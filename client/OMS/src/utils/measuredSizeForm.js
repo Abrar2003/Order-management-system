@@ -1,7 +1,9 @@
 import { formatCbm } from "./cbm";
 import { formatNumberInputValue } from "./measurementDisplay";
 
-export const SIZE_ENTRY_LIMIT = 4;
+export const ITEM_SIZE_ENTRY_LIMIT = 5;
+export const BOX_SIZE_ENTRY_LIMIT = 4;
+export const SIZE_ENTRY_LIMIT = BOX_SIZE_ENTRY_LIMIT;
 export const BOX_PACKAGING_MODES = Object.freeze({
   INDIVIDUAL: "individual",
   CARTON: "carton",
@@ -19,6 +21,7 @@ export const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   { value: "base", label: "Base" },
   { value: "base2", label: "Base 2" },
   { value: "pedestal", label: "Pedestal" },
+  { value: "stretcher", label: "Stretcher" },
   { value: "item1", label: "Item 1" },
   { value: "item2", label: "Item 2" },
   { value: "item3", label: "Item 3" },
@@ -157,9 +160,13 @@ export const toDimensionInputValue = (value) => {
   return formatNumberInputValue(value);
 };
 
-export const normalizeSizeCount = (value, fallback = 1) => {
+export const normalizeSizeCount = (
+  value,
+  fallback = 1,
+  limit = ITEM_SIZE_ENTRY_LIMIT,
+) => {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > SIZE_ENTRY_LIMIT) {
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > limit) {
     return fallback;
   }
   return parsed;
@@ -207,12 +214,16 @@ const coerceMeasuredSizeEntry = (
 export const ensureMeasuredSizeEntryCount = (
   entries = [],
   count = 1,
-  { mode = BOX_PACKAGING_MODES.INDIVIDUAL, singleRemark = "" } = {},
+  {
+    mode = BOX_PACKAGING_MODES.INDIVIDUAL,
+    singleRemark = "",
+    limit = ITEM_SIZE_ENTRY_LIMIT,
+  } = {},
 ) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
   const fixedBoxCount = getFixedBoxEntryCount(resolvedMode);
   const safeCount =
-    fixedBoxCount ?? normalizeSizeCount(count, 1);
+    fixedBoxCount ?? normalizeSizeCount(count, 1, limit);
   const nextEntries = Array.isArray(entries)
     ? entries
         .slice(0, safeCount)
@@ -302,6 +313,7 @@ export const buildMeasuredSizeEntriesFromLegacy = ({
   primaryEntries = [],
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
   weightKey = "",
+  limit = ITEM_SIZE_ENTRY_LIMIT,
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, primaryEntries);
   return Array.isArray(primaryEntries)
@@ -310,7 +322,7 @@ export const buildMeasuredSizeEntriesFromLegacy = ({
           toMeasuredSizeEntryValue(entry, weightKey, { mode: resolvedMode, index }),
         )
         .filter((entry) => hasMeaningfulMeasuredSize(entry))
-        .slice(0, getFixedBoxEntryCount(resolvedMode) ?? SIZE_ENTRY_LIMIT)
+        .slice(0, getFixedBoxEntryCount(resolvedMode) ?? limit)
     : [];
 };
 
@@ -326,7 +338,7 @@ export const convertMeasuredBoxEntriesMode = (
   const normalizedEntries = ensureMeasuredSizeEntryCount(
     entries,
     fixedBoxCount ?? Math.max(1, entries?.length || 1),
-    { mode: resolvedMode },
+    { mode: resolvedMode, limit: BOX_SIZE_ENTRY_LIMIT },
   );
 
   if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
@@ -399,14 +411,16 @@ export const deriveLegacyFromMeasuredSizeEntries = (
     weightKey = "weight",
     remarkOrder = [],
     mode = BOX_PACKAGING_MODES.INDIVIDUAL,
+    limit = ITEM_SIZE_ENTRY_LIMIT,
   } = {},
 ) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
   const fixedBoxCount = getFixedBoxEntryCount(resolvedMode);
   const safeCount =
-    fixedBoxCount ?? normalizeSizeCount(count, 1);
+    fixedBoxCount ?? normalizeSizeCount(count, 1, limit);
   const safeEntries = ensureMeasuredSizeEntryCount(entries, safeCount, {
     mode: resolvedMode,
+    limit,
   });
   const normalizedEntries = safeEntries
     .map((entry) => ({
@@ -504,15 +518,16 @@ export const parseMeasuredSizeEntries = ({
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
   allowIncomplete = false,
   singleRemark = "",
+  limit = ITEM_SIZE_ENTRY_LIMIT,
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
   const fixedBoxCount = getFixedBoxEntryCount(resolvedMode);
   const safeCount =
-    fixedBoxCount ?? normalizeSizeCount(count, 1);
+    fixedBoxCount ?? normalizeSizeCount(count, 1, limit);
   const scopedEntries = ensureMeasuredSizeEntryCount(
     entries,
     safeCount,
-    { mode: resolvedMode, singleRemark },
+    { mode: resolvedMode, singleRemark, limit },
   ).slice(0, safeCount);
   const defaultSingleRemark = normalizeRemarkValue(singleRemark);
   const hasMeaningfulInput = scopedEntries.some((entry) => {
@@ -670,14 +685,15 @@ export const parseMeasuredSizeEntries = ({
 export const calculateMeasuredSizeEntriesCbm = (
   entries = [],
   count = 1,
-  { mode = BOX_PACKAGING_MODES.INDIVIDUAL } = {},
+  { mode = BOX_PACKAGING_MODES.INDIVIDUAL, limit = ITEM_SIZE_ENTRY_LIMIT } = {},
 ) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
   const fixedBoxCount = getFixedBoxEntryCount(resolvedMode);
   const safeCount =
-    fixedBoxCount ?? normalizeSizeCount(count, 1);
+    fixedBoxCount ?? normalizeSizeCount(count, 1, limit);
   const scopedEntries = ensureMeasuredSizeEntryCount(entries, safeCount, {
     mode: resolvedMode,
+    limit,
   }).slice(0, safeCount);
   if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
     const innerEntry =

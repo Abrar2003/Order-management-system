@@ -25,12 +25,14 @@ import "../App.css";
 
 const SIZE_UNIT = "cm";
 const WEIGHT_UNIT = "kg";
-const ENTRY_LIMIT = 4;
+const ITEM_ENTRY_LIMIT = 5;
+const BOX_ENTRY_LIMIT = 4;
 const ITEM_INDEXED_REMARKS = [
   "top",
   "base",
   "base2",
   "pedestal",
+  "stretcher",
   "item",
   "item1",
   "item2",
@@ -84,6 +86,7 @@ const getRemarkLabel = (entry = {}, fallback = "Entry") => {
   if (remark === "base") return "Base";
   if (remark === "base2") return "Base 2";
   if (remark === "pedestal") return "Pedestal";
+  if (remark === "stretcher") return "Stretcher";
   if (remark === "top") return "Top";
   if (remark === "inner") return "Inner";
   if (remark === "master") return "Master";
@@ -99,6 +102,7 @@ const formatMeasurementRemark = (remark = "") => {
   if (normalized === "base") return "Base";
   if (normalized === "base2") return "Base 2";
   if (normalized === "pedestal") return "Pedestal";
+  if (normalized === "stretcher") return "Stretcher";
   return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
     `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
   );
@@ -221,7 +225,12 @@ const formatStructuredWeightValue = ({
   };
 };
 
-const normalizeMeasurementEntries = (entries = [], weightKey = "", remarkOrder = []) =>
+const normalizeMeasurementEntries = (
+  entries = [],
+  weightKey = "",
+  remarkOrder = [],
+  limit = ITEM_ENTRY_LIMIT,
+) =>
   sortMeasurementEntries(
     (Array.isArray(entries) ? entries : [])
       .map((entry) => {
@@ -238,7 +247,7 @@ const normalizeMeasurementEntries = (entries = [], weightKey = "", remarkOrder =
         };
       })
       .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
-      .slice(0, ENTRY_LIMIT),
+      .slice(0, limit),
     remarkOrder,
   );
 
@@ -403,9 +412,10 @@ const hasSizeValue = (entry = {}, weightKey = "") =>
   });
 
 const formatSizeEntries = (entries = [], weightKey = "") => {
+  const limit = weightKey === "gross_weight" ? BOX_ENTRY_LIMIT : ITEM_ENTRY_LIMIT;
   const rows = (Array.isArray(entries) ? entries : [])
     .filter((entry) => hasSizeValue(entry, weightKey))
-    .slice(0, ENTRY_LIMIT);
+    .slice(0, limit);
   if (rows.length === 0) return "Not Set";
 
   return rows
@@ -702,9 +712,24 @@ const ItemDetails = () => {
       const pisItemEntries = normalizeMeasurementEntries(item?.pis_item_sizes, "net_weight", ITEM_INDEXED_REMARKS);
       const inspectedItemEntries = normalizeMeasurementEntries(item?.inspected_item_sizes, "net_weight", ITEM_INDEXED_REMARKS);
       const masterItemEntries = normalizeMeasurementEntries(item?.master_item_sizes, "net_weight", ITEM_INDEXED_REMARKS);
-      const pisBoxEntries = normalizeMeasurementEntries(item?.pis_box_sizes, "gross_weight", BOX_INDEXED_REMARKS);
-      const inspectedBoxEntries = normalizeMeasurementEntries(item?.inspected_box_sizes, "gross_weight", BOX_INDEXED_REMARKS);
-      const masterBoxEntries = normalizeMeasurementEntries(item?.master_box_sizes, "gross_weight", BOX_INDEXED_REMARKS);
+      const pisBoxEntries = normalizeMeasurementEntries(
+        item?.pis_box_sizes,
+        "gross_weight",
+        BOX_INDEXED_REMARKS,
+        BOX_ENTRY_LIMIT,
+      );
+      const inspectedBoxEntries = normalizeMeasurementEntries(
+        item?.inspected_box_sizes,
+        "gross_weight",
+        BOX_INDEXED_REMARKS,
+        BOX_ENTRY_LIMIT,
+      );
+      const masterBoxEntries = normalizeMeasurementEntries(
+        item?.master_box_sizes,
+        "gross_weight",
+        BOX_INDEXED_REMARKS,
+        BOX_ENTRY_LIMIT,
+      );
       const barcodeRows = [];
       const sourceModes = [
         item?.pis_box_mode,

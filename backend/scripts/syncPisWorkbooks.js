@@ -22,8 +22,9 @@ const {
 } = require("../helpers/itemLegacySizeCleanup");
 const { renderPdf } = require("../services/pdfRenderer");
 
-const SIZE_ENTRY_LIMIT = 4;
-const ITEM_REMARKS = ["item", "item1", "item2", "item3"];
+const ITEM_SIZE_ENTRY_LIMIT = 5;
+const BOX_SIZE_ENTRY_LIMIT = 4;
+const ITEM_REMARKS = ["item", "item1", "item2", "item3", "item4"];
 const BOX_REMARKS = ["box1", "box2", "box3", "box4"];
 
 const normalizeText = (value) => {
@@ -105,17 +106,23 @@ const inferTwoPartRemark = (label = "") => {
   if (normalized.includes("legs") || normalized.includes("base") || normalized.includes("bottom")) {
     return "base";
   }
+  if (normalized.includes("pedestal")) {
+    return "pedestal";
+  }
+  if (normalized.includes("stretcher")) {
+    return "stretcher";
+  }
   return "";
 };
 
-const assignRemarks = (entries = [], indexedRemarks = []) => {
-  const trimmed = (Array.isArray(entries) ? entries : []).slice(0, SIZE_ENTRY_LIMIT);
+const assignRemarks = (entries = [], indexedRemarks = [], limit = BOX_SIZE_ENTRY_LIMIT) => {
+  const trimmed = (Array.isArray(entries) ? entries : []).slice(0, limit);
   if (trimmed.length <= 1) {
     return trimmed.map((entry) => ({ ...entry, remark: "" }));
   }
 
+  const inferred = trimmed.map((entry) => inferTwoPartRemark(entry.label));
   if (trimmed.length === 2) {
-    const inferred = trimmed.map((entry) => inferTwoPartRemark(entry.label));
     if (inferred.includes("top") && inferred.includes("base")) {
       return trimmed.map((entry, index) => ({ ...entry, remark: inferred[index] }));
     }
@@ -123,7 +130,7 @@ const assignRemarks = (entries = [], indexedRemarks = []) => {
 
   return trimmed.map((entry, index) => ({
     ...entry,
-    remark: indexedRemarks[index] || indexedRemarks[indexedRemarks.length - 1] || "",
+    remark: inferred[index] || indexedRemarks[index] || indexedRemarks[indexedRemarks.length - 1] || "",
   }));
 };
 
@@ -143,8 +150,12 @@ const formatCbmTotal = (total) => {
   return fixed.replace(/\.?0+$/, "") || "0";
 };
 
-const buildLegacyFields = (entries = [], weightKey = "") => {
-  const normalized = (Array.isArray(entries) ? entries : []).slice(0, SIZE_ENTRY_LIMIT);
+const buildLegacyFields = (
+  entries = [],
+  weightKey = "",
+  limit = ITEM_SIZE_ENTRY_LIMIT,
+) => {
+  const normalized = (Array.isArray(entries) ? entries : []).slice(0, limit);
   const totalWeight = roundNumber(
     normalized.reduce((sum, entry) => sum + Number(entry?.[weightKey] || 0), 0),
     3,
@@ -788,21 +799,21 @@ const extractWorkbookData = (filePath) => {
     }
   }
 
-  if (itemRows.length > SIZE_ENTRY_LIMIT) {
-    warnings.push(`Found ${itemRows.length} item rows; using first ${SIZE_ENTRY_LIMIT}.`);
+  if (itemRows.length > ITEM_SIZE_ENTRY_LIMIT) {
+    warnings.push(`Found ${itemRows.length} item rows; using first ${ITEM_SIZE_ENTRY_LIMIT}.`);
   }
-  if (boxRows.length > SIZE_ENTRY_LIMIT) {
-    warnings.push(`Found ${boxRows.length} box rows; using first ${SIZE_ENTRY_LIMIT}.`);
+  if (boxRows.length > BOX_SIZE_ENTRY_LIMIT) {
+    warnings.push(`Found ${boxRows.length} box rows; using first ${BOX_SIZE_ENTRY_LIMIT}.`);
   }
 
-  const itemEntries = assignRemarks(itemRows, ITEM_REMARKS).map((entry) => ({
+  const itemEntries = assignRemarks(itemRows, ITEM_REMARKS, ITEM_SIZE_ENTRY_LIMIT).map((entry) => ({
     remark: entry.remark,
     L: entry.L,
     B: entry.B,
     H: entry.H,
     net_weight: entry.weight,
   }));
-  const boxEntries = assignRemarks(boxRows, BOX_REMARKS).map((entry) => ({
+  const boxEntries = assignRemarks(boxRows, BOX_REMARKS, BOX_SIZE_ENTRY_LIMIT).map((entry) => ({
     remark: entry.remark,
     L: entry.L,
     B: entry.B,
@@ -810,8 +821,8 @@ const extractWorkbookData = (filePath) => {
     gross_weight: entry.weight,
   }));
 
-  const itemWeightSummary = buildLegacyFields(itemEntries, "net_weight");
-  const boxWeightSummary = buildLegacyFields(boxEntries, "gross_weight");
+  const itemWeightSummary = buildLegacyFields(itemEntries, "net_weight", ITEM_SIZE_ENTRY_LIMIT);
+  const boxWeightSummary = buildLegacyFields(boxEntries, "gross_weight", BOX_SIZE_ENTRY_LIMIT);
   const cbmSource = boxEntries.length > 0 ? boxEntries : itemEntries;
   const cbmTotal = cbmSource.reduce(
     (sum, entry) => sum + Number(calculateCbmFromLbh(entry) || 0),

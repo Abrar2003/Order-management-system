@@ -79,6 +79,54 @@ test("reports component height difference and treats pedestal as optional", () =
   assert.equal(heightError?.difference, -10);
 });
 
+test("adds stretcher net weight to common weight calculation", () => {
+  const result = evaluateCommonInspectionErrors(buildInspection({
+    inspected_item_sizes: [
+      { remark: "item", H: 100, net_weight: 2 },
+      { remark: "stretcher", H: 10, net_weight: 1 },
+      { remark: "top", H: 20 },
+      { remark: "base", H: 80 },
+    ],
+    inspected_box_sizes: [
+      { remark: "inner", item_count_in_inner: 4 },
+      { remark: "master", box_count_in_master: 3, gross_weight: 30 },
+    ],
+  }));
+  const weightError = result.errors.find((error) => error.type === "weight");
+
+  assert.equal(weightError?.actual, 36);
+  assert.equal(weightError?.details?.net_weight, 3);
+  assert.equal(weightError?.details?.stretcher_net_weight, 1);
+});
+
+test("ignores stretcher height in common height calculation", () => {
+  const result = evaluateCommonInspectionErrors(buildInspection({
+    inspected_item_sizes: [
+      { remark: "item", H: 100, net_weight: 2 },
+      { remark: "top", H: 20 },
+      { remark: "base", H: 70 },
+      { remark: "stretcher", H: 10, net_weight: 1 },
+    ],
+  }));
+  const heightError = result.errors.find((error) => error.type === "height");
+
+  assert.equal(heightError?.actual, 90);
+  assert.equal(heightError?.details?.stretcher_height, undefined);
+});
+
+test("stretcher height does not create a height error when top and base are enough", () => {
+  const result = evaluateCommonInspectionErrors(buildInspection({
+    inspected_item_sizes: [
+      { remark: "item", H: 100, net_weight: 2 },
+      { remark: "top", H: 30 },
+      { remark: "base", H: 70 },
+      { remark: "stretcher", H: 500, net_weight: 1 },
+    ],
+  }));
+
+  assert.equal(result.errors.some((error) => error.type === "height"), false);
+});
+
 test("skips a rule when required inputs are missing", () => {
   const result = evaluateCommonInspectionErrors({
     inspected_item_sizes: [{ remark: "item", H: 100 }],

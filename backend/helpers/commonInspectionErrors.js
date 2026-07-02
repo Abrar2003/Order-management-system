@@ -48,10 +48,22 @@ const evaluateCommonInspectionErrors = (inspection = {}) => {
   const topEntry = findEntry(itemEntries, ["top"]);
   const baseEntry = findEntry(itemEntries, ["base"]);
   const pedestalEntry = findEntry(itemEntries, ["pedestal"]);
+  const stretcherEntry = findEntry(itemEntries, ["stretcher"]);
   const masterEntry = findEntry(boxEntries, ["master"]);
 
   const errors = [];
-  const netWeight = toPositiveNumber(itemEntry?.net_weight);
+  const itemNetWeight = toPositiveNumber(itemEntry?.net_weight);
+  const stretcherNetWeight = toPositiveNumber(stretcherEntry?.net_weight);
+  const netWeightParts = [itemNetWeight, stretcherNetWeight].filter((value) => value !== null);
+  const stretcherWeightDetails = stretcherNetWeight !== null
+    ? {
+        item_net_weight: itemNetWeight || 0,
+        stretcher_net_weight: stretcherNetWeight,
+      }
+    : {};
+  const netWeight = netWeightParts.length > 0
+    ? netWeightParts.reduce((sum, value) => sum + value, 0)
+    : null;
   const piecesInInner = findFirstPositiveValue(boxEntries, "item_count_in_inner");
   const innerBoxesInMaster = findFirstPositiveValue(boxEntries, "box_count_in_master");
   const masterGrossWeight = toPositiveNumber(masterEntry?.gross_weight);
@@ -70,9 +82,10 @@ const evaluateCommonInspectionErrors = (inspection = {}) => {
         expected: masterGrossWeight,
         actual: calculatedNetWeight,
         difference: calculatedNetWeight - masterGrossWeight,
-        formula: `${netWeight} × ${piecesInInner} × ${innerBoxesInMaster}`,
+        formula: `${netWeightParts.length > 1 ? `(${netWeightParts.join(" + ")})` : netWeight} × ${piecesInInner} × ${innerBoxesInMaster}`,
         details: {
           net_weight: netWeight,
+          ...stretcherWeightDetails,
           item_count_in_inner: piecesInInner,
           box_count_in_master: innerBoxesInMaster,
           master_gross_weight: masterGrossWeight,

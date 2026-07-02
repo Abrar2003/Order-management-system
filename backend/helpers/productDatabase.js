@@ -13,13 +13,15 @@ const {
   normalizeUserRoleKey,
 } = require("./userRole");
 
-const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_ENTRY_LIMIT = 5;
+const BOX_SIZE_ENTRY_LIMIT = 4;
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   "item",
   "top",
   "base",
   "base2",
   "pedestal",
+  "stretcher",
   "item1",
   "item2",
   "item3",
@@ -128,9 +130,9 @@ const normalizeItemSizeEntries = (entries = []) => {
   }
 
   const meaningfulEntries = entries.filter((entry) => hasMeaningfulItemEntry(entry));
-  if (meaningfulEntries.length > SIZE_ENTRY_LIMIT) {
+  if (meaningfulEntries.length > ITEM_SIZE_ENTRY_LIMIT) {
     throw new ProductDatabaseError(
-      `pd_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+      `pd_item_sizes cannot exceed ${ITEM_SIZE_ENTRY_LIMIT} entries`,
     );
   }
 
@@ -184,7 +186,7 @@ const normalizeBoxSizeEntries = (
       ? 2
       : resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
         ? 1
-        : SIZE_ENTRY_LIMIT;
+        : BOX_SIZE_ENTRY_LIMIT;
 
   if (meaningfulEntries.length > limit) {
     throw new ProductDatabaseError(`pd_box_sizes cannot exceed ${limit} entries`);

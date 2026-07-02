@@ -14,7 +14,9 @@ const {
   hasReferenceSizeArray,
 } = require("./sizeDimensionFormatter");
 
-const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_ENTRY_LIMIT = 5;
+const BOX_SIZE_ENTRY_LIMIT = 4;
+const SIZE_ENTRY_LIMIT = BOX_SIZE_ENTRY_LIMIT;
 const NUMBER_TOLERANCE = 0.001;
 const ITEM_SIZE_REMARK_ORDER = Object.freeze([
   "",
@@ -23,6 +25,7 @@ const ITEM_SIZE_REMARK_ORDER = Object.freeze([
   "base",
   "base2",
   "pedestal",
+  "stretcher",
   "item1",
   "item2",
   "item3",
@@ -176,7 +179,7 @@ const normalizeItemSizes = (entries = []) =>
     (Array.isArray(entries) ? entries : [])
       .map((entry) => normalizeItemSizeEntry(entry))
       .filter((entry) => hasMeaningfulItemEntry(entry))
-      .slice(0, SIZE_ENTRY_LIMIT),
+      .slice(0, ITEM_SIZE_ENTRY_LIMIT),
     {
       order: ITEM_SIZE_REMARK_ORDER,
       keyBuilder: buildItemEntryKey,
@@ -193,7 +196,7 @@ const normalizeBoxSizes = (
       ? 2
       : resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
         ? 1
-        : SIZE_ENTRY_LIMIT;
+        : BOX_SIZE_ENTRY_LIMIT;
 
   return sortEntries(
     (Array.isArray(entries) ? entries : [])
@@ -488,6 +491,8 @@ const compareInspectionSizeSnapshot = (inspection = {}, currentSource = {}) => {
 
 module.exports = {
   SIZE_ENTRY_LIMIT,
+  ITEM_SIZE_ENTRY_LIMIT,
+  BOX_SIZE_ENTRY_LIMIT,
   NUMBER_TOLERANCE,
   normalizeNumber,
   normalizeSizeEntry: (entry = {}, type = "item", options = {}) =>

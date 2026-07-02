@@ -4,6 +4,7 @@ import MeasuredSizeSection from "./MeasuredSizeSection";
 import useBrandOptions from "../hooks/useBrandOptions";
 import {
   BOX_PACKAGING_MODES,
+  BOX_SIZE_ENTRY_LIMIT,
   BOX_SIZE_REMARK_OPTIONS,
   ITEM_SIZE_REMARK_OPTIONS,
   calculateMeasuredSizeEntriesCbm,
@@ -72,6 +73,7 @@ const CreateItemModal = ({
       ensureMeasuredSizeEntryCount(form.pis_box_sizes, form.pis_box_count, {
         mode: form.pis_box_mode,
         singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
       }),
     [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
@@ -83,6 +85,7 @@ const CreateItemModal = ({
     () =>
       calculateMeasuredSizeEntriesCbm(form.pis_box_sizes, form.pis_box_count, {
         mode: form.pis_box_mode,
+        limit: BOX_SIZE_ENTRY_LIMIT,
       }),
     [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
@@ -101,12 +104,15 @@ const CreateItemModal = ({
   };
 
   const handleCountChange = (countKey, entriesKey, value) => {
-    const safeCount = String(normalizeSizeCount(value, 1));
+    const isBoxEntries = entriesKey.includes("box");
+    const sizeEntryLimit = isBoxEntries ? BOX_SIZE_ENTRY_LIMIT : undefined;
+    const safeCount = String(normalizeSizeCount(value, 1, sizeEntryLimit));
     setForm((prev) => ({
       ...prev,
       [countKey]: safeCount,
       [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount, {
-        singleRemark: entriesKey.includes("box") ? "box" : "item",
+        singleRemark: isBoxEntries ? "box" : "item",
+        ...(isBoxEntries ? { limit: BOX_SIZE_ENTRY_LIMIT } : {}),
       }),
     }));
   };
@@ -121,6 +127,7 @@ const CreateItemModal = ({
       pis_box_sizes: ensureMeasuredSizeEntryCount(prev.pis_box_sizes, nextCount, {
         mode: nextMode,
         singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
       }),
     }));
   };
@@ -202,6 +209,7 @@ const CreateItemModal = ({
         weightFieldLabel: "Gross weight",
         mode: form.pis_box_mode,
         singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
       });
       if (pisBoxPayload.error) {
         throw new Error(pisBoxPayload.error);

@@ -8,9 +8,10 @@ import { formatDateDDMMYYYY } from "../utils/date";
 import {
   BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
+  BOX_SIZE_ENTRY_LIMIT,
   BOX_SIZE_REMARK_OPTIONS,
+  ITEM_SIZE_ENTRY_LIMIT,
   ITEM_SIZE_REMARK_OPTIONS,
-  SIZE_ENTRY_LIMIT,
   buildMeasuredSizeEntriesFromLegacy,
   calculateMeasuredSizeEntriesCbm,
   detectBoxPackagingMode,
@@ -47,6 +48,7 @@ const formatRemarkLabel = (remark = "", fallback = "Entry") => {
   if (normalized === "base") return "Base";
   if (normalized === "base2") return "Base 2";
   if (normalized === "pedestal") return "Pedestal";
+  if (normalized === "stretcher") return "Stretcher";
   if (normalized === "inner") return "Inner Carton";
   if (normalized === "master") return "Master Carton";
   return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
@@ -201,11 +203,12 @@ const buildInspectedMeasurementDetails = (item = {}) => {
     primaryEntries: item?.inspected_box_sizes,
     mode: inspectedBoxMode,
     weightKey: "gross_weight",
+    limit: BOX_SIZE_ENTRY_LIMIT,
   }).filter((entry) => hasFetchableMeasuredValue(entry));
 
   const sortedItemEntries = sortMeasuredEntriesByRemark(
     itemEntries,
-    ["item", "top", "base", "base2", "pedestal"],
+    ["item", "top", "base", "base2", "pedestal", "stretcher"],
   );
   const sortedBoxEntries =
     inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
@@ -215,10 +218,10 @@ const buildInspectedMeasurementDetails = (item = {}) => {
 
   return {
     inspectedBoxMode,
-    itemEntries: sortedItemEntries.slice(0, SIZE_ENTRY_LIMIT),
+    itemEntries: sortedItemEntries.slice(0, ITEM_SIZE_ENTRY_LIMIT),
     boxEntries: sortedBoxEntries.slice(
       0,
-      fixedBoxCount ?? SIZE_ENTRY_LIMIT,
+      fixedBoxCount ?? BOX_SIZE_ENTRY_LIMIT,
     ),
   };
 };
@@ -236,6 +239,7 @@ const buildMeasurementEntriesForFormSource = (item = {}, source = "pis", group =
         : (isItemGroup ? item?.pis_item_sizes : item?.pis_box_sizes),
     mode: isItemGroup ? undefined : boxMode,
     weightKey: isItemGroup ? "net_weight" : "gross_weight",
+    limit: isItemGroup ? ITEM_SIZE_ENTRY_LIMIT : BOX_SIZE_ENTRY_LIMIT,
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
 };
 
@@ -290,7 +294,7 @@ const buildInitialForm = (item = {}, options = {}) => {
   const pisBoxCount =
     pisBoxFixedCount ??
     (pisBoxEntries.length > 0
-      ? normalizeSizeCount(pisBoxEntries.length, 1)
+      ? normalizeSizeCount(pisBoxEntries.length, 1, BOX_SIZE_ENTRY_LIMIT)
       : 1);
 
   return {
@@ -309,6 +313,7 @@ const buildInitialForm = (item = {}, options = {}) => {
     pis_box_sizes: ensureMeasuredSizeEntryCount(pisBoxEntries, pisBoxCount, {
       mode: resolvedBoxMode,
       singleRemark: "box",
+      limit: BOX_SIZE_ENTRY_LIMIT,
     }),
   };
 };
@@ -407,6 +412,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       ensureMeasuredSizeEntryCount(form.pis_box_sizes, form.pis_box_count, {
         mode: form.pis_box_mode,
         singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
       }),
     [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
@@ -418,6 +424,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     () =>
       calculateMeasuredSizeEntriesCbm(form.pis_box_sizes, form.pis_box_count, {
         mode: form.pis_box_mode,
+        limit: BOX_SIZE_ENTRY_LIMIT,
       }),
     [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
@@ -484,12 +491,16 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   };
 
   const handleCountChange = (countKey, entriesKey, value) => {
-    const safeCount = String(normalizeSizeCount(value, 1));
+    const isBoxEntries = entriesKey.includes("box");
+    const safeCount = String(
+      normalizeSizeCount(value, 1, isBoxEntries ? BOX_SIZE_ENTRY_LIMIT : undefined),
+    );
     setForm((prev) => ({
       ...prev,
       [countKey]: safeCount,
       [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount, {
-        singleRemark: entriesKey.includes("box") ? "box" : "item",
+        singleRemark: isBoxEntries ? "box" : "item",
+        ...(isBoxEntries ? { limit: BOX_SIZE_ENTRY_LIMIT } : {}),
       }),
     }));
   };
@@ -506,6 +517,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       pis_box_sizes: ensureMeasuredSizeEntryCount(prev.pis_box_sizes, nextCount, {
         mode: nextMode,
         singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
       }),
     }));
   };
@@ -534,7 +546,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         ),
         prev[entriesKey]?.length || 1,
         {
-          ...(entriesKey === "pis_box_sizes" ? { mode: prev.pis_box_mode } : {}),
+          ...(entriesKey === "pis_box_sizes"
+            ? { mode: prev.pis_box_mode, limit: BOX_SIZE_ENTRY_LIMIT }
+            : {}),
           singleRemark: entriesKey.includes("box") ? "box" : "item",
         },
       ),
@@ -589,13 +603,17 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         const boxMode = inspectedMeasurementDetails.inspectedBoxMode;
         const boxCount =
           getFixedBoxEntryCount(boxMode) ??
-          normalizeSizeCount(inspectedMeasurementDetails.boxEntries.length, 1);
+          normalizeSizeCount(
+            inspectedMeasurementDetails.boxEntries.length,
+            1,
+            BOX_SIZE_ENTRY_LIMIT,
+          );
         next.pis_box_mode = boxMode;
         next.pis_box_count = String(boxCount);
         next.pis_box_sizes = ensureMeasuredSizeEntryCount(
           inspectedMeasurementDetails.boxEntries,
           boxCount,
-          { mode: boxMode, singleRemark: "box" },
+          { mode: boxMode, singleRemark: "box", limit: BOX_SIZE_ENTRY_LIMIT },
         );
       }
 
@@ -640,6 +658,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         mode: form.pis_box_mode,
         allowIncomplete: true,
         singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
       });
       if (pisBoxPayload.error) {
         throw new Error(pisBoxPayload.error);

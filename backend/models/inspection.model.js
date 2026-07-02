@@ -5,7 +5,8 @@ const {
   BOX_ENTRY_TYPES,
 } = require("../helpers/boxMeasurement");
 
-const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_ENTRY_LIMIT = 5;
+const BOX_SIZE_ENTRY_LIMIT = 4;
 
 const createSizeEntrySchema = () =>
   new mongoose.Schema(
@@ -151,8 +152,8 @@ const InspectionSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `inspected_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= ITEM_SIZE_ENTRY_LIMIT,
+        message: `inspected_item_sizes cannot exceed ${ITEM_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     inspected_box_sizes: {
@@ -160,8 +161,8 @@ const InspectionSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `inspected_box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= BOX_SIZE_ENTRY_LIMIT,
+        message: `inspected_box_sizes cannot exceed ${BOX_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     inspected_box_mode: {

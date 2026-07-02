@@ -3,6 +3,7 @@ import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
 import {
   BOX_PACKAGING_MODES,
+  BOX_SIZE_ENTRY_LIMIT,
   BOX_SIZE_REMARK_OPTIONS,
   ITEM_SIZE_REMARK_OPTIONS,
   buildMeasuredSizeEntriesFromLegacy,
@@ -59,6 +60,7 @@ const buildInitialForm = (item = {}) => {
     primaryEntries: item?.inspected_box_sizes,
     mode: inspectedBoxMode,
     weightKey: "gross_weight",
+    limit: BOX_SIZE_ENTRY_LIMIT,
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
 
   const inspectedItemCount =
@@ -69,7 +71,7 @@ const buildInitialForm = (item = {}) => {
   const inspectedBoxCount =
     inspectedBoxFixedCount ??
     (inspectedBoxEntries.length > 0
-      ? normalizeSizeCount(inspectedBoxEntries.length, 1)
+      ? normalizeSizeCount(inspectedBoxEntries.length, 1, BOX_SIZE_ENTRY_LIMIT)
       : 1);
 
   return {
@@ -88,7 +90,7 @@ const buildInitialForm = (item = {}) => {
     inspected_box_sizes: ensureMeasuredSizeEntryCount(
       inspectedBoxEntries,
       inspectedBoxCount,
-      { mode: inspectedBoxMode, singleRemark: "box" },
+      { mode: inspectedBoxMode, singleRemark: "box", limit: BOX_SIZE_ENTRY_LIMIT },
     ),
     qc: {
       packed_size: Boolean(item?.qc?.packed_size),
@@ -133,6 +135,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       ensureMeasuredSizeEntryCount(form.inspected_box_sizes, form.inspected_box_count, {
         mode: form.inspected_box_mode,
         singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
       }),
     [form.inspected_box_count, form.inspected_box_mode, form.inspected_box_sizes],
   );
@@ -145,7 +148,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       calculateMeasuredSizeEntriesCbm(
         form.inspected_box_sizes,
         form.inspected_box_count,
-        { mode: form.inspected_box_mode },
+        { mode: form.inspected_box_mode, limit: BOX_SIZE_ENTRY_LIMIT },
       ),
     [form.inspected_box_count, form.inspected_box_mode, form.inspected_box_sizes],
   );
@@ -173,12 +176,16 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
   };
 
   const handleCountChange = (countKey, entriesKey, value) => {
-    const safeCount = String(normalizeSizeCount(value, 1));
+    const isBoxEntries = entriesKey.includes("box");
+    const safeCount = String(
+      normalizeSizeCount(value, 1, isBoxEntries ? BOX_SIZE_ENTRY_LIMIT : undefined),
+    );
     setForm((prev) => ({
       ...prev,
       [countKey]: safeCount,
       [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount, {
-        singleRemark: entriesKey.includes("box") ? "box" : "item",
+        singleRemark: isBoxEntries ? "box" : "item",
+        ...(isBoxEntries ? { limit: BOX_SIZE_ENTRY_LIMIT } : {}),
       }),
     }));
   };
@@ -199,7 +206,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       inspected_box_sizes: ensureMeasuredSizeEntryCount(
         prev.inspected_box_sizes,
         nextCount,
-        { mode: nextMode, singleRemark: "box" },
+        { mode: nextMode, singleRemark: "box", limit: BOX_SIZE_ENTRY_LIMIT },
       ),
     }));
   };
@@ -229,7 +236,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
         prev[entriesKey]?.length || 1,
         {
           ...(entriesKey === "inspected_box_sizes"
-            ? { mode: prev.inspected_box_mode }
+            ? { mode: prev.inspected_box_mode, limit: BOX_SIZE_ENTRY_LIMIT }
             : {}),
           singleRemark: entriesKey.includes("box") ? "box" : "item",
         },
@@ -264,6 +271,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
         weightFieldLabel: "Gross weight",
         mode: form.inspected_box_mode,
         singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
       });
       if (inspectedBoxPayload.error) {
         throw new Error(inspectedBoxPayload.error);

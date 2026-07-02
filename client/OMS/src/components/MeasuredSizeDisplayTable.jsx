@@ -10,6 +10,7 @@ const formatRemark = (entry = {}, fallback = "Entry") => {
   if (raw === "base") return "Base";
   if (raw === "base2") return "Base 2";
   if (raw === "pedestal") return "Pedestal";
+  if (raw === "stretcher") return "Stretcher";
   if (raw === "top") return "Top";
   if (raw === "inner") return "Inner Carton";
   if (raw === "master") return "Master Carton";

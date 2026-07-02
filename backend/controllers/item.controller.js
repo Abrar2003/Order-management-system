@@ -189,13 +189,15 @@ const toPositiveCbmNumber = (value) => {
   return parsed;
 };
 
-const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_ENTRY_LIMIT = 5;
+const BOX_SIZE_ENTRY_LIMIT = 4;
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   "item",
   "top",
   "base",
   "base2",
   "pedestal",
+  "stretcher",
   "item1",
   "item2",
   "item3",
@@ -214,7 +216,10 @@ const hasCompletePositiveLbh = (dimensions = {}) =>
   Number(dimensions?.B || 0) > 0 &&
   Number(dimensions?.H || 0) > 0;
 
-const normalizeStoredSizeEntries = (entries = [], { weightKey = "" } = {}) =>
+const normalizeStoredSizeEntries = (
+  entries = [],
+  { weightKey = "", limit = ITEM_SIZE_ENTRY_LIMIT } = {},
+) =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
       const L = toSafeNumber(entry?.L, 0);
@@ -228,7 +233,7 @@ const normalizeStoredSizeEntries = (entries = [], { weightKey = "" } = {}) =>
       return normalizedEntry;
     })
     .filter((entry) => hasCompletePositiveLbh(entry))
-    .slice(0, SIZE_ENTRY_LIMIT);
+    .slice(0, limit);
 
 const sortSizeEntriesByRemark = (entries = [], remarkOptions = []) =>
   [...(Array.isArray(entries) ? entries : [])].sort((left, right) => {
@@ -238,16 +243,17 @@ const sortSizeEntriesByRemark = (entries = [], remarkOptions = []) =>
     const rightIndex = remarkOptions.indexOf(
       normalizeTextField(right?.remark || "").toLowerCase(),
     );
-    const safeLeftIndex = leftIndex >= 0 ? leftIndex : SIZE_ENTRY_LIMIT + 1;
-    const safeRightIndex = rightIndex >= 0 ? rightIndex : SIZE_ENTRY_LIMIT + 1;
+    const safeLeftIndex = leftIndex >= 0 ? leftIndex : remarkOptions.length + 1;
+    const safeRightIndex = rightIndex >= 0 ? rightIndex : remarkOptions.length + 1;
     return safeLeftIndex - safeRightIndex;
   });
 
 const buildSizeEntriesFromLegacy = ({
   sizes = [],
   weightKey = "",
+  limit = ITEM_SIZE_ENTRY_LIMIT,
 } = {}) => {
-  return normalizeStoredSizeEntries(sizes, { weightKey });
+  return normalizeStoredSizeEntries(sizes, { weightKey, limit });
 };
 
 const buildWeightRecord = (weight = {}) =>
@@ -329,6 +335,15 @@ const getPayloadWeightField = (payloadWeight = {}, fieldKey = "", fieldLabelPref
   return { provided: false, value: 0 };
 };
 
+const isBoxSizeFieldLabel = (fieldLabel = "") =>
+  fieldLabel === "inspected_box_sizes" ||
+  fieldLabel === "pis_box_sizes" ||
+  fieldLabel === "master_box_sizes" ||
+  fieldLabel === "pd_box_sizes";
+
+const getSizeEntryLimitForField = (fieldLabel = "") =>
+  isBoxSizeFieldLabel(fieldLabel) ? BOX_SIZE_ENTRY_LIMIT : ITEM_SIZE_ENTRY_LIMIT;
+
 const buildMeasurementCbmSummary = ({
   sizes = [],
   remarkOptions = [],
@@ -336,9 +351,10 @@ const buildMeasurementCbmSummary = ({
   const normalizedEntries = sortSizeEntriesByRemark(
     buildSizeEntriesFromLegacy({
       sizes,
+      limit: ITEM_SIZE_ENTRY_LIMIT,
     }),
     remarkOptions,
-  ).slice(0, SIZE_ENTRY_LIMIT);
+  ).slice(0, ITEM_SIZE_ENTRY_LIMIT);
 
   if (normalizedEntries.length > 0) {
     const first = calculateCbmFromLbh(normalizedEntries[0] || {});
@@ -388,15 +404,13 @@ const parseSizeEntriesPayload = (
     throw new Error(`${fieldLabel} must be an array`);
   }
 
-  if (entries.length > SIZE_ENTRY_LIMIT) {
-    throw new Error(`${fieldLabel} cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
+  const sizeEntryLimit = getSizeEntryLimitForField(fieldLabel);
+  if (entries.length > sizeEntryLimit) {
+    throw new Error(`${fieldLabel} cannot exceed ${sizeEntryLimit} entries`);
   }
 
   const seenRemarks = new Set();
-  const isBoxSizeField =
-    fieldLabel === "inspected_box_sizes" ||
-    fieldLabel === "pis_box_sizes" ||
-    fieldLabel === "master_box_sizes";
+  const isBoxSizeField = isBoxSizeFieldLabel(fieldLabel);
   const resolvedBoxMode =
     isBoxSizeField
       ? detectBoxPackagingMode(mode, entries)
@@ -1685,11 +1699,13 @@ const buildComparableMeasurementEntries = ({
   sizes = [],
   weightKey = "",
   remarkOptions = [],
+  limit = ITEM_SIZE_ENTRY_LIMIT,
 } = {}) =>
   sortSizeEntriesByRemark(
     buildSizeEntriesFromLegacy({
       sizes,
       weightKey,
+      limit,
     }).filter((entry) => {
       const hasSize = hasAnyPositiveMeasurementLbh(entry);
       const hasWeight = weightKey
@@ -1698,7 +1714,7 @@ const buildComparableMeasurementEntries = ({
       return hasSize || hasWeight;
     }),
     remarkOptions,
-  ).slice(0, SIZE_ENTRY_LIMIT);
+  ).slice(0, limit);
 
 const compareMeasurementEntryGroups = (
   inspectedEntries = [],
@@ -2046,6 +2062,7 @@ const buildPisDiffMeasurementEntries = ({
         : (isItemGroup ? item?.inspected_item_sizes : item?.inspected_box_sizes),
     weightKey: isItemGroup ? "net_weight" : "gross_weight",
     remarkOptions: isItemGroup ? ITEM_SIZE_REMARK_OPTIONS : BOX_SIZE_REMARK_OPTIONS,
+    limit: isItemGroup ? ITEM_SIZE_ENTRY_LIMIT : BOX_SIZE_ENTRY_LIMIT,
   });
 };
 
@@ -2631,9 +2648,14 @@ const buildDefaultMasterBoxSizeEntry = ({ remark = "", boxType = "" } = {}) => {
   };
 };
 
-const ensureArrayEntry = (entries = [], index = 0, fallbackEntry = {}) => {
+const ensureArrayEntry = (
+  entries = [],
+  index = 0,
+  fallbackEntry = {},
+  { limit = BOX_SIZE_ENTRY_LIMIT } = {},
+) => {
   const safeIndex = Number.parseInt(String(index), 10);
-  if (!Number.isInteger(safeIndex) || safeIndex < 0 || safeIndex >= SIZE_ENTRY_LIMIT) {
+  if (!Number.isInteger(safeIndex) || safeIndex < 0 || safeIndex >= limit) {
     throw new Error("Difference row points to an invalid master entry");
   }
 
@@ -2669,6 +2691,7 @@ const applyFinalPisMasterOverride = ({
       state.masterItemSizes,
       metadata.index,
       buildDefaultMasterItemSizeEntry({ remark: metadata.remark }),
+      { limit: ITEM_SIZE_ENTRY_LIMIT },
     );
     if (!["L", "B", "H", "net_weight"].includes(field)) {
       throw new Error(`Unsupported item size field for ${difference?.key}`);
@@ -2694,6 +2717,7 @@ const applyFinalPisMasterOverride = ({
         remark: metadata.remark,
         boxType: metadata.box_type,
       }),
+      { limit: BOX_SIZE_ENTRY_LIMIT },
     );
     if (!["L", "B", "H", "gross_weight", "item_count_in_inner", "box_count_in_master"].includes(field)) {
       throw new Error(`Unsupported box size field for ${difference?.key}`);

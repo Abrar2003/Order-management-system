@@ -153,6 +153,7 @@ const formatMeasurementPartLabel = (remark = "", fallback = "Item") => {
   if (normalized === "base" || normalized === "bottom") return "Base";
   if (normalized === "base2") return "Base 2";
   if (normalized === "pedestal") return "Pedestal";
+  if (normalized === "stretcher") return "Stretcher";
   if (normalized === "inner") return "Inner";
   if (normalized === "master" || normalized === "outer") return "Master";
   return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>

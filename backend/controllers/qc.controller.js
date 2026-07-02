@@ -296,17 +296,21 @@ const ACTIVE_ORDER_MATCH = {
   archived: { $ne: true },
   status: { $ne: "Cancelled" },
 };
-const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_ENTRY_LIMIT = 5;
+const BOX_SIZE_ENTRY_LIMIT = 4;
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   "item",
   "top",
   "base",
   "base2",
   "pedestal",
+  "stretcher",
   "item1",
   "item2",
   "item3",
 ]);
+const getSizeEntryLimitForField = (fieldName = "") =>
+  fieldName === "inspected_box_sizes" ? BOX_SIZE_ENTRY_LIMIT : ITEM_SIZE_ENTRY_LIMIT;
 const resolveQcOrderStatus = (qcDoc = null, orderDoc = null) => {
   const resolvedOrder = orderDoc || qcDoc?.order || null;
   if (!resolvedOrder) return "Pending";
@@ -1335,7 +1339,10 @@ const hasCompletePositiveLbh = (dimensions = {}) => {
   return L > 0 && B > 0 && H > 0;
 };
 
-const normalizeStoredSizeEntries = (entries = [], { weightKey = "" } = {}) =>
+const normalizeStoredSizeEntries = (
+  entries = [],
+  { weightKey = "", limit = ITEM_SIZE_ENTRY_LIMIT } = {},
+) =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
       const L = toNonNegativeNumber(entry?.L, 0);
@@ -1354,7 +1361,7 @@ const normalizeStoredSizeEntries = (entries = [], { weightKey = "" } = {}) =>
       };
     })
     .filter((entry) => hasCompletePositiveLbh(entry))
-    .slice(0, SIZE_ENTRY_LIMIT);
+    .slice(0, limit);
 
 const hasCompletePositiveWeightedSizeEntry = (entries = [], weightKey = "") =>
   (Array.isArray(entries) ? entries : []).some(
@@ -1401,8 +1408,8 @@ const sortSizeEntriesByRemark = (entries = [], remarkOptions = []) =>
     const rightIndex = remarkOptions.indexOf(
       normalizeText(right?.remark).toLowerCase(),
     );
-    const safeLeftIndex = leftIndex >= 0 ? leftIndex : SIZE_ENTRY_LIMIT + 1;
-    const safeRightIndex = rightIndex >= 0 ? rightIndex : SIZE_ENTRY_LIMIT + 1;
+    const safeLeftIndex = leftIndex >= 0 ? leftIndex : remarkOptions.length + 1;
+    const safeRightIndex = rightIndex >= 0 ? rightIndex : remarkOptions.length + 1;
     return safeLeftIndex - safeRightIndex;
   });
 
@@ -5098,8 +5105,9 @@ const updateQC = async (req, res) => {
           : { hasInput: false, value: null };
       }
 
-      if (nonEmptyEntries.length > SIZE_ENTRY_LIMIT) {
-        throw new Error(`${fieldName} cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
+      const sizeEntryLimit = getSizeEntryLimitForField(fieldName);
+      if (nonEmptyEntries.length > sizeEntryLimit) {
+        throw new Error(`${fieldName} cannot exceed ${sizeEntryLimit} entries`);
       }
 
       const resolvedBoxMode =
@@ -11453,8 +11461,9 @@ exports.editInspectionRecords = async (req, res) => {
 	      if (!Array.isArray(value)) {
 	        throw new Error(`${fieldName} must be an array`);
 	      }
-	      if (value.length > SIZE_ENTRY_LIMIT) {
-	        throw new Error(`${fieldName} cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
+	      const sizeEntryLimit = getSizeEntryLimitForField(fieldName);
+	      if (value.length > sizeEntryLimit) {
+	        throw new Error(`${fieldName} cannot exceed ${sizeEntryLimit} entries`);
 	      }
 
 	      const isBoxSizeField = fieldName === "inspected_box_sizes";

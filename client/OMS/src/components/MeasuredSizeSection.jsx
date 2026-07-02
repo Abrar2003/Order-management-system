@@ -1,16 +1,13 @@
 import {
   BOX_CARTON_REMARK_OPTIONS,
   BOX_ENTRY_TYPES,
+  BOX_SIZE_ENTRY_LIMIT,
   BOX_PACKAGING_MODES,
-  SIZE_ENTRY_LIMIT,
+  ITEM_SIZE_ENTRY_LIMIT,
   getFixedBoxEntryCount,
   getRemarkLabel,
   normalizeSizeCount,
 } from "../utils/measuredSizeForm";
-
-const SIZE_COUNT_OPTIONS = Array.from({ length: SIZE_ENTRY_LIMIT }, (_, index) =>
-  String(index + 1),
-);
 
 const MeasuredSizeSection = ({
   sectionKey,
@@ -31,11 +28,16 @@ const MeasuredSizeSection = ({
   const isIndividualMasterMode =
     mode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
   const fixedBoxCount = getFixedBoxEntryCount(mode);
-  const safeCount = fixedBoxCount ?? normalizeSizeCount(countValue, 1);
-  const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
   const singleEntryLabel = String(countLabel || "").toLowerCase().includes("box")
     ? "Box"
     : "Item";
+  const entryLimit =
+    singleEntryLabel === "Box" ? BOX_SIZE_ENTRY_LIMIT : ITEM_SIZE_ENTRY_LIMIT;
+  const sizeCountOptions = Array.from({ length: entryLimit }, (_, index) =>
+    String(index + 1),
+  );
+  const safeCount = fixedBoxCount ?? normalizeSizeCount(countValue, 1, entryLimit);
+  const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
   const getCartonRemark = (index) =>
     index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
@@ -73,7 +75,7 @@ const MeasuredSizeSection = ({
                 onChange={(event) => onCountChange?.(event.target.value)}
                 disabled={disabled}
               >
-                {SIZE_COUNT_OPTIONS.map((option) => (
+                {sizeCountOptions.map((option) => (
                   <option key={option} value={option}>
                     {option}
                   </option>
@@ -90,7 +92,7 @@ const MeasuredSizeSection = ({
               onChange={(event) => onCountChange?.(event.target.value)}
               disabled={disabled}
             >
-              {SIZE_COUNT_OPTIONS.map((option) => (
+              {sizeCountOptions.map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>

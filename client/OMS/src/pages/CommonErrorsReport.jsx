@@ -28,6 +28,7 @@ const formatRemark = (value) => {
   const normalized = normalizeText(value).toLowerCase();
   if (normalized === "base2") return "Base 2";
   if (normalized === "pedestal") return "Pedestal";
+  if (normalized === "stretcher") return "Stretcher";
   return normalized
     ? normalized.replace(/([a-z]+)(\d+)/i, (_, word, number) =>
         `${word.charAt(0).toUpperCase()}${word.slice(1)} ${number}`)

@@ -27,7 +27,8 @@ import { exportElementToPdf } from "../services/pdfExport.service";
 
 const SIZE_UNIT = "cm";
 const WEIGHT_UNIT = "kg";
-const MEASUREMENT_ENTRY_DISPLAY_LIMIT = 4;
+const ITEM_MEASUREMENT_ENTRY_DISPLAY_LIMIT = 5;
+const BOX_MEASUREMENT_ENTRY_DISPLAY_LIMIT = 4;
 const normalizeBarcodeDigits = (value) => String(value ?? "").replace(/\D/g, "");
 const isDefaultBarcodeDigits = (value) => {
   const digits = normalizeBarcodeDigits(value);
@@ -82,6 +83,7 @@ const ITEM_INDEXED_REMARKS = [
   "base",
   "base2",
   "pedestal",
+  "stretcher",
   "item",
   "item1",
   "item2",
@@ -97,6 +99,7 @@ const formatMeasurementRemark = (remark = "") => {
   if (normalized === "base") return "Base";
   if (normalized === "base2") return "Base 2";
   if (normalized === "pedestal") return "Pedestal";
+  if (normalized === "stretcher") return "Stretcher";
   return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
     `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
   );
@@ -302,6 +305,7 @@ const normalizeMeasurementEntries = (
   entries = [],
   weightKey = "",
   remarkOrder = [],
+  limit = ITEM_MEASUREMENT_ENTRY_DISPLAY_LIMIT,
 ) =>
   sortMeasurementEntries(
     (Array.isArray(entries) ? entries : [])
@@ -319,7 +323,7 @@ const normalizeMeasurementEntries = (
         };
       })
       .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
-      .slice(0, MEASUREMENT_ENTRY_DISPLAY_LIMIT),
+      .slice(0, limit),
     remarkOrder,
   );
 
@@ -1198,11 +1202,13 @@ const InspectionReport = () => {
       itemMaster?.pis_box_sizes,
       "gross_weight",
       BOX_INDEXED_REMARKS,
+      BOX_MEASUREMENT_ENTRY_DISPLAY_LIMIT,
     );
     const inspectedBoxEntries = normalizeMeasurementEntries(
       inspectedBoxSizesSource,
       "gross_weight",
       BOX_INDEXED_REMARKS,
+      BOX_MEASUREMENT_ENTRY_DISPLAY_LIMIT,
     );
     const inspectedItemLbhEntries = inspectedItemEntries;
     const inspectedBoxLbhEntries = inspectedBoxEntries;

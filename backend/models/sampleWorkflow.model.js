@@ -5,12 +5,16 @@ const {
   BOX_SIZE_REMARK_OPTIONS,
 } = require("../helpers/boxMeasurement");
 
-const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_ENTRY_LIMIT = 5;
+const BOX_SIZE_ENTRY_LIMIT = 4;
 const ITEM_SIZE_REMARKS = [
   "",
   "item",
   "top",
   "base",
+  "base2",
+  "pedestal",
+  "stretcher",
   "item1",
   "item2",
   "item3",
@@ -126,8 +130,8 @@ const sampleWorkflowSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= ITEM_SIZE_ENTRY_LIMIT,
+        message: `item_sizes cannot exceed ${ITEM_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     box_sizes: {
@@ -135,8 +139,8 @@ const sampleWorkflowSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= BOX_SIZE_ENTRY_LIMIT,
+        message: `box_sizes cannot exceed ${BOX_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     box_mode: {

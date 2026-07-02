@@ -303,10 +303,13 @@ const parseDimensionRows = (sheet, dimensionCell) => {
   if (itemSizes.length === 0 && boxSizes.length === 0) {
     throw new PisImportError(422, "PIS dimensions section contains no valid item or carton rows");
   }
-  if (itemSizes.length > Item.SIZE_ENTRY_LIMIT || boxSizes.length > Item.SIZE_ENTRY_LIMIT) {
+  if (
+    itemSizes.length > Item.ITEM_SIZE_ENTRY_LIMIT ||
+    boxSizes.length > Item.BOX_SIZE_ENTRY_LIMIT
+  ) {
     throw new PisImportError(
       422,
-      `PIS dimensions cannot exceed ${Item.SIZE_ENTRY_LIMIT} entries per section`,
+      `PIS dimensions cannot exceed ${Item.ITEM_SIZE_ENTRY_LIMIT} item entries or ${Item.BOX_SIZE_ENTRY_LIMIT} carton entries`,
     );
   }
 

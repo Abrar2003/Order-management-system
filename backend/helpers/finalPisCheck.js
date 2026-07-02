@@ -65,7 +65,9 @@ const COMPARE_TOLERANCE = 0.001;
 const CBM_COMPARE_TOLERANCE = 0.03;
 const CBM_COMPARE_EPSILON = 0.000000001;
 const CBM_COMPARE_DECIMALS = 2;
-const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_ENTRY_LIMIT = 5;
+const BOX_SIZE_ENTRY_LIMIT = 4;
+const SIZE_ENTRY_LIMIT = BOX_SIZE_ENTRY_LIMIT;
 const EMPTY_LABEL = "Not Set";
 const ITEM_REMARK_ORDER = Object.freeze([
   "",
@@ -74,6 +76,7 @@ const ITEM_REMARK_ORDER = Object.freeze([
   "base",
   "base2",
   "pedestal",
+  "stretcher",
   "item1",
   "item2",
   "item3",
@@ -268,6 +271,7 @@ const formatRemarkLabel = (remark = "", fallback = "Value") => {
   if (normalized === "base") return "Base";
   if (normalized === "base2") return "Base 2";
   if (normalized === "pedestal") return "Pedestal";
+  if (normalized === "stretcher") return "Stretcher";
   if (normalized === "inner") return "Inner Carton";
   if (normalized === "master") return "Master Carton";
   if (normalized === "individual") return "Individual";
@@ -387,7 +391,7 @@ const buildItemMeasurementEntries = ({
     (Array.isArray(sizes) ? sizes : [])
     .map((entry) => normalizeItemMeasurementEntry(entry))
     .filter((entry) => hasMeaningfulEntry(entry, { weightKey: "net_weight" }))
-    .slice(0, SIZE_ENTRY_LIMIT),
+    .slice(0, ITEM_SIZE_ENTRY_LIMIT),
     {
       order: ITEM_REMARK_ORDER,
       keyBuilder: buildItemEntryKey,
@@ -405,7 +409,7 @@ const buildBoxMeasurementEntries = ({
       ? 2
       : resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
         ? 1
-        : SIZE_ENTRY_LIMIT;
+        : BOX_SIZE_ENTRY_LIMIT;
   const normalizedSizes = (Array.isArray(sizes) ? sizes : [])
     .map((entry) => normalizeBoxMeasurementEntry(entry))
     .filter((entry) =>

@@ -23,6 +23,7 @@ import {
   BOX_CARTON_REMARK_OPTIONS,
   BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
+  BOX_SIZE_ENTRY_LIMIT,
   BOX_SIZE_REMARK_OPTIONS,
   convertMeasuredBoxEntriesMode,
   createEmptyMeasuredSizeEntry,
@@ -30,8 +31,8 @@ import {
   ensureMeasuredSizeEntryCount,
   getFixedBoxEntryCount,
   getRemarkLabel,
+  ITEM_SIZE_ENTRY_LIMIT,
   normalizeSizeCount,
-  SIZE_ENTRY_LIMIT as SIZE_ENTRY_LIMIT_UTIL,
   toDimensionInputValue,
 } from "../utils/measuredSizeForm";
 import {
@@ -45,8 +46,10 @@ import "../App.css";
 const DEFAULT_FILTER = "all";
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [20, 50, 100];
-const SIZE_ENTRY_LIMIT = SIZE_ENTRY_LIMIT_UTIL;
-const SIZE_COUNT_OPTIONS = Array.from({ length: SIZE_ENTRY_LIMIT }, (_, index) =>
+const ITEM_SIZE_COUNT_OPTIONS = Array.from({ length: ITEM_SIZE_ENTRY_LIMIT }, (_, index) =>
+  String(index + 1),
+);
+const BOX_SIZE_COUNT_OPTIONS = Array.from({ length: BOX_SIZE_ENTRY_LIMIT }, (_, index) =>
   String(index + 1),
 );
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
@@ -55,6 +58,7 @@ const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   { value: "base", label: "Base" },
   { value: "base2", label: "Base 2" },
   { value: "pedestal", label: "Pedestal" },
+  { value: "stretcher", label: "Stretcher" },
   { value: "item1", label: "Item 1" },
   { value: "item2", label: "Item 2" },
   { value: "item3", label: "Item 3" },
@@ -578,11 +582,15 @@ const ProductDatabaseMeasuredSizeSection = ({
   const isIndividualMasterMode =
     mode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
   const fixedBoxCount = getFixedBoxEntryCount(mode);
-  const safeCount = fixedBoxCount ?? normalizeSizeCount(countValue, 1);
-  const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
   const singleEntryLabel = String(countLabel || "").toLowerCase().includes("box")
     ? "Box"
     : "Item";
+  const sizeEntryLimit =
+    singleEntryLabel === "Box" ? BOX_SIZE_ENTRY_LIMIT : ITEM_SIZE_ENTRY_LIMIT;
+  const sizeCountOptions =
+    singleEntryLabel === "Box" ? BOX_SIZE_COUNT_OPTIONS : ITEM_SIZE_COUNT_OPTIONS;
+  const safeCount = fixedBoxCount ?? normalizeSizeCount(countValue, 1, sizeEntryLimit);
+  const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
   const getCartonRemark = (index) =>
     index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
@@ -616,7 +624,7 @@ const ProductDatabaseMeasuredSizeSection = ({
               onChange={onControlChange}
               disabled={disabled}
             >
-              {SIZE_COUNT_OPTIONS.map((option) => (
+              {sizeCountOptions.map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>
@@ -644,7 +652,7 @@ const ProductDatabaseMeasuredSizeSection = ({
                 onChange={onControlChange}
                 disabled={disabled}
               >
-                {SIZE_COUNT_OPTIONS.map((option) => (
+                {sizeCountOptions.map((option) => (
                   <option key={option} value={option}>
                     {option}
                   </option>
@@ -992,7 +1000,9 @@ const createProductDatabaseMeasuredSizeFormState = (item = {}) => {
   const itemEntries = getDisplayItemSizes(item).map((entry) =>
     toMeasuredSizeEntryFormValue(entry, { weightKey: "net_weight" }),
   );
-  const itemCount = String(normalizeSizeCount(Math.max(itemEntries.length, 1), 1));
+  const itemCount = String(
+    normalizeSizeCount(Math.max(itemEntries.length, 1), 1, ITEM_SIZE_ENTRY_LIMIT),
+  );
   const boxMode = getDisplayBoxMode(item);
   const boxEntries = getDisplayBoxSizes(item).map((entry) =>
     toMeasuredSizeEntryFormValue(entry, {
@@ -1006,7 +1016,7 @@ const createProductDatabaseMeasuredSizeFormState = (item = {}) => {
   const boxCount =
     fixedBoxCount
       ? String(fixedBoxCount)
-      : String(normalizeSizeCount(Math.max(boxEntries.length, 1), 1));
+      : String(normalizeSizeCount(Math.max(boxEntries.length, 1), 1, BOX_SIZE_ENTRY_LIMIT));
 
   return {
     itemCount,
@@ -1018,6 +1028,7 @@ const createProductDatabaseMeasuredSizeFormState = (item = {}) => {
     boxEntries: ensureMeasuredSizeEntryCount(boxEntries, boxCount, {
       mode: resolvedBoxMode,
       singleRemark: "box",
+      limit: BOX_SIZE_ENTRY_LIMIT,
     }),
   };
 };
@@ -1026,13 +1037,13 @@ const cloneMeasuredSizeEntries = (entries = []) =>
   (Array.isArray(entries) ? entries : []).map((entry) => ({ ...entry }));
 
 const cloneMeasuredSizeFormState = (formState = {}) => ({
-  itemCount: String(normalizeSizeCount(formState?.itemCount, 1)),
+  itemCount: String(normalizeSizeCount(formState?.itemCount, 1, ITEM_SIZE_ENTRY_LIMIT)),
   itemEntries: cloneMeasuredSizeEntries(formState?.itemEntries),
   boxMode: detectBoxPackagingMode(formState?.boxMode, formState?.boxEntries || []),
   boxCount: String(
     getFixedBoxEntryCount(
       detectBoxPackagingMode(formState?.boxMode, formState?.boxEntries || []),
-    ) ?? normalizeSizeCount(formState?.boxCount, 1),
+    ) ?? normalizeSizeCount(formState?.boxCount, 1, BOX_SIZE_ENTRY_LIMIT),
   ),
   boxEntries: cloneMeasuredSizeEntries(formState?.boxEntries),
 });
@@ -1051,11 +1062,13 @@ const buildMeasuredSizeEntriesPayload = ({
 } = {}) => {
   const resolvedMode = isBox ? detectBoxPackagingMode(mode, entries) : BOX_PACKAGING_MODES.INDIVIDUAL;
   const fixedBoxCount = isBox ? getFixedBoxEntryCount(resolvedMode) : null;
+  const sizeEntryLimit = isBox ? BOX_SIZE_ENTRY_LIMIT : ITEM_SIZE_ENTRY_LIMIT;
   const safeCount =
-    fixedBoxCount ?? normalizeSizeCount(count, 1);
+    fixedBoxCount ?? normalizeSizeCount(count, 1, sizeEntryLimit);
   const scopedEntries = ensureMeasuredSizeEntryCount(entries, safeCount, {
     mode: resolvedMode,
     singleRemark: isBox ? "box" : "item",
+    limit: sizeEntryLimit,
   }).slice(0, safeCount);
 
   return scopedEntries.reduce((payloadEntries, entry, index) => {
@@ -1661,19 +1674,21 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
           boxCount:
             String(
               getFixedBoxEntryCount(nextMode) ??
-                normalizeSizeCount(prev.boxCount, 1),
+                normalizeSizeCount(prev.boxCount, 1, BOX_SIZE_ENTRY_LIMIT),
             ),
           boxEntries: ensureMeasuredSizeEntryCount(
             convertMeasuredBoxEntriesMode(prev.boxEntries, nextMode),
             getFixedBoxEntryCount(nextMode) ?? prev.boxCount,
-            { mode: nextMode, singleRemark: "box" },
+            { mode: nextMode, singleRemark: "box", limit: BOX_SIZE_ENTRY_LIMIT },
           ),
         };
       }
 
       if (name === "pd_item_count" || name === "pd_box_count") {
-        const safeCount = String(normalizeSizeCount(value, 1));
         if (name === "pd_item_count") {
+          const safeCount = String(
+            normalizeSizeCount(value, 1, ITEM_SIZE_ENTRY_LIMIT),
+          );
           return {
             ...prev,
             itemCount: safeCount,
@@ -1683,12 +1698,14 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
           };
         }
 
+        const safeCount = String(normalizeSizeCount(value, 1, BOX_SIZE_ENTRY_LIMIT));
         return {
           ...prev,
           boxCount: safeCount,
           boxEntries: ensureMeasuredSizeEntryCount(prev.boxEntries, safeCount, {
             mode: prev.boxMode,
             singleRemark: "box",
+            limit: BOX_SIZE_ENTRY_LIMIT,
           }),
         };
       }
@@ -1726,7 +1743,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
           boxEntries: ensureMeasuredSizeEntryCount(
             nextEntries,
             prev.boxCount,
-            { mode: prev.boxMode, singleRemark: "box" },
+            { mode: prev.boxMode, singleRemark: "box", limit: BOX_SIZE_ENTRY_LIMIT },
           ),
         };
       }
@@ -1797,12 +1814,16 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
   const displayedItemEntries = ensureMeasuredSizeEntryCount(
     measuredSizeForm.itemEntries,
     measuredSizeForm.itemCount,
-    { singleRemark: "item" },
+    { singleRemark: "item", limit: ITEM_SIZE_ENTRY_LIMIT },
   );
   const displayedBoxEntries = ensureMeasuredSizeEntryCount(
     measuredSizeForm.boxEntries,
     measuredSizeForm.boxCount,
-    { mode: measuredSizeForm.boxMode, singleRemark: "box" },
+    {
+      mode: measuredSizeForm.boxMode,
+      singleRemark: "box",
+      limit: BOX_SIZE_ENTRY_LIMIT,
+    },
   );
   const isProductDatabaseCartonMode =
     detectBoxPackagingMode(measuredSizeForm.boxMode, measuredSizeForm.boxEntries) ===

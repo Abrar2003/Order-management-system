@@ -84,6 +84,9 @@ const formatRemarkLabel = (remark = "", fallback = "Value") => {
   if (!normalized) return fallback;
   if (normalized === "top") return "Top";
   if (normalized === "base") return "Base";
+  if (normalized === "base2") return "Base 2";
+  if (normalized === "pedestal") return "Pedestal";
+  if (normalized === "stretcher") return "Stretcher";
   return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
     `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
   );

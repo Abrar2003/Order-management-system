@@ -4,6 +4,7 @@ import MeasuredSizeSection from "./MeasuredSizeSection";
 import useBrandOptions from "../hooks/useBrandOptions";
 import {
   BOX_PACKAGING_MODES,
+  BOX_SIZE_ENTRY_LIMIT,
   BOX_SIZE_REMARK_OPTIONS,
   ITEM_SIZE_REMARK_OPTIONS,
   calculateMeasuredSizeEntriesCbm,
@@ -92,11 +93,13 @@ const parseOptionalSampleMeasuredSizeEntries = ({
   entries = [],
   count = 1,
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  limit,
   ...rest
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
   const normalizedEntries = ensureMeasuredSizeEntryCount(entries, count, {
     mode: resolvedMode,
+    ...(limit ? { limit } : {}),
   });
   const hasMeaningfulInput = normalizedEntries.some((entry) =>
     hasMeaningfulSampleSizeInput(entry, { mode: resolvedMode }),
@@ -114,6 +117,7 @@ const parseOptionalSampleMeasuredSizeEntries = ({
     entries,
     count,
     mode: resolvedMode,
+    ...(limit ? { limit } : {}),
     ...rest,
   });
 };
@@ -207,6 +211,7 @@ const SampleModal = ({
       ensureMeasuredSizeEntryCount(sampleForm.box_sizes, sampleForm.box_count, {
         mode: sampleForm.box_mode,
         singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
       }),
     [sampleForm.box_count, sampleForm.box_mode, sampleForm.box_sizes],
   );
@@ -218,6 +223,7 @@ const SampleModal = ({
     () =>
       calculateMeasuredSizeEntriesCbm(sampleForm.box_sizes, sampleForm.box_count, {
         mode: sampleForm.box_mode,
+        limit: BOX_SIZE_ENTRY_LIMIT,
       }),
     [sampleForm.box_count, sampleForm.box_mode, sampleForm.box_sizes],
   );
@@ -253,12 +259,16 @@ const SampleModal = ({
   };
 
   const handleCountChange = (countKey, entriesKey, value) => {
-    const safeCount = String(normalizeSizeCount(value, 1));
+    const isBoxEntries = entriesKey.includes("box");
+    const safeCount = String(
+      normalizeSizeCount(value, 1, isBoxEntries ? BOX_SIZE_ENTRY_LIMIT : undefined),
+    );
     setSampleForm((prev) => ({
       ...prev,
       [countKey]: safeCount,
       [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount, {
-        singleRemark: entriesKey.includes("box") ? "box" : "item",
+        singleRemark: isBoxEntries ? "box" : "item",
+        ...(isBoxEntries ? { limit: BOX_SIZE_ENTRY_LIMIT } : {}),
       }),
     }));
   };
@@ -273,6 +283,7 @@ const SampleModal = ({
       box_sizes: ensureMeasuredSizeEntryCount(prev.box_sizes, nextCount, {
         mode: nextMode,
         singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
       }),
     }));
   };
@@ -301,7 +312,9 @@ const SampleModal = ({
         ),
         prev[entriesKey]?.length || 1,
         {
-          ...(entriesKey === "box_sizes" ? { mode: prev.box_mode } : {}),
+          ...(entriesKey === "box_sizes"
+            ? { mode: prev.box_mode, limit: BOX_SIZE_ENTRY_LIMIT }
+            : {}),
           singleRemark: entriesKey.includes("box") ? "box" : "item",
         },
       ),
@@ -336,6 +349,7 @@ const SampleModal = ({
       weightFieldLabel: "Gross weight",
       mode: sampleForm.box_mode,
       singleRemark: "box",
+      limit: BOX_SIZE_ENTRY_LIMIT,
     });
     if (boxSizesPayload.error) {
       throw new Error(boxSizesPayload.error);

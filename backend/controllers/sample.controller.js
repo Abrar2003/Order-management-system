@@ -8,8 +8,20 @@ const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 
 const SHIPPED_BY_VENDOR_ID = "shipped_by_vendor";
 const SHIPPED_BY_VENDOR_NAME = "Shipped By Vendor";
-const SIZE_ENTRY_LIMIT = 4;
-const ITEM_SIZE_REMARK_OPTIONS = Object.freeze(["item", "top", "base", "item1", "item2", "item3", "item4"]);
+const ITEM_SIZE_ENTRY_LIMIT = 5;
+const BOX_SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
+  "item",
+  "top",
+  "base",
+  "base2",
+  "pedestal",
+  "stretcher",
+  "item1",
+  "item2",
+  "item3",
+  "item4",
+]);
 const BOX_SIZE_REMARK_OPTIONS = Object.freeze(["top", "base", "box", "box1", "box2", "box3"]);
 const SAMPLE_MUTATION_ROLES = new Set([
   "admin",
@@ -211,8 +223,8 @@ const isBlankBoxSizeEntry = (entry = {}, boxMode = BOX_PACKAGING_MODES.INDIVIDUA
 const normalizeItemSizeEntries = (entries = []) => {
   if (!Array.isArray(entries)) throw new Error("item_sizes must be an array");
   const normalizedEntries = entries.filter((entry) => !isBlankItemSizeEntry(entry));
-  if (normalizedEntries.length > SIZE_ENTRY_LIMIT) {
-    throw new Error(`item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
+  if (normalizedEntries.length > ITEM_SIZE_ENTRY_LIMIT) {
+    throw new Error(`item_sizes cannot exceed ${ITEM_SIZE_ENTRY_LIMIT} entries`);
   }
   const seenRemarks = new Set();
   return normalizedEntries.map((entry, index) => {
@@ -244,7 +256,7 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
       ? 2
       : boxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
         ? 1
-        : SIZE_ENTRY_LIMIT;
+        : BOX_SIZE_ENTRY_LIMIT;
   if (normalizedEntries.length > entryLimit) {
     throw new Error(`box_sizes cannot exceed ${entryLimit} entries`);
   }

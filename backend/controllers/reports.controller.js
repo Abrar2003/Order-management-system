@@ -2151,10 +2151,21 @@ exports.getCommonErrorsReport = async (req, res) => {
   }
 };
 
+const formatCommonErrorRemark = (value = "") => {
+  const normalized = normalizeText(value).toLowerCase();
+  if (normalized === "base2") return "Base 2";
+  if (normalized === "pedestal") return "Pedestal";
+  if (normalized === "stretcher") return "Stretcher";
+  return normalized
+    ? normalized.replace(/([a-z]+)(\d+)/i, (_, word, number) =>
+        `${word.charAt(0).toUpperCase()}${word.slice(1)} ${number}`)
+    : "entry";
+};
+
 const formatCommonErrorSizeEntries = (entries = [], weightKey = "") =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
-      const remark = normalizeText(entry?.remark) || "entry";
+      const remark = formatCommonErrorRemark(entry?.remark);
       const size = `${Number(entry?.L || 0)} x ${Number(entry?.B || 0)} x ${Number(entry?.H || 0)}`;
       const weight = Number(entry?.[weightKey] || 0);
       return `${remark}: ${size}${weight > 0 ? ` | ${weightKey}: ${weight}` : ""}`;

@@ -9,7 +9,8 @@ const {
   pickReferenceSizeArray,
 } = require("../helpers/sizeDimensionFormatter");
 
-const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_ENTRY_LIMIT = 5;
+const BOX_SIZE_ENTRY_LIMIT = 4;
 
 const createSizeEntrySchema = () =>
   new mongoose.Schema(
@@ -337,8 +338,8 @@ const itemSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `inspected_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= ITEM_SIZE_ENTRY_LIMIT,
+        message: `inspected_item_sizes cannot exceed ${ITEM_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     inspected_item_top_LBH: legacyLbhSchema,
@@ -349,8 +350,8 @@ const itemSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `inspected_box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= BOX_SIZE_ENTRY_LIMIT,
+        message: `inspected_box_sizes cannot exceed ${BOX_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     inspected_box_mode: {
@@ -369,8 +370,8 @@ const itemSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `pis_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= ITEM_SIZE_ENTRY_LIMIT,
+        message: `pis_item_sizes cannot exceed ${ITEM_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     pd_item_sizes: {
@@ -378,8 +379,8 @@ const itemSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `pd_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= ITEM_SIZE_ENTRY_LIMIT,
+        message: `pd_item_sizes cannot exceed ${ITEM_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     pis_item_top_LBH: legacyLbhSchema,
@@ -390,8 +391,8 @@ const itemSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `pis_box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= BOX_SIZE_ENTRY_LIMIT,
+        message: `pis_box_sizes cannot exceed ${BOX_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     pis_box_mode: {
@@ -405,8 +406,8 @@ const itemSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `master_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= ITEM_SIZE_ENTRY_LIMIT,
+        message: `master_item_sizes cannot exceed ${ITEM_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     master_box_sizes: {
@@ -414,8 +415,8 @@ const itemSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `master_box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= BOX_SIZE_ENTRY_LIMIT,
+        message: `master_box_sizes cannot exceed ${BOX_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     master_box_mode: {
@@ -434,8 +435,8 @@ const itemSchema = new mongoose.Schema(
       default: [],
       validate: {
         validator: (entries) =>
-          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
-        message: `pd_box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+          !Array.isArray(entries) || entries.length <= BOX_SIZE_ENTRY_LIMIT,
+        message: `pd_box_sizes cannot exceed ${BOX_SIZE_ENTRY_LIMIT} entries`,
       },
     },
     pd_box_mode: {
@@ -650,6 +651,8 @@ const Item = mongoose.model("items", itemSchema);
 Item.createSizeEntrySchema = createSizeEntrySchema;
 Item.itemSizeEntrySchema = itemSizeEntrySchema;
 Item.boxSizeEntrySchema = boxSizeEntrySchema;
-Item.SIZE_ENTRY_LIMIT = SIZE_ENTRY_LIMIT;
+Item.SIZE_ENTRY_LIMIT = BOX_SIZE_ENTRY_LIMIT;
+Item.ITEM_SIZE_ENTRY_LIMIT = ITEM_SIZE_ENTRY_LIMIT;
+Item.BOX_SIZE_ENTRY_LIMIT = BOX_SIZE_ENTRY_LIMIT;
 
 module.exports = Item;
