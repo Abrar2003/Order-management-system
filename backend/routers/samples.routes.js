@@ -1,4 +1,5 @@
 const express = require("express");
+const upload = require("../config/multer.config");
 const auth = require("../middlewares/auth.middleware");
 const {
   requirePermission,
@@ -10,6 +11,8 @@ const {
   updateSample,
   finalizeSampleShipment,
   getShippedSamples,
+  uploadSampleFile,
+  convertToItem,
 } = require("../controllers/sample.controller");
 
 const router = express.Router();
@@ -53,6 +56,23 @@ router.patch(
   auth,
   requirePermissionOrRoles("samples", "edit", SAMPLE_MUTATION_ROLE_KEYS),
   finalizeSampleShipment,
+);
+
+router.post(
+  "/:id/files",
+  auth,
+  requirePermissionOrRoles("samples", "edit", SAMPLE_MUTATION_ROLE_KEYS),
+  requirePermission("images_documents", "upload"),
+  upload.safeSingle("file"),
+  uploadSampleFile,
+);
+
+router.post(
+  "/:id/convert-to-item",
+  auth,
+  requirePermissionOrRoles("samples", "edit", SAMPLE_MUTATION_ROLE_KEYS),
+  requirePermission("items", "create"),
+  convertToItem,
 );
 
 module.exports = router;

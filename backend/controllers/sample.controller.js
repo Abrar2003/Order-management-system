@@ -471,6 +471,52 @@ const flattenSampleShipmentRows = (samples = []) =>
     });
   });
 
+const hasStoredImage = (image) => {
+  return !!(image && (image.key || image.link));
+};
+
+const buildProductImageThumbnail = async (image, sampleCode) => {
+  if (!hasStoredImage(image)) {
+    return {
+      product_image: image ? {
+        key: image.key || "",
+        originalName: image.originalName || "",
+        contentType: image.contentType || "",
+        size: image.size || 0,
+        link: image.link || "",
+        public_id: image.public_id || "",
+      } : null,
+      product_image_url: "",
+    };
+  }
+
+  let link = image.link || "";
+  if (image.key) {
+    if (isWasabiConfigured()) {
+      try {
+        link = await getSignedObjectUrl(image.key, {
+          expiresIn: 24 * 60 * 60,
+          filename: image.originalName || `${sampleCode || "sample"}-product-image.jpg`,
+        });
+      } catch (err) {
+        console.error("Failed to sign sample image key", err);
+      }
+    }
+  }
+
+  return {
+    product_image: {
+      key: image.key || "",
+      originalName: image.originalName || `${sampleCode || "sample"}-product-image.jpg`,
+      contentType: image.contentType || "image/jpeg",
+      size: image.size || 0,
+      link: image.link || "",
+      public_id: image.public_id || image.key || "",
+    },
+    product_image_url: link,
+  };
+};
+
 exports.getSamples = async (req, res) => {
   try {
     const page = parsePositiveInt(req.query.page, 1);
@@ -486,9 +532,26 @@ exports.getSamples = async (req, res) => {
       Sample.distinct("vendor", applyDataAccessMatch(buildSampleMatch({ ...req.query, vendor: "" }), req.user, accessOptions)),
     ]);
 
+    const includeThumbnail = req.query.include_product_image_thumbnail === "true";
+    let data;
+    if (includeThumbnail) {
+      data = await Promise.all(
+        samples.map(async (sample) => {
+          const serialized = serializeSample(sample);
+          const thumbnail = await buildProductImageThumbnail(sample.image, sample.code);
+          return {
+            ...serialized,
+            ...thumbnail,
+          };
+        })
+      );
+    } else {
+      data = samples.map(serializeSample);
+    }
+
     return res.status(200).json({
       success: true,
-      data: samples.map(serializeSample),
+      data,
       pagination: {
         page,
         limit,
@@ -702,6 +765,268 @@ exports.getShippedSamples = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch shipped samples",
+      error: error.message,
+    });
+  }
+};
+
+exports.uploadSampleFile = async (req, res) => {
+  try {
+    const sampleId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(sampleId)) {
+      return res.status(400).json({ success: false, message: "Invalid sample ID" });
+    }
+
+    const fileType = (req.body?.file_type || req.body?.fileType || "").trim().toLowerCase();
+    if (fileType !== "product_image") {
+      return res.status(400).json({ success: false, message: "Invalid file type" });
+    }
+
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+
+    const mimeType = String(file.mimetype || "").toLowerCase();
+    const extension = path.extname(String(file.originalname || "")).toLowerCase();
+    const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
+    const ALLOWED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
+
+    if (!ALLOWED_MIME_TYPES.has(mimeType) || !ALLOWED_EXTENSIONS.has(extension)) {
+      return res.status(400).json({ success: false, message: "Only JPG, JPEG, and PNG images are allowed" });
+    }
+
+    if (!isWasabiConfigured()) {
+      return res.status(500).json({ success: false, message: "Wasabi storage is not configured" });
+    }
+
+    const sample = await Sample.findOne(
+      applyDataAccessMatch({ _id: sampleId }, req.user, {
+        vendorFields: ["vendor"],
+      }),
+    );
+    if (!sample) {
+      return res.status(404).json({ success: false, message: "Sample not found" });
+    }
+
+    const previousStorageKey = sample.image?.key;
+
+    const uploadResult = await uploadBuffer({
+      buffer: file.buffer,
+      key: createStorageKey({
+        folder: "samples/images",
+        originalName: file.originalname || `${sample.code}-product-image.jpg`,
+        extension,
+      }),
+      originalName: file.originalname || `${sample.code}-product-image.jpg`,
+      contentType: mimeType,
+    });
+
+    sample.image = {
+      key: uploadResult.key,
+      originalName: file.originalname || `${sample.code}-product-image.jpg`,
+      contentType: mimeType,
+      size: file.size,
+      link: "",
+      public_id: uploadResult.key,
+    };
+    sample.updated_by = buildAuditActor(req.user);
+    await sample.save();
+
+    if (previousStorageKey) {
+      deleteObject(previousStorageKey).catch((error) => {
+        console.error("Delete previous sample image failed:", error);
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Sample image uploaded successfully",
+      data: {
+        key: sample.image.key,
+        originalName: sample.image.originalName,
+        contentType: sample.image.contentType,
+        size: sample.image.size,
+        link: sample.image.link,
+        public_id: sample.image.public_id,
+      },
+    });
+  } catch (error) {
+    console.error("Upload Sample File Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to upload sample file",
+      error: error.message,
+    });
+  }
+};
+
+exports.convertToItem = async (req, res) => {
+  try {
+    const sampleId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(sampleId)) {
+      return res.status(400).json({ success: false, message: "Invalid sample ID" });
+    }
+
+    const { code, name, description } = req.body || {};
+    const normalizedCode = String(code || "").trim().toUpperCase();
+    const normalizedName = String(name || "").trim();
+    const normalizedDescription = String(description || "").trim();
+
+    if (!normalizedCode) {
+      return res.status(400).json({ success: false, message: "Item code is required" });
+    }
+    if (!normalizedName) {
+      return res.status(400).json({ success: false, message: "Item name is required" });
+    }
+    if (!normalizedDescription) {
+      return res.status(400).json({ success: false, message: "Item description is required" });
+    }
+
+    // Fetch sample with data access protection
+    const sample = await Sample.findOne(
+      applyDataAccessMatch({ _id: sampleId }, req.user, {
+        vendorFields: ["vendor"],
+      }),
+    );
+    if (!sample) {
+      return res.status(404).json({ success: false, message: "Sample not found" });
+    }
+
+    // Validate brand and vendor on sample
+    if (!sample.brand) {
+      return res.status(400).json({ success: false, message: "Sample brand is required for conversion" });
+    }
+    if (!Array.isArray(sample.vendor) || sample.vendor.length === 0 || !sample.vendor[0]) {
+      return res.status(400).json({ success: false, message: "Sample must have at least one vendor for conversion" });
+    }
+
+    // Check duplicate item code
+    const existingItem = await Item.findOne({
+      code: { $regex: `^${escapeRegex(normalizedCode)}$`, $options: "i" },
+    }).select("_id code");
+    if (existingItem) {
+      return res.status(400).json({
+        success: false,
+        message: `Item code ${existingItem.code || normalizedCode} already exists`,
+      });
+    }
+
+    // Calculate CBM
+    const summary = buildBoxMeasurementCbmSummary({
+      sizes: sample.box_sizes,
+      mode: sample.box_mode,
+    });
+
+    const totalCbmVal = (summary.total && summary.total !== "0") ? summary.total : (sample.cbm > 0 ? String(sample.cbm) : "0");
+    const topCbmVal = (summary.total && summary.total !== "0") ? (summary.first || "0") : "0";
+    const bottomCbmVal = (summary.total && summary.total !== "0") ? (summary.second || "0") : "0";
+
+    const itemCbm = {
+      top: topCbmVal,
+      bottom: bottomCbmVal,
+      total: totalCbmVal,
+      inspected_top: topCbmVal,
+      inspected_bottom: bottomCbmVal,
+      inspected_total: totalCbmVal,
+      calculated_inspected_total: totalCbmVal,
+      calculated_pis_total: "0",
+      calculated_total: totalCbmVal,
+    };
+
+    // Copy image key if stored
+    let itemImage = {
+      key: "",
+      originalName: "",
+      contentType: "",
+      size: 0,
+      link: "",
+      public_id: "",
+    };
+    if (sample.image && sample.image.key) {
+      itemImage = {
+        key: sample.image.key,
+        originalName: sample.image.originalName || "",
+        contentType: sample.image.contentType || "",
+        size: sample.image.size || 0,
+        link: sample.image.link || "",
+        public_id: sample.image.public_id || sample.image.key,
+      };
+    }
+
+    // Create the Item
+    const item = new Item({
+      code: normalizedCode,
+      name: normalizedName,
+      description: normalizedDescription,
+      brand: sample.brand,
+      brand_name: sample.brand,
+      brands: [sample.brand],
+      vendors: sample.vendor,
+      inspected_item_sizes: sample.item_sizes.map(size => ({
+        L: size.L,
+        B: size.B,
+        H: size.H,
+        remark: size.remark,
+        net_weight: size.net_weight,
+        gross_weight: size.gross_weight,
+      })),
+      inspected_box_sizes: sample.box_sizes.map(size => ({
+        L: size.L,
+        B: size.B,
+        H: size.H,
+        remark: size.remark,
+        net_weight: size.net_weight,
+        gross_weight: size.gross_weight,
+        box_type: size.box_type,
+        item_count_in_inner: size.item_count_in_inner,
+        box_count_in_master: size.box_count_in_master,
+      })),
+      inspected_box_mode: sample.box_mode,
+      cbm: itemCbm,
+      image: itemImage,
+      source: {
+        from_orders: false,
+        from_qc: false,
+      },
+    });
+
+    // Append update history
+    appendItemUpdateHistory(item, {
+      before: {},
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "create",
+      source: "sample_conversion",
+      route: "POST /samples/:id/convert-to-item",
+    });
+
+    await item.save();
+
+    // Update sample with converted details
+    sample.converted_item = {
+      item: item._id,
+      code: item.code,
+      name: item.name,
+      description: item.description,
+      converted_at: new Date(),
+      converted_by: buildAuditActor(req.user),
+    };
+    await sample.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "Sample converted to item successfully",
+      data: {
+        item,
+        sample: serializeSample(sample),
+      },
+    });
+  } catch (error) {
+    console.error("Convert Sample to Item Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to convert sample to item",
       error: error.message,
     });
   }

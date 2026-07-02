@@ -184,6 +184,18 @@ const sampleSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    converted_item: {
+      item: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "items",
+        default: null,
+      },
+      code: { type: String, default: "" },
+      name: { type: String, default: "" },
+      description: { type: String, default: "" },
+      converted_at: { type: Date, default: null },
+      converted_by: { type: AuditActorSchema, default: null },
+    },
     updated_at: { type: Date, default: Date.now },
     updated_by: { type: AuditActorSchema, default: () => ({}) },
   },

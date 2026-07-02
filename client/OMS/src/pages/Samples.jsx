@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import SampleCreateModal from "../components/samples/SampleCreateModal";
 import { usePermissions } from "../auth/PermissionContext";
 import { normalizeUserRole } from "../auth/permissions";
-import { listSamples } from "../services/samples.service";
+import { listSamples, uploadSampleImage } from "../services/samples.service";
+import ProductImageThumbnail from "../components/ProductImageThumbnail";
+import EditSampleModal from "../components/EditSampleModal";
+import ConvertToItemModal from "../components/samples/ConvertToItemModal";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -27,8 +30,10 @@ const limitValue = (value) => {
 const Samples = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "samples");
-  const { role } = usePermissions();
+  const { role, hasPermission } = usePermissions();
   const canMutate = MUTATION_ROLES.has(normalizeUserRole(role));
+  const canUploadImage = canMutate && hasPermission("images_documents", "upload");
+  const canConvert = canMutate && hasPermission("items", "create");
 
   const [rows, setRows] = useState([]);
   const [filters, setFilters] = useState({ brands: [], vendors: [] });
@@ -36,6 +41,59 @@ const Samples = () => {
   const [error, setError] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCreateWorkflowModal, setShowCreateWorkflowModal] = useState(false);
+  const [editingSample, setEditingSample] = useState(null);
+  const [convertingSample, setConvertingSample] = useState(null);
+  const [uploadingSampleId, setUploadingSampleId] = useState("");
+  const fileInputRef = useRef(null);
+
+  const handleFileChange = async (event) => {
+    const inputElement = event.target;
+    const file = inputElement?.files?.[0];
+    if (!file || !uploadingSampleId) {
+      if (inputElement) inputElement.value = "";
+      return;
+    }
+
+    const allowedExtensions = [".jpg", ".jpeg", ".png"];
+    const allowedMimeTypes = ["image/jpeg", "image/png"];
+    const normalizedName = String(file.name || "").toLowerCase();
+    const normalizedType = String(file.type || "").toLowerCase();
+
+    const hasAllowedExtension = allowedExtensions.some((ext) => normalizedName.endsWith(ext));
+    const hasAllowedMimeType = allowedMimeTypes.includes(normalizedType);
+
+    if (!hasAllowedExtension || !hasAllowedMimeType) {
+      setError("Only JPG, JPEG, and PNG images are allowed.");
+      if (inputElement) inputElement.value = "";
+      setUploadingSampleId("");
+      return;
+    }
+
+    try {
+      setError("");
+      setLoading(true);
+
+      const formData = new FormData();
+      formData.append("file_type", "product_image");
+      formData.append("file", file);
+
+      await uploadSampleImage(uploadingSampleId, formData);
+      await fetchSamples();
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || "Failed to upload image.");
+    } finally {
+      setLoading(false);
+      setUploadingSampleId("");
+      if (inputElement) inputElement.value = "";
+    }
+  };
+
+  const triggerImageUpload = (sampleId) => {
+    setUploadingSampleId(sampleId);
+    setTimeout(() => {
+      fileInputRef.current?.click();
+    }, 0);
+  };
   const [page, setPage] = useState(() => positiveInt(searchParams.get("page"), 1));
   const [limit, setLimit] = useState(() => limitValue(searchParams.get("limit")));
   const [totalPages, setTotalPages] = useState(1);
@@ -62,6 +120,7 @@ const Samples = () => {
         vendor: query.vendor === "all" ? "" : query.vendor,
         date_from: query.date_from,
         date_to: query.date_to,
+        include_product_image_thumbnail: true,
       });
       setRows(Array.isArray(response?.data?.data) ? response.data.data : []);
       setFilters((prev) => ({ ...prev, ...(response?.data?.filters || {}) }));
@@ -209,21 +268,31 @@ const Samples = () => {
             <table className="table table-hover align-middle mb-0 samples-table">
               <thead>
                 <tr>
+                  <th>Image</th>
                   <th>Sample Code</th>
                   <th>Name / Description</th>
                   <th>Brand</th>
                   <th>Vendors</th>
                   <th>CBM</th>
                   <th>Last Updated</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan="6" className="text-center py-4">Loading samples...</td></tr>
+                  <tr><td colSpan="8" className="text-center py-4">Loading samples...</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan="6" className="text-center py-4 text-secondary">No samples found.</td></tr>
+                  <tr><td colSpan="8" className="text-center py-4 text-secondary">No samples found.</td></tr>
                 ) : rows.map((sample) => (
                   <tr key={sample._id}>
+                    <td>
+                      <ProductImageThumbnail
+                        src={sample.product_image_url}
+                        originalName={sample.product_image?.originalName}
+                        alt={sample.code}
+                        size="sm"
+                      />
+                    </td>
                     <td className="fw-semibold">{sample.code || "-"}</td>
                     <td>
                       <div>{sample.name || "-"}</div>
@@ -233,6 +302,70 @@ const Samples = () => {
                     <td>{Array.isArray(sample.vendors) && sample.vendors.length ? sample.vendors.join(", ") : "-"}</td>
                     <td>{Number(sample.cbm || 0).toFixed(2)}</td>
                     <td>{formatDateDDMMYYYY(sample.updatedAt, "-")}</td>
+                    <td className="text-nowrap">
+                      <div className="d-flex align-items-center gap-2">
+                        {sample.converted_item?.item && (
+                          <span className="badge bg-success-subtle text-success border border-success-subtle d-inline-flex align-items-center">
+                            Converted (
+                            <a
+                              href={`/items?search=${encodeURIComponent(sample.converted_item.code)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-decoration-none text-success fw-bold ms-1"
+                            >
+                              {sample.converted_item.code}
+                            </a>
+                            )
+                          </span>
+                        )}
+                        {canMutate && (
+                          <div className="dropdown">
+                            <button
+                              type="button"
+                              className="btn btn-outline-secondary btn-sm dropdown-toggle"
+                              data-bs-toggle="dropdown"
+                              data-bs-popper-config='{"strategy":"fixed"}'
+                              aria-expanded="false"
+                            >
+                              Actions
+                            </button>
+                            <ul className="dropdown-menu dropdown-menu-end shadow">
+                              <li>
+                                <button
+                                  className="dropdown-item"
+                                  type="button"
+                                  onClick={() => setEditingSample(sample)}
+                                >
+                                  Edit
+                                </button>
+                              </li>
+                              {canUploadImage && (
+                                <li>
+                                  <button
+                                    className="dropdown-item"
+                                    type="button"
+                                    onClick={() => triggerImageUpload(sample._id)}
+                                  >
+                                    Upload Image
+                                  </button>
+                                </li>
+                              )}
+                              {!sample.converted_item?.item && canConvert && (
+                                <li>
+                                  <button
+                                    className="dropdown-item"
+                                    type="button"
+                                    onClick={() => setConvertingSample(sample)}
+                                  >
+                                    Convert to Item
+                                  </button>
+                                </li>
+                              )}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -264,6 +397,33 @@ const Samples = () => {
           }}
         />
       )}
+      {editingSample && (
+        <EditSampleModal
+          sample={editingSample}
+          onClose={() => setEditingSample(null)}
+          onSuccess={() => {
+            setEditingSample(null);
+            fetchSamples();
+          }}
+        />
+      )}
+      {convertingSample && (
+        <ConvertToItemModal
+          sample={convertingSample}
+          onClose={() => setConvertingSample(null)}
+          onConverted={() => {
+            setConvertingSample(null);
+            fetchSamples();
+          }}
+        />
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="d-none"
+        accept=".jpg,.jpeg,.png"
+        onChange={handleFileChange}
+      />
     </>
   );
 };
