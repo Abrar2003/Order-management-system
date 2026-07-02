@@ -9648,6 +9648,73 @@ button.om-item-order-presence-label {
   font-size: 0.72rem;
 }
 
+.qc-details-comment-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  overflow: visible;
+}
+
+.qc-details-comment-button.has-comments {
+  padding-left: 2.45rem;
+}
+
+.qc-comment-icon-wrap {
+  position: absolute;
+  left: 0.55rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(215, 190, 145, 0.9);
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.12);
+}
+
+.qc-comment-icon {
+  position: relative;
+  width: 0.82rem;
+  height: 0.58rem;
+  border-radius: 0.2rem;
+  background: #f4b400;
+}
+
+.qc-comment-icon::after {
+  content: "";
+  position: absolute;
+  left: 0.12rem;
+  bottom: -0.2rem;
+  width: 0.32rem;
+  height: 0.32rem;
+  background: #f4b400;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+.qc-comment-counter {
+  position: absolute;
+  top: -0.42rem;
+  right: -0.44rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
+  border: 2px solid #fff;
+}
+
 .qc-complaints-accordion {
   display: grid;
   gap: 0.65rem;

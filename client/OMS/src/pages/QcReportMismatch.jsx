@@ -161,6 +161,18 @@ const getPoCount = (row) => {
     : 0;
 };
 
+const getCommentCount = (row = {}) => {
+  if (Array.isArray(row?.qc_mismatch_comments)) {
+    return row.qc_mismatch_comments.length;
+  }
+  const count = Number(
+    row?.qc_mismatch_comment_count ?? row?.comment_count ?? row?.comments_count,
+  );
+  return Number.isFinite(count) && count > 0 ? count : 0;
+};
+
+const formatCommentCount = (count = 0) => (count > 99 ? "99+" : String(count));
+
 const formatComparisonValue = (value, type = "text", fieldKey = "") => {
   if (fieldKey === "box_mode") {
     return formatBoxModeLabel(value);
@@ -446,7 +458,16 @@ const QcReportMismatch = () => {
     if (!code) return;
     try {
       const response = await api.get(`/reports/qc-report-mismatch/${encodeURIComponent(code)}/comments`);
-      setCommentsList(response?.data?.comments || []);
+      const updatedComments = response?.data?.comments || [];
+      setCommentsList(updatedComments);
+      setReport((prev) => ({
+        ...prev,
+        rows: prev.rows.map((row) =>
+          row.item_code === code
+            ? { ...row, qc_mismatch_comments: updatedComments }
+            : row,
+        ),
+      }));
     } catch (err) {
       console.error("Failed to load comments", err);
     }
@@ -1149,6 +1170,7 @@ const QcReportMismatch = () => {
                     {rows.map((row) => {
                       const hasMismatch = Boolean(row?.mismatch_summary?.has_mismatch);
                       const poCount = getPoCount(row);
+                      const commentCount = getCommentCount(row);
                       return (
                         <tr key={row?.id || row?.item_code || row?.inspection_id}>
                           <td>{row?.brand || "N/A"}</td>
@@ -1178,13 +1200,27 @@ const QcReportMismatch = () => {
                             ) : null}
                           </td>
                           <td>
-                            <button
-                              type="button"
-                              className="btn btn-outline-primary btn-sm"
-                              onClick={() => setSelectedRow(row)}
-                            >
-                              View Details
-                            </button>
+                            <div className="d-flex align-items-center gap-2">
+                              <button
+                                type="button"
+                                className={`btn btn-outline-primary btn-sm qc-details-comment-button${commentCount > 0 ? " has-comments" : ""}`}
+                                onClick={() => setSelectedRow(row)}
+                              >
+                                {commentCount > 0 && (
+                                  <span
+                                    className="qc-comment-icon-wrap"
+                                    title={`${commentCount} ${commentCount === 1 ? "comment" : "comments"}`}
+                                    aria-label={`${commentCount} ${commentCount === 1 ? "comment" : "comments"}`}
+                                  >
+                                    <span className="qc-comment-icon" aria-hidden="true" />
+                                    <span className="qc-comment-counter">
+                                      {formatCommentCount(commentCount)}
+                                    </span>
+                                  </span>
+                                )}
+                                <span>View Details</span>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
