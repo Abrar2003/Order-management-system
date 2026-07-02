@@ -755,6 +755,7 @@ const QC_REPORT_MISMATCH_ITEM_SELECT = [
   "pis_item_sizes",
   "pis_box_sizes",
   "pis_box_mode",
+  "qc_mismatch_comments",
 ].join(" ");
 const QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT = 3;
 const QC_REPORT_MISMATCH_STATUS = "Inspection Done";
@@ -2508,6 +2509,7 @@ exports.getQcReportMismatch = async (req, res) => {
           current_qc_inspected_item_sizes: currentSnapshot.inspected_item_sizes,
           current_qc_inspected_box_sizes: currentSnapshot.inspected_box_sizes,
           current_qc_inspected_box_mode: currentSnapshot.inspected_box_mode,
+          qc_mismatch_comments: currentItemDoc.qc_mismatch_comments || [],
           mismatch_summary: {
             has_mismatch: false,
             mismatch_count: 0,
@@ -2735,6 +2737,211 @@ exports.getQcReportMismatch = async (req, res) => {
       success: false,
       message: error?.message || "Failed to fetch QC report mismatch data",
     });
+  }
+};
+
+const getActorDisplayName = (user = {}) => {
+  const name = String(user?.name || "").trim();
+  if (name) return name;
+  const username = String(user?.username || "").trim();
+  if (username) return username;
+  const email = String(user?.email || "").trim();
+  if (email) return email.split("@")[0];
+  return "Unknown";
+};
+
+exports.getQcMismatchComments = async (req, res) => {
+  try {
+    const itemCodeInput = String(req.params.code || "").trim();
+    if (!itemCodeInput) {
+      return res.status(400).json({ message: "Item code is required." });
+    }
+
+    const item = await Item.findOne(
+      applyDataAccessMatch({ code: new RegExp(`^\\s*${escapeRegex(itemCodeInput)}\\s*$`, "i") }, req.user, {
+        brandFields: ["brand", "brand_name", "brands"],
+        vendorFields: ["vendors"],
+      })
+    ).select("code qc_mismatch_comments");
+
+    if (!item) {
+      return res.status(200).json({ comments: [] });
+    }
+
+    return res.status(200).json({
+      success: true,
+      comments: item.qc_mismatch_comments || [],
+    });
+  } catch (error) {
+    console.error("Get QC Mismatch Comments Error:", error);
+    return res.status(500).json({ message: "Failed to get comments" });
+  }
+};
+
+exports.createQcMismatchComment = async (req, res) => {
+  try {
+    const itemCodeInput = String(req.params.code || "").trim();
+    const commentText = String(req.body?.comment || "").trim();
+
+    if (!itemCodeInput) {
+      return res.status(400).json({ message: "Item code is required." });
+    }
+    if (!commentText) {
+      return res.status(400).json({ message: "Comment cannot be empty." });
+    }
+    if (commentText.length > 1000) {
+      return res.status(400).json({ message: "Comment cannot exceed 1000 characters." });
+    }
+
+    const item = await Item.findOne(
+      applyDataAccessMatch({ code: new RegExp(`^\\s*${escapeRegex(itemCodeInput)}\\s*$`, "i") }, req.user, {
+        brandFields: ["brand", "brand_name", "brands"],
+        vendorFields: ["vendors"],
+      })
+    ).select("code qc_mismatch_comments");
+
+    if (!item) {
+      return res.status(404).json({ message: "Item not found or access denied." });
+    }
+
+    const userName = getActorDisplayName(req.user);
+    const userRole = String(req.user?.role || "qc").trim();
+
+    const newComment = {
+      comment: commentText,
+      item_code: item.code || itemCodeInput,
+      created_by: req.user?._id || req.user?.id || null,
+      created_by_name: userName,
+      created_by_role: userRole,
+      created_at: new Date(),
+    };
+
+    item.qc_mismatch_comments = item.qc_mismatch_comments || [];
+    item.qc_mismatch_comments.push(newComment);
+    await item.save();
+
+    return res.status(201).json({
+      success: true,
+      comments: item.qc_mismatch_comments,
+    });
+  } catch (error) {
+    console.error("Create QC Mismatch Comment Error:", error);
+    return res.status(500).json({ message: "Failed to create comment" });
+  }
+};
+
+const isQcMismatchCommentCreator = (comment = {}, user = {}) => {
+  const actorId = String(user?._id || user?.id || "").trim();
+  const creatorId = String(comment?.created_by || "").trim();
+  return Boolean(actorId && creatorId && actorId === creatorId);
+};
+
+const findQcMismatchCommentTarget = async ({
+  itemCodeInput = "",
+  commentId = "",
+  user = null,
+} = {}) => {
+  const normalizedItemCode = String(itemCodeInput || "").trim();
+  const normalizedCommentId = String(commentId || "").trim();
+
+  if (!normalizedItemCode) {
+    return { status: 400, message: "Item code is required." };
+  }
+  if (!normalizedCommentId || !mongoose.Types.ObjectId.isValid(normalizedCommentId)) {
+    return { status: 400, message: "Valid comment id is required." };
+  }
+
+  const itemCodeMatch = new RegExp(`^\\s*${escapeRegex(normalizedItemCode)}\\s*$`, "i");
+  const item = await Item.findOne(
+    applyDataAccessMatch({ code: itemCodeMatch }, user, {
+      brandFields: ["brand", "brand_name", "brands"],
+      vendorFields: ["vendors"],
+    })
+  ).select("_id code qc_mismatch_comments");
+
+  if (!item) {
+    return { status: 404, message: "Item not found." };
+  }
+
+  const comment = item.qc_mismatch_comments.id(normalizedCommentId);
+  if (!comment) {
+    return { status: 404, message: "Comment not found." };
+  }
+
+  return { item, comment };
+};
+
+exports.updateQcMismatchComment = async (req, res) => {
+  try {
+    const commentText = String(req.body?.comment || "").trim();
+    if (!commentText) {
+      return res.status(400).json({ message: "Comment is required." });
+    }
+    if (commentText.length > 1000) {
+      return res.status(400).json({ message: "Comment cannot exceed 1000 characters." });
+    }
+
+    const target = await findQcMismatchCommentTarget({
+      itemCodeInput: req.params.code,
+      commentId: req.params.commentId,
+      user: req.user,
+    });
+
+    if (!target?.item || !target?.comment) {
+      return res.status(target.status || 404).json({
+        message: target.message || "Comment not found.",
+      });
+    }
+
+    if (!isQcMismatchCommentCreator(target.comment, req.user)) {
+      return res.status(403).json({
+        message: "Only the comment creator can edit this comment.",
+      });
+    }
+
+    target.comment.comment = commentText;
+    await target.item.save();
+
+    return res.status(200).json({
+      success: true,
+      comments: target.item.qc_mismatch_comments || [],
+    });
+  } catch (error) {
+    console.error("Update QC Mismatch Comment Error:", error);
+    return res.status(500).json({ message: "Failed to update comment" });
+  }
+};
+
+exports.deleteQcMismatchComment = async (req, res) => {
+  try {
+    const target = await findQcMismatchCommentTarget({
+      itemCodeInput: req.params.code,
+      commentId: req.params.commentId,
+      user: req.user,
+    });
+
+    if (!target?.item || !target?.comment) {
+      return res.status(target.status || 404).json({
+        message: target.message || "Comment not found.",
+      });
+    }
+
+    if (!isQcMismatchCommentCreator(target.comment, req.user)) {
+      return res.status(403).json({
+        message: "Only the comment creator can delete this comment.",
+      });
+    }
+
+    target.comment.deleteOne();
+    await target.item.save();
+
+    return res.status(200).json({
+      success: true,
+      comments: target.item.qc_mismatch_comments || [],
+    });
+  } catch (error) {
+    console.error("Delete QC Mismatch Comment Error:", error);
+    return res.status(500).json({ message: "Failed to delete comment" });
   }
 };
 

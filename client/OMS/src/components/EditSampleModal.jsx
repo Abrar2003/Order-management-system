@@ -70,6 +70,10 @@ const createEmptyShipmentRow = () => ({
 });
 
 const EditSampleModal = ({ sample, onClose, onSuccess }) => {
+  const hasEditableSizeData =
+    Object.prototype.hasOwnProperty.call(sample || {}, "item_sizes") ||
+    Object.prototype.hasOwnProperty.call(sample || {}, "box_sizes") ||
+    Object.prototype.hasOwnProperty.call(sample || {}, "box_mode");
   const [form, setForm] = useState({
     code: String(sample?.code ?? ""),
     name: String(sample?.name ?? ""),
@@ -325,33 +329,37 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
       return;
     }
 
-    const itemPayload = buildSizePayload({
-      entries: itemEntries,
-      count: form.item_count,
-      mode: BOX_PACKAGING_MODES.INDIVIDUAL,
-      groupLabel: "Item Size",
-      remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
-      payloadWeightKey: "net_weight",
-      singleRemark: "item",
-    });
-    if (itemPayload.error) {
-      setError(itemPayload.error);
-      return;
-    }
+    let itemPayload = null;
+    let boxPayload = null;
+    if (hasEditableSizeData) {
+      itemPayload = buildSizePayload({
+        entries: itemEntries,
+        count: form.item_count,
+        mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+        groupLabel: "Item Size",
+        remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+        payloadWeightKey: "net_weight",
+        singleRemark: "item",
+      });
+      if (itemPayload.error) {
+        setError(itemPayload.error);
+        return;
+      }
 
-    const boxPayload = buildSizePayload({
-      entries: boxEntries,
-      count: form.box_count,
-      mode: form.box_mode,
-      groupLabel: "Box Size",
-      remarkOptions: BOX_SIZE_REMARK_OPTIONS,
-      payloadWeightKey: "gross_weight",
-      singleRemark: "box",
-      limit: BOX_SIZE_ENTRY_LIMIT,
-    });
-    if (boxPayload.error) {
-      setError(boxPayload.error);
-      return;
+      boxPayload = buildSizePayload({
+        entries: boxEntries,
+        count: form.box_count,
+        mode: form.box_mode,
+        groupLabel: "Box Size",
+        remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        payloadWeightKey: "gross_weight",
+        singleRemark: "box",
+        limit: BOX_SIZE_ENTRY_LIMIT,
+      });
+      if (boxPayload.error) {
+        setError(boxPayload.error);
+        return;
+      }
     }
 
     const payload = {
@@ -360,10 +368,6 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
       description: String(form.description || "").trim(),
       brand: String(form.brand || "").trim(),
       vendor: String(form.vendor || "").trim(),
-      item_sizes: itemPayload.value,
-      box_sizes: boxPayload.value,
-      box_mode: form.box_mode,
-      cbm,
       shipment: form.shipment.map((entry) => ({
         _id: String(entry?._id || "").trim(),
         stuffed_by: {
@@ -380,6 +384,12 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
         checked: normalizeShipmentCheckedDraft(entry?.checked),
       })),
     };
+    if (hasEditableSizeData) {
+      payload.item_sizes = itemPayload.value;
+      payload.box_sizes = boxPayload.value;
+      payload.box_mode = form.box_mode;
+      payload.cbm = cbm;
+    }
 
     if (!window.confirm(buildConfirmationMessage(payload))) {
       return;
@@ -464,7 +474,7 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
                   }
                 />
               </div>
-              <div className="col-md-9">
+              <div className={hasEditableSizeData ? "col-md-9" : "col-12"}>
                 <label className="form-label">Description</label>
                 <textarea
                   className="form-control"
@@ -475,46 +485,52 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
                   }
                 />
               </div>
-              <div className="col-md-3">
-                <label className="form-label">CBM</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={cbm}
-                  readOnly
-                />
-              </div>
+              {hasEditableSizeData && (
+                <div className="col-md-3">
+                  <label className="form-label">CBM</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={cbm}
+                    readOnly
+                  />
+                </div>
+              )}
             </div>
 
-            <div className="row g-3">
-              <MeasuredSizeSection
-                sectionKey="sample-item"
-                title="Item Sizes"
-                countLabel="Item Size Rows"
-                countValue={form.item_count}
-                entries={itemEntries}
-                remarkOptions={ITEM_SIZE_REMARK_OPTIONS}
-                weightLabel="Net Weight"
-                onCountChange={(value) => setCount("item_count", "item_sizes", value)}
-                onEntryChange={(index, field, value) => setEntry("item_sizes", index, field, value)}
-              />
-            </div>
-            <div className="row g-3">
-              <MeasuredSizeSection
-                sectionKey="sample-box"
-                title="Box Sizes"
-                countLabel="Box Size Rows"
-                countValue={form.box_count}
-                entries={boxEntries}
-                remarkOptions={BOX_SIZE_REMARK_OPTIONS}
-                weightLabel="Gross Weight"
-                mode={form.box_mode}
-                showModeSelector
-                onModeChange={handleBoxModeChange}
-                onCountChange={(value) => setCount("box_count", "box_sizes", value)}
-                onEntryChange={(index, field, value) => setEntry("box_sizes", index, field, value)}
-              />
-            </div>
+            {hasEditableSizeData && (
+              <>
+                <div className="row g-3">
+                  <MeasuredSizeSection
+                    sectionKey="sample-item"
+                    title="Item Sizes"
+                    countLabel="Item Size Rows"
+                    countValue={form.item_count}
+                    entries={itemEntries}
+                    remarkOptions={ITEM_SIZE_REMARK_OPTIONS}
+                    weightLabel="Net Weight"
+                    onCountChange={(value) => setCount("item_count", "item_sizes", value)}
+                    onEntryChange={(index, field, value) => setEntry("item_sizes", index, field, value)}
+                  />
+                </div>
+                <div className="row g-3">
+                  <MeasuredSizeSection
+                    sectionKey="sample-box"
+                    title="Box Sizes"
+                    countLabel="Box Size Rows"
+                    countValue={form.box_count}
+                    entries={boxEntries}
+                    remarkOptions={BOX_SIZE_REMARK_OPTIONS}
+                    weightLabel="Gross Weight"
+                    mode={form.box_mode}
+                    showModeSelector
+                    onModeChange={handleBoxModeChange}
+                    onCountChange={(value) => setCount("box_count", "box_sizes", value)}
+                    onEntryChange={(index, field, value) => setEntry("box_sizes", index, field, value)}
+                  />
+                </div>
+              </>
+            )}
 
             <div className="d-flex justify-content-between align-items-center">
               <h6 className="mb-0">Shipment Rows</h6>

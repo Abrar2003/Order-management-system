@@ -1,10 +1,18 @@
 const mongoose = require("mongoose");
+const path = require("path");
 
 const Sample = require("../models/sample.model");
-const { BOX_PACKAGING_MODES, BOX_ENTRY_TYPES } = require("../helpers/boxMeasurement");
+const Item = require("../models/item.model");
+const {
+  BOX_PACKAGING_MODES,
+  BOX_ENTRY_TYPES,
+  buildBoxMeasurementCbmSummary,
+} = require("../helpers/boxMeasurement");
 const { normalizeUserRoleKey } = require("../helpers/userRole");
+const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const { calculateTotalPoCbm } = require("../services/orderCbm.service");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const wasabiStorage = require("../services/wasabiStorage.service");
 
 const SHIPPED_BY_VENDOR_ID = "shipped_by_vendor";
 const SHIPPED_BY_VENDOR_NAME = "Shipped By Vendor";
@@ -492,9 +500,9 @@ const buildProductImageThumbnail = async (image, sampleCode) => {
 
   let link = image.link || "";
   if (image.key) {
-    if (isWasabiConfigured()) {
+    if (wasabiStorage.isConfigured()) {
       try {
-        link = await getSignedObjectUrl(image.key, {
+        link = await wasabiStorage.getSignedObjectUrl(image.key, {
           expiresIn: 24 * 60 * 60,
           filename: image.originalName || `${sampleCode || "sample"}-product-image.jpg`,
         });
@@ -514,6 +522,60 @@ const buildProductImageThumbnail = async (image, sampleCode) => {
       public_id: image.public_id || image.key || "",
     },
     product_image_url: link,
+  };
+};
+
+const buildEmptyStoredFile = () => ({
+  key: "",
+  originalName: "",
+  contentType: "",
+  size: 0,
+  link: "",
+  public_id: "",
+});
+
+const getImageExtension = (originalName = "", contentType = "") => {
+  const extension = path.extname(String(originalName || "")).toLowerCase();
+  if ([".jpg", ".jpeg", ".png"].includes(extension)) return extension;
+  return String(contentType || "").toLowerCase() === "image/png" ? ".png" : ".jpg";
+};
+
+const copySampleImageToItemImage = async (sample = {}, itemCode = "") => {
+  const sourceImage = sample?.image || {};
+  const sourceKey = normalizeText(sourceImage.key || sourceImage.public_id);
+  if (!sourceKey) return buildEmptyStoredFile();
+
+  if (!wasabiStorage.isConfigured()) {
+    throw new Error("Wasabi storage is not configured");
+  }
+
+  const objectPayload = await wasabiStorage.getObjectBuffer(sourceKey);
+  const originalName =
+    normalizeText(sourceImage.originalName) ||
+    `${normalizeText(itemCode || sample?.code) || "item"}-product-image.jpg`;
+  const contentType =
+    normalizeText(objectPayload?.contentType) ||
+    normalizeText(sourceImage.contentType) ||
+    "image/jpeg";
+  const extension = getImageExtension(originalName, contentType);
+  const uploadResult = await wasabiStorage.uploadBuffer({
+    buffer: objectPayload.buffer,
+    key: wasabiStorage.createStorageKey({
+      folder: "item-image",
+      originalName,
+      extension,
+    }),
+    originalName,
+    contentType,
+  });
+
+  return {
+    key: uploadResult.key,
+    originalName,
+    contentType,
+    size: uploadResult.size || objectPayload.size || sourceImage.size || 0,
+    link: "",
+    public_id: uploadResult.key,
   };
 };
 
@@ -796,7 +858,7 @@ exports.uploadSampleFile = async (req, res) => {
       return res.status(400).json({ success: false, message: "Only JPG, JPEG, and PNG images are allowed" });
     }
 
-    if (!isWasabiConfigured()) {
+    if (!wasabiStorage.isConfigured()) {
       return res.status(500).json({ success: false, message: "Wasabi storage is not configured" });
     }
 
@@ -811,30 +873,44 @@ exports.uploadSampleFile = async (req, res) => {
 
     const previousStorageKey = sample.image?.key;
 
-    const uploadResult = await uploadBuffer({
-      buffer: file.buffer,
-      key: createStorageKey({
-        folder: "samples/images",
+    let uploadResult = null;
+    try {
+      uploadResult = await wasabiStorage.uploadBuffer({
+        buffer: file.buffer,
+        key: wasabiStorage.createStorageKey({
+          folder: "samples/images",
+          originalName: file.originalname || `${sample.code}-product-image.jpg`,
+          extension,
+        }),
         originalName: file.originalname || `${sample.code}-product-image.jpg`,
-        extension,
-      }),
-      originalName: file.originalname || `${sample.code}-product-image.jpg`,
-      contentType: mimeType,
-    });
+        contentType: mimeType,
+      });
+    } catch (uploadError) {
+      throw uploadError;
+    }
 
     sample.image = {
       key: uploadResult.key,
       originalName: file.originalname || `${sample.code}-product-image.jpg`,
       contentType: mimeType,
-      size: file.size,
+      size: uploadResult.size || file.size || 0,
       link: "",
       public_id: uploadResult.key,
     };
     sample.updated_by = buildAuditActor(req.user);
-    await sample.save();
+    try {
+      await sample.save();
+    } catch (saveError) {
+      if (uploadResult?.key) {
+        await wasabiStorage.deleteObject(uploadResult.key).catch((cleanupError) => {
+          console.error("Rollback uploaded sample image failed:", cleanupError);
+        });
+      }
+      throw saveError;
+    }
 
     if (previousStorageKey) {
-      deleteObject(previousStorageKey).catch((error) => {
+      wasabiStorage.deleteObject(previousStorageKey).catch((error) => {
         console.error("Delete previous sample image failed:", error);
       });
     }
@@ -892,12 +968,20 @@ exports.convertToItem = async (req, res) => {
     if (!sample) {
       return res.status(404).json({ success: false, message: "Sample not found" });
     }
+    if (sample.converted_item?.item) {
+      return res.status(400).json({
+        success: false,
+        message: `Sample is already converted to item ${sample.converted_item.code || ""}`.trim(),
+      });
+    }
 
     // Validate brand and vendor on sample
-    if (!sample.brand) {
+    const sampleBrand = normalizeText(sample.brand);
+    const sampleVendors = normalizeVendorList(sample.vendor);
+    if (!sampleBrand) {
       return res.status(400).json({ success: false, message: "Sample brand is required for conversion" });
     }
-    if (!Array.isArray(sample.vendor) || sample.vendor.length === 0 || !sample.vendor[0]) {
+    if (sampleVendors.length === 0) {
       return res.status(400).json({ success: false, message: "Sample must have at least one vendor for conversion" });
     }
 
@@ -934,36 +1018,18 @@ exports.convertToItem = async (req, res) => {
       calculated_total: totalCbmVal,
     };
 
-    // Copy image key if stored
-    let itemImage = {
-      key: "",
-      originalName: "",
-      contentType: "",
-      size: 0,
-      link: "",
-      public_id: "",
-    };
-    if (sample.image && sample.image.key) {
-      itemImage = {
-        key: sample.image.key,
-        originalName: sample.image.originalName || "",
-        contentType: sample.image.contentType || "",
-        size: sample.image.size || 0,
-        link: sample.image.link || "",
-        public_id: sample.image.public_id || sample.image.key,
-      };
-    }
+    const itemImage = await copySampleImageToItemImage(sample, normalizedCode);
 
     // Create the Item
     const item = new Item({
       code: normalizedCode,
       name: normalizedName,
       description: normalizedDescription,
-      brand: sample.brand,
-      brand_name: sample.brand,
-      brands: [sample.brand],
-      vendors: sample.vendor,
-      inspected_item_sizes: sample.item_sizes.map(size => ({
+      brand: sampleBrand,
+      brand_name: sampleBrand,
+      brands: [sampleBrand],
+      vendors: sampleVendors,
+      inspected_item_sizes: (Array.isArray(sample.item_sizes) ? sample.item_sizes : []).map(size => ({
         L: size.L,
         B: size.B,
         H: size.H,
@@ -971,7 +1037,7 @@ exports.convertToItem = async (req, res) => {
         net_weight: size.net_weight,
         gross_weight: size.gross_weight,
       })),
-      inspected_box_sizes: sample.box_sizes.map(size => ({
+      inspected_box_sizes: (Array.isArray(sample.box_sizes) ? sample.box_sizes : []).map(size => ({
         L: size.L,
         B: size.B,
         H: size.H,
@@ -1001,7 +1067,16 @@ exports.convertToItem = async (req, res) => {
       route: "POST /samples/:id/convert-to-item",
     });
 
-    await item.save();
+    try {
+      await item.save();
+    } catch (saveError) {
+      if (itemImage.key) {
+        await wasabiStorage.deleteObject(itemImage.key).catch((cleanupError) => {
+          console.error("Rollback converted item image failed:", cleanupError);
+        });
+      }
+      throw saveError;
+    }
 
     // Update sample with converted details
     sample.converted_item = {

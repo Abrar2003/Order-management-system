@@ -10829,6 +10829,9 @@ exports.getArchivedOrders = async (req, res) => {
     const vendor = normalizeFilterValue(req.query.vendor);
     const brand = normalizeFilterValue(req.query.brand);
     const orderId = normalizeFilterValue(req.query.order_id ?? req.query.order);
+    const itemSearch = normalizeFilterValue(
+      req.query.item ?? req.query.item_search ?? req.query.item_code,
+    );
 
     const match = { archived: true };
     if (vendor) {
@@ -10840,6 +10843,13 @@ exports.getArchivedOrders = async (req, res) => {
     if (orderId) {
       const escaped = escapeRegex(orderId);
       match.order_id = { $regex: escaped, $options: "i" };
+    }
+    if (itemSearch) {
+      const escaped = escapeRegex(itemSearch);
+      match.$or = [
+        { "item.item_code": { $regex: escaped, $options: "i" } },
+        { "item.description": { $regex: escaped, $options: "i" } },
+      ];
     }
     const scopedMatch = applyDataAccessMatch(match, req.user);
     const scopedArchivedMatch = applyDataAccessMatch({ archived: true }, req.user);

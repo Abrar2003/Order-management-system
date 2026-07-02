@@ -49,11 +49,13 @@ const ArchivedOrders = () => {
   const [error, setError] = useState("");
   const [filters, setFilters] = useState(() => ({
     order_id: normalizeSearchParam(searchParams.get("order_id")),
+    item: normalizeSearchParam(searchParams.get("item")),
     vendor: normalizeSearchParam(searchParams.get("vendor")),
     brand: normalizeSearchParam(searchParams.get("brand")),
   }));
   const [draftFilters, setDraftFilters] = useState(() => ({
     order_id: normalizeSearchParam(searchParams.get("order_id")),
+    item: normalizeSearchParam(searchParams.get("item")),
     vendor: normalizeSearchParam(searchParams.get("vendor")),
     brand: normalizeSearchParam(searchParams.get("brand")),
   }));
@@ -76,15 +78,17 @@ const ArchivedOrders = () => {
       limit: pagination.limit,
     };
     const orderId = String(filters.order_id || "").trim();
+    const item = String(filters.item || "").trim();
     const vendor = String(filters.vendor || "").trim();
     const brand = String(filters.brand || "").trim();
 
     if (orderId) params.order_id = orderId;
+    if (item) params.item = item;
     if (vendor) params.vendor = vendor;
     if (brand) params.brand = brand;
 
     return params;
-  }, [filters.brand, filters.order_id, filters.vendor, pagination.limit, pagination.page]);
+  }, [filters.brand, filters.item, filters.order_id, filters.vendor, pagination.limit, pagination.page]);
 
   const fetchArchivedOrders = useCallback(async () => {
     try {
@@ -120,6 +124,7 @@ const ArchivedOrders = () => {
 
     const nextFilters = {
       order_id: normalizeSearchParam(searchParams.get("order_id")),
+      item: normalizeSearchParam(searchParams.get("item")),
       vendor: normalizeSearchParam(searchParams.get("vendor")),
       brand: normalizeSearchParam(searchParams.get("brand")),
     };
@@ -128,6 +133,7 @@ const ArchivedOrders = () => {
 
     setFilters((prev) =>
       prev.order_id === nextFilters.order_id
+      && prev.item === nextFilters.item
       && prev.vendor === nextFilters.vendor
       && prev.brand === nextFilters.brand
         ? prev
@@ -135,6 +141,7 @@ const ArchivedOrders = () => {
     );
     setDraftFilters((prev) =>
       prev.order_id === nextFilters.order_id
+      && prev.item === nextFilters.item
       && prev.vendor === nextFilters.vendor
       && prev.brand === nextFilters.brand
         ? prev
@@ -154,10 +161,12 @@ const ArchivedOrders = () => {
 
     const next = new URLSearchParams();
     const orderId = normalizeSearchParam(filters.order_id);
+    const item = normalizeSearchParam(filters.item);
     const vendor = normalizeSearchParam(filters.vendor);
     const brand = normalizeSearchParam(filters.brand);
 
     if (orderId) next.set("order_id", orderId);
+    if (item) next.set("item", item);
     if (vendor) next.set("vendor", vendor);
     if (brand) next.set("brand", brand);
     if (pagination.page > 1) next.set("page", String(pagination.page));
@@ -168,7 +177,7 @@ const ArchivedOrders = () => {
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [filters.brand, filters.order_id, filters.vendor, pagination.limit, pagination.page, searchParams, setSearchParams, syncedQuery]);
+  }, [filters.brand, filters.item, filters.order_id, filters.vendor, pagination.limit, pagination.page, searchParams, setSearchParams, syncedQuery]);
 
   const handleSyncZeroQuantity = async () => {
     const remark = window.prompt(
@@ -194,6 +203,7 @@ const ArchivedOrders = () => {
   const handleApplyFilters = () => {
     setFilters({
       order_id: normalizeSearchParam(draftFilters.order_id),
+      item: normalizeSearchParam(draftFilters.item),
       vendor: normalizeSearchParam(draftFilters.vendor),
       brand: normalizeSearchParam(draftFilters.brand),
     });
@@ -204,7 +214,7 @@ const ArchivedOrders = () => {
   };
 
   const handleClearFilters = () => {
-    const emptyFilters = { order_id: "", vendor: "", brand: "" };
+    const emptyFilters = { order_id: "", item: "", vendor: "", brand: "" };
     setDraftFilters(emptyFilters);
     setFilters(emptyFilters);
     setPagination((prev) => ({ ...prev, page: 1 }));
@@ -301,7 +311,7 @@ const ArchivedOrders = () => {
         <ReportInfoBanner
           description="Lists archived orders (typically inactive or zero-quantity orders) and allows unarchiving."
           dataShown="PO number, item code, description, brand, vendor, quantity, original status, archive date, user, and remark."
-          howItWorks="Displays a paginated log of archived orders, filterable by order ID, vendor, and brand, with a tool to sync/archive zero-quantity orders."
+          howItWorks="Displays a paginated log of archived orders, filterable by order ID, item, vendor, and brand, with a tool to sync/archive zero-quantity orders."
         />
 
         <div className="card om-card mb-3">
@@ -313,7 +323,7 @@ const ArchivedOrders = () => {
                 handleApplyFilters();
               }}
             >
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label mb-1">Order ID</label>
                 <input
                   type="text"
@@ -323,7 +333,18 @@ const ArchivedOrders = () => {
                     setDraftFilters((prev) => ({ ...prev, order_id: e.target.value }))}
                 />
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
+                <label className="form-label mb-1">Item</label>
+                <input
+                  type="text"
+                  className="form-control form-control-sm"
+                  value={draftFilters.item}
+                  placeholder="Code or description"
+                  onChange={(e) =>
+                    setDraftFilters((prev) => ({ ...prev, item: e.target.value }))}
+                />
+              </div>
+              <div className="col-md-3">
                 <label className="form-label mb-1">Vendor</label>
                 <input
                   type="text"
@@ -333,7 +354,7 @@ const ArchivedOrders = () => {
                     setDraftFilters((prev) => ({ ...prev, vendor: e.target.value }))}
                 />
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label mb-1">Brand</label>
                 <input
                   type="text"

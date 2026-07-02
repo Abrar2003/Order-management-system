@@ -182,6 +182,17 @@ const pisUpdateCommentSchema = new mongoose.Schema(
   },
   { _id: true },
 );
+const qcMismatchCommentSchema = new mongoose.Schema(
+  {
+    comment: { type: String, required: true, trim: true },
+    item_code: { type: String, default: "", trim: true },
+    created_by: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
+    created_by_name: { type: String, default: "", trim: true },
+    created_by_role: { type: String, default: "", trim: true },
+    created_at: { type: Date, default: Date.now },
+  },
+  { _id: true },
+);
 const productTypeSnapshotSchema = new mongoose.Schema(
   {
     template: {
@@ -461,6 +472,7 @@ const itemSchema = new mongoose.Schema(
     pd_history: { type: [productDatabaseHistorySchema], default: [] },
     update_history: { type: [itemUpdateHistorySchema], default: [] },
     pis_update_comments: { type: [pisUpdateCommentSchema], default: [] },
+    qc_mismatch_comments: { type: [qcMismatchCommentSchema], default: [] },
     pis_box_top_LBH: legacyLbhSchema,
     pis_box_bottom_LBH: legacyLbhSchema,
     pis_barcode: { type: String, default: "", trim: true },

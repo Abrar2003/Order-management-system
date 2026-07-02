@@ -50,6 +50,34 @@ router.get(
   reportsController.getQcReportMismatch,
 );
 
+router.post(
+  "/qc-report-mismatch/:code/comments",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.createQcMismatchComment,
+);
+
+router.get(
+  "/qc-report-mismatch/:code/comments",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.getQcMismatchComments,
+);
+
+router.put(
+  "/qc-report-mismatch/:code/comments/:commentId",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.updateQcMismatchComment,
+);
+
+router.delete(
+  "/qc-report-mismatch/:code/comments/:commentId",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.deleteQcMismatchComment,
+);
+
 router.get(
   "/common-errors/export",
   auth,

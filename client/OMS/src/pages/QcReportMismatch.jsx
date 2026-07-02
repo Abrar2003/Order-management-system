@@ -6,6 +6,7 @@ import ReportInfoBanner from "../components/ReportInfoBanner";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { getUserFromToken } from "../auth/auth.utils";
 import "../App.css";
 
 const DEFAULT_TIMELINE = "1m";
@@ -430,6 +431,141 @@ const QcReportMismatch = () => {
   const [report, setReport] = useState(defaultReport);
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [selectedRow, setSelectedRow] = useState(null);
+
+  const currentUser = useMemo(() => getUserFromToken(), []);
+  const currentUserRole = currentUser?.role ? String(currentUser.role).trim().toLowerCase() : "";
+  const isAllowedToComment = ["admin", "manager", "qc"].includes(currentUserRole);
+
+  const [commentsList, setCommentsList] = useState([]);
+  const [newCommentText, setNewCommentText] = useState("");
+  const [commentLoading, setCommentLoading] = useState(false);
+  const [editingCommentId, setEditingCommentId] = useState(null);
+  const [editingText, setEditingText] = useState("");
+
+  const fetchComments = useCallback(async (code) => {
+    if (!code) return;
+    try {
+      const response = await api.get(`/reports/qc-report-mismatch/${encodeURIComponent(code)}/comments`);
+      setCommentsList(response?.data?.comments || []);
+    } catch (err) {
+      console.error("Failed to load comments", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedRow?.item_code && selectedRow.item_code !== "N/A") {
+      setCommentsList(selectedRow.qc_mismatch_comments || []);
+      fetchComments(selectedRow.item_code);
+    } else {
+      setCommentsList([]);
+    }
+    setNewCommentText("");
+  }, [selectedRow, fetchComments]);
+
+  const handleAddComment = async (e) => {
+    e.preventDefault();
+    const code = selectedRow?.item_code;
+    const text = newCommentText.trim();
+    if (!code || !text) return;
+
+    try {
+      setCommentLoading(true);
+      const response = await api.post(`/reports/qc-report-mismatch/${encodeURIComponent(code)}/comments`, {
+        comment: text,
+      });
+      const updatedComments = response?.data?.comments || [];
+      setCommentsList(updatedComments);
+      setNewCommentText("");
+      
+      setReport((prev) => {
+        const updatedRows = prev.rows.map((row) => {
+          if (row.item_code === code) {
+            return {
+              ...row,
+              qc_mismatch_comments: updatedComments,
+            };
+          }
+          return row;
+        });
+        return {
+          ...prev,
+          rows: updatedRows,
+        };
+      });
+    } catch (err) {
+      console.error("Failed to add comment", err);
+      alert(err?.response?.data?.message || "Failed to save comment.");
+    } finally {
+      setCommentLoading(false);
+    }
+  };
+
+  const handleEditComment = async (commentId) => {
+    const code = selectedRow?.item_code;
+    const text = editingText.trim();
+    if (!code || !commentId || !text) return;
+
+    try {
+      setCommentLoading(true);
+      const response = await api.put(`/reports/qc-report-mismatch/${encodeURIComponent(code)}/comments/${commentId}`, {
+        comment: text,
+      });
+      const updatedComments = response?.data?.comments || [];
+      setCommentsList(updatedComments);
+      setEditingCommentId(null);
+      setEditingText("");
+      
+      setReport((prev) => {
+        const updatedRows = prev.rows.map((row) => {
+          if (row.item_code === code) {
+            return {
+              ...row,
+              qc_mismatch_comments: updatedComments,
+            };
+          }
+          return row;
+        });
+        return { ...prev, rows: updatedRows };
+      });
+    } catch (err) {
+      console.error("Failed to edit comment", err);
+      alert(err?.response?.data?.message || "Failed to update comment.");
+    } finally {
+      setCommentLoading(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId) => {
+    const code = selectedRow?.item_code;
+    if (!code || !commentId) return;
+
+    if (!window.confirm("Are you sure you want to delete this comment?")) return;
+
+    try {
+      setCommentLoading(true);
+      const response = await api.delete(`/reports/qc-report-mismatch/${encodeURIComponent(code)}/comments/${commentId}`);
+      const updatedComments = response?.data?.comments || [];
+      setCommentsList(updatedComments);
+      
+      setReport((prev) => {
+        const updatedRows = prev.rows.map((row) => {
+          if (row.item_code === code) {
+            return {
+              ...row,
+              qc_mismatch_comments: updatedComments,
+            };
+          }
+          return row;
+        });
+        return { ...prev, rows: updatedRows };
+      });
+    } catch (err) {
+      console.error("Failed to delete comment", err);
+      alert(err?.response?.data?.message || "Failed to delete comment.");
+    } finally {
+      setCommentLoading(false);
+    }
+  };
 
   const fetchReport = useCallback(async () => {
     try {
@@ -1156,6 +1292,113 @@ const QcReportMismatch = () => {
                     Mismatch Inspections: {selectedRow?.mismatch_summary?.mismatch_inspection_count || 0}
                   </span>
                 </div>
+
+                <section className="mb-4 bg-light p-3 rounded border">
+                  <h6 className="mb-2">Comments</h6>
+                  <div className="qc-comments-list mb-3" style={{ maxHeight: "150px", overflowY: "auto" }}>
+                    {commentsList.length === 0 ? (
+                      <div className="text-secondary small">No comments yet.</div>
+                    ) : (
+                      commentsList.map((comment) => {
+                        const isCreator = comment.created_by && (comment.created_by === currentUser?.id || comment.created_by === currentUser?._id);
+                        const isEditing = editingCommentId === comment._id;
+                        return (
+                          <div key={comment._id || comment.created_at} className="mb-2 p-2 bg-white rounded border">
+                            <div className="d-flex justify-content-between align-items-center small text-secondary">
+                              <span className="fw-semibold">
+                                {comment.created_by_name} ({comment.created_by_role?.toUpperCase()})
+                              </span>
+                              <div className="d-flex align-items-center gap-2">
+                                <span>{formatDateDDMMYYYY(comment.created_at)} {new Date(comment.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                {isCreator && !isEditing && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="btn btn-link p-0 text-primary text-decoration-none"
+                                      style={{ fontSize: "11px" }}
+                                      onClick={() => {
+                                        setEditingCommentId(comment._id);
+                                        setEditingText(comment.comment);
+                                      }}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-link p-0 text-danger text-decoration-none"
+                                      style={{ fontSize: "11px" }}
+                                      onClick={() => handleDeleteComment(comment._id)}
+                                    >
+                                      Delete
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            {isEditing ? (
+                              <div className="mt-2">
+                                <textarea
+                                  className="form-control form-control-sm mb-1"
+                                  rows="2"
+                                  value={editingText}
+                                  onChange={(e) => setEditingText(e.target.value)}
+                                  maxLength="1000"
+                                />
+                                <div className="d-flex justify-content-end gap-1">
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-secondary btn-sm"
+                                    onClick={() => {
+                                      setEditingCommentId(null);
+                                      setEditingText("");
+                                    }}
+                                    disabled={commentLoading}
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary btn-sm"
+                                    onClick={() => handleEditComment(comment._id)}
+                                    disabled={commentLoading || !editingText.trim()}
+                                  >
+                                    Save
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-1 small text-dark" style={{ whiteSpace: "pre-wrap" }}>
+                                {comment.comment}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  {isAllowedToComment && (
+                    <form onSubmit={handleAddComment}>
+                      <div className="input-group">
+                        <textarea
+                          className="form-control"
+                          rows="2"
+                          placeholder="Add a comment on this mismatch..."
+                          value={newCommentText}
+                          onChange={(e) => setNewCommentText(e.target.value)}
+                          maxLength="1000"
+                          disabled={commentLoading}
+                        />
+                        <button
+                          type="submit"
+                          className="btn btn-primary d-flex align-items-center"
+                          disabled={commentLoading || !newCommentText.trim()}
+                        >
+                          {commentLoading ? "Saving..." : "Add Comment"}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </section>
 
                 {[
                   { title: "Item Sizes", rows: itemDetailRows },
