@@ -479,6 +479,7 @@ const QcDetails = () => {
   const [showQcImageGallery, setShowQcImageGallery] = useState(false);
   const [showQcImageCarousel, setShowQcImageCarousel] = useState(false);
   const [showOnlyCommentedQcImages, setShowOnlyCommentedQcImages] = useState(false);
+  const [showQcImageUploadQueue, setShowQcImageUploadQueue] = useState(false);
   const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
   const [selectedQcImageIds, setSelectedQcImageIds] = useState([]);
   const [downloadingQcImages, setDownloadingQcImages] = useState(false);
@@ -710,6 +711,13 @@ const QcDetails = () => {
       Boolean(qcImageUploadState.summary) ||
       Boolean(qcImageUploadState.selectionMessage)
     );
+
+  useEffect(() => {
+    if (!showQcImageUploadPanel) {
+      setShowQcImageUploadQueue(false);
+    }
+  }, [showQcImageUploadPanel]);
+
   const relatedFileUploadDisabledReason = !canUploadActiveRelatedFile
     ? activeRelatedFileConfig?.scope === "item_master" && !qc?.item_master?._id
       ? "Item master not found for this QC."
@@ -2427,9 +2435,22 @@ const QcDetails = () => {
               </div>
 
               {qcImageUploadState.batchStatuses.length > 0 && (
-                <details className="qc-image-upload-queue">
-                  <summary>
-                    <span className="fw-semibold">Image Queue</span>
+                <div className="qc-image-upload-queue">
+                  <button
+                    type="button"
+                    className="qc-image-upload-queue-toggle"
+                    onClick={() => setShowQcImageUploadQueue((isOpen) => !isOpen)}
+                    aria-expanded={showQcImageUploadQueue}
+                    aria-controls="qc-image-upload-queue-table"
+                  >
+                    <span className="qc-image-upload-queue-title">
+                      <span className="qc-image-upload-queue-icon" aria-hidden="true">
+                        {showQcImageUploadQueue ? "-" : "+"}
+                      </span>
+                      <span className="fw-semibold">
+                        {showQcImageUploadQueue ? "Hide image queue" : "Show image queue"}
+                      </span>
+                    </span>
                     <span className="text-muted small">
                       {qcImageUploadState.fileStatuses.length} image{qcImageUploadState.fileStatuses.length === 1 ? "" : "s"}
                       {" | "}
@@ -2437,52 +2458,57 @@ const QcDetails = () => {
                       {" | "}
                       {qcImageUploadState.failedCount} failed
                     </span>
-                  </summary>
-                  <div className="table-responsive qc-details-table-wrap mt-2">
-                    <table className="table table-sm align-middle mb-0 qc-details-batch-table qc-image-upload-file-table">
-                      <thead>
-                        <tr>
-                          <th>Image</th>
-                          <th>Status</th>
-                          <th>Attempt</th>
-                          <th>Progress</th>
-                          <th>Message</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {qcImageUploadState.fileStatuses.map((fileStatus) => (
-                          <tr key={fileStatus.fileId}>
-                            <td className="text-break">
-                              {fileStatus.fileName}
-                            </td>
-                            <td>
-                              <span
-                                className={`badge text-uppercase ${
-                                  fileStatus.status === "uploaded"
-                                    ? "bg-success"
-                                    : fileStatus.status === "failed"
-                                      ? "bg-danger"
-                                      : fileStatus.status === "uploading"
-                                        ? "bg-primary"
-                                        : fileStatus.status === "retrying"
-                                          ? "bg-warning text-dark"
-                                          : "bg-secondary"
-                                }`}
-                              >
-                                {fileStatus.status}
-                              </span>
-                            </td>
-                            <td>{Math.max(0, Number(fileStatus.attempts || 0))}</td>
-                            <td>{Math.max(0, Math.min(100, fileStatus.progressPercent || 0))}%</td>
-                            <td className="small text-break">
-                              {fileStatus.errorMessage || fileStatus.message || "-"}
-                            </td>
+                  </button>
+                  {showQcImageUploadQueue && (
+                    <div
+                      id="qc-image-upload-queue-table"
+                      className="table-responsive qc-details-table-wrap mt-2"
+                    >
+                      <table className="table table-sm align-middle mb-0 qc-details-batch-table qc-image-upload-file-table">
+                        <thead>
+                          <tr>
+                            <th>Image</th>
+                            <th>Status</th>
+                            <th>Attempt</th>
+                            <th>Progress</th>
+                            <th>Message</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </details>
+                        </thead>
+                        <tbody>
+                          {qcImageUploadState.fileStatuses.map((fileStatus) => (
+                            <tr key={fileStatus.fileId}>
+                              <td className="text-break">
+                                {fileStatus.fileName}
+                              </td>
+                              <td>
+                                <span
+                                  className={`badge text-uppercase ${
+                                    fileStatus.status === "uploaded"
+                                      ? "bg-success"
+                                      : fileStatus.status === "failed"
+                                        ? "bg-danger"
+                                        : fileStatus.status === "uploading"
+                                          ? "bg-primary"
+                                          : fileStatus.status === "retrying"
+                                            ? "bg-warning text-dark"
+                                            : "bg-secondary"
+                                  }`}
+                                >
+                                  {fileStatus.status}
+                                </span>
+                              </td>
+                              <td>{Math.max(0, Number(fileStatus.attempts || 0))}</td>
+                              <td>{Math.max(0, Math.min(100, fileStatus.progressPercent || 0))}%</td>
+                              <td className="small text-break">
+                                {fileStatus.errorMessage || fileStatus.message || "-"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               )}
 
               {qcImageUploadState.batchStatuses.length > 0 && (

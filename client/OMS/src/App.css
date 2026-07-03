@@ -6228,24 +6228,49 @@ small,
   background: var(--om-color-surface-muted);
 }
 
-.qc-image-upload-queue > summary {
+.qc-image-upload-queue-toggle {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  width: 100%;
   min-height: 2.9rem;
   padding: 0.7rem 0.9rem;
-  cursor: pointer;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
   color: var(--om-color-text);
-  list-style-position: inside;
+  text-align: left;
 }
 
-.qc-image-upload-queue > summary::marker {
-  color: var(--om-color-text-muted);
+.qc-image-upload-queue-toggle:hover,
+.qc-image-upload-queue-toggle:focus-visible {
+  background: rgba(255, 255, 255, 0.52);
+  outline: none;
 }
 
-.qc-image-upload-queue[open] > summary {
+.qc-image-upload-queue-toggle[aria-expanded="true"] {
   border-bottom: 1px solid rgba(203, 189, 170, 0.65);
+  border-radius: 8px 8px 0 0;
+}
+
+.qc-image-upload-queue-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.qc-image-upload-queue-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border: 1px solid rgba(99, 82, 57, 0.28);
+  border-radius: 999px;
+  background: var(--om-color-surface);
+  color: var(--om-color-text-muted);
+  font-weight: 700;
+  line-height: 1;
 }
 
 .qc-image-upload-queue .qc-details-table-wrap {
@@ -11229,7 +11254,7 @@ button.om-item-order-presence-label {
 }
 
 @media (max-width: 991.98px) {
-  .qc-image-upload-queue > summary {
+  .qc-image-upload-queue-toggle {
     align-items: flex-start;
     flex-direction: column;
     justify-content: center;
