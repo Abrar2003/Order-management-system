@@ -7780,9 +7780,12 @@ small,
   }
 
   .om-main-menu-dropdown {
-    width: min(16rem, calc(100vw - 1rem));
-    max-width: calc(100vw - 1rem);
-    right: 0;
+    width: min(21rem, calc(100vw - 2rem));
+    max-width: calc(100vw - 2rem);
+    max-height: calc(100dvh - 6rem);
+    overflow-y: auto;
+    left: 0;
+    right: auto;
   }
 
   .home-calendar-wrapper {
