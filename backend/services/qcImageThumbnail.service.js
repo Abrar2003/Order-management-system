@@ -24,6 +24,30 @@ const normalizeKey = (value) => normalizeText(value).toLowerCase();
 const toConciseError = (error) =>
   normalizeText(error?.message || String(error)).replace(/\s+/g, " ").slice(0, 300);
 
+const getDownloadedBuffer = (payload) => {
+  if (Buffer.isBuffer(payload)) {
+    return payload;
+  }
+
+  if (Buffer.isBuffer(payload?.buffer)) {
+    return payload.buffer;
+  }
+
+  if (payload?.buffer instanceof ArrayBuffer) {
+    return Buffer.from(payload.buffer);
+  }
+
+  if (ArrayBuffer.isView(payload?.buffer)) {
+    return Buffer.from(
+      payload.buffer.buffer,
+      payload.buffer.byteOffset,
+      payload.buffer.byteLength,
+    );
+  }
+
+  return null;
+};
+
 const resolveImageField = (value = "qc_images") => {
   const normalized = normalizeText(value);
   return VALID_QC_IMAGE_FIELDS.has(normalized) ? normalized : "qc_images";
@@ -227,7 +251,7 @@ const generateThumbnailForStoredQcImage = async ({
 
     const sourceObject = await getObjectBuffer(resolvedSourceKey);
     const thumbnail = await generateQcImageThumbnail({
-      sourceBuffer: sourceObject.buffer,
+      sourceBuffer: getDownloadedBuffer(sourceObject),
     });
 
     await uploadBuffer({

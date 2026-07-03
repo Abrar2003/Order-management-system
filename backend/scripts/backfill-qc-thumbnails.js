@@ -181,6 +181,30 @@ const isThumbnailCandidate = (image = {}, options = {}) => {
 const toConciseError = (error) =>
   normalizeText(error?.message || String(error)).replace(/\s+/g, " ").slice(0, 300);
 
+const getDownloadedBuffer = (payload) => {
+  if (Buffer.isBuffer(payload)) {
+    return payload;
+  }
+
+  if (Buffer.isBuffer(payload?.buffer)) {
+    return payload.buffer;
+  }
+
+  if (payload?.buffer instanceof ArrayBuffer) {
+    return Buffer.from(payload.buffer);
+  }
+
+  if (ArrayBuffer.isView(payload?.buffer)) {
+    return Buffer.from(
+      payload.buffer.buffer,
+      payload.buffer.byteOffset,
+      payload.buffer.byteLength,
+    );
+  }
+
+  return null;
+};
+
 const withStorageRetry = async (operation, label = "storage operation") => {
   let lastError = null;
 
@@ -322,7 +346,7 @@ const processImageRef = async (ref, options, stats) => {
       "source image download",
     );
     const thumbnail = await generateQcImageThumbnail({
-      sourceBuffer: sourceObject.buffer,
+      sourceBuffer: getDownloadedBuffer(sourceObject),
     });
 
     await withStorageRetry(
@@ -448,6 +472,19 @@ const printStats = (stats) => {
   console.log(`elapsed time: ${elapsedSeconds}s`);
 };
 
+const withPaginationAfterId = (baseQuery, lastSeenId) => {
+  if (!lastSeenId) {
+    return baseQuery;
+  }
+
+  return {
+    $and: [
+      baseQuery,
+      { _id: { $gt: lastSeenId } },
+    ],
+  };
+};
+
 const main = async () => {
   loadEnvFiles({
     cwd: path.resolve(__dirname, ".."),
@@ -470,13 +507,9 @@ const main = async () => {
     failed: 0,
   };
   const query = buildQcQuery(options);
-  const cursor = QC.find(query)
-    .select("_id qc_images hardware_inspection inspection_record createdAt")
-    .sort({ _id: 1 })
-    .lean()
-    .cursor({ batchSize: options.batchSize });
   let batch = [];
   let reachedLimit = false;
+  let lastSeenId = null;
 
   console.log("QC thumbnail backfill starting.", {
     dry_run: options.dryRun,
@@ -489,28 +522,45 @@ const main = async () => {
     from_date: options.fromDate ? options.fromDate.toISOString().slice(0, 10) : "",
   });
 
-  for await (const doc of cursor) {
-    if (shutdownRequested) break;
+  while (!shutdownRequested && !reachedLimit) {
+    const docs = await QC.find(withPaginationAfterId(query, lastSeenId))
+      .select("_id qc_images hardware_inspection inspection_record createdAt")
+      .sort({ _id: 1 })
+      .limit(options.batchSize)
+      .lean();
 
-    const candidates = collectCandidatesFromDoc(doc, options, stats);
-    for (const candidate of candidates) {
-      if (options.limit > 0 && stats.eligible >= options.limit) {
-        reachedLimit = true;
-        break;
-      }
-
-      stats.eligible += 1;
-      batch.push(candidate);
-
-      if (batch.length >= options.batchSize) {
-        await processBatch(batch, options, stats);
-        batch = [];
-      }
-
-      if (shutdownRequested) break;
+    if (docs.length === 0) {
+      break;
     }
 
-    if (reachedLimit) break;
+    for (const doc of docs) {
+      lastSeenId = doc._id;
+      if (shutdownRequested) break;
+
+      const candidates = collectCandidatesFromDoc(doc, options, stats);
+      for (const candidate of candidates) {
+        if (options.limit > 0 && stats.eligible >= options.limit) {
+          reachedLimit = true;
+          break;
+        }
+
+        stats.eligible += 1;
+        batch.push(candidate);
+
+        if (batch.length >= options.batchSize) {
+          await processBatch(batch, options, stats);
+          batch = [];
+        }
+
+        if (shutdownRequested) break;
+      }
+
+      if (reachedLimit) break;
+    }
+
+    if (docs.length < options.batchSize) {
+      break;
+    }
   }
 
   if (batch.length > 0) {
