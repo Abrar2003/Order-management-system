@@ -1,8 +1,6 @@
 const path = require("path");
 const sharp = require("sharp");
-const {
-  QC_IMAGE_MAX_INPUT_PIXELS,
-} = require("../config/qcImageUpload.config");
+const { QC_IMAGE_MAX_INPUT_PIXELS } = require("../config/qcImageUpload.config");
 
 const QC_THUMBNAIL_MAX_DIMENSION = 480;
 const QC_THUMBNAIL_WEBP_QUALITY = 72;
@@ -12,7 +10,9 @@ const QC_THUMBNAIL_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const normalizeText = (value) => String(value ?? "").trim();
 
 const normalizeStoragePath = (key = "") =>
-  normalizeText(key).replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  normalizeText(key)
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "");
 
 const buildQcThumbnailStorageKey = (sourceKey = "") => {
   const normalizedKey = normalizeStoragePath(sourceKey);
@@ -41,8 +41,14 @@ const generateQcImageThumbnail = async ({
     throw new Error("Thumbnail generation requires a source image buffer");
   }
 
-  const safeMaxDimension = Math.max(1, Number(maxDimension) || QC_THUMBNAIL_MAX_DIMENSION);
-  const safeQuality = Math.min(100, Math.max(1, Number(quality) || QC_THUMBNAIL_WEBP_QUALITY));
+  const safeMaxDimension = Math.max(
+    1,
+    Number(maxDimension) || QC_THUMBNAIL_MAX_DIMENSION,
+  );
+  const safeQuality = Math.min(
+    100,
+    Math.max(1, Number(quality) || QC_THUMBNAIL_WEBP_QUALITY),
+  );
 
   const { data, info } = await sharp(sourceBuffer, {
     failOn: "none",
@@ -78,3 +84,15 @@ module.exports = {
   buildQcThumbnailStorageKey,
   generateQcImageThumbnail,
 };
+
+//Smoke Test Commands
+
+// cd backend
+// node scripts/backfill-qc-thumbnails.js --dry-run --limit=25 --verbose
+// node scripts/backfill-qc-thumbnails.js --limit=25 --concurrency=2 --verbose
+
+//Full Controlled Backfill
+
+// cd backend
+// nohup node scripts/backfill-qc-thumbnails.js --concurrency=3 --batch-size=100 > qc-thumbnail-backfill.log 2>&1 &
+// echo $! > qc-thumbnail-backfill.pid
