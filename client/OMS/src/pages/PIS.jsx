@@ -337,11 +337,11 @@ const PIS = () => {
   return (
     <>
       <Navbar />
-      <div className="page-shell py-3">
-        <div className="d-flex justify-content-between align-items-center mb-3">
+      <div className="page-shell py-3 pis-page oms-responsive-list-page">
+        <div className="d-flex justify-content-between align-items-center mb-3 gap-3 flex-wrap oms-responsive-page-header">
           <h2 className="h4 mb-0">PIS</h2>
           {canUploadFinish || canEditPis ? (
-            <div className="d-flex flex-wrap gap-2">
+            <div className="d-flex flex-wrap gap-2 justify-content-end oms-responsive-page-actions">
               {canUploadFinish && (
                 <button
                   type="button"
@@ -463,8 +463,8 @@ const PIS = () => {
             {loading ? (
               <div className="text-center py-4">Loading...</div>
             ) : (
-              <div className="table-responsive pis-table-wrap">
-                <table className="table table-striped table-hover align-middle om-table pis-table mb-0">
+              <div className="table-responsive pis-table-wrap responsive-table-shell">
+                <table className="table table-striped table-hover align-middle om-table pis-table responsive-card-table mb-0">
                   <thead className="table-primary">
                     <tr>
                       <th>
@@ -544,7 +544,7 @@ const PIS = () => {
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 && (
-                      <tr>
+                      <tr className="responsive-card-table-empty-row">
                         <td colSpan={canEditPis ? "10" : "9"} className="text-center py-4">
                           No items found
                         </td>
@@ -552,29 +552,29 @@ const PIS = () => {
                     )}
                     {sortedRows.map((item) => (
                       <tr key={item?._id || item?.code}>
-                        <td>{item?.code || "N/A"}</td>
-                        <td>{item?.description || item?.name || "N/A"}</td>
-                        <td>{getBrand(item) || "N/A"}</td>
-                        <td>{getVendors(item)}</td>
-                        <td>{formatFixedNumber(getPisWeight(item, "net"))}</td>
-                        <td>{formatFixedNumber(getPisWeight(item, "gross"))}</td>
-                        <td>
+                        <td data-label="Item Code">{item?.code || "N/A"}</td>
+                        <td data-label="Description">{item?.description || item?.name || "N/A"}</td>
+                        <td data-label="Brand">{getBrand(item) || "N/A"}</td>
+                        <td data-label="Vendors">{getVendors(item)}</td>
+                        <td data-label="PIS Net">{formatFixedNumber(getPisWeight(item, "net"))}</td>
+                        <td data-label="PIS Gross">{formatFixedNumber(getPisWeight(item, "gross"))}</td>
+                        <td data-label="PIS Item Sizes">
                           <MeasuredSizeDisplayTable
                             entries={item?.pis_item_sizes}
                             weightKey="net_weight"
                             emptyLabel="No item sizes saved"
                           />
                         </td>
-                        <td>
+                        <td data-label="PIS Box Sizes">
                           <MeasuredSizeDisplayTable
                             entries={item?.pis_box_sizes}
                             weightKey="gross_weight"
                             emptyLabel="No box sizes saved"
                           />
                         </td>
-                        <td>{formatCbm(item?.cbm?.calculated_pis_total)}</td>
+                        <td data-label="PIS CBM">{formatCbm(item?.cbm?.calculated_pis_total)}</td>
                         {canEditPis && (
-                          <td>
+                          <td data-label="Action">
                             <button
                               type="button"
                               className="btn btn-outline-primary btn-sm"
@@ -593,7 +593,7 @@ const PIS = () => {
           </div>
         </div>
 
-        <div className="d-flex justify-content-center align-items-center gap-3 mt-3">
+        <div className="d-flex justify-content-center align-items-center gap-3 mt-3 oms-responsive-pagination">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -615,7 +615,7 @@ const PIS = () => {
           </button>
         </div>
 
-        <div className="d-flex justify-content-end mt-3">
+        <div className="d-flex justify-content-end mt-3 oms-responsive-limit-row">
           <div className="input-group om-limit-control">
             <span className="input-group-text">Limit</span>
             <select

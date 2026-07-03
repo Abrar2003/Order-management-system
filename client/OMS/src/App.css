@@ -3029,6 +3029,265 @@ small,
   vertical-align: middle;
 }
 
+.responsive-table-shell {
+  overflow-x: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.responsive-card-table {
+  min-width: 1080px;
+}
+
+.items-table.responsive-card-table {
+  min-width: 1120px;
+}
+
+.item-files-table.responsive-card-table {
+  min-width: 1040px;
+}
+
+.pis-table.responsive-card-table {
+  min-width: 1280px;
+}
+
+.pis-update-logs-table.responsive-card-table {
+  min-width: 1240px;
+}
+
+.responsive-card-table td[data-label] {
+  min-width: 0;
+}
+
+@media (max-width: 991.98px) {
+  .oms-responsive-list-page {
+    padding-inline: 0.75rem;
+  }
+
+  .oms-responsive-page-header {
+    align-items: stretch !important;
+  }
+
+  .oms-responsive-page-header > h2,
+  .oms-responsive-page-header > .text-center {
+    order: -1;
+    flex: 1 1 100%;
+    text-align: left !important;
+  }
+
+  .oms-responsive-page-actions {
+    flex: 1 1 auto;
+  }
+
+  .oms-responsive-list-page .card-body {
+    padding: 1rem;
+  }
+
+  .oms-responsive-list-page .card-body.p-0 {
+    padding: 0 !important;
+  }
+
+  .responsive-table-shell {
+    overflow: visible !important;
+    border: 0 !important;
+    background: transparent !important;
+    margin: 0.5rem !important;
+  }
+
+  .responsive-card-table,
+  .responsive-card-table > thead,
+  .responsive-card-table > tbody,
+  .responsive-card-table > thead > tr,
+  .responsive-card-table > tbody > tr,
+  .responsive-card-table > thead > tr > th,
+  .responsive-card-table > tbody > tr > td {
+    display: block;
+    width: 100%;
+  }
+
+  .responsive-card-table {
+    min-width: 0 !important;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: auto;
+  }
+
+  .responsive-card-table > thead {
+    display: none;
+  }
+
+  .responsive-card-table > tbody {
+    display: grid;
+    gap: 0.85rem;
+    padding: 0.35rem;
+  }
+
+  .responsive-card-table > tbody > tr {
+    overflow: hidden;
+    border: 1px solid rgba(203, 189, 170, 0.65);
+    border-radius: 8px;
+    background: var(--om-color-surface);
+    box-shadow: var(--om-shadow-xs);
+  }
+
+  .responsive-card-table > tbody > tr > td {
+    display: grid;
+    grid-template-columns: minmax(8.5rem, 34%) minmax(0, 1fr);
+    align-items: start;
+    gap: 0.75rem;
+    padding: 0.72rem 0.85rem;
+    border-bottom: 1px solid rgba(203, 189, 170, 0.48);
+    text-align: left;
+  }
+
+  .responsive-card-table > tbody > tr > td:last-child {
+    border-bottom: 0;
+  }
+
+  .responsive-card-table > tbody > tr > td::before {
+    content: attr(data-label);
+    color: var(--om-color-text-muted);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    line-height: 1.25;
+    text-transform: uppercase;
+  }
+
+  .responsive-card-table > tbody > tr > td:not([data-label])::before,
+  .responsive-card-table-empty-row > td::before {
+    content: none;
+  }
+
+  .responsive-card-table-empty-row {
+    border-style: dashed !important;
+    background: var(--om-color-surface-muted) !important;
+    box-shadow: none !important;
+  }
+
+  .responsive-card-table-empty-row > td {
+    display: block;
+    text-align: center;
+  }
+
+  .responsive-card-table .items-size-column,
+  .responsive-card-table .items-action-column {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .responsive-card-table .items-row-actions {
+    width: 100%;
+    max-width: none;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .responsive-card-table .items-upload-action {
+    min-width: 0;
+  }
+
+  .responsive-card-table .dropdown {
+    width: min(100%, 14rem);
+    justify-self: start;
+  }
+
+  .responsive-card-table .dropdown-toggle {
+    width: 100%;
+  }
+
+  .responsive-card-table details {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .oms-responsive-pagination {
+    flex-wrap: wrap;
+  }
+
+  .oms-responsive-limit-row {
+    justify-content: flex-start !important;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .oms-responsive-list-page {
+    padding-inline: 0.5rem;
+  }
+
+  .oms-responsive-page-actions {
+    width: 100%;
+  }
+
+  .oms-responsive-page-actions > .btn {
+    flex: 1 1 9rem;
+  }
+
+  .responsive-table-shell {
+    margin: 0.35rem !important;
+  }
+
+  .responsive-card-table > tbody {
+    gap: 0.7rem;
+    padding: 0.2rem;
+  }
+
+  .responsive-card-table > tbody > tr > td {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+    padding: 0.72rem 0.8rem;
+  }
+
+  .responsive-card-table > tbody > tr > td::before {
+    font-size: 0.66rem;
+  }
+
+  .responsive-card-table .items-row-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .responsive-card-table .items-action-btn,
+  .responsive-card-table .dropdown,
+  .responsive-card-table .dropdown-toggle {
+    width: 100%;
+  }
+
+  .responsive-card-table .items-upload-action {
+    grid-template-columns: minmax(0, 1fr);
+    border-radius: 0.8rem;
+  }
+
+  .responsive-card-table .items-upload-select {
+    min-height: 2.35rem;
+    border-bottom: 1px solid rgba(203, 189, 170, 0.75);
+    border-radius: 0.8rem 0.8rem 0 0;
+  }
+
+  .responsive-card-table .items-upload-btn {
+    min-height: 2.35rem;
+    border-top: 0;
+    border-left: 0;
+    border-radius: 0 0 0.8rem 0.8rem;
+  }
+
+  .oms-responsive-pagination {
+    gap: 0.65rem !important;
+  }
+
+  .oms-responsive-pagination .btn {
+    flex: 1 1 5rem;
+  }
+
+  .oms-responsive-pagination .small {
+    order: -1;
+    flex: 1 1 100%;
+    text-align: center;
+  }
+
+  .oms-responsive-limit-row .om-limit-control {
+    width: 100%;
+  }
+}
+
 .om-report-page .table {
   table-layout: fixed;
   width: 100%;
@@ -3759,7 +4018,8 @@ small,
 }
 
 .pis-table-wrap {
-  overflow-x: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .pis-table {
@@ -3846,6 +4106,18 @@ small,
 .pis-table .om-size-data-table td:nth-child(3) {
   width: 22%;
   white-space: nowrap;
+}
+
+@media (max-width: 991.98px) {
+  .pis-table.responsive-card-table {
+    table-layout: auto;
+  }
+
+  .pis-table.responsive-card-table > thead > tr > th,
+  .pis-table.responsive-card-table > tbody > tr > td {
+    width: 100% !important;
+    min-width: 0;
+  }
 }
 
 .form-label {

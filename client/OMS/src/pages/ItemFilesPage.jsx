@@ -695,7 +695,7 @@ const ItemFilesPage = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
+      <div className="page-shell py-3 item-files-page oms-responsive-list-page">
         <input
           ref={itemFileInputRef}
           type="file"
@@ -706,7 +706,7 @@ const ItemFilesPage = () => {
           onChange={handleItemFileChange}
         />
 
-        <div className="d-flex justify-content-between align-items-center mb-3 gap-3 flex-wrap">
+        <div className="d-flex justify-content-between align-items-center mb-3 gap-3 flex-wrap oms-responsive-page-header">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -816,8 +816,8 @@ const ItemFilesPage = () => {
             {loading ? (
               <div className="text-center py-4">Loading...</div>
             ) : (
-              <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table items-table item-files-table mb-0">
+              <div className="table-responsive responsive-table-shell">
+                <table className="table table-striped table-hover align-middle om-table items-table item-files-table responsive-card-table mb-0">
                   <thead className="table-primary">
                     <tr>
                       <th>
@@ -873,7 +873,7 @@ const ItemFilesPage = () => {
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 && (
-                      <tr>
+                      <tr className="responsive-card-table-empty-row">
                         <td colSpan="7" className="text-center py-4">
                           No items found
                         </td>
@@ -889,7 +889,7 @@ const ItemFilesPage = () => {
 
                       return (
                         <tr key={item?._id || item?.code}>
-                          <td>
+                          <td data-label="Item Code">
                             {item?.code ? (
                               <ItemOrderPresenceTooltip
                                 itemCode={item.code}
@@ -900,21 +900,24 @@ const ItemFilesPage = () => {
                               "N/A"
                             )}
                           </td>
-                          <td>{item?.name || "N/A"}</td>
-                          <td>
+                          <td data-label="Name">{item?.name || "N/A"}</td>
+                          <td data-label="Brand">
                             {item?.brand_name
                               || (Array.isArray(item?.brands) && item.brands.length > 0
                                 ? item.brands[0]
                                 : "N/A")}
                           </td>
-                          <td>{formatCbm(getPreferredCbm(item, preferPisMeasurements))}</td>
-                          <td className="items-size-column">
+                          <td data-label="CBM">{formatCbm(getPreferredCbm(item, preferPisMeasurements))}</td>
+                          <td
+                            className="items-size-column"
+                            data-label={preferPisMeasurements ? "PIS Size" : "Inspected Size"}
+                          >
                             <SizeDataCell
                               item={item}
                               preferPis={preferPisMeasurements}
                             />
                           </td>
-                          <td>
+                          <td data-label={activeFileOption.label}>
                             {hasFile ? (
                               <div className="item-file-product-image-cell">
                                 {isProductImageFileType(activeFileType) && (
@@ -941,7 +944,7 @@ const ItemFilesPage = () => {
                               </div>
                             )}
                           </td>
-                          <td>
+                          <td data-label="Action">
                             <div className="dropdown">
                               <button
                                 type="button"
@@ -1019,7 +1022,7 @@ const ItemFilesPage = () => {
           </div>
         </div>
 
-        <div className="d-flex justify-content-center align-items-center gap-3 mt-3">
+        <div className="d-flex justify-content-center align-items-center gap-3 mt-3 oms-responsive-pagination">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -1041,7 +1044,7 @@ const ItemFilesPage = () => {
           </button>
         </div>
 
-        <div className="d-flex justify-content-end mt-3">
+        <div className="d-flex justify-content-end mt-3 oms-responsive-limit-row">
           <div className="input-group om-limit-control">
             <span className="input-group-text">Limit</span>
             <select

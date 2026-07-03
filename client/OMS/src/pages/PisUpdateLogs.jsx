@@ -330,8 +330,8 @@ const PisUpdateLogs = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
-        <div className="d-flex justify-content-between align-items-center mb-3">
+      <div className="page-shell py-3 pis-update-logs-page oms-responsive-list-page">
+        <div className="d-flex justify-content-between align-items-center mb-3 gap-3 flex-wrap oms-responsive-page-header">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -464,8 +464,8 @@ const PisUpdateLogs = () => {
             {loading ? (
               <div className="text-center py-4">Loading...</div>
             ) : (
-              <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table mb-0">
+              <div className="table-responsive responsive-table-shell">
+                <table className="table table-striped table-hover align-middle om-table responsive-card-table pis-update-logs-table mb-0">
                   <thead className="table-primary">
                     <tr>
                       <th>
@@ -553,7 +553,7 @@ const PisUpdateLogs = () => {
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 && (
-                      <tr>
+                      <tr className="responsive-card-table-empty-row">
                         <td colSpan="11" className="text-center py-4">
                           No PIS update logs found
                         </td>
@@ -567,22 +567,22 @@ const PisUpdateLogs = () => {
                         : [];
                       return (
                         <tr key={log?._id || `${log?.createdAt || ""}-${log?.item_code || ""}`}>
-                          <td>{formatDateDDMMYYYY(log?.createdAt)}</td>
-                          <td>{log?.edited_by_name || "N/A"}</td>
-                          <td>
+                          <td data-label="Updated">{formatDateDDMMYYYY(log?.createdAt)}</td>
+                          <td data-label="User">{log?.edited_by_name || "N/A"}</td>
+                          <td data-label="Item">
                             <div className="fw-semibold">{log?.item_code || "N/A"}</div>
                             <div className="small text-secondary">
                               {log?.description || log?.item_name || "N/A"}
                             </div>
                           </td>
-                          <td>{log?.brand || "N/A"}</td>
-                          <td>{formatArray(log?.vendors)}</td>
-                          <td>{log?.page_name || "N/A"}</td>
-                          <td>{formatOperation(log?.operation_type)}</td>
-                          <td>{formatArray(log?.data_scope)}</td>
-                          <td>{Number(log?.changed_fields_count || changes.length || 0)}</td>
-                          <td>{Number(log?.missing_fields_count || missingFields.length || 0)}</td>
-                          <td>
+                          <td data-label="Brand">{log?.brand || "N/A"}</td>
+                          <td data-label="Vendor">{formatArray(log?.vendors)}</td>
+                          <td data-label="Page">{log?.page_name || "N/A"}</td>
+                          <td data-label="Type">{formatOperation(log?.operation_type)}</td>
+                          <td data-label="Data">{formatArray(log?.data_scope)}</td>
+                          <td data-label="Changed">{Number(log?.changed_fields_count || changes.length || 0)}</td>
+                          <td data-label="Missing">{Number(log?.missing_fields_count || missingFields.length || 0)}</td>
+                          <td data-label="Details">
                             {changes.length > 0 || missingFields.length > 0 ? (
                               <details>
                                 <summary>View</summary>
@@ -638,7 +638,7 @@ const PisUpdateLogs = () => {
           </div>
         </div>
 
-        <div className="d-flex justify-content-center align-items-center gap-3 mt-3">
+        <div className="d-flex justify-content-center align-items-center gap-3 mt-3 oms-responsive-pagination">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -660,7 +660,7 @@ const PisUpdateLogs = () => {
           </button>
         </div>
 
-        <div className="d-flex justify-content-end mt-3">
+        <div className="d-flex justify-content-end mt-3 oms-responsive-limit-row">
           <div className="input-group om-limit-control">
             <span className="input-group-text">Limit</span>
             <select

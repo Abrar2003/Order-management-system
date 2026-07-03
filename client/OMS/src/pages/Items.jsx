@@ -838,7 +838,7 @@ const Items = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
+      <div className="page-shell py-3 items-page oms-responsive-list-page">
         <input
           ref={itemFileInputRef}
           type="file"
@@ -849,7 +849,7 @@ const Items = () => {
           onChange={handleItemFileChange}
         />
 
-        <div className="d-flex justify-content-between align-items-center mb-3">
+        <div className="d-flex justify-content-between align-items-center mb-3 gap-3 flex-wrap oms-responsive-page-header">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -859,7 +859,7 @@ const Items = () => {
           </button>
           <h2 className="h4 mb-0">Items</h2>
           {canSyncItems || canCreateItems ? (
-            <div className="d-flex gap-2">
+            <div className="d-flex gap-2 flex-wrap justify-content-end oms-responsive-page-actions">
               {canCreateItems && (
                 <>
                   <button
@@ -993,8 +993,8 @@ const Items = () => {
             {loading ? (
               <div className="text-center py-4">Loading...</div>
             ) : (
-              <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table items-table mb-0">
+              <div className="table-responsive responsive-table-shell">
+                <table className="table table-striped table-hover align-middle om-table items-table responsive-card-table mb-0">
                   <thead className="table-primary">
                     <tr>
                       <th>
@@ -1053,7 +1053,7 @@ const Items = () => {
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 && (
-                      <tr>
+                      <tr className="responsive-card-table-empty-row">
                         <td colSpan="8" className="text-center py-4">
                           No items found
                         </td>
@@ -1076,7 +1076,7 @@ const Items = () => {
 
                       return (
                         <tr key={item?._id || item?.code}>
-                          <td>
+                          <td data-label="Item Code">
                             {item?.code ? (
                               <ItemOrderPresenceTooltip
                                 itemCode={item.code}
@@ -1087,7 +1087,7 @@ const Items = () => {
                               "N/A"
                             )}
                           </td>
-                          <td>
+                          <td data-label="Image">
                             <ProductImageThumbnail
                               src={item?.product_image_url}
                               originalName={item?.product_image?.originalName}
@@ -1095,19 +1095,19 @@ const Items = () => {
                               size="sm"
                             />
                           </td>
-                          <td>{item?.name || "N/A"}</td>
-                          <td>
+                          <td data-label="Name">{item?.name || "N/A"}</td>
+                          <td data-label="Brand">
                             {item?.brand_name
                               || (Array.isArray(item?.brands) && item.brands.length > 0
                                 ? item.brands[0]
                                 : "N/A")}
                           </td>
-                          <td>{getVendorNames(item)}</td>
-                          <td>{formatCbm(getCalculatedInspectedCbm(item))}</td>
-                          <td className="items-size-column">
+                          <td data-label="Vendor">{getVendorNames(item)}</td>
+                          <td data-label="CBM">{formatCbm(getCalculatedInspectedCbm(item))}</td>
+                          <td className="items-size-column" data-label="Inspected Size">
                             <InspectedSizeCell item={item} />
                           </td>
-                          <td className="items-action-column">
+                          <td className="items-action-column" data-label="Actions">
                             <div className="items-row-actions" aria-label={`Actions for ${item?.code || "item"}`}>
                               <button
                                 type="button"
@@ -1217,7 +1217,7 @@ const Items = () => {
           </div>
         </div>
 
-        <div className="d-flex justify-content-center align-items-center gap-3 mt-3">
+        <div className="d-flex justify-content-center align-items-center gap-3 mt-3 oms-responsive-pagination">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -1239,7 +1239,7 @@ const Items = () => {
           </button>
         </div>
 
-        <div className="d-flex justify-content-end mt-3">
+        <div className="d-flex justify-content-end mt-3 oms-responsive-limit-row">
           <div className="input-group om-limit-control">
             <span className="input-group-text">Limit</span>
             <select
