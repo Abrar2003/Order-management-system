@@ -35,6 +35,13 @@ const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
   "box3",
 ]);
 const BOX_CARTON_REMARK_OPTIONS = Object.freeze(["inner", "master"]);
+const PRODUCT_DATABASE_COMPLETION_BUCKETS = Object.freeze([25, 50, 75, 100]);
+const PRODUCT_DATABASE_COMPLETION_RANGE_BUCKETS = Object.freeze([
+  { key: "0-25", min: 0, max: 25 },
+  { key: "26-50", min: 26, max: 50 },
+  { key: "51-75", min: 51, max: 75 },
+  { key: "76-100", min: 76, max: 100 },
+]);
 const PD_STATUSES = Object.freeze({
   CREATED: "created",
   CHECKED: "checked",
@@ -123,6 +130,225 @@ const hasMeaningfulBoxEntry = (entry = {}) =>
     "item_count_in_inner",
     "box_count_in_master",
   ].some((field) => hasMeaningfulNumber(entry?.[field]));
+
+const rawValuesToPlainObject = (rawValues = {}) => {
+  if (rawValues instanceof Map) {
+    return Object.fromEntries(rawValues.entries());
+  }
+  if (rawValues && typeof rawValues === "object" && !Array.isArray(rawValues)) {
+    return { ...rawValues };
+  }
+  return {};
+};
+
+const hasMeaningfulGenericValue = (value) => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "string") return normalizeText(value) !== "";
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (Array.isArray(value)) return value.some((entry) => hasMeaningfulGenericValue(entry));
+  if (typeof value === "object") {
+    return Object.values(value).some((entry) => hasMeaningfulGenericValue(entry));
+  }
+  return Boolean(value);
+};
+
+const hasMeaningfulStoredSpecField = (entry = {}) => {
+  switch (normalizeTemplateKey(entry?.value_type)) {
+    case "number":
+      return entry?.value_number !== null && entry?.value_number !== undefined;
+    case "boolean":
+      return entry?.value_boolean !== null && entry?.value_boolean !== undefined;
+    case "date":
+      return Boolean(entry?.value_date);
+    case "array":
+      return Array.isArray(entry?.value_array) && entry.value_array.length > 0;
+    case "object":
+      return hasMeaningfulGenericValue(entry?.raw_value) ||
+        normalizeText(entry?.value_text) !== "";
+    case "string":
+    default:
+      return normalizeText(entry?.value_text) !== "";
+  }
+};
+
+const hasMeaningfulStoredSizeEntry = (entry = {}, { isBoxSize = false } = {}) => {
+  const fields = isBoxSize
+    ? ["L", "B", "H", "net_weight", "gross_weight", "item_count_in_inner", "box_count_in_master"]
+    : ["L", "B", "H", "net_weight", "gross_weight"];
+  return fields.some((field) => {
+    const value = entry?.[field];
+    if (value === null || value === undefined || value === "") return false;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed !== 0 : normalizeText(value) !== "";
+  });
+};
+
+const sizeEntryMatchesField = (entry = {}, field = {}) => {
+  const expected = normalizeTemplateKey(
+    field?.size_remark || field?.box_type || field?.key,
+  );
+  if (!expected) return false;
+  return [
+    entry?.remark,
+    entry?.box_type,
+    entry?.type,
+  ].some((value) => normalizeTemplateKey(value) === expected);
+};
+
+const hasProductDatabaseFieldValue = (item = {}, field = {}) => {
+  const fieldKey = normalizeTemplateKey(field?.key);
+  if (!fieldKey) return false;
+
+  const productSpecs = item?.product_specs && typeof item.product_specs === "object"
+    ? item.product_specs
+    : {};
+  const rawValues = rawValuesToPlainObject(productSpecs?.raw_values);
+  if (hasMeaningfulGenericValue(rawValues[fieldKey])) {
+    return true;
+  }
+
+  const inputType = normalizeTemplateKey(field?.input_type);
+  if (inputType === "item_size") {
+    return [
+      ...(Array.isArray(productSpecs?.item_sizes) ? productSpecs.item_sizes : []),
+      ...(Array.isArray(item?.pd_item_sizes) ? item.pd_item_sizes : []),
+    ].some((entry) =>
+      sizeEntryMatchesField(entry, field) &&
+      hasMeaningfulStoredSizeEntry(entry, { isBoxSize: false }),
+    );
+  }
+
+  if (inputType === "box_size") {
+    return [
+      ...(Array.isArray(productSpecs?.box_sizes) ? productSpecs.box_sizes : []),
+      ...(Array.isArray(item?.pd_box_sizes) ? item.pd_box_sizes : []),
+    ].some((entry) =>
+      sizeEntryMatchesField(entry, field) &&
+      hasMeaningfulStoredSizeEntry(entry, { isBoxSize: true }),
+    );
+  }
+
+  return (Array.isArray(productSpecs?.fields) ? productSpecs.fields : [])
+    .some((entry) =>
+      normalizeTemplateKey(entry?.key) === fieldKey &&
+      hasMeaningfulStoredSpecField(entry),
+    );
+};
+
+const getProductDatabaseCompletionBucket = (percentage = 0) => {
+  const parsed = Number(percentage);
+  if (!Number.isFinite(parsed) || parsed < 25) return 0;
+  if (parsed >= 100) return 100;
+  if (parsed >= 75) return 75;
+  if (parsed >= 50) return 50;
+  return 25;
+};
+
+const normalizeProductDatabaseDetailsBucket = (value = "") => {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  return PRODUCT_DATABASE_COMPLETION_BUCKETS.includes(parsed) ? parsed : 0;
+};
+
+const buildProductDatabaseCompletion = (item = {}, templateFields = []) => {
+  const fields = Array.isArray(templateFields) ? templateFields : [];
+  const total = fields.length;
+  const filled = total > 0
+    ? fields.filter((field) => hasProductDatabaseFieldValue(item, field)).length
+    : 0;
+  const percentage = total > 0 ? Math.round((filled / total) * 100) : 0;
+  const bucket = getProductDatabaseCompletionBucket(percentage);
+
+  return {
+    filled,
+    total,
+    percentage,
+    bucket,
+  };
+};
+
+const buildProductDatabaseCompletionSummary = (
+  items = [],
+  templateFields = [],
+) => {
+  const buckets = PRODUCT_DATABASE_COMPLETION_BUCKETS.reduce((accumulator, bucket) => {
+    accumulator[bucket] = 0;
+    return accumulator;
+  }, {});
+  let below25 = 0;
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const completion = item?.pd_completion ||
+      buildProductDatabaseCompletion(item, templateFields);
+    if (PRODUCT_DATABASE_COMPLETION_BUCKETS.includes(completion.bucket)) {
+      buckets[completion.bucket] += 1;
+    } else {
+      below25 += 1;
+    }
+  });
+
+  return {
+    total_items: Array.isArray(items) ? items.length : 0,
+    total_fields: Array.isArray(templateFields) ? templateFields.length : 0,
+    below_25: below25,
+    buckets,
+  };
+};
+
+const normalizeProductDatabaseCompletionRange = (value = "") => {
+  const normalized = normalizeText(value)
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/_/g, "-")
+    .replace(/to/g, "-");
+  return PRODUCT_DATABASE_COMPLETION_RANGE_BUCKETS.some((bucket) => bucket.key === normalized)
+    ? normalized
+    : "";
+};
+
+const getProductDatabaseCompletionRange = (percentage = 0) => {
+  const parsed = Number(percentage);
+  const safePercentage = Number.isFinite(parsed)
+    ? Math.max(0, Math.min(100, Math.round(parsed)))
+    : 0;
+  const match = PRODUCT_DATABASE_COMPLETION_RANGE_BUCKETS.find(
+    (bucket) => safePercentage >= bucket.min && safePercentage <= bucket.max,
+  );
+  return match?.key || "0-25";
+};
+
+const buildProductDatabaseCompletionRangeSummary = (
+  items = [],
+  templateFields = [],
+) => {
+  const buckets = PRODUCT_DATABASE_COMPLETION_RANGE_BUCKETS.reduce(
+    (accumulator, bucket) => {
+      accumulator[bucket.key] = 0;
+      return accumulator;
+    },
+    {},
+  );
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const completion = item?.pd_completion ||
+      buildProductDatabaseCompletion(item, templateFields);
+    const range = getProductDatabaseCompletionRange(completion?.percentage);
+    buckets[range] += 1;
+  });
+
+  return {
+    total_items: Array.isArray(items) ? items.length : 0,
+    total_fields: Array.isArray(templateFields) ? templateFields.length : 0,
+    buckets,
+  };
+};
+
+const productDatabaseCompletionMatchesRange = (item = {}, range = "") => {
+  const normalizedRange = normalizeProductDatabaseCompletionRange(range);
+  if (!normalizedRange) return true;
+  return getProductDatabaseCompletionRange(item?.pd_completion?.percentage) === normalizedRange;
+};
 
 const normalizeItemSizeEntries = (entries = []) => {
   if (!Array.isArray(entries)) {
@@ -995,15 +1221,24 @@ module.exports = {
   NOT_SET_STATUS,
   PD_STATUSES,
   PD_STATUS_VALUES,
+  PRODUCT_DATABASE_COMPLETION_BUCKETS,
+  PRODUCT_DATABASE_COMPLETION_RANGE_BUCKETS,
   ProductDatabaseError,
   normalizePdStatus,
   normalizePdStatusKey,
+  normalizeProductDatabaseDetailsBucket,
+  normalizeProductDatabaseCompletionRange,
   buildPdAuditActor,
   extractProductDatabaseFields,
   normalizeProductDatabaseInput,
   mergeProductDatabaseFields,
   getChangedProductDatabaseFields,
   hasProductDatabaseData,
+  buildProductDatabaseCompletion,
+  buildProductDatabaseCompletionSummary,
+  buildProductDatabaseCompletionRangeSummary,
+  getProductDatabaseCompletionRange,
+  productDatabaseCompletionMatchesRange,
   applyProductDatabaseSave,
   applyProductDatabaseCheck,
   applyProductDatabaseApprove,

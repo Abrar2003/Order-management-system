@@ -70,6 +70,12 @@ const STATUS_OPTIONS = Object.freeze([
   { value: "checked", label: "Checked" },
   { value: "approved", label: "Approved" },
 ]);
+const DETAILS_FILTER_OPTIONS = Object.freeze([
+  { value: "0-25", label: "0-25%" },
+  { value: "26-50", label: "26-50%" },
+  { value: "51-75", label: "51-75%" },
+  { value: "76-100", label: "76-100%" },
+]);
 const BARCODE_MODES = Object.freeze({
   SINGLE: "single",
   INNER_MASTER: "inner_master",
@@ -113,6 +119,16 @@ const normalizeFilterValue = (value, fallback = DEFAULT_FILTER) => {
     return fallback;
   }
   return normalized;
+};
+
+const normalizeDetailsFilterValue = (value, fallback = DEFAULT_FILTER) => {
+  const normalized = normalizeFilterValue(value, fallback)
+    .replace(/_/g, "-")
+    .replace(/\s+/g, "");
+  if (normalized === fallback) return fallback;
+  return DETAILS_FILTER_OPTIONS.some((option) => option.value === normalized)
+    ? normalized
+    : fallback;
 };
 
 const parsePositiveInt = (value, fallback = 1) => {
@@ -551,16 +567,44 @@ const SizeSummary = ({ entries = [], type = "item" }) => {
   );
 };
 
-const SummaryCard = ({ label, value }) => (
+const SummaryCard = ({ label, value, meta = "", active = false, onClick = null }) => (
   <div className="col-md-6 col-xl-3">
-    <div className="card om-card h-100">
+    <button
+      type="button"
+      className={`card om-card h-100 w-100 text-start product-database-summary-card ${active ? "is-active" : ""}`}
+      onClick={onClick || undefined}
+      disabled={!onClick}
+    >
       <div className="card-body">
         <div className="small text-secondary">{label}</div>
         <div className="h4 mb-0 mt-2">{value}</div>
+        {meta ? <div className="small text-secondary mt-1">{meta}</div> : null}
       </div>
-    </div>
+    </button>
   </div>
 );
+
+const ProductDatabaseStatusPills = ({ summary = {} }) => {
+  const total = Number(summary?.total || 0);
+  const statuses = [
+    { key: "created", label: "Created" },
+    { key: "checked", label: "Checked" },
+    { key: "approved", label: "Approved" },
+  ];
+
+  return (
+    <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+      {statuses.map((status) => (
+        <span
+          key={status.key}
+          className={`om-summary-chip product-database-status-pill ${status.key}`}
+        >
+          {status.label}: {Number(summary?.[status.key] || 0)} / {total}
+        </span>
+      ))}
+    </div>
+  );
+};
 
 const ProductDatabaseMeasuredSizeSection = ({
   title,
@@ -2243,6 +2287,9 @@ const ProductDatabase = () => {
   const [draftStatusFilter, setDraftStatusFilter] = useState(() =>
     normalizeFilterValue(searchParams.get("status")),
   );
+  const [detailsFilter, setDetailsFilter] = useState(() =>
+    normalizeDetailsFilterValue(searchParams.get("details")),
+  );
   const [page, setPage] = useState(() => parsePositiveInt(searchParams.get("page"), 1));
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [rows, setRows] = useState([]);
@@ -2280,6 +2327,7 @@ const ProductDatabase = () => {
       if (brandFilter !== DEFAULT_FILTER) params.brand = brandFilter;
       if (vendorFilter !== DEFAULT_FILTER) params.vendor = vendorFilter;
       if (statusFilter !== DEFAULT_FILTER) params.status = statusFilter;
+      if (detailsFilter !== DEFAULT_FILTER) params.details = detailsFilter;
       params.include_product_image_thumbnail = true;
 
       const response = await api.get("/items/product-database", { params });
@@ -2294,7 +2342,7 @@ const ProductDatabase = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, limit, page, search, statusFilter, vendorFilter]);
+  }, [brandFilter, detailsFilter, limit, page, search, statusFilter, vendorFilter]);
 
   useEffect(() => {
     fetchRows();
@@ -2308,6 +2356,7 @@ const ProductDatabase = () => {
     const nextBrand = normalizeFilterValue(searchParams.get("brand"));
     const nextVendor = normalizeFilterValue(searchParams.get("vendor"));
     const nextStatus = normalizeFilterValue(searchParams.get("status"));
+    const nextDetails = normalizeDetailsFilterValue(searchParams.get("details"));
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
     const nextLimit = parseLimit(searchParams.get("limit"));
 
@@ -2319,6 +2368,7 @@ const ProductDatabase = () => {
     setDraftVendorFilter((prev) => (prev === nextVendor ? prev : nextVendor));
     setStatusFilter((prev) => (prev === nextStatus ? prev : nextStatus));
     setDraftStatusFilter((prev) => (prev === nextStatus ? prev : nextStatus));
+    setDetailsFilter((prev) => (prev === nextDetails ? prev : nextDetails));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -2333,6 +2383,7 @@ const ProductDatabase = () => {
     if (brandFilter !== DEFAULT_FILTER) next.set("brand", brandFilter);
     if (vendorFilter !== DEFAULT_FILTER) next.set("vendor", vendorFilter);
     if (statusFilter !== DEFAULT_FILTER) next.set("status", statusFilter);
+    if (detailsFilter !== DEFAULT_FILTER) next.set("details", detailsFilter);
     if (page !== 1) next.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
 
@@ -2341,6 +2392,7 @@ const ProductDatabase = () => {
     }
   }, [
     brandFilter,
+    detailsFilter,
     limit,
     page,
     search,
@@ -2369,6 +2421,7 @@ const ProductDatabase = () => {
     setBrandFilter(DEFAULT_FILTER);
     setVendorFilter(DEFAULT_FILTER);
     setStatusFilter(DEFAULT_FILTER);
+    setDetailsFilter(DEFAULT_FILTER);
     setPage(1);
     setLimit(DEFAULT_LIMIT);
   };
@@ -2381,6 +2434,7 @@ const ProductDatabase = () => {
       if (brandFilter !== DEFAULT_FILTER) params.brand = brandFilter;
       if (vendorFilter !== DEFAULT_FILTER) params.vendor = vendorFilter;
       if (statusFilter !== DEFAULT_FILTER) params.status = statusFilter;
+      if (detailsFilter !== DEFAULT_FILTER) params.details = detailsFilter;
 
       const response = await api.get("/items/product-database/export", {
         params,
@@ -2405,7 +2459,7 @@ const ProductDatabase = () => {
     } finally {
       setExporting(false);
     }
-  }, [brandFilter, search, statusFilter, vendorFilter]);
+  }, [brandFilter, detailsFilter, search, statusFilter, vendorFilter]);
 
   const handleDraftSaved = useCallback(({ itemId, draft: nextDraft }) => {
     const draftKey = normalizeTextValue(itemId);
@@ -2439,6 +2493,19 @@ const ProductDatabase = () => {
 
   const selectedDraftKey = getProductDatabaseDraftKey(selectedItem);
   const selectedDraft = selectedDraftKey ? productDatabaseDrafts[selectedDraftKey] : null;
+  const detailSummary = summary?.details || {};
+  const detailBuckets = detailSummary?.buckets || {};
+  const detailTotalFields = Number(detailSummary?.total_fields || 0);
+  const statusSummary = {
+    total: Number(summary?.total || 0),
+    created: Number(summary?.created || 0),
+    checked: Number(summary?.checked || 0),
+    approved: Number(summary?.approved || 0),
+  };
+  const handleDetailsBucketClick = (bucketValue) => {
+    setDetailsFilter((prev) => (prev === bucketValue ? DEFAULT_FILTER : bucketValue));
+    setPage(1);
+  };
 
   return (
     <>
@@ -2447,16 +2514,19 @@ const ProductDatabase = () => {
       <div className="page-shell om-report-page py-3">
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
           <h2 className="h4 mb-0">Product Database</h2>
-          <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
-            <span className="small text-secondary">PD size data approval workflow</span>
-            <button
-              type="button"
-              className="btn btn-outline-primary btn-sm"
-              onClick={handleExportXls}
-              disabled={loading || exporting || Number(pagination.total || 0) === 0}
-            >
-              {exporting ? "Exporting..." : "Export XLS"}
-            </button>
+          <div className="d-flex flex-column align-items-end gap-2">
+            <ProductDatabaseStatusPills summary={statusSummary} />
+            <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+              <span className="small text-secondary">PD size data approval workflow</span>
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={handleExportXls}
+                disabled={loading || exporting || Number(pagination.total || 0) === 0}
+              >
+                {exporting ? "Exporting..." : "Export XLS"}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -2532,11 +2602,39 @@ const ProductDatabase = () => {
           </form>
         </div>
 
+        <div className="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-2">
+          <div>
+            <h3 className="h6 mb-1">PD Details Filled</h3>
+            <div className="small text-secondary">
+              {detailTotalFields > 0
+                ? `${detailTotalFields} Table v1 fields measured per item`
+                : "Table v1 field template not available"}
+            </div>
+          </div>
+          {detailsFilter !== DEFAULT_FILTER && (
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={() => {
+                setDetailsFilter(DEFAULT_FILTER);
+                setPage(1);
+              }}
+            >
+              Clear details filter
+            </button>
+          )}
+        </div>
+
         <div className="row g-3 mb-3">
-          <SummaryCard label="Not Set" value={summary.not_set ?? 0} />
-          <SummaryCard label="Created" value={summary.created ?? 0} />
-          <SummaryCard label="Checked" value={summary.checked ?? 0} />
-          <SummaryCard label="Approved" value={summary.approved ?? 0} />
+          {DETAILS_FILTER_OPTIONS.map((option) => (
+            <SummaryCard
+              key={option.value}
+              label={option.label}
+              value={Number(detailBuckets?.[option.value] || 0)}
+              active={detailsFilter === option.value}
+              onClick={() => handleDetailsBucketClick(option.value)}
+            />
+          ))}
         </div>
 
         {error && <div className="alert alert-danger mb-3">{error}</div>}
@@ -2562,6 +2660,7 @@ const ProductDatabase = () => {
                       <th>Vendor</th>
                       <th>Product Sizes</th>
                       <th>Box Sizes</th>
+                      <th>Details Filled</th>
                       <th>Status</th>
                       <th>Audit</th>
                       <th>Actions</th>
@@ -2591,6 +2690,18 @@ const ProductDatabase = () => {
                             Mode: {formatBoxMode(getDisplayBoxMode(row))}
                           </div>
                           <SizeSummary entries={getDisplayBoxSizes(row)} type="box" />
+                        </td>
+                        <td>
+                          {row?.pd_completion?.total ? (
+                            <div className="small">
+                              <div className="fw-semibold">{row.pd_completion.percentage}%</div>
+                              <div className="text-secondary">
+                                {row.pd_completion.filled} / {row.pd_completion.total}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="small text-secondary">N/A</span>
+                          )}
                         </td>
                         <td>
                           <span className={`badge ${getStatusBadgeClass(row.pd_checked)}`}>

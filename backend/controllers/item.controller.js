@@ -71,11 +71,16 @@ const {
   applyProductDatabaseApprove,
   applyProductDatabaseCheck,
   applyProductDatabaseSave,
+  buildProductDatabaseCompletion,
+  buildProductDatabaseCompletionRangeSummary,
   buildProductDatabaseRow,
+  normalizeProductDatabaseCompletionRange,
   normalizePdStatus,
+  productDatabaseCompletionMatchesRange,
 } = require("../helpers/productDatabase");
 const {
   buildProductTypeSnapshot,
+  flattenTemplateFields,
   mapUploadedRowToProductSpecs,
   normalizeProductSpecsPayload,
   normalizeTemplateKey,
@@ -1540,6 +1545,29 @@ const PRODUCT_DATABASE_ITEM_SELECT = [
   "pd_history",
   "updatedAt",
 ].join(" ");
+const PRODUCT_DATABASE_COMPLETION_TEMPLATE_KEY = "table";
+const PRODUCT_DATABASE_COMPLETION_TEMPLATE_VERSION = 1;
+const PRODUCT_DATABASE_TABLE_V1_COMPLETION_FALLBACK_FIELDS = Object.freeze([
+  {
+    key: "table_top_thickness",
+    label: "Table Top Thickness",
+    input_type: "number",
+    value_type: "number",
+    order: 45,
+    group_key: "table_details",
+    group_label: "Table Details",
+  },
+  {
+    key: "distances_between_legs",
+    label: "Distances Between Legs",
+    input_type: "number_list",
+    value_type: "array",
+    unit: "cm",
+    order: 75,
+    group_key: "table_details",
+    group_label: "Table Details",
+  },
+]);
 const ITEM_DETAILS_SELECT = [
   "code",
   "name",
@@ -1612,6 +1640,84 @@ const buildProductDatabaseStatusMatch = (status) => {
 
   const statusValue = normalizePdStatus(normalizedStatus);
   return statusValue ? { pd_checked: statusValue } : {};
+};
+
+const itemMatchesProductDatabaseStatus = (item = {}, status = "") => {
+  const normalizedStatus = String(status ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (!normalizedStatus || normalizedStatus === "all") return true;
+  const itemStatus = normalizePdStatus(item?.pd_checked) || NOT_SET_STATUS;
+  if (normalizedStatus === NOT_SET_STATUS || normalizedStatus === "not_set") {
+    return itemStatus === NOT_SET_STATUS;
+  }
+  const requestedStatus = normalizePdStatus(normalizedStatus);
+  if (!requestedStatus) return true;
+  return itemStatus === requestedStatus;
+};
+
+const countProductDatabaseStatuses = (items = []) => {
+  const summary = {
+    total: Array.isArray(items) ? items.length : 0,
+    not_set: 0,
+    created: 0,
+    checked: 0,
+    approved: 0,
+  };
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const status = normalizePdStatus(item?.pd_checked) || NOT_SET_STATUS;
+    if (Object.prototype.hasOwnProperty.call(summary, status)) {
+      summary[status] += 1;
+    } else {
+      summary.not_set += 1;
+    }
+  });
+
+  return summary;
+};
+
+const getProductDatabaseCompletionTemplateFields = async () => {
+  const template = await ProductTypeTemplate.findOne({
+    key: PRODUCT_DATABASE_COMPLETION_TEMPLATE_KEY,
+    version: PRODUCT_DATABASE_COMPLETION_TEMPLATE_VERSION,
+  }).lean();
+
+  const fields = flattenTemplateFields(template || {}, {
+    includeInactiveGroups: false,
+    includeInactiveFields: false,
+  });
+  if (fields.length > 0) {
+    const fieldKeys = new Set(fields.map((field) => normalizeTemplateKey(field?.key)));
+    PRODUCT_DATABASE_TABLE_V1_COMPLETION_FALLBACK_FIELDS.forEach((field) => {
+      if (!fieldKeys.has(field.key)) {
+        fields.push({ ...field });
+      }
+    });
+  }
+
+  return fields.sort((left, right) => {
+    const groupOrder = normalizeTextField(left?.group_key).localeCompare(
+      normalizeTextField(right?.group_key),
+    );
+    if (groupOrder !== 0) return groupOrder;
+    const orderDelta = Number(left?.order || 0) - Number(right?.order || 0);
+    if (orderDelta !== 0) return orderDelta;
+    return normalizeTextField(left?.label).localeCompare(normalizeTextField(right?.label));
+  });
+};
+
+const attachProductDatabaseCompletion = (items = [], templateFields = []) =>
+  (Array.isArray(items) ? items : []).map((item) => ({
+    ...item,
+    pd_completion: buildProductDatabaseCompletion(item, templateFields),
+  }));
+
+const filterItemsByProductDatabaseDetailsRange = (items = [], range = "") => {
+  const normalizedRange = normalizeProductDatabaseCompletionRange(range);
+  if (!normalizedRange) return Array.isArray(items) ? items : [];
+
+  return (Array.isArray(items) ? items : []).filter((item) =>
+    productDatabaseCompletionMatchesRange(item, normalizedRange),
+  );
 };
 
 const combineMongoMatches = (...matches) => {
@@ -2922,6 +3028,7 @@ exports.getProductDatabaseItems = async (req, res) => {
     const brand = req.query.brand;
     const vendor = req.query.vendor;
     const status = req.query.status;
+    const detailsRange = normalizeProductDatabaseCompletionRange(req.query.details);
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
@@ -2930,52 +3037,58 @@ exports.getProductDatabaseItems = async (req, res) => {
       buildItemMatch({ search, brand, vendor }),
       req.user,
     );
-    const statusMatch = buildProductDatabaseStatusMatch(status);
-    const match = combineMongoMatches(baseMatch, statusMatch);
 
     const [
-      items,
-      totalRecords,
+      baseItemsRaw,
+      completionTemplateFields,
       brandsRaw,
       brandNamesRaw,
       brandsPrimaryRaw,
       vendorsRaw,
-      notSetCount,
-      createdCount,
-      checkedCount,
-      approvedCount,
     ] = await Promise.all([
-      Item.find(match)
+      Item.find(baseMatch)
         .select(PRODUCT_DATABASE_ITEM_SELECT)
         .sort({ updatedAt: -1, code: 1 })
-        .skip(skip)
-        .limit(limit)
         .lean(),
-      Item.countDocuments(match),
+      getProductDatabaseCompletionTemplateFields(),
       Item.distinct("brands", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
       Item.distinct("brand_name", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
       Item.distinct("brand", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
       Item.distinct("vendors", applyItemDataAccess(buildItemMatch({ search, brand }), req.user)),
-      Item.countDocuments(
-        combineMongoMatches(baseMatch, buildProductDatabaseStatusMatch(NOT_SET_STATUS)),
-      ),
-      Item.countDocuments(
-        combineMongoMatches(baseMatch, buildProductDatabaseStatusMatch(PD_STATUSES.CREATED)),
-      ),
-      Item.countDocuments(
-        combineMongoMatches(baseMatch, buildProductDatabaseStatusMatch(PD_STATUSES.CHECKED)),
-      ),
-      Item.countDocuments(
-        combineMongoMatches(baseMatch, buildProductDatabaseStatusMatch(PD_STATUSES.APPROVED)),
-      ),
     ]);
 
+    const baseItems = attachProductDatabaseCompletion(
+      baseItemsRaw,
+      completionTemplateFields,
+    );
+    const statusFilteredItems = baseItems.filter((item) =>
+      itemMatchesProductDatabaseStatus(item, status),
+    );
+    const detailsFilteredBaseItems = filterItemsByProductDatabaseDetailsRange(
+      baseItems,
+      detailsRange,
+    );
+    const matchingItems = filterItemsByProductDatabaseDetailsRange(
+      statusFilteredItems,
+      detailsRange,
+    );
+    const totalRecords = matchingItems.length;
+    const items = matchingItems.slice(skip, skip + limit);
+    const statusSummary = countProductDatabaseStatuses(detailsFilteredBaseItems);
+    const completionSummary = buildProductDatabaseCompletionRangeSummary(
+      statusFilteredItems,
+      completionTemplateFields,
+    );
     const itemLookup = new Map(
       (Array.isArray(items) ? items : []).map((item) => [normalizeTextField(item?._id), item]),
     );
-    const rows = (Array.isArray(items) ? items : []).map((item) =>
-      buildProductDatabaseRow(item, req.user),
-    );
+    const rows = (Array.isArray(items) ? items : []).map((item) => ({
+      ...buildProductDatabaseRow(item, req.user),
+      pd_completion: item?.pd_completion || buildProductDatabaseCompletion(
+        item,
+        completionTemplateFields,
+      ),
+    }));
     const rowsWithThumbnails = await attachProductImageThumbnails(
       rows,
       itemLookup,
@@ -2986,16 +3099,15 @@ exports.getProductDatabaseItems = async (req, res) => {
       success: true,
       rows: rowsWithThumbnails,
       summary: {
-        not_set: notSetCount,
-        created: createdCount,
-        checked: checkedCount,
-        approved: approvedCount,
+        ...statusSummary,
+        details: completionSummary,
       },
       filters: {
         search: normalizeFilterValue(search) || "",
         brand: normalizeFilterValue(brand) || "",
         vendor: normalizeFilterValue(vendor) || "",
         status: String(status || "").trim() || "all",
+        details: detailsRange || "",
         brand_options: normalizeDistinctValues([
           ...(brandsPrimaryRaw || []),
           ...(brandsRaw || []),
@@ -3025,6 +3137,7 @@ exports.exportProductDatabaseItems = async (req, res) => {
     const brand = req.query.brand;
     const vendor = req.query.vendor;
     const status = req.query.status;
+    const detailsRange = normalizeProductDatabaseCompletionRange(req.query.details);
     const baseMatch = applyItemDataAccess(
       buildItemMatch({ search, brand, vendor }),
       req.user,
@@ -3033,12 +3146,23 @@ exports.exportProductDatabaseItems = async (req, res) => {
       baseMatch,
       buildProductDatabaseStatusMatch(status),
     );
-    const items = await Item.find(match)
-      .select(PRODUCT_DATABASE_ITEM_SELECT)
-      .sort({ updatedAt: -1, code: 1 })
-      .lean();
+    const [itemsRaw, completionTemplateFields] = await Promise.all([
+      Item.find(match)
+        .select(PRODUCT_DATABASE_ITEM_SELECT)
+        .sort({ updatedAt: -1, code: 1 })
+        .lean(),
+      getProductDatabaseCompletionTemplateFields(),
+    ]);
+    const items = filterItemsByProductDatabaseDetailsRange(
+      attachProductDatabaseCompletion(itemsRaw, completionTemplateFields),
+      detailsRange,
+    );
     const rows = (Array.isArray(items) ? items : []).map((item) => ({
       ...buildProductDatabaseRow(item, req.user),
+      pd_completion: item?.pd_completion || buildProductDatabaseCompletion(
+        item,
+        completionTemplateFields,
+      ),
       kd: item?.kd === true,
       mounting_file_needed: item?.mounting_file_needed === true,
     }));
@@ -3100,6 +3224,8 @@ exports.exportProductDatabaseItems = async (req, res) => {
       { key: "box_mode", header: "Box Mode" },
       { key: "box_sizes", header: "Box Sizes" },
       { key: "product_specs", header: "Product Specifications" },
+      { key: "pd_completion", header: "PD Details Filled" },
+      { key: "pd_completion_count", header: "PD Details Count" },
       { key: "status", header: "Approval Status" },
       { key: "created_by", header: "Created By" },
       { key: "checked_by", header: "Checked By" },
@@ -3129,6 +3255,12 @@ exports.exportProductDatabaseItems = async (req, res) => {
       box_mode: normalizeTextField(row?.pd_box_mode),
       box_sizes: formatSizesForExport(row?.pd_box_sizes),
       product_specs: stringifyForExport(row?.product_specs),
+      pd_completion: row?.pd_completion?.total
+        ? `${row.pd_completion.percentage}%`
+        : "",
+      pd_completion_count: row?.pd_completion?.total
+        ? `${row.pd_completion.filled}/${row.pd_completion.total}`
+        : "",
       status: normalizeTextField(row?.pd_checked || NOT_SET_STATUS).replace(
         /_/g,
         " ",
@@ -3255,6 +3387,7 @@ const buildItemDatabaseRow = ({
   latest_inspection_report_qc_id: latestInspectionReport?.qc_id || "",
   product_database_status: productDatabaseRow?.pd_checked || NOT_SET_STATUS,
   product_database: productDatabaseRow,
+  pd_completion: productDatabaseRow?.pd_completion || null,
 });
 
 const getItemDatabaseDataset = async ({
@@ -3262,47 +3395,60 @@ const getItemDatabaseDataset = async ({
   brand,
   vendor,
   status,
+  details,
   runningPo = "all",
   user = null,
 } = {}) => {
   const normalizedRunningPo = String(runningPo || "all").trim().toLowerCase();
+  const normalizedDetails = normalizeProductDatabaseCompletionRange(details);
   const baseMatch = applyItemDataAccess(
     buildItemMatch({ search, brand, vendor }),
     user,
   );
-  const statusMatch = buildProductDatabaseStatusMatch(status);
-  const match = combineMongoMatches(baseMatch, statusMatch);
 
   const [
     allMatchedItems,
+    completionTemplateFields,
     brandsRaw,
     brandNamesRaw,
     brandsPrimaryRaw,
     vendorsRaw,
   ] = await Promise.all([
-    Item.find(match)
+    Item.find(baseMatch)
       .select(PRODUCT_DATABASE_ITEM_SELECT)
       .sort({ updatedAt: -1, code: 1 })
       .lean(),
+    getProductDatabaseCompletionTemplateFields(),
     Item.distinct("brands", applyItemDataAccess(buildItemMatch({ search, vendor }), user)),
     Item.distinct("brand_name", applyItemDataAccess(buildItemMatch({ search, vendor }), user)),
     Item.distinct("brand", applyItemDataAccess(buildItemMatch({ search, vendor }), user)),
     Item.distinct("vendors", applyItemDataAccess(buildItemMatch({ search, brand }), user)),
   ]);
 
-  const itemCodes = (Array.isArray(allMatchedItems) ? allMatchedItems : [])
+  const completedItems = attachProductDatabaseCompletion(
+    allMatchedItems,
+    completionTemplateFields,
+  );
+  const itemCodes = (Array.isArray(completedItems) ? completedItems : [])
     .map((item) => item?.code);
   const [runningPoLookup, latestInspectionReportLookup] = await Promise.all([
     buildRunningPoLookup(itemCodes),
     buildLatestInspectionReportLookup(itemCodes),
   ]);
 
-  const rows = (Array.isArray(allMatchedItems) ? allMatchedItems : [])
+  const baseRows = (Array.isArray(completedItems) ? completedItems : [])
     .map((item) => {
       const itemCodeKey = normalizeLookupKey(item?.code);
+      const productDatabaseRow = {
+        ...buildProductDatabaseRow(item, user),
+        pd_completion: item?.pd_completion || buildProductDatabaseCompletion(
+          item,
+          completionTemplateFields,
+        ),
+      };
       return buildItemDatabaseRow({
         item,
-        productDatabaseRow: buildProductDatabaseRow(item, user),
+        productDatabaseRow,
         runningPo: runningPoLookup.get(itemCodeKey) || {},
         latestInspectionReport: latestInspectionReportLookup.get(itemCodeKey) || {},
       });
@@ -3316,15 +3462,39 @@ const getItemDatabaseDataset = async ({
       }
       return true;
     });
+  const statusFilteredRows = baseRows.filter((row) =>
+    itemMatchesProductDatabaseStatus(
+      { pd_checked: row?.product_database_status },
+      status,
+    ),
+  );
+  const detailsFilteredBaseRows = baseRows.filter((row) =>
+    productDatabaseCompletionMatchesRange(row, normalizedDetails),
+  );
+  const rows = statusFilteredRows.filter((row) =>
+    productDatabaseCompletionMatchesRange(row, normalizedDetails),
+  );
+  const statusSummary = countProductDatabaseStatuses(
+    detailsFilteredBaseRows.map((row) => ({ pd_checked: row?.product_database_status })),
+  );
+  const completionSummary = buildProductDatabaseCompletionRangeSummary(
+    statusFilteredRows,
+    completionTemplateFields,
+  );
 
   return {
     rows,
-    allMatchedItems,
+    allMatchedItems: completedItems,
+    summary: {
+      ...statusSummary,
+      details: completionSummary,
+    },
     filters: {
       search: normalizeFilterValue(search) || "",
       brand: normalizeFilterValue(brand) || "",
       vendor: normalizeFilterValue(vendor) || "",
       status: String(status || "").trim() || "all",
+      details: normalizedDetails,
       running_po: normalizedRunningPo || "all",
       brand_options: normalizeDistinctValues([
         ...(brandsPrimaryRaw || []),
@@ -3342,6 +3512,7 @@ exports.getItemDatabaseItems = async (req, res) => {
     const brand = req.query.brand;
     const vendor = req.query.vendor;
     const status = req.query.status;
+    const details = req.query.details;
     const runningPo = String(req.query.running_po || "all").trim().toLowerCase();
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
@@ -3351,6 +3522,7 @@ exports.getItemDatabaseItems = async (req, res) => {
       brand,
       vendor,
       status,
+      details,
       runningPo,
       user: req.user,
     });
@@ -3373,6 +3545,7 @@ exports.getItemDatabaseItems = async (req, res) => {
       success: true,
       rows: rowsWithThumbnails,
       filters: dataset.filters,
+      summary: dataset.summary,
       pagination: {
         page,
         limit,
@@ -3396,6 +3569,7 @@ exports.exportItemDatabaseItems = async (req, res) => {
       brand: req.query.brand,
       vendor: req.query.vendor,
       status: req.query.status,
+      details: req.query.details,
       runningPo: req.query.running_po,
       user: req.user,
     });
@@ -3408,6 +3582,8 @@ exports.exportItemDatabaseItems = async (req, res) => {
       { key: "current_running_po_ids", header: "Running PO IDs" },
       { key: "last_inspected_date", header: "Last Inspected Date" },
       { key: "product_database_status", header: "PD Status" },
+      { key: "pd_completion", header: "PD Details Filled" },
+      { key: "pd_completion_count", header: "PD Details Count" },
     ];
     const exportRows = dataset.rows.map((row) => ({
       item_code: String(row?.item_code || "").trim(),
@@ -3427,6 +3603,12 @@ exports.exportItemDatabaseItems = async (req, res) => {
         String(row?.product_database_status || NOT_SET_STATUS)
           .trim()
           .replace(/_/g, " "),
+      pd_completion: row?.pd_completion?.total
+        ? `${row.pd_completion.percentage}%`
+        : "",
+      pd_completion_count: row?.pd_completion?.total
+        ? `${row.pd_completion.filled}/${row.pd_completion.total}`
+        : "",
     }));
     const headerRow = columns.map((column) => column.header);
     const dataRows = exportRows.map((row) =>

@@ -895,6 +895,104 @@ small,
   line-height: 1;
 }
 
+.product-database-status-pill {
+  background: var(--om-color-surface);
+  color: var(--om-color-text);
+  border-color: var(--om-color-border-strong);
+}
+
+.product-database-status-pill.created {
+  background: var(--om-color-warning-soft);
+}
+
+.product-database-status-pill.checked {
+  background: var(--om-color-accent-soft);
+}
+
+.product-database-status-pill.approved {
+  background: var(--om-color-success-soft);
+}
+
+.product-database-summary-card {
+  border: 1px solid var(--om-color-border);
+  color: var(--om-color-text);
+  cursor: pointer;
+  appearance: none;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.product-database-summary-card:hover,
+.product-database-summary-card:focus-visible,
+.product-database-summary-card.is-active {
+  border-color: var(--om-color-accent-strong);
+  box-shadow: var(--om-shadow-sm);
+}
+
+.product-database-summary-card:focus-visible {
+  outline: 3px solid rgba(124, 109, 89, 0.22);
+  outline-offset: 2px;
+}
+
+.product-database-summary-card:active {
+  transform: translateY(1px);
+}
+
+.product-database-summary-card.is-active {
+  background: var(--om-color-accent-soft);
+}
+
+.item-database-status-pill {
+  background: var(--om-color-surface);
+  color: var(--om-color-text);
+  border-color: var(--om-color-border-strong);
+}
+
+.item-database-status-pill.created {
+  background: var(--om-color-warning-soft);
+}
+
+.item-database-status-pill.checked {
+  background: var(--om-color-accent-soft);
+}
+
+.item-database-status-pill.approved {
+  background: var(--om-color-success-soft);
+}
+
+.item-database-summary-card {
+  border: 1px solid var(--om-color-border);
+  color: var(--om-color-text);
+  cursor: pointer;
+  appearance: none;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.item-database-summary-card:hover,
+.item-database-summary-card:focus-visible,
+.item-database-summary-card.is-active {
+  border-color: var(--om-color-accent-strong);
+  box-shadow: var(--om-shadow-sm);
+}
+
+.item-database-summary-card:focus-visible {
+  outline: 3px solid rgba(124, 109, 89, 0.22);
+  outline-offset: 2px;
+}
+
+.item-database-summary-card:active {
+  transform: translateY(1px);
+}
+
+.item-database-summary-card.is-active {
+  background: var(--om-color-accent-soft);
+}
+
 .product-database-product-type-card {
   border-style: dashed;
 }

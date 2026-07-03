@@ -23,11 +23,23 @@ const RUNNING_PO_OPTIONS = [
   { value: "yes", label: "Has Running POs" },
   { value: "no", label: "No Running POs" },
 ];
+const DETAILS_FILTER_OPTIONS = [
+  { value: "0-25", label: "0-25%" },
+  { value: "26-50", label: "26-50%" },
+  { value: "51-75", label: "51-75%" },
+  { value: "76-100", label: "76-100%" },
+];
 
 const normalizeText = (value) => String(value || "").trim();
 const normalizeFilter = (value, fallback = DEFAULT_FILTER) => {
   const normalized = normalizeText(value);
   return normalized || fallback;
+};
+const normalizeDetailsFilter = (value, fallback = DEFAULT_FILTER) => {
+  const normalized = normalizeText(value).replace(/_/g, "-");
+  return DETAILS_FILTER_OPTIONS.some((option) => option.value === normalized)
+    ? normalized
+    : fallback;
 };
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(String(value || ""), 10);
@@ -48,6 +60,44 @@ const getStatusBadgeClass = (value) => {
   if (normalized === "checked") return "text-bg-info";
   if (normalized === "created") return "text-bg-warning";
   return "text-bg-secondary";
+};
+
+const SummaryCard = ({ label, value, active = false, onClick = null }) => (
+  <div className="col-md-6 col-xl-3">
+    <button
+      type="button"
+      className={`card om-card h-100 w-100 text-start item-database-summary-card ${active ? "is-active" : ""}`}
+      onClick={onClick || undefined}
+      disabled={!onClick}
+    >
+      <div className="card-body">
+        <div className="small text-secondary">{label}</div>
+        <div className="h4 mb-0 mt-2">{value}</div>
+      </div>
+    </button>
+  </div>
+);
+
+const ItemDatabaseStatusPills = ({ summary = {} }) => {
+  const total = Number(summary?.total || 0);
+  const statuses = [
+    { key: "created", label: "Created" },
+    { key: "checked", label: "Checked" },
+    { key: "approved", label: "Approved" },
+  ];
+
+  return (
+    <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+      {statuses.map((status) => (
+        <span
+          key={status.key}
+          className={`om-summary-chip item-database-status-pill ${status.key}`}
+        >
+          {status.label}: {Number(summary?.[status.key] || 0)} / {total}
+        </span>
+      ))}
+    </div>
+  );
 };
 
 const downloadBlobResponse = (response, fallbackName) => {
@@ -87,12 +137,24 @@ const ItemDatabase = () => {
   const [draftVendorFilter, setDraftVendorFilter] = useState(() => normalizeFilter(searchParams.get("vendor")));
   const [statusFilter, setStatusFilter] = useState(() => normalizeFilter(searchParams.get("status")));
   const [draftStatusFilter, setDraftStatusFilter] = useState(() => normalizeFilter(searchParams.get("status")));
+  const [detailsFilter, setDetailsFilter] = useState(() => normalizeDetailsFilter(searchParams.get("details")));
   const [runningPoFilter, setRunningPoFilter] = useState(() => normalizeFilter(searchParams.get("running_po")));
   const [draftRunningPoFilter, setDraftRunningPoFilter] = useState(() => normalizeFilter(searchParams.get("running_po")));
   const [page, setPage] = useState(() => parsePositiveInt(searchParams.get("page"), 1));
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [totalRecords, setTotalRecords] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [summary, setSummary] = useState({
+    total: 0,
+    not_set: 0,
+    created: 0,
+    checked: 0,
+    approved: 0,
+    details: {
+      total_fields: 0,
+      buckets: {},
+    },
+  });
 
   const fetchRows = useCallback(async () => {
     try {
@@ -104,6 +166,7 @@ const ItemDatabase = () => {
           brand: brandFilter,
           vendor: vendorFilter,
           status: statusFilter,
+          details: detailsFilter,
           running_po: runningPoFilter,
           include_product_image_thumbnail: true,
           page,
@@ -113,6 +176,7 @@ const ItemDatabase = () => {
 
       setRows(Array.isArray(response?.data?.rows) ? response.data.rows : []);
       setFilters(response?.data?.filters || { brand_options: [], vendor_options: [] });
+      setSummary(response?.data?.summary || {});
       setTotalRecords(Number(response?.data?.pagination?.total || 0));
       setTotalPages(Number(response?.data?.pagination?.totalPages || 1));
     } catch (fetchError) {
@@ -121,7 +185,7 @@ const ItemDatabase = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, limit, page, runningPoFilter, searchInput, statusFilter, vendorFilter]);
+  }, [brandFilter, detailsFilter, limit, page, runningPoFilter, searchInput, statusFilter, vendorFilter]);
 
   useEffect(() => {
     fetchRows();
@@ -133,6 +197,7 @@ const ItemDatabase = () => {
     if (brandFilter !== DEFAULT_FILTER) nextParams.set("brand", brandFilter);
     if (vendorFilter !== DEFAULT_FILTER) nextParams.set("vendor", vendorFilter);
     if (statusFilter !== DEFAULT_FILTER) nextParams.set("status", statusFilter);
+    if (detailsFilter !== DEFAULT_FILTER) nextParams.set("details", detailsFilter);
     if (runningPoFilter !== DEFAULT_FILTER) nextParams.set("running_po", runningPoFilter);
     if (page > 1) nextParams.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) nextParams.set("limit", String(limit));
@@ -142,6 +207,7 @@ const ItemDatabase = () => {
     }
   }, [
     brandFilter,
+    detailsFilter,
     limit,
     page,
     runningPoFilter,
@@ -172,6 +238,7 @@ const ItemDatabase = () => {
     setBrandFilter(DEFAULT_FILTER);
     setVendorFilter(DEFAULT_FILTER);
     setStatusFilter(DEFAULT_FILTER);
+    setDetailsFilter(DEFAULT_FILTER);
     setRunningPoFilter(DEFAULT_FILTER);
     setPage(1);
   };
@@ -186,6 +253,7 @@ const ItemDatabase = () => {
           brand: brandFilter,
           vendor: vendorFilter,
           status: statusFilter,
+          details: detailsFilter,
           running_po: runningPoFilter,
         },
       });
@@ -211,7 +279,21 @@ const ItemDatabase = () => {
     } finally {
       setExporting(false);
     }
-  }, [brandFilter, runningPoFilter, searchInput, statusFilter, vendorFilter]);
+  }, [brandFilter, detailsFilter, runningPoFilter, searchInput, statusFilter, vendorFilter]);
+
+  const detailSummary = summary?.details || {};
+  const detailBuckets = detailSummary?.buckets || {};
+  const detailTotalFields = Number(detailSummary?.total_fields || 0);
+  const statusSummary = {
+    total: Number(summary?.total || 0),
+    created: Number(summary?.created || 0),
+    checked: Number(summary?.checked || 0),
+    approved: Number(summary?.approved || 0),
+  };
+  const handleDetailsBucketClick = (bucketValue) => {
+    setDetailsFilter((current) => (current === bucketValue ? DEFAULT_FILTER : bucketValue));
+    setPage(1);
+  };
 
   return (
     <>
@@ -224,14 +306,17 @@ const ItemDatabase = () => {
               {totalRecords} item{totalRecords === 1 ? "" : "s"}
             </div>
           </div>
-          <button
-            type="button"
-            className="btn btn-outline-primary btn-sm"
-            onClick={handleExportXls}
-            disabled={exporting || loading || totalRecords === 0}
-          >
-            {exporting ? "Exporting..." : "Export XLS"}
-          </button>
+          <div className="d-flex flex-column align-items-end gap-2">
+            <ItemDatabaseStatusPills summary={statusSummary} />
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-sm"
+              onClick={handleExportXls}
+              disabled={exporting || loading || totalRecords === 0}
+            >
+              {exporting ? "Exporting..." : "Export XLS"}
+            </button>
+          </div>
         </div>
 
         <div className="card om-card mb-4">
@@ -325,6 +410,41 @@ const ItemDatabase = () => {
 
         {error && <div className="alert alert-danger">{error}</div>}
 
+        <div className="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-2">
+          <div>
+            <h3 className="h6 mb-1">PD Details Filled</h3>
+            <div className="small text-secondary">
+              {detailTotalFields > 0
+                ? `${detailTotalFields} Table v1 fields measured per item`
+                : "Table v1 field template not available"}
+            </div>
+          </div>
+          {detailsFilter !== DEFAULT_FILTER && (
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={() => {
+                setDetailsFilter(DEFAULT_FILTER);
+                setPage(1);
+              }}
+            >
+              Clear details filter
+            </button>
+          )}
+        </div>
+
+        <div className="row g-3 mb-4">
+          {DETAILS_FILTER_OPTIONS.map((option) => (
+            <SummaryCard
+              key={option.value}
+              label={option.label}
+              value={Number(detailBuckets?.[option.value] || 0)}
+              active={detailsFilter === option.value}
+              onClick={() => handleDetailsBucketClick(option.value)}
+            />
+          ))}
+        </div>
+
         <div className="card om-card">
           <div className="card-body p-0">
             {loading ? (
@@ -340,6 +460,7 @@ const ItemDatabase = () => {
                       <th>Vendor</th>
                       <th>Current Running POs</th>
                       <th>Last Inspected Date</th>
+                      <th>Details Filled</th>
                       <th>PD Status</th>
                       <th>Action</th>
                     </tr>
@@ -369,6 +490,18 @@ const ItemDatabase = () => {
                         </td>
                         <td>{row.last_inspected_date ? formatDateDDMMYYYY(row.last_inspected_date) : "N/A"}</td>
                         <td>
+                          {row?.pd_completion?.total ? (
+                            <div className="small">
+                              <div className="fw-semibold">{row.pd_completion.percentage}%</div>
+                              <div className="text-secondary">
+                                {row.pd_completion.filled} / {row.pd_completion.total}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="small text-secondary">N/A</span>
+                          )}
+                        </td>
+                        <td>
                           <span className={`badge ${getStatusBadgeClass(row.product_database_status)}`}>
                             {getStatusLabel(row.product_database_status)}
                           </span>
@@ -386,7 +519,7 @@ const ItemDatabase = () => {
                     ))}
                     {rows.length === 0 && (
                       <tr>
-                        <td className="text-center py-4" colSpan={8}>No items found</td>
+                        <td className="text-center py-4" colSpan={9}>No items found</td>
                       </tr>
                     )}
                   </tbody>
