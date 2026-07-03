@@ -6,6 +6,7 @@ const {
   S3Client,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   GetBucketCorsCommand,
   PutObjectCommand,
   PutBucketCorsCommand,
@@ -237,6 +238,7 @@ const uploadBuffer = async ({
   key,
   originalName = "",
   contentType = "application/octet-stream",
+  cacheControl = "",
   queueSize = DEFAULT_UPLOAD_QUEUE_SIZE,
   partSize = DEFAULT_UPLOAD_PART_SIZE,
 }) => {
@@ -267,6 +269,7 @@ const uploadBuffer = async ({
         Key: key,
         Body: buffer,
         ContentType: contentType,
+        ...(normalizeValue(cacheControl) ? { CacheControl: normalizeValue(cacheControl) } : {}),
       },
     });
 
@@ -290,6 +293,7 @@ const uploadStream = async ({
   key,
   originalName = "",
   contentType = "application/octet-stream",
+  cacheControl = "",
   queueSize = DEFAULT_UPLOAD_QUEUE_SIZE,
   partSize = DEFAULT_UPLOAD_PART_SIZE,
   size = 0,
@@ -319,6 +323,7 @@ const uploadStream = async ({
           Key: key,
           Body: stream,
           ContentType: contentType,
+          ...(normalizeValue(cacheControl) ? { CacheControl: normalizeValue(cacheControl) } : {}),
         }),
       );
     } else {
@@ -332,6 +337,7 @@ const uploadStream = async ({
           Key: key,
           Body: stream,
           ContentType: contentType,
+          ...(normalizeValue(cacheControl) ? { CacheControl: normalizeValue(cacheControl) } : {}),
         },
       });
 
@@ -356,6 +362,7 @@ const uploadFile = async ({
   key,
   originalName = "",
   contentType = "application/octet-stream",
+  cacheControl = "",
   queueSize = DEFAULT_UPLOAD_QUEUE_SIZE,
   partSize = DEFAULT_UPLOAD_PART_SIZE,
 }) => {
@@ -389,6 +396,7 @@ const uploadFile = async ({
     key,
     originalName,
     contentType,
+    cacheControl,
     queueSize: safeQueueSize,
     partSize: safePartSize,
     size: fileSize,
@@ -467,6 +475,40 @@ const getObjectBuffer = async (key) => {
   } catch (error) {
     throw new Error(
       `Wasabi download failed: ${error?.message || String(error)}`,
+    );
+  }
+};
+
+const objectExists = async (key) => {
+  if (!normalizeValue(key)) {
+    return false;
+  }
+
+  const client = getClient();
+  const config = getConfig();
+
+  try {
+    await client.send(
+      new HeadObjectCommand({
+        Bucket: config.bucket,
+        Key: key,
+      }),
+    );
+    return true;
+  } catch (error) {
+    const errorName = normalizeValue(error?.name || error?.Code);
+    const statusCode = Number(error?.$metadata?.httpStatusCode || 0);
+    if (
+      statusCode === 404
+      || errorName === "NotFound"
+      || errorName === "NoSuchKey"
+      || errorName === "NotFoundException"
+    ) {
+      return false;
+    }
+
+    throw new Error(
+      `Wasabi object existence check failed: ${error?.message || String(error)}`,
     );
   }
 };
@@ -571,6 +613,7 @@ module.exports = {
   getObjectUrl,
   getSignedObjectUrl,
   getObjectBuffer,
+  objectExists,
   getBucketCors,
   putBucketCors,
   uploadBuffer,

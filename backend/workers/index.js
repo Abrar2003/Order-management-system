@@ -29,6 +29,9 @@ const {
   invalidateOrderCaches,
   invalidateItemCaches,
 } = require("../services/cacheInvalidation.service");
+const {
+  generateThumbnailForStoredQcImage,
+} = require("../services/qcImageThumbnail.service");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 
 const ACTIVE_ORDER_MATCH = {
@@ -431,11 +434,26 @@ const processOrderImportQueue = async (job) => ({
   reason: "Order import remains synchronous unless an endpoint enqueues this job",
 });
 
-const processImageQueue = async (job) => ({
-  skipped: true,
-  jobName: job.name,
-  reason: "QC image upload already optimizes images inline; background post-processing is not required",
-});
+const processImageQueue = async (job) => {
+  if (job.name === JOB_NAMES.GENERATE_QC_IMAGE_THUMBNAIL) {
+    await job.updateProgress(10);
+    const result = await generateThumbnailForStoredQcImage({
+      qcId: job.data?.qcId,
+      imageField: job.data?.imageField,
+      imageId: job.data?.imageId,
+      sourceKey: job.data?.sourceKey,
+      idempotencyKey: job.data?.idempotencyKey,
+    });
+    await job.updateProgress(100);
+    return result;
+  }
+
+  return {
+    skipped: true,
+    jobName: job.name,
+    reason: "Unsupported image processing job",
+  };
+};
 
 const createWorker = (queueName, processor, concurrency) => {
   const worker = new Worker(queueName, processor, {

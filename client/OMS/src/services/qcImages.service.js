@@ -67,6 +67,7 @@ export const normalizeQcImageBatchSummary = (responseData = {}) => {
 export const uploadQcImageBatch = async ({
   qcId,
   files = [],
+  idempotencyKeys = [],
   uploadMode = "bulk",
   imageType = "qc_images",
   comment = "",
@@ -83,6 +84,11 @@ export const uploadQcImageBatch = async ({
 
   (Array.isArray(files) ? files : []).forEach((file) => {
     formData.append("files", file);
+  });
+  (Array.isArray(idempotencyKeys) ? idempotencyKeys : []).forEach((key) => {
+    if (normalizeText(key)) {
+      formData.append("idempotency_keys", normalizeText(key));
+    }
   });
 
   return api.post(`/qc/${encodeURIComponent(qcId)}/images`, formData, {

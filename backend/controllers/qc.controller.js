@@ -1531,8 +1531,35 @@ const buildSignedItemFileList = async (files = [], { logLabel = "Item file" } = 
       ),
   ).then((signedFiles) => signedFiles.filter(Boolean));
 
-const buildSignedQcImage = async (image = {}) =>
-  buildSignedItemFile(image, { logLabel: "QC image" });
+const buildSignedQcImage = async (image = {}) => {
+  const signedImage = await buildSignedItemFile(image, { logLabel: "QC image" });
+  const thumbnailKey = normalizeText(image?.thumbnail_key || "");
+  let thumbnailUrl = thumbnailKey ? "" : normalizeText(image?.thumbnail_url || "");
+
+  if (thumbnailKey) {
+    try {
+      thumbnailUrl = await getSignedObjectUrl(thumbnailKey, {
+        expiresIn: 24 * 60 * 60,
+        filename: path.basename(thumbnailKey) || "qc-image-thumbnail.webp",
+      });
+    } catch (error) {
+      console.error("QC image thumbnail signed URL generation failed:", {
+        key: thumbnailKey,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  return {
+    ...(signedImage || {}),
+    thumbnail_key: thumbnailKey,
+    thumbnail_url: thumbnailUrl,
+    thumbnail_generated_at: image?.thumbnail_generated_at || null,
+    thumbnail_status: normalizeText(image?.thumbnail_status || ""),
+    thumbnail_error: normalizeText(image?.thumbnail_error || ""),
+    thumbnail_attempts: toNonNegativeNumber(image?.thumbnail_attempts, 0),
+  };
+};
 
 const buildSignedQcImageList = async (images = []) =>
   Promise.all(
@@ -1554,6 +1581,28 @@ const buildSignedQcImageList = async (images = []) =>
 
 const getImageListFromQc = (qcDoc = {}, field = "qc_images") =>
   Array.isArray(qcDoc?.[field]) ? qcDoc[field] : [];
+
+const normalizeUploadIdempotencyKeys = (body = {}, expectedCount = 0) => {
+  const rawValue =
+    body?.idempotency_keys ??
+    body?.idempotencyKeys ??
+    body?.idempotency_key ??
+    body?.idempotencyKey ??
+    [];
+  const rawValues = Array.isArray(rawValue) ? rawValue : [rawValue];
+  const normalizedValues = rawValues
+    .map((value) => normalizeText(value).toLowerCase())
+    .filter(Boolean);
+
+  if (normalizedValues.length >= expectedCount) {
+    return normalizedValues.slice(0, expectedCount);
+  }
+
+  return [
+    ...normalizedValues,
+    ...Array.from({ length: Math.max(0, expectedCount - normalizedValues.length) }, () => ""),
+  ];
+};
 
 const findPreviousInspectedQcRecordsForItem = async ({
   qcDoc = {},
@@ -10525,6 +10574,7 @@ exports.uploadQcImages = async (req, res) => {
     } = await processQcImageBatch({
       qc,
       files,
+      idempotencyKeys: normalizeUploadIdempotencyKeys(req.body, files.length),
       uploadMode,
       singleImageComment,
       uploadedBy,
@@ -10688,9 +10738,16 @@ exports.deleteQcImages = async (req, res) => {
       });
     }
 
-    const objectKeysToDelete = imagesToDelete
-      .map((image) => normalizeText(image?.key || ""))
-      .filter(Boolean);
+    const objectKeysToDelete = [
+      ...new Set(
+        imagesToDelete
+          .flatMap((image) => [
+            normalizeText(image?.key || ""),
+            normalizeText(image?.thumbnail_key || ""),
+          ])
+          .filter(Boolean),
+      ),
+    ];
 
     const buildPullCondition = (images = []) => {
       const ids = images

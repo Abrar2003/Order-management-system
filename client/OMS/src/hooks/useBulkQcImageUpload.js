@@ -10,9 +10,12 @@ import {
   uploadQcImageBatch,
 } from "../services/qcImages.service";
 
+const RETRY_DELAYS_MS = [2000, 5000, 10000];
+
 const createInitialState = () => ({
   isUploading: false,
   selectedFiles: [],
+  fileStatuses: [],
   batchStatuses: [],
   currentBatchIndex: 0,
   totalBatches: 0,
@@ -29,11 +32,6 @@ const createInitialState = () => ({
 
 const normalizeText = (value) => String(value ?? "").trim();
 
-const normalizeFileName = (value) => normalizeText(value).toLowerCase();
-
-const normalizeFileBaseName = (value) =>
-  normalizeFileName(value).replace(/\.[^.]+$/, "");
-
 const isAbortError = (error) =>
   error?.code === "ERR_CANCELED" || axios.isCancel?.(error) === true;
 
@@ -42,6 +40,7 @@ const isRetryableUploadError = (error) => {
 
   const status = Number(error?.response?.status || 0);
   if (!error?.response) return true;
+  if (status === 408 || status === 429) return true;
   if (status >= 500) return true;
 
   const errorCode = normalizeText(error?.code).toUpperCase();
@@ -58,6 +57,7 @@ const waitWithSignal = (ms, signal) =>
       return;
     }
 
+    let abortHandler = null;
     const timeoutId = window.setTimeout(() => {
       if (abortHandler) {
         signal?.removeEventListener("abort", abortHandler);
@@ -65,7 +65,7 @@ const waitWithSignal = (ms, signal) =>
       resolve();
     }, ms);
 
-    const abortHandler = () => {
+    abortHandler = () => {
       window.clearTimeout(timeoutId);
       signal?.removeEventListener("abort", abortHandler);
       reject(new Error("Upload cancelled"));
@@ -73,6 +73,18 @@ const waitWithSignal = (ms, signal) =>
 
     signal?.addEventListener("abort", abortHandler, { once: true });
   });
+
+const createIdempotencyKey = () => {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return [
+    Date.now().toString(36),
+    Math.random().toString(36).slice(2, 12),
+    Math.random().toString(36).slice(2, 12),
+  ].join("-");
+};
 
 const mergeUniqueFiles = (files = []) =>
   Array.from(
@@ -83,64 +95,131 @@ const mergeUniqueFiles = (files = []) =>
     ).values(),
   );
 
-const createPendingBatchStatuses = (files = [], batchSize = QC_IMAGE_BATCH_SIZE) =>
-  splitFilesIntoBatches(files, batchSize).map((batchFiles, index) => ({
-    batchId: `batch-${index + 1}`,
-    batchNumber: index + 1,
-    fileCount: batchFiles.length,
-    fileNames: batchFiles.map((file) => normalizeText(file?.name)).filter(Boolean),
-    files: batchFiles,
-    status: "pending",
-    progressPercent: 0,
-    uploadedCount: 0,
-    duplicateCount: 0,
-    failedCount: 0,
-    failures: [],
-    skippedDuplicates: [],
-    attempts: 0,
-    message: "",
-    errorMessage: "",
-    retryFiles: [],
-  }));
-
-const computeOverallProgress = (batchStatuses = []) => {
-  if (!Array.isArray(batchStatuses) || batchStatuses.length === 0) {
-    return 0;
-  }
-
-  const totalProgress = batchStatuses.reduce(
-    (sum, batchStatus) => sum + Math.max(0, Math.min(100, Number(batchStatus?.progressPercent || 0))),
-    0,
+const createFileStatuses = (files = [], batchSize = QC_IMAGE_BATCH_SIZE, previousStatuses = []) => {
+  const previousBySignature = new Map(
+    (Array.isArray(previousStatuses) ? previousStatuses : []).map((entry) => [
+      entry.fileSignature,
+      entry,
+    ]),
   );
 
-  return Math.max(0, Math.min(100, Math.round(totalProgress / batchStatuses.length)));
+  return mergeUniqueFiles(files).map((file, index) => {
+    const fileSignature = getQcImageFileSignature(file);
+    const previous = previousBySignature.get(fileSignature);
+
+    return {
+      fileId: previous?.fileId || createIdempotencyKey(),
+      idempotencyKey: previous?.idempotencyKey || createIdempotencyKey(),
+      fileSignature,
+      file,
+      fileName: normalizeText(file?.name) || `QC image ${index + 1}`,
+      fileSize: Number(file?.size || 0),
+      batchNumber: Math.floor(index / Math.max(1, Number(batchSize) || QC_IMAGE_BATCH_SIZE)) + 1,
+      status: "queued",
+      progressPercent: 0,
+      attempts: 0,
+      uploadedCount: 0,
+      duplicateCount: 0,
+      optimizedCount: 0,
+      bytesSaved: 0,
+      message: "",
+      errorMessage: "",
+      failure: null,
+    };
+  });
 };
 
-const mapFailuresToFiles = (batchFiles = [], failures = []) => {
-  const remainingFiles = [...(Array.isArray(batchFiles) ? batchFiles : [])];
-  const matchedFiles = [];
+const statusRank = (status = "") => {
+  if (status === "uploading" || status === "retrying") return 3;
+  if (status === "failed") return 2;
+  if (status === "queued") return 1;
+  return 0;
+};
 
-  (Array.isArray(failures) ? failures : []).forEach((failure) => {
-    const failureName = normalizeFileName(failure?.originalName);
-    const failureBaseName = normalizeFileBaseName(failure?.originalName);
+const buildBatchStatuses = (fileStatuses = [], batchSize = QC_IMAGE_BATCH_SIZE) => {
+  const batches = splitFilesIntoBatches(fileStatuses, batchSize);
 
-    let matchIndex = remainingFiles.findIndex(
-      (file) => normalizeFileName(file?.name) === failureName,
-    );
-
-    if (matchIndex < 0 && failureBaseName) {
-      matchIndex = remainingFiles.findIndex(
-        (file) => normalizeFileBaseName(file?.name) === failureBaseName,
-      );
+  return batches.map((files, index) => {
+    const active = files.some((file) => file.status === "uploading" || file.status === "retrying");
+    const failedCount = files.filter((file) => file.status === "failed").length;
+    const queuedCount = files.filter((file) => file.status === "queued").length;
+    const uploadedCount = files.filter((file) => file.status === "uploaded").length;
+    const duplicateCount = files.reduce((sum, file) => sum + Number(file.duplicateCount || 0), 0);
+    const progressPercent = files.length > 0
+      ? Math.round(
+        files.reduce((sum, file) => sum + Math.max(0, Math.min(100, Number(file.progressPercent || 0))), 0)
+        / files.length,
+      )
+      : 0;
+    let status = "pending";
+    if (active) {
+      status = files.some((file) => file.status === "retrying") ? "retrying" : "uploading";
+    } else if (failedCount > 0 && uploadedCount > 0) {
+      status = "partial";
+    } else if (failedCount > 0) {
+      status = "failed";
+    } else if (queuedCount === 0 && files.length > 0) {
+      status = "success";
     }
 
-    if (matchIndex >= 0) {
-      matchedFiles.push(remainingFiles[matchIndex]);
-      remainingFiles.splice(matchIndex, 1);
-    }
+    return {
+      batchId: `batch-${index + 1}`,
+      batchNumber: index + 1,
+      fileCount: files.length,
+      fileNames: files.map((file) => file.fileName),
+      files,
+      status,
+      progressPercent,
+      uploadedCount,
+      duplicateCount,
+      failedCount,
+      failures: files.map((file) => file.failure).filter(Boolean),
+      skippedDuplicates: [],
+      attempts: Math.max(0, ...files.map((file) => Number(file.attempts || 0))),
+      message: "",
+      errorMessage: files.find((file) => file.errorMessage)?.errorMessage || "",
+      retryFiles: files.filter((file) => file.status === "failed").map((file) => file.file),
+    };
   });
+};
 
-  return matchedFiles;
+const summarizeFileStatuses = (fileStatuses = []) => {
+  const uploadedStatuses = fileStatuses.filter((file) => file.status === "uploaded");
+  const failedStatuses = fileStatuses.filter((file) => file.status === "failed");
+  const uploadedCount = uploadedStatuses.reduce((sum, file) => sum + Number(file.uploadedCount || 0), 0);
+  const duplicateCount = uploadedStatuses.reduce((sum, file) => sum + Number(file.duplicateCount || 0), 0);
+  const optimizedCount = uploadedStatuses.reduce((sum, file) => sum + Number(file.optimizedCount || 0), 0);
+  const bytesSaved = uploadedStatuses.reduce((sum, file) => sum + Number(file.bytesSaved || 0), 0);
+
+  return {
+    uploadedCount,
+    duplicateCount,
+    failedCount: failedStatuses.length,
+    failedFiles: failedStatuses.map((file) => ({
+      originalName: file.fileName,
+      reason: file.errorMessage || file.failure?.reason || "Upload failed",
+      idempotencyKey: file.idempotencyKey,
+    })),
+    optimizedCount,
+    bytesSaved,
+  };
+};
+
+const computeOverallProgress = (fileStatuses = []) => {
+  if (!Array.isArray(fileStatuses) || fileStatuses.length === 0) return 0;
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        fileStatuses.reduce(
+          (sum, file) => sum + Math.max(0, Math.min(100, Number(file.progressPercent || 0))),
+          0,
+        ) / fileStatuses.length,
+      ),
+    ),
+  );
 };
 
 const createSummaryMessage = ({
@@ -149,8 +228,8 @@ const createSummaryMessage = ({
   duplicateCount = 0,
   failedCount = 0,
 } = {}) => {
-  if (uploadedCount > 0) {
-    let message = `${uploadedCount} of ${totalSelectedCount} image${totalSelectedCount === 1 ? "" : "s"} uploaded successfully`;
+  if (uploadedCount > 0 || duplicateCount > 0) {
+    let message = `${uploadedCount + duplicateCount} of ${totalSelectedCount} image${totalSelectedCount === 1 ? "" : "s"} confirmed uploaded`;
     if (duplicateCount > 0) {
       message += `. ${duplicateCount} duplicate${duplicateCount === 1 ? "" : "s"} skipped`;
     }
@@ -160,15 +239,52 @@ const createSummaryMessage = ({
     return `${message}.`;
   }
 
-  if (duplicateCount > 0 && failedCount === 0) {
-    return "All selected images were duplicates and were skipped.";
-  }
-
   if (failedCount > 0) {
-    return `${failedCount} file${failedCount === 1 ? "" : "s"} still failed after batching.`;
+    return `${failedCount} file${failedCount === 1 ? "" : "s"} still failed.`;
   }
 
-  return "No QC image batches have been uploaded yet.";
+  return "No QC images have been uploaded yet.";
+};
+
+const getServerFailureMessage = (responseData = {}) => {
+  const normalizedSummary = normalizeQcImageBatchSummary(responseData);
+  const firstFailure = normalizedSummary.failures[0];
+  return firstFailure?.reason || normalizedSummary.message || "Image upload failed.";
+};
+
+const isRetryableServerFailure = (failure = {}) => {
+  const stage = normalizeText(failure?.stage).toLowerCase();
+  const reason = normalizeText(failure?.reason).toLowerCase();
+
+  if (stage === "validation" || stage === "limit") return false;
+  if (
+    reason.includes("only jpg") ||
+    reason.includes("unsupported") ||
+    reason.includes("upload limit") ||
+    reason.includes("limit reached")
+  ) {
+    return false;
+  }
+
+  if (stage === "upload" || stage === "persist") return true;
+
+  return [
+    "network",
+    "timeout",
+    "timed out",
+    "temporary",
+    "throttl",
+    "rate",
+    "slowdown",
+    "socket",
+    "econnreset",
+    "408",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+  ].some((needle) => reason.includes(needle));
 };
 
 export const useBulkQcImageUpload = ({
@@ -182,6 +298,27 @@ export const useBulkQcImageUpload = ({
   const abortControllerRef = useRef(null);
   const uploadInFlightRef = useRef(false);
 
+  const recomputeState = useCallback((baseState, nextFileStatuses) => {
+    const safeFileStatuses = Array.isArray(nextFileStatuses) ? nextFileStatuses : [];
+    const counts = summarizeFileStatuses(safeFileStatuses);
+    const batchStatuses = buildBatchStatuses(safeFileStatuses, batchSize);
+
+    return {
+      ...baseState,
+      fileStatuses: safeFileStatuses,
+      selectedFiles: safeFileStatuses.map((file) => file.file).filter(Boolean),
+      batchStatuses,
+      totalBatches: batchStatuses.length,
+      progressPercent: computeOverallProgress(safeFileStatuses),
+      uploadedCount: counts.uploadedCount,
+      duplicateCount: counts.duplicateCount,
+      failedCount: counts.failedCount,
+      failedFiles: counts.failedFiles,
+      optimizedCount: counts.optimizedCount,
+      bytesSaved: counts.bytesSaved,
+    };
+  }, [batchSize]);
+
   const updateState = useCallback((updater) => {
     if (!isMountedRef.current) return;
 
@@ -194,6 +331,19 @@ export const useBulkQcImageUpload = ({
       return nextState;
     });
   }, []);
+
+  const updateFileStatus = useCallback((fileId, updater) => {
+    updateState((previousState) => {
+      const nextFileStatuses = previousState.fileStatuses.map((fileStatus) => {
+        if (fileStatus.fileId !== fileId) return fileStatus;
+        return typeof updater === "function"
+          ? updater(fileStatus)
+          : { ...fileStatus, ...updater };
+      });
+
+      return recomputeState(previousState, nextFileStatuses);
+    });
+  }, [recomputeState, updateState]);
 
   useEffect(() => {
     stateRef.current = state;
@@ -244,27 +394,28 @@ export const useBulkQcImageUpload = ({
       messages.push(`Only the first ${maxFiles} images were kept.`);
     }
 
-    const pendingBatchStatuses = createPendingBatchStatuses(validFiles, batchSize);
+    const nextFileStatuses = createFileStatuses(
+      validFiles,
+      batchSize,
+      stateRef.current.fileStatuses,
+    );
+    const nextBatchStatuses = buildBatchStatuses(nextFileStatuses, batchSize);
 
     updateState((previousState) => ({
-      ...previousState,
-      selectedFiles: validFiles,
-      batchStatuses: pendingBatchStatuses,
-      currentBatchIndex: validFiles.length > 0 ? 1 : 0,
-      totalBatches: pendingBatchStatuses.length,
-      progressPercent: 0,
-      uploadedCount: 0,
-      duplicateCount: 0,
-      failedCount: 0,
-      failedFiles: [],
-      optimizedCount: 0,
-      bytesSaved: 0,
-      summary: null,
-      selectionMessage:
-        messages.join(" ")
-        || (validFiles.length > 0
-          ? `${validFiles.length} image${validFiles.length === 1 ? "" : "s"} ready to upload in ${pendingBatchStatuses.length} batch${pendingBatchStatuses.length === 1 ? "" : "es"}.`
-          : `No valid ${imageTypeLabel}s selected.`),
+      ...recomputeState(
+        {
+          ...previousState,
+          isUploading: false,
+          currentBatchIndex: nextBatchStatuses.length > 0 ? 1 : 0,
+          selectionMessage:
+            messages.join(" ")
+            || (validFiles.length > 0
+              ? `${validFiles.length} image${validFiles.length === 1 ? "" : "s"} ready to upload in ${nextBatchStatuses.length} batch${nextBatchStatuses.length === 1 ? "" : "es"}.`
+              : `No valid ${imageTypeLabel}s selected.`),
+          summary: null,
+        },
+        nextFileStatuses,
+      ),
     }));
 
     return {
@@ -272,64 +423,149 @@ export const useBulkQcImageUpload = ({
       invalidFiles,
       message: messages.join(" "),
     };
-  }, [batchSize, maxFiles, updateState]);
+  }, [batchSize, maxFiles, recomputeState, updateState]);
 
-  const setBatchStatus = useCallback((batchIndex, updater) => {
-    updateState((previousState) => {
-      const nextBatchStatuses = previousState.batchStatuses.map((batchStatus, index) => {
-        if (index !== batchIndex) return batchStatus;
-        return typeof updater === "function" ? updater(batchStatus) : { ...batchStatus, ...updater };
-      });
-
-      return {
-        ...previousState,
-        batchStatuses: nextBatchStatuses,
-        progressPercent: computeOverallProgress(nextBatchStatuses),
-      };
-    });
-  }, [updateState]);
-
-  const uploadBatchWithRetry = useCallback(async ({
-    batchFiles,
+  const uploadSingleFileWithRetry = useCallback(async ({
+    fileStatus,
     uploadMode,
     imageType,
     comment,
     signal,
-    onUploadProgress,
   }) => {
-    let attempts = 0;
+    const maxAttempts = 1 + RETRY_DELAYS_MS.length;
 
-    while (attempts < 2) {
-      attempts += 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const retrying = attempt > 1;
+      updateFileStatus(fileStatus.fileId, (current) => ({
+        ...current,
+        status: retrying ? "retrying" : "uploading",
+        attempts: attempt,
+        progressPercent: retrying ? 0 : Math.max(3, current.progressPercent || 0),
+        errorMessage: retrying
+          ? `Retrying after ${Math.round(RETRY_DELAYS_MS[attempt - 2] / 1000)} seconds...`
+          : "",
+        message: "",
+      }));
+
       try {
         const response = await uploadQcImageBatch({
           qcId,
-          files: batchFiles,
+          files: [fileStatus.file],
+          idempotencyKeys: [fileStatus.idempotencyKey],
           uploadMode,
           imageType,
           comment,
           signal,
-          onUploadProgress,
-        });
+          onUploadProgress: (progressEvent) => {
+            if (signal?.aborted) return;
 
-        return { response, attempts };
-      } catch (error) {
-        if (isAbortError(error) || !isRetryableUploadError(error) || attempts >= 2) {
-          throw Object.assign(error, { attempts });
+            const total = Number(progressEvent?.total || 0);
+            const loaded = Number(progressEvent?.loaded || 0);
+            const percent = total > 0
+              ? Math.round((loaded / total) * 100)
+              : Math.min(95, Math.max(10, loaded > 0 ? 25 : 10));
+
+            updateFileStatus(fileStatus.fileId, (current) => ({
+              ...current,
+              progressPercent: Math.max(3, Math.min(percent, 95)),
+            }));
+          },
+        });
+        const normalizedSummary = normalizeQcImageBatchSummary(response?.data);
+
+        if (normalizedSummary.failedCount > 0 && normalizedSummary.uploadedCount === 0 && normalizedSummary.skippedDuplicateCount === 0) {
+          const failure = normalizedSummary.failures[0] || {
+            originalName: fileStatus.fileName,
+            reason: getServerFailureMessage(response?.data),
+          };
+
+          const retryIndex = attempt - 1;
+          if (isRetryableServerFailure(failure) && retryIndex < RETRY_DELAYS_MS.length) {
+            const delayMs = RETRY_DELAYS_MS[retryIndex];
+            updateFileStatus(fileStatus.fileId, (current) => ({
+              ...current,
+              status: "retrying",
+              errorMessage:
+                failure.reason ||
+                `Temporary upload failure. Retrying in ${Math.round(delayMs / 1000)} seconds.`,
+              failure,
+            }));
+            await waitWithSignal(delayMs, signal);
+            continue;
+          }
+
+          updateFileStatus(fileStatus.fileId, (current) => ({
+            ...current,
+            status: "failed",
+            progressPercent: 100,
+            errorMessage: failure.reason || "Upload failed",
+            failure,
+            message: normalizedSummary.message,
+          }));
+          return { uploaded: false, failed: true };
         }
 
-        await waitWithSignal(800 * attempts, signal);
+        updateFileStatus(fileStatus.fileId, (current) => ({
+          ...current,
+          status: "uploaded",
+          progressPercent: 100,
+          uploadedCount: normalizedSummary.uploadedCount,
+          duplicateCount: normalizedSummary.skippedDuplicateCount,
+          optimizedCount: normalizedSummary.optimizedCount,
+          bytesSaved: normalizedSummary.bytesSaved,
+          errorMessage: "",
+          failure: null,
+          message: normalizedSummary.message,
+        }));
+        return { uploaded: true };
+      } catch (error) {
+        if (isAbortError(error) || signal?.aborted) {
+          throw error;
+        }
+
+        const retryable = isRetryableUploadError(error);
+        const retryIndex = attempt - 1;
+        if (retryable && retryIndex < RETRY_DELAYS_MS.length) {
+          const delayMs = RETRY_DELAYS_MS[retryIndex];
+          updateFileStatus(fileStatus.fileId, (current) => ({
+            ...current,
+            status: "retrying",
+            errorMessage:
+              error?.response?.data?.message ||
+              error?.message ||
+              `Temporary upload failure. Retrying in ${Math.round(delayMs / 1000)} seconds.`,
+          }));
+          await waitWithSignal(delayMs, signal);
+          continue;
+        }
+
+        const failure = {
+          originalName: fileStatus.fileName,
+          reason:
+            error?.response?.data?.message ||
+            error?.message ||
+            "Upload failed",
+          stage: "request",
+        };
+        updateFileStatus(fileStatus.fileId, (current) => ({
+          ...current,
+          status: "failed",
+          progressPercent: 100,
+          errorMessage: failure.reason,
+          failure,
+        }));
+        return { uploaded: false, failed: true };
       }
     }
 
-    throw new Error("QC image batch upload failed");
-  }, [qcId]);
+    return { uploaded: false, failed: true };
+  }, [qcId, updateFileStatus]);
 
-  const startUpload = useCallback(async ({
+  const runUpload = useCallback(async ({
     uploadMode = "bulk",
     imageType = "qc_images",
     comment = "",
-    files = null,
+    fileStatusesToUpload = [],
   } = {}) => {
     if (stateRef.current.isUploading || uploadInFlightRef.current) return null;
 
@@ -339,9 +575,12 @@ export const useBulkQcImageUpload = ({
       normalizedImageType === "hardware_inspection"
         ? "hardware inspection image"
         : "QC image";
-    const filesToUpload = mergeUniqueFiles(
-      Array.isArray(files) ? files : stateRef.current.selectedFiles,
-    );
+    const runnableFileStatuses = (Array.isArray(fileStatusesToUpload) ? fileStatusesToUpload : [])
+      .filter((fileStatus) => fileStatus?.file && fileStatus.status !== "uploaded")
+      .sort((left, right) =>
+        left.batchNumber - right.batchNumber ||
+        statusRank(right.status) - statusRank(left.status),
+      );
 
     if (!normalizeText(qcId)) {
       updateState((previousState) => ({
@@ -351,7 +590,7 @@ export const useBulkQcImageUpload = ({
       return null;
     }
 
-    if (filesToUpload.length === 0) {
+    if (runnableFileStatuses.length === 0) {
       updateState((previousState) => ({
         ...previousState,
         selectionMessage: `Select at least one ${imageTypeLabel} before uploading.`,
@@ -359,7 +598,7 @@ export const useBulkQcImageUpload = ({
       return null;
     }
 
-    if (normalizedUploadMode === "single" && filesToUpload.length !== 1) {
+    if (normalizedUploadMode === "single" && runnableFileStatuses.length !== 1) {
       updateState((previousState) => ({
         ...previousState,
         selectionMessage: "Single image mode requires exactly one image.",
@@ -372,195 +611,52 @@ export const useBulkQcImageUpload = ({
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    const pendingBatchStatuses = createPendingBatchStatuses(filesToUpload, batchSize);
-    const failedFilesMap = new Map();
-    let uploadedCount = stateRef.current.summary?.uploadedCount || 0;
-    let duplicateCount = stateRef.current.summary?.duplicateCount || 0;
-    let optimizedCount = stateRef.current.summary?.optimizedCount || 0;
-    let bytesSaved = stateRef.current.summary?.bytesSaved || 0;
-
     updateState((previousState) => ({
       ...previousState,
       isUploading: true,
-      selectedFiles:
-        previousState.selectedFiles.length > 0
-          ? previousState.selectedFiles
-          : filesToUpload,
-      batchStatuses: pendingBatchStatuses,
-      currentBatchIndex: pendingBatchStatuses.length > 0 ? 1 : 0,
-      totalBatches: pendingBatchStatuses.length,
-      progressPercent: 0,
-      failedCount: 0,
-      failedFiles: [],
       selectionMessage: "",
-      summary: previousState.summary
-        ? {
-          ...previousState.summary,
-          failedCount: 0,
-          failedFiles: [],
-        }
-        : null,
+      summary: null,
     }));
 
     try {
-      for (let batchIndex = 0; batchIndex < pendingBatchStatuses.length; batchIndex += 1) {
-        const batchStatus = pendingBatchStatuses[batchIndex];
-        const batchFiles = batchStatus.files;
+      const batches = splitFilesIntoBatches(runnableFileStatuses, batchSize);
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+        if (abortController.signal.aborted) return null;
 
         updateState((previousState) => ({
           ...previousState,
           currentBatchIndex: batchIndex + 1,
+          totalBatches: Math.max(previousState.totalBatches, batches.length),
         }));
 
-        setBatchStatus(batchIndex, (currentBatchStatus) => ({
-          ...currentBatchStatus,
-          status: "uploading",
-          attempts: currentBatchStatus.attempts + 1,
-          progressPercent: Math.max(3, currentBatchStatus.progressPercent || 0),
-          errorMessage: "",
-          message: "",
-        }));
+        for (const fileStatus of batches[batchIndex]) {
+          if (abortController.signal.aborted) return null;
 
-        try {
-          const { response, attempts } = await uploadBatchWithRetry({
-            batchFiles,
+          await uploadSingleFileWithRetry({
+            fileStatus,
             uploadMode: normalizedUploadMode,
             imageType: normalizedImageType,
             comment,
             signal: abortController.signal,
-            onUploadProgress: (progressEvent) => {
-              if (abortController.signal.aborted) return;
-
-              const total = Number(progressEvent?.total || 0);
-              const loaded = Number(progressEvent?.loaded || 0);
-              const percent = total > 0
-                ? Math.round((loaded / total) * 100)
-                : Math.min(95, Math.max(10, loaded > 0 ? 25 : 10));
-
-              setBatchStatus(batchIndex, (currentBatchStatus) => ({
-                ...currentBatchStatus,
-                progressPercent: Math.max(
-                  currentBatchStatus.status === "uploading" ? 3 : 0,
-                  Math.min(percent, 95),
-                ),
-              }));
-            },
           });
-
-          const normalizedSummary = normalizeQcImageBatchSummary(response?.data);
-          const retryFiles = normalizedSummary.failedCount > 0
-            ? (mapFailuresToFiles(batchFiles, normalizedSummary.failures).length > 0
-              ? mapFailuresToFiles(batchFiles, normalizedSummary.failures)
-              : batchFiles)
-            : [];
-
-          uploadedCount += normalizedSummary.uploadedCount;
-          duplicateCount += normalizedSummary.skippedDuplicateCount;
-          optimizedCount += normalizedSummary.optimizedCount;
-          bytesSaved += normalizedSummary.bytesSaved;
-
-          retryFiles.forEach((file, index) => {
-            const failureEntry =
-              normalizedSummary.failures[index]
-              || normalizedSummary.failures.find(
-                (failure) =>
-                  normalizeFileName(failure?.originalName) === normalizeFileName(file?.name),
-              )
-              || {
-                originalName: normalizeText(file?.name),
-                reason: "Batch reported a failed file.",
-              };
-            failedFilesMap.set(getQcImageFileSignature(file), failureEntry);
-          });
-
-          batchFiles.forEach((file) => {
-            if (!retryFiles.some(
-              (retryFile) => getQcImageFileSignature(retryFile) === getQcImageFileSignature(file),
-            )) {
-              failedFilesMap.delete(getQcImageFileSignature(file));
-            }
-          });
-
-          setBatchStatus(batchIndex, (currentBatchStatus) => ({
-            ...currentBatchStatus,
-            status: normalizedSummary.failedCount > 0 ? "partial" : "success",
-            attempts,
-            progressPercent: 100,
-            uploadedCount: normalizedSummary.uploadedCount,
-            duplicateCount: normalizedSummary.skippedDuplicateCount,
-            failedCount: normalizedSummary.failedCount,
-            failures: normalizedSummary.failures,
-            skippedDuplicates: normalizedSummary.skippedDuplicates,
-            retryFiles,
-            message: normalizedSummary.message,
-            errorMessage: "",
-          }));
-        } catch (error) {
-          if (isAbortError(error) || abortController.signal.aborted) {
-            return null;
-          }
-
-          const attempts = Math.max(1, Number(error?.attempts || 1));
-          const fallbackFailures = batchFiles.map((file) => ({
-            originalName: normalizeText(file?.name) || "unknown-file",
-            reason:
-              error?.response?.data?.message
-              || error?.message
-              || "Batch request failed before the server returned a summary.",
-            stage: "request",
-          }));
-
-          batchFiles.forEach((file, index) => {
-            failedFilesMap.set(
-              getQcImageFileSignature(file),
-              fallbackFailures[index],
-            );
-          });
-
-          setBatchStatus(batchIndex, (currentBatchStatus) => ({
-            ...currentBatchStatus,
-            status: "failed",
-            attempts,
-            progressPercent: 100,
-            uploadedCount: 0,
-            duplicateCount: 0,
-            failedCount: batchFiles.length,
-            failures: fallbackFailures,
-            skippedDuplicates: [],
-            retryFiles: batchFiles,
-            message: "",
-            errorMessage:
-              error?.response?.data?.message
-              || error?.message
-              || "Batch upload failed.",
-          }));
         }
       }
     } finally {
-      const batchStatuses = stateRef.current.batchStatuses;
-      const failedFiles = Array.from(failedFilesMap.values());
+      const latestStatuses = stateRef.current.fileStatuses;
+      const counts = summarizeFileStatuses(latestStatuses);
+      const totalSelectedCount = latestStatuses.length;
       const summary = {
-        totalSelectedCount:
-          stateRef.current.summary?.totalSelectedCount
-          || stateRef.current.selectedFiles.length
-          || filesToUpload.length,
-        uploadedCount,
-        duplicateCount,
-        failedCount: failedFiles.length,
-        failedFiles,
-        optimizedCount,
-        bytesSaved,
+        totalSelectedCount,
+        ...counts,
         currentBatchIndex: stateRef.current.currentBatchIndex,
         totalBatches: stateRef.current.totalBatches,
-        batchStatuses,
+        batchStatuses: stateRef.current.batchStatuses,
         message: createSummaryMessage({
-          totalSelectedCount:
-            stateRef.current.summary?.totalSelectedCount
-            || stateRef.current.selectedFiles.length
-            || filesToUpload.length,
-          uploadedCount,
-          duplicateCount,
-          failedCount: failedFiles.length,
+          totalSelectedCount,
+          uploadedCount: counts.uploadedCount,
+          duplicateCount: counts.duplicateCount,
+          failedCount: counts.failedCount,
         }),
       };
 
@@ -568,56 +664,77 @@ export const useBulkQcImageUpload = ({
       uploadInFlightRef.current = false;
 
       updateState((previousState) => ({
-        ...previousState,
-        isUploading: false,
-        progressPercent: computeOverallProgress(previousState.batchStatuses),
-        uploadedCount,
-        duplicateCount,
-        failedCount: failedFiles.length,
-        failedFiles,
-        optimizedCount,
-        bytesSaved,
-        summary,
+        ...recomputeState(
+          {
+            ...previousState,
+            isUploading: false,
+            summary,
+          },
+          latestStatuses,
+        ),
       }));
     }
 
-    return {
-      uploadedCount,
-      duplicateCount,
-      failedCount: failedFilesMap.size,
-      failedFiles: Array.from(failedFilesMap.values()),
-      optimizedCount,
-      bytesSaved,
-    };
-  }, [batchSize, qcId, setBatchStatus, updateState, uploadBatchWithRetry]);
+    const counts = summarizeFileStatuses(stateRef.current.fileStatuses);
+    return counts;
+  }, [batchSize, qcId, recomputeState, updateState, uploadSingleFileWithRetry]);
 
-  const retryFailedFiles = useCallback(async ({ uploadMode = "bulk", imageType = "qc_images", comment = "" } = {}) => {
-    const retryFiles = mergeUniqueFiles(
-      stateRef.current.batchStatuses.flatMap((batchStatus) => batchStatus.retryFiles || []),
+  const startUpload = useCallback(async ({
+    uploadMode = "bulk",
+    imageType = "qc_images",
+    comment = "",
+    files = null,
+  } = {}) => {
+    let nextStatuses = stateRef.current.fileStatuses;
+
+    if (Array.isArray(files)) {
+      nextStatuses = createFileStatuses(files, batchSize, stateRef.current.fileStatuses);
+      updateState((previousState) =>
+        recomputeState(
+          {
+            ...previousState,
+            selectionMessage: "",
+            summary: null,
+          },
+          nextStatuses,
+        ),
+      );
+    }
+
+    const uploadCandidates = nextStatuses.filter((fileStatus) =>
+      fileStatus.status === "queued" || fileStatus.status === "failed",
     );
 
-    if (retryFiles.length === 0) {
+    return runUpload({
+      uploadMode,
+      imageType,
+      comment,
+      fileStatusesToUpload: uploadCandidates,
+    });
+  }, [batchSize, recomputeState, runUpload, updateState]);
+
+  const retryFailedFiles = useCallback(async ({ uploadMode = "bulk", imageType = "qc_images", comment = "" } = {}) => {
+    const retryStatuses = stateRef.current.fileStatuses.filter((fileStatus) => fileStatus.status === "failed");
+
+    if (retryStatuses.length === 0) {
       updateState((previousState) => ({
         ...previousState,
-        selectionMessage: "There are no failed QC image batches to retry.",
+        selectionMessage: "There are no failed QC image uploads to retry.",
       }));
       return null;
     }
 
-    return startUpload({
+    return runUpload({
       uploadMode,
       imageType,
       comment,
-      files: retryFiles,
+      fileStatusesToUpload: retryStatuses,
     });
-  }, [startUpload, updateState]);
+  }, [runUpload, updateState]);
 
   const canRetryFailedFiles = useMemo(
-    () =>
-      state.batchStatuses.some(
-        (batchStatus) => Array.isArray(batchStatus.retryFiles) && batchStatus.retryFiles.length > 0,
-      ),
-    [state.batchStatuses],
+    () => state.fileStatuses.some((fileStatus) => fileStatus.status === "failed"),
+    [state.fileStatuses],
   );
 
   const cancelUpload = useCallback(() => {

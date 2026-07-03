@@ -368,6 +368,25 @@ const getQcImageGroupKey = (image = {}) =>
   image?.gallery_group_key ||
   `${getQcImageUploadedDateLabel(image)}__${getQcImageUploaderName(image)}`;
 
+const getQcImageGalleryItemKey = (image = {}, index = 0) =>
+  [
+    image?.gallery_parent_qc_id || "",
+    image?.gallery_image_field || image?.gallery_source || "qc_images",
+    image?._id || image?.key || image?.url || image?.originalName || index,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join("__");
+
+const getQcImagePreviewUrl = (image = {}) =>
+  String(image?.url || image?.link || "").trim();
+
+const getQcImageThumbnailUrl = (image = {}) =>
+  String(image?.thumbnail_status || image?.thumbnailStatus || "").trim().toLowerCase() === "completed"
+    ? String(image?.thumbnail_url || image?.thumbnailUrl || "").trim()
+      || getQcImagePreviewUrl(image)
+    : getQcImagePreviewUrl(image);
+
 const getDownloadFileName = (response, fallbackName) => {
   const disposition = String(response?.headers?.["content-disposition"] || "");
   const match = disposition.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
@@ -498,6 +517,11 @@ const QcDetails = () => {
   const relatedFileInputRef = useRef(null);
   const relatedFileUploadInFlightRef = useRef(false);
   const relatedFileUploadBatchKeyRef = useRef("");
+  const qcImageGalleryBodyRef = useRef(null);
+  const qcImageGalleryThumbNodesRef = useRef(new Map());
+  const [visibleGalleryThumbKeys, setVisibleGalleryThumbKeys] = useState(() => new Set());
+  const [loadedGalleryThumbKeys, setLoadedGalleryThumbKeys] = useState(() => new Set());
+  const [fallbackGalleryThumbKeys, setFallbackGalleryThumbKeys] = useState(() => new Set());
   const {
     state: qcImageUploadState,
     canRetryFailedFiles: canRetryQcImageUpload,
@@ -1081,6 +1105,13 @@ const QcDetails = () => {
         ),
     [qcImages, showOnlyCommentedQcImages],
   );
+  const visibleQcImageGalleryKeys = useMemo(
+    () =>
+      visibleQcImages.map(({ image, index }) =>
+        getQcImageGalleryItemKey(image, index),
+      ),
+    [visibleQcImages],
+  );
   const qcImageGroups = useMemo(() => {
     const groups = new Map();
 
@@ -1177,6 +1208,117 @@ const QcDetails = () => {
       ),
     [selectableQcImageIds, selectedQcImageIds],
   );
+  const registerQcGalleryThumbNode = useCallback((itemKey, node) => {
+    if (!itemKey) return;
+    if (node) {
+      qcImageGalleryThumbNodesRef.current.set(itemKey, node);
+    } else {
+      qcImageGalleryThumbNodesRef.current.delete(itemKey);
+    }
+  }, []);
+  const markGalleryThumbLoaded = useCallback((itemKey) => {
+    if (!itemKey) return;
+    setLoadedGalleryThumbKeys((current) => {
+      if (current.has(itemKey)) return current;
+      const next = new Set(current);
+      next.add(itemKey);
+      return next;
+    });
+  }, []);
+  const handleGalleryThumbError = useCallback((itemKey, imageUrl, previewUrl) => {
+    if (!itemKey) return;
+    if (previewUrl && imageUrl !== previewUrl) {
+      setFallbackGalleryThumbKeys((current) => {
+        if (current.has(itemKey)) return current;
+        const next = new Set(current);
+        next.add(itemKey);
+        return next;
+      });
+      setLoadedGalleryThumbKeys((current) => {
+        if (!current.has(itemKey)) return current;
+        const next = new Set(current);
+        next.delete(itemKey);
+        return next;
+      });
+      return;
+    }
+    markGalleryThumbLoaded(itemKey);
+  }, [markGalleryThumbLoaded]);
+
+  useEffect(() => {
+    if (showQcImageGallery) return;
+    qcImageGalleryThumbNodesRef.current.clear();
+    setVisibleGalleryThumbKeys(new Set());
+    setLoadedGalleryThumbKeys(new Set());
+    setFallbackGalleryThumbKeys(new Set());
+  }, [showQcImageGallery]);
+
+  useEffect(() => {
+    const activeKeys = new Set(visibleQcImageGalleryKeys);
+    setVisibleGalleryThumbKeys((current) =>
+      new Set([...current].filter((key) => activeKeys.has(key))),
+    );
+    setLoadedGalleryThumbKeys((current) =>
+      new Set([...current].filter((key) => activeKeys.has(key))),
+    );
+    setFallbackGalleryThumbKeys((current) =>
+      new Set([...current].filter((key) => activeKeys.has(key))),
+    );
+  }, [visibleQcImageGalleryKeys]);
+
+  useEffect(() => {
+    if (!showQcImageGallery || visibleQcImageGalleryKeys.length === 0) {
+      return undefined;
+    }
+
+    const root = qcImageGalleryBodyRef.current;
+    const observerSupported = typeof globalThis.IntersectionObserver === "function";
+    if (!root || !observerSupported) {
+      setVisibleGalleryThumbKeys(new Set(visibleQcImageGalleryKeys));
+      return undefined;
+    }
+
+    const observer = new globalThis.IntersectionObserver(
+      (entries) => {
+        const newlyVisibleKeys = entries
+          .filter((entry) => entry.isIntersecting || entry.intersectionRatio > 0)
+          .map((entry) => entry.target?.dataset?.galleryThumbKey)
+          .filter(Boolean);
+
+        if (newlyVisibleKeys.length === 0) return;
+
+        setVisibleGalleryThumbKeys((current) => {
+          let changed = false;
+          const next = new Set(current);
+          newlyVisibleKeys.forEach((key) => {
+            if (!next.has(key)) {
+              next.add(key);
+              changed = true;
+            }
+          });
+          return changed ? next : current;
+        });
+
+        newlyVisibleKeys.forEach((key) => {
+          const node = qcImageGalleryThumbNodesRef.current.get(key);
+          if (node) observer.unobserve(node);
+        });
+      },
+      {
+        root,
+        rootMargin: "700px 0px",
+        threshold: 0.01,
+      },
+    );
+
+    visibleQcImageGalleryKeys.forEach((key) => {
+      if (visibleGalleryThumbKeys.has(key)) return;
+      const node = qcImageGalleryThumbNodesRef.current.get(key);
+      if (node) observer.observe(node);
+    });
+
+    return () => observer.disconnect();
+  }, [showQcImageGallery, visibleGalleryThumbKeys, visibleQcImageGalleryKeys]);
 
   const requestInspectionTimeline = useMemo(() => {
     const requestHistory = Array.isArray(qc?.request_history)
@@ -1625,7 +1767,7 @@ const QcDetails = () => {
       comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
     });
 
-    if (result?.uploadedCount > 0) {
+    if (result?.uploadedCount > 0 || result?.duplicateCount > 0) {
       if (qcImageUploadMode === "single") {
         setQcSingleImageComment("");
       }
@@ -1646,7 +1788,7 @@ const QcDetails = () => {
       comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
     });
 
-    if (result?.uploadedCount > 0) {
+    if (result?.uploadedCount > 0 || result?.duplicateCount > 0) {
       if (qcImageUploadMode === "single") {
         setQcSingleImageComment("");
       }
@@ -2147,7 +2289,7 @@ const QcDetails = () => {
                       onClick={handleRetryQcImageUpload}
                       disabled={!canUploadActiveRelatedFile || deletingRelatedFile}
                     >
-                      Retry Failed
+                      Retry Failed Uploads
                     </button>
                   )}
 
@@ -2222,7 +2364,7 @@ const QcDetails = () => {
             <div className="card-body d-grid gap-3">
               <div className="d-flex justify-content-between align-items-start flex-wrap gap-3">
                 <div>
-                  <h3 className="h6 mb-1">QC Image Batch Upload</h3>
+                  <h3 className="h6 mb-1">QC Image Upload</h3>
                   <div className="small text-muted">
                     {qcImageUploadState.summary?.totalSelectedCount || qcImageUploadState.selectedFiles.length || 0} selected
                     {" | "}
@@ -2283,6 +2425,53 @@ const QcDetails = () => {
                   </span>
                 </div>
               </div>
+
+              {qcImageUploadState.batchStatuses.length > 0 && (
+                <div className="table-responsive qc-details-table-wrap">
+                  <table className="table table-sm align-middle mb-0 qc-details-batch-table">
+                    <thead>
+                      <tr>
+                        <th>Image</th>
+                        <th>Status</th>
+                        <th>Attempt</th>
+                        <th>Progress</th>
+                        <th>Message</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {qcImageUploadState.fileStatuses.map((fileStatus) => (
+                        <tr key={fileStatus.fileId}>
+                          <td className="text-break">
+                            {fileStatus.fileName}
+                          </td>
+                          <td>
+                            <span
+                              className={`badge text-uppercase ${
+                                fileStatus.status === "uploaded"
+                                  ? "bg-success"
+                                  : fileStatus.status === "failed"
+                                    ? "bg-danger"
+                                    : fileStatus.status === "uploading"
+                                      ? "bg-primary"
+                                      : fileStatus.status === "retrying"
+                                        ? "bg-warning text-dark"
+                                        : "bg-secondary"
+                              }`}
+                            >
+                              {fileStatus.status}
+                            </span>
+                          </td>
+                          <td>{Math.max(0, Number(fileStatus.attempts || 0))}</td>
+                          <td>{Math.max(0, Math.min(100, fileStatus.progressPercent || 0))}%</td>
+                          <td className="small text-break">
+                            {fileStatus.errorMessage || fileStatus.message || "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {qcImageUploadState.batchStatuses.length > 0 && (
                 <div className="table-responsive qc-details-table-wrap">
@@ -3214,7 +3403,7 @@ const QcDetails = () => {
               </div>
             </div>
 
-            <div className="qc-image-gallery-body">
+            <div className="qc-image-gallery-body" ref={qcImageGalleryBodyRef}>
               {qcImageGroups.length === 0 ? (
                 <div className="qc-image-gallery-empty-state">
                   {showOnlyCommentedQcImages
@@ -3270,7 +3459,17 @@ const QcDetails = () => {
 
                       <div className="qc-image-gallery-grid">
                         {group.images.map(({ image, index }) => {
-                          const imageUrl = String(image?.url || "").trim();
+                          const previewUrl = getQcImagePreviewUrl(image);
+                          const thumbnailUrl = getQcImageThumbnailUrl(image);
+                          const itemKey = getQcImageGalleryItemKey(image, index);
+                          const shouldUsePreviewFallback =
+                            fallbackGalleryThumbKeys.has(itemKey) && previewUrl;
+                          const imageUrl = shouldUsePreviewFallback
+                            ? previewUrl
+                            : thumbnailUrl;
+                          const shouldLoadImage =
+                            Boolean(imageUrl) && visibleGalleryThumbKeys.has(itemKey);
+                          const thumbLoaded = loadedGalleryThumbKeys.has(itemKey);
                           const isSelected = index === activeQcImageIndex;
                           const selectionValue = getQcImageSelectionValue(image);
                           const isChecked =
@@ -3280,11 +3479,9 @@ const QcDetails = () => {
                           return (
                             <div
                               className="qc-image-gallery-thumb-wrap"
-                              key={String(
-                                image?._id ||
-                                image?.key ||
-                                `${image?.originalName || "qc-image"}-${index}`,
-                              )}
+                              key={itemKey || `${image?.originalName || "qc-image"}-${index}`}
+                              data-gallery-thumb-key={itemKey}
+                              ref={(node) => registerQcGalleryThumbNode(itemKey, node)}
                             >
                               <button
                                 type="button"
@@ -3292,13 +3489,21 @@ const QcDetails = () => {
                                 onClick={() => handleOpenQcImageCarousel(index)}
                                 title={image?.originalName || `QC image ${index + 1}`}
                               >
-                                {imageUrl ? (
+                                {imageUrl && shouldLoadImage ? (
                                   <img
                                     src={imageUrl}
                                     alt={image?.originalName || `QC image ${index + 1}`}
-                                    className="qc-image-gallery-thumb-image"
-                                    loading="lazy"
+                                    className={`qc-image-gallery-thumb-image${thumbLoaded ? " is-loaded" : ""}`}
                                     decoding="async"
+                                    onLoad={() => markGalleryThumbLoaded(itemKey)}
+                                    onError={() =>
+                                      handleGalleryThumbError(itemKey, imageUrl, previewUrl)
+                                    }
+                                  />
+                                ) : imageUrl ? (
+                                  <span
+                                    className="qc-image-gallery-thumb-empty qc-image-gallery-thumb-skeleton"
+                                    aria-hidden="true"
                                   />
                                 ) : (
                                   <span className="qc-image-gallery-thumb-empty">

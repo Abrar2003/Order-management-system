@@ -7274,6 +7274,12 @@ small,
 .qc-image-gallery-thumb-image {
   display: block;
   object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.qc-image-gallery-thumb-image.is-loaded {
+  opacity: 1;
 }
 
 .qc-image-gallery-thumb-empty {
@@ -7285,6 +7291,29 @@ small,
   font-size: 0.8rem;
   text-align: center;
   background: var(--om-color-surface-muted);
+}
+
+.qc-image-gallery-thumb-skeleton {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 253, 250, 0.2),
+      rgba(203, 189, 170, 0.26),
+      rgba(255, 253, 250, 0.2)
+    ),
+    var(--om-color-surface-muted);
+  background-size: 180% 100%;
+  animation: qc-gallery-thumb-skeleton 1.2s ease-in-out infinite;
+}
+
+@keyframes qc-gallery-thumb-skeleton {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
 }
 
 .qc-image-gallery-comment-indicator {

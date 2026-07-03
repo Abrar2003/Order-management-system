@@ -6,9 +6,13 @@ const { safeDeleteFiles } = require("../helpers/fileCleanup");
 const { optimizeImageFileForStorage } = require("./imageOptimization.service");
 const {
   createStorageKey,
+  objectExists,
   uploadFile,
   deleteObject,
 } = require("./wasabiStorage.service");
+const {
+  enqueueQcImageThumbnailGeneration,
+} = require("../queues");
 const {
   QC_IMAGE_MIME_TYPES,
   QC_IMAGE_EXTENSIONS,
@@ -28,6 +32,17 @@ const toNonNegativeNumber = (value, fallback = 0) => {
 };
 
 const normalizeQcImageHash = (value) => normalizeText(value).toLowerCase();
+
+const normalizeQcImageIdempotencyKey = (value) =>
+  normalizeText(value).toLowerCase();
+
+const sanitizeStorageKeyPart = (value = "", fallback = "image") =>
+  normalizeText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9:_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120) || fallback;
 
 const flattenUploadedFiles = (files = null) => {
   if (Array.isArray(files)) {
@@ -103,15 +118,24 @@ const releaseUploadSlot = (uploadSlotState = null) => {
 const buildStoredQcImageEntry = ({
   uploadResult = {},
   hash = "",
+  idempotencyKey = "",
   comment = "",
   uploadedAt = new Date(),
   uploadedBy = null,
+  thumbnail = {},
 } = {}) => ({
   key: uploadResult?.key || "",
   hash: normalizeQcImageHash(hash),
+  idempotency_key: normalizeQcImageIdempotencyKey(idempotencyKey),
   originalName: uploadResult?.originalName || "",
   contentType: uploadResult?.contentType || "",
   size: toNonNegativeNumber(uploadResult?.size, 0),
+  thumbnail_key: normalizeText(thumbnail?.key || "") || null,
+  thumbnail_url: normalizeText(thumbnail?.url || "") || null,
+  thumbnail_generated_at: thumbnail?.generatedAt || null,
+  thumbnail_status: normalizeText(thumbnail?.status || "pending"),
+  thumbnail_error: normalizeText(thumbnail?.error || ""),
+  thumbnail_attempts: toNonNegativeNumber(thumbnail?.attempts, 0),
   comment: normalizeText(comment),
   uploadedAt,
   uploaded_by: uploadedBy || {},
@@ -267,18 +291,41 @@ const prepareSingleQcImageUpload = async ({
 const uploadPreparedQcImage = async ({
   preparedUpload = null,
   folder = "qc-images",
+  qcId = "",
+  targetField = "qc_images",
+  idempotencyKey = "",
 } = {}) => {
   if (!normalizeText(preparedUpload?.filePath)) {
     throw new Error("Prepared QC image upload is required");
   }
 
-  return uploadFile({
-    filePath: preparedUpload.filePath,
-    key: createStorageKey({
+  const normalizedIdempotencyKey = normalizeQcImageIdempotencyKey(idempotencyKey);
+  const storageKey = normalizedIdempotencyKey
+    ? [
+      normalizeText(folder).replace(/^\/+|\/+$/g, "") || "qc-images",
+      sanitizeStorageKeyPart(qcId, "qc"),
+      sanitizeStorageKeyPart(targetField, "images"),
+      `${sanitizeStorageKeyPart(normalizedIdempotencyKey, "image")}${preparedUpload.extension || ".jpg"}`,
+    ].join("/")
+    : createStorageKey({
       folder,
       originalName: preparedUpload.originalName,
       extension: preparedUpload.extension,
-    }),
+    });
+
+  if (normalizedIdempotencyKey && await objectExists(storageKey)) {
+    return {
+      key: storageKey,
+      originalName: preparedUpload.originalName,
+      contentType: preparedUpload.contentType,
+      size: toNonNegativeNumber(preparedUpload?.size, 0),
+      reusedExistingObject: true,
+    };
+  }
+
+  return uploadFile({
+    filePath: preparedUpload.filePath,
+    key: storageKey,
     originalName: preparedUpload.originalName,
     contentType: preparedUpload.contentType,
   });
@@ -288,20 +335,31 @@ const persistSingleQcImageEntry = async ({
   qcId = "",
   imageEntry = null,
   hash = "",
+  idempotencyKey = "",
   uploadedBy = null,
   targetField = "qc_images",
 } = {}) => {
   const normalizedHash = normalizeQcImageHash(hash);
+  const normalizedIdempotencyKey = normalizeQcImageIdempotencyKey(idempotencyKey);
   if (!qcId || !imageEntry || !normalizedHash) {
     throw new Error("QC image persistence requires qcId, imageEntry, and hash");
   }
 
   // This document-level conditional update is the final duplicate guard when
-  // concurrent requests race to append the same image hash.
+  // concurrent requests race to append the same image hash or idempotency key.
+  const duplicateGuards = {
+    [`${targetField}.hash`]: { $ne: normalizedHash },
+  };
+  if (normalizedIdempotencyKey) {
+    duplicateGuards[`${targetField}.idempotency_key`] = {
+      $ne: normalizedIdempotencyKey,
+    };
+  }
+
   return QC.updateOne(
     {
       _id: qcId,
-      [`${targetField}.hash`]: { $ne: normalizedHash },
+      ...duplicateGuards,
     },
     {
       $push: {
@@ -314,29 +372,84 @@ const persistSingleQcImageEntry = async ({
   );
 };
 
+const queueQcImageThumbnailGeneration = ({
+  qcId = "",
+  targetField = "qc_images",
+  imageEntry = {},
+} = {}) => {
+  const sourceKey = normalizeText(imageEntry?.key || "");
+  if (!qcId || !sourceKey) return;
+
+  setImmediate(() => {
+    enqueueQcImageThumbnailGeneration({
+      qcId,
+      imageField: targetField,
+      sourceKey,
+      idempotencyKey: imageEntry?.idempotency_key || "",
+    }).catch((error) => {
+      console.warn("[qc-image-upload] thumbnail_enqueue_failed", {
+        qcId,
+        targetField,
+        sourceKey,
+        reason: error?.message || String(error),
+      });
+    });
+  });
+};
+
 const processSingleQcImageFile = async ({
   file = null,
   qc = null,
+  idempotencyKey = "",
   singleImageComment = "",
   uploadedBy = null,
   uploadedAt = null,
   existingHashes = new Set(),
+  existingIdempotencyKeys = new Set(),
   requestHashes = new Set(),
+  requestIdempotencyKeys = new Set(),
   targetField = "qc_images",
   storageFolder = "qc-images",
   uploadSlotState = null,
   uploadLimitMessage = "",
 } = {}) => {
+  const normalizedIdempotencyKey = normalizeQcImageIdempotencyKey(idempotencyKey);
   const fallbackOriginalName =
     file?.originalname ||
     `${normalizeText(qc?.order_meta?.order_id || qc?._id || "qc")}${
       path.extname(String(file?.originalname || "")).toLowerCase() || ".jpg"
-    }`;
+  }`;
   let preparedUpload = null;
   let uploadResult = null;
   let claimedUploadSlot = false;
 
   try {
+    if (normalizedIdempotencyKey) {
+      if (requestIdempotencyKeys.has(normalizedIdempotencyKey)) {
+        return {
+          status: "duplicate",
+          duplicate: buildQcImageDuplicateEntry({
+            originalName: file?.originalname || fallbackOriginalName,
+            hash: "",
+            reason: "duplicate_idempotency_key_in_request",
+          }),
+        };
+      }
+
+      if (existingIdempotencyKeys.has(normalizedIdempotencyKey)) {
+        return {
+          status: "duplicate",
+          duplicate: buildQcImageDuplicateEntry({
+            originalName: file?.originalname || fallbackOriginalName,
+            hash: "",
+            reason: "already_uploaded_idempotency_key",
+          }),
+        };
+      }
+
+      requestIdempotencyKeys.add(normalizedIdempotencyKey);
+    }
+
     preparedUpload = await prepareSingleQcImageUpload({
       file,
       fallbackOriginalName,
@@ -395,29 +508,42 @@ const processSingleQcImageFile = async ({
     uploadResult = await uploadPreparedQcImage({
       preparedUpload,
       folder: storageFolder,
+      qcId: String(qc?._id || ""),
+      targetField,
+      idempotencyKey: normalizedIdempotencyKey,
     });
 
     const imageEntry = buildStoredQcImageEntry({
       uploadResult,
       hash: normalizedHash,
+      idempotencyKey: normalizedIdempotencyKey,
       comment: singleImageComment,
       uploadedAt: uploadedAt || new Date(),
       uploadedBy,
+      thumbnail: {
+        status: "pending",
+      },
     });
 
     const persistResult = await persistSingleQcImageEntry({
       qcId: String(qc?._id || ""),
       imageEntry,
       hash: normalizedHash,
+      idempotencyKey: normalizedIdempotencyKey,
       uploadedBy,
       targetField,
     });
 
     if (Number(persistResult?.modifiedCount || 0) <= 0) {
-      await cleanupUploadedQcImageObject(uploadResult?.key);
+      if (!uploadResult?.reusedExistingObject) {
+        await cleanupUploadedQcImageObject(uploadResult?.key);
+      }
       releaseUploadSlot(uploadSlotState);
       claimedUploadSlot = false;
       existingHashes.add(normalizedHash);
+      if (normalizedIdempotencyKey) {
+        existingIdempotencyKeys.add(normalizedIdempotencyKey);
+      }
       return {
         status: "duplicate",
         duplicate: buildQcImageDuplicateEntry({
@@ -429,6 +555,14 @@ const processSingleQcImageFile = async ({
     }
 
     existingHashes.add(normalizedHash);
+    if (normalizedIdempotencyKey) {
+      existingIdempotencyKeys.add(normalizedIdempotencyKey);
+    }
+    queueQcImageThumbnailGeneration({
+      qcId: String(qc?._id || ""),
+      targetField,
+      imageEntry,
+    });
     return {
       status: "uploaded",
       uploadedImage: imageEntry,
@@ -442,7 +576,7 @@ const processSingleQcImageFile = async ({
       claimedUploadSlot = false;
     }
 
-    if (uploadResult?.key) {
+    if (uploadResult?.key && !uploadResult?.reusedExistingObject) {
       await cleanupUploadedQcImageObject(uploadResult.key);
     }
 
@@ -469,6 +603,7 @@ const processSingleQcImageFile = async ({
 const processQcImageBatch = async ({
   qc = null,
   files = [],
+  idempotencyKeys = [],
   uploadMode = "",
   singleImageComment = "",
   uploadedBy = null,
@@ -479,12 +614,25 @@ const processQcImageBatch = async ({
   requestStartedAt = Date.now(),
 } = {}) => {
   const safeFiles = flattenUploadedFiles(files);
+  const safeIdempotencyKeys = Array.isArray(idempotencyKeys)
+    ? idempotencyKeys
+    : [];
+  const uploadItems = safeFiles.map((file, index) => ({
+    file,
+    idempotencyKey: normalizeQcImageIdempotencyKey(safeIdempotencyKeys[index]),
+  }));
   const existingHashes = new Set(
     (Array.isArray(qc?.[targetField]) ? qc[targetField] : [])
       .map((image) => normalizeQcImageHash(image?.hash))
       .filter(Boolean),
   );
+  const existingIdempotencyKeys = new Set(
+    (Array.isArray(qc?.[targetField]) ? qc[targetField] : [])
+      .map((image) => normalizeQcImageIdempotencyKey(image?.idempotency_key))
+      .filter(Boolean),
+  );
   const requestHashes = new Set();
+  const requestIdempotencyKeys = new Set();
   const skippedDuplicates = [];
   const failures = [];
   let uploadedCount = 0;
@@ -498,7 +646,7 @@ const processQcImageBatch = async ({
   const uploadSlotState = Number.isFinite(maxSuccessfulUploads)
     ? { remaining: Math.max(0, Number(maxSuccessfulUploads) || 0) }
     : null;
-  const fileChunks = chunkItems(safeFiles, chunkSize);
+  const fileChunks = chunkItems(uploadItems, chunkSize);
 
   logQcImageUploadEvent("start", {
     qcId: String(qc?._id || ""),
@@ -514,15 +662,18 @@ const processQcImageBatch = async ({
     const chunkResults = await mapWithConcurrencyLimit(
       chunk,
       processingConcurrency,
-      async (file) =>
+      async (item) =>
         processSingleQcImageFile({
-          file,
+          file: item?.file,
           qc,
+          idempotencyKey: item?.idempotencyKey,
           singleImageComment,
           uploadedBy,
           uploadedAt: new Date(),
           existingHashes,
+          existingIdempotencyKeys,
           requestHashes,
+          requestIdempotencyKeys,
           targetField,
           storageFolder,
           uploadSlotState,

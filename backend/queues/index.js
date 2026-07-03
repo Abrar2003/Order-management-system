@@ -241,6 +241,40 @@ const enqueuePisFileProcessing = ({
     },
   );
 
+const enqueueQcImageThumbnailGeneration = ({
+  qcId = "",
+  imageField = "qc_images",
+  sourceKey = "",
+  imageId = "",
+  idempotencyKey = "",
+} = {}) => {
+  const safeQcId = sanitizeJobIdPart(qcId);
+  const safeImageField = sanitizeJobIdPart(imageField);
+  const safeImageRef = sanitizeJobIdPart(
+    idempotencyKey || imageId || sourceKey || "image",
+  );
+
+  return addJob(
+    QUEUE_NAMES.imageProcessingQueue,
+    JOB_NAMES.GENERATE_QC_IMAGE_THUMBNAIL,
+    {
+      qcId,
+      imageField,
+      sourceKey,
+      imageId,
+      idempotencyKey,
+    },
+    {
+      jobId: ["qc-thumbnail", safeQcId, safeImageField, safeImageRef].join(":"),
+      attempts: 3,
+      backoff: {
+        type: "exponential",
+        delay: 5000,
+      },
+    },
+  );
+};
+
 const closeQueues = async () => {
   const registeredQueues = queues || {};
   const registeredEvents = queueEvents || {};
@@ -267,5 +301,6 @@ module.exports = {
   enqueueOrderGroupCalendarSync,
   enqueueBrandCalendarResync,
   enqueuePisFileProcessing,
+  enqueueQcImageThumbnailGeneration,
   closeQueues,
 };
