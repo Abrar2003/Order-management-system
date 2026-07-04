@@ -46,6 +46,7 @@ const InspectionReport = lazy(() => import("./pages/inspection_report"));
 const InspectorReports = lazy(() => import("./pages/InspectorReports"));
 const VendorReports = lazy(() => import("./pages/VendorReports"));
 const VendorWiseQAReport = lazy(() => import("./pages/VendorWiseQAReport"));
+const MonthlyShipmentsReport = lazy(() => import("./pages/MonthlyShipmentsReport"));
 const DelayedPoReports = lazy(() => import("./pages/DelayedPoReports"));
 const UpcomingEtdReports = lazy(() => import("./pages/UpcomingEtdReports"));
 const CommonErrorsReport = lazy(() => import("./pages/CommonErrorsReport"));
@@ -334,6 +335,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <VendorWiseQAReport />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/monthly-shipments"
+            element={
+              <ProtectedRoute>
+                <MonthlyShipmentsReport />
               </ProtectedRoute>
             }
           />

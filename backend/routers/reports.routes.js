@@ -44,6 +44,22 @@ router.get(
 );
 
 router.get(
+  "/monthly-shipments",
+  auth,
+  requirePermission("reports", "view"),
+  cacheRoute("reports", MEDIUM_CACHE_TTL),
+  reportsController.getMonthlyShipmentsReport,
+);
+
+router.get(
+  "/monthly-shipments/drilldown",
+  auth,
+  requirePermission("reports", "view"),
+  cacheRoute("reports", MEDIUM_CACHE_TTL),
+  reportsController.getMonthlyShipmentsDrilldown,
+);
+
+router.get(
   "/qc-report-mismatch",
   auth,
   requirePermission("reports", "view"),

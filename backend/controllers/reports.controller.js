@@ -7,6 +7,10 @@ const Item = require("../models/item.model");
 const Order = require("../models/order.model");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
+  getMonthlyShipmentsDrilldownData,
+  getMonthlyShipmentsReportData,
+} = require("../services/monthlyShipmentsReport.service");
+const {
   buildNormalizedInspectionSizeState,
   compareInspectionSizeSnapshot,
   normalizeNumber,
@@ -2942,6 +2946,46 @@ exports.deleteQcMismatchComment = async (req, res) => {
   } catch (error) {
     console.error("Delete QC Mismatch Comment Error:", error);
     return res.status(500).json({ message: "Failed to delete comment" });
+  }
+};
+
+exports.getMonthlyShipmentsReport = async (req, res) => {
+  try {
+    const report = await getMonthlyShipmentsReportData({
+      query: req.query,
+      user: req.user,
+    });
+
+    return res.status(200).json({
+      success: true,
+      ...report,
+    });
+  } catch (error) {
+    console.error("Monthly Shipments Report Error:", error);
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      message: error?.message || "Failed to fetch monthly shipments report",
+    });
+  }
+};
+
+exports.getMonthlyShipmentsDrilldown = async (req, res) => {
+  try {
+    const drilldown = await getMonthlyShipmentsDrilldownData({
+      query: req.query,
+      user: req.user,
+    });
+
+    return res.status(200).json({
+      success: true,
+      ...drilldown,
+    });
+  } catch (error) {
+    console.error("Monthly Shipments Drilldown Error:", error);
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      message: error?.message || "Failed to fetch monthly shipments drill-down",
+    });
   }
 };
 

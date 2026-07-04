@@ -4498,6 +4498,128 @@ small,
   font-size: 0.875rem;
 }
 
+.monthly-shipments-page {
+  overflow-x: visible;
+}
+
+.monthly-shipments-tabs {
+  margin-bottom: 0;
+}
+
+.monthly-shipments-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.8rem;
+  align-items: end;
+}
+
+.monthly-shipments-filter-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  min-height: 2.35rem;
+}
+
+.monthly-shipments-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.8rem;
+}
+
+.monthly-shipments-kpi {
+  display: flex;
+  min-height: 5.2rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.35rem;
+  border: 1px solid var(--om-color-border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  background: var(--om-color-surface);
+  box-shadow: var(--om-shadow-xs);
+}
+
+.monthly-shipments-kpi span {
+  color: var(--om-color-text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.monthly-shipments-kpi strong {
+  color: var(--om-color-text);
+  font-size: 1.35rem;
+  line-height: 1.2;
+}
+
+.monthly-shipments-chart-frame {
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+
+.monthly-shipments-tooltip {
+  min-width: 14rem;
+  max-width: 18rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  padding: 0.65rem 0.8rem;
+  background-color: var(--om-color-surface);
+  box-shadow: var(--om-shadow-sm);
+  color: var(--om-color-text);
+  font-size: 0.86rem;
+}
+
+.monthly-shipments-state .card-body {
+  min-height: 5rem;
+  display: flex;
+  align-items: center;
+}
+
+.monthly-shipments-brand-section .card-body {
+  overflow: visible;
+}
+
+.monthly-shipments-vendor-select {
+  min-width: min(18rem, 100%);
+}
+
+.monthly-shipments-detail-table {
+  max-height: 60vh;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.monthly-shipments-detail-table .table {
+  min-width: 58rem;
+}
+
+.monthly-shipments-detail-row {
+  cursor: pointer;
+}
+
+.monthly-shipments-detail-row:hover > * {
+  background-color: rgba(37, 99, 235, 0.06) !important;
+}
+
+.monthly-shipments-page .recharts-wrapper,
+.monthly-shipments-page .recharts-surface {
+  max-width: 100%;
+}
+
+@media (max-width: 575.98px) {
+  .monthly-shipments-filter-actions {
+    align-items: stretch;
+  }
+
+  .monthly-shipments-filter-actions .btn {
+    flex: 1 1 0;
+  }
+
+  .monthly-shipments-kpi strong {
+    font-size: 1.15rem;
+  }
+}
+
 .om-report-page .table .om-etd-history {
   width: 100%;
   justify-content: center;

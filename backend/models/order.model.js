@@ -172,6 +172,22 @@ Order_Schema.index(
   },
 );
 
+// Monthly shipment reporting filters shipped rows by status/archive and stuffing date,
+// then groups by container/brand/vendor.
+Order_Schema.index(
+  {
+    status: 1,
+    archived: 1,
+    "shipment.stuffing_date": 1,
+    "shipment.container": 1,
+    brand: 1,
+    vendor: 1,
+  },
+  {
+    name: "orders_monthly_shipments_report_idx",
+  },
+);
+
 // Archived-order pages sort by archive time; this replaces the old single-field archived index.
 Order_Schema.index(
   { archived: 1, archived_at: -1, updatedAt: -1, order_id: -1 },

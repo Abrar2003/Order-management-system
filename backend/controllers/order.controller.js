@@ -41,9 +41,12 @@ const {
   calculateTotalPoCbm,
 } = require("../services/orderCbm.service");
 const {
-  calculateEffectiveBoxEntriesCbmTotal,
-  detectBoxPackagingMode,
-} = require("../helpers/boxMeasurement");
+  resolveOrderRowCbmSummary,
+  resolveOrderRowCbmSummaryWithStoredFallback,
+  resolveShipmentRowCbm,
+  toPositiveCbmNumber,
+  toRoundedCbmValue,
+} = require("../services/shipmentCbmAllocation.service");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   QUEUE_NAMES,
@@ -239,161 +242,6 @@ const normalizeShipmentEntryId = (entry = {}) => {
   return mongoose.Types.ObjectId.isValid(normalizedId)
     ? new mongoose.Types.ObjectId(normalizedId)
     : null;
-};
-
-const toPositiveCbmNumber = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return parsed;
-};
-
-const toRoundedCbmValue = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 0;
-  return Number(parsed.toFixed(6));
-};
-
-const calculateCbmFromLbh = (dimensions = {}) => {
-  const length = Math.max(0, Number(dimensions?.L || 0));
-  const breadth = Math.max(0, Number(dimensions?.B || 0));
-  const height = Math.max(0, Number(dimensions?.H || 0));
-  if (!Number.isFinite(length) || !Number.isFinite(breadth) || !Number.isFinite(height)) {
-    return 0;
-  }
-  if (length <= 0 || breadth <= 0 || height <= 0) return 0;
-  return (length * breadth * height) / 1000000;
-};
-
-const calculateSizeEntriesCbmTotal = (entries = []) => {
-  const itemEntries = (Array.isArray(entries) ? entries : []).filter(entry => 
-    String(entry?.remark || entry?.type || "").trim().toLowerCase().startsWith("item")
-  );
-  return itemEntries.reduce(
-    (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
-    0,
-  );
-};
-
-const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
-  if (!itemDoc || typeof itemDoc !== "object") {
-    return {
-      source: null,
-      per_item: null,
-      total: null,
-    };
-  }
-
-  // 1. Calculate per-item CBM from actual sizes of item (starting with "item" remark)
-  const getItemSizeCbm = (sizes) => {
-    const itemEntries = (Array.isArray(sizes) ? sizes : []).filter(entry => 
-      String(entry?.remark || entry?.type || "").trim().toLowerCase().startsWith("item")
-    );
-    return itemEntries.reduce((sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)), 0);
-  };
-
-  let perItem = getItemSizeCbm(itemDoc?.inspected_item_sizes);
-  let perItemSource = "inspected_item";
-
-  if (perItem <= 0) {
-    perItem = getItemSizeCbm(itemDoc?.pis_item_sizes);
-    perItemSource = "pis_item";
-  }
-
-  // Fallbacks for per_item if no actual item sizes found
-  if (perItem <= 0) {
-    const inspectedStoredCbm = [
-      itemDoc?.cbm?.calculated_inspected_total,
-      itemDoc?.cbm?.inspected_total,
-    ]
-      .map((value) => toPositiveCbmNumber(value))
-      .find((value) => value > 0);
-    if (inspectedStoredCbm > 0) {
-      perItem = inspectedStoredCbm;
-      perItemSource = "inspected";
-    }
-  }
-
-  if (perItem <= 0) {
-    const pisTopCbm = toPositiveCbmNumber(itemDoc?.cbm?.top);
-    const pisBottomCbm = toPositiveCbmNumber(itemDoc?.cbm?.bottom);
-    if (pisTopCbm > 0 && pisBottomCbm > 0) {
-      perItem = pisTopCbm + pisBottomCbm;
-      perItemSource = "pis";
-    }
-  }
-
-  if (perItem <= 0) {
-    const pisStoredCbm = [
-      itemDoc?.cbm?.calculated_pis_total,
-      itemDoc?.cbm?.total,
-    ]
-      .map((value) => toPositiveCbmNumber(value))
-      .find((value) => value > 0);
-    if (pisStoredCbm > 0) {
-      perItem = pisStoredCbm;
-      perItemSource = "pis";
-    }
-  }
-
-  // 2. Calculate Total PO CBM (shipping/stuffed volume) from box sizes
-  let totalPoCbm = calculateTotalPoCbm({
-    orderQuantity,
-    inspectedBoxSizes: itemDoc?.inspected_box_sizes,
-    inspectedBoxMode: itemDoc?.inspected_box_mode,
-  });
-  let totalSource = "inspected_box";
-
-  if (totalPoCbm <= 0) {
-    const pisBoxMode = detectBoxPackagingMode(itemDoc?.pis_box_mode, itemDoc?.pis_box_sizes);
-    const pisBoxEntriesCbm = calculateEffectiveBoxEntriesCbmTotal(
-      itemDoc?.pis_box_sizes,
-      pisBoxMode,
-    );
-    if (pisBoxEntriesCbm > 0) {
-      totalPoCbm = toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * pisBoxEntriesCbm);
-      totalSource = "pis_box";
-    }
-  }
-
-  // If no item CBM resolved yet, fallback to total CBM / quantity
-  if (perItem <= 0 && totalPoCbm > 0) {
-    const quantity = Math.max(0, Number(orderQuantity || 0));
-    perItem = quantity > 0 ? totalPoCbm / quantity : 0;
-    perItemSource = totalSource;
-  }
-
-  // If no total PO CBM resolved yet, fallback to item CBM * quantity
-  if (totalPoCbm <= 0 && perItem > 0) {
-    totalPoCbm = Math.max(0, Number(orderQuantity || 0)) * perItem;
-    totalSource = perItemSource;
-  }
-
-  return {
-    source: totalSource,
-    per_item: perItem > 0 ? toRoundedCbmValue(perItem) : null,
-    total: totalPoCbm > 0 ? toRoundedCbmValue(totalPoCbm) : null,
-  };
-};;
-
-const resolveOrderRowCbmSummaryWithStoredFallback = ({
-  itemDoc = null,
-  quantity = 0,
-  storedTotalCbm = 0,
-} = {}) => {
-  const calculatedSummary = resolveOrderRowCbmSummary(itemDoc, quantity);
-  if (toPositiveCbmNumber(calculatedSummary?.total) > 0) {
-    return calculatedSummary;
-  }
-
-  const total = toPositiveCbmNumber(storedTotalCbm);
-  if (total <= 0) return calculatedSummary;
-
-  const quantityValue = Math.max(0, Number(quantity || 0));
-  return {
-    source: "total_po_cbm",
-    per_item: quantityValue > 0 ? toRoundedCbmValue(total / quantityValue) : 0,
-    total,
-  };
 };
 
 const normalizeBrandKey = (value) => normalizeLooseString(value).toLowerCase();
@@ -3427,31 +3275,6 @@ const resolveShipmentSortConfig = ({
     sortOrder,
     sortDirection,
   };
-};
-
-const resolveShipmentRowCbm = ({
-  itemDoc = null,
-  orderQuantity = 0,
-  storedPoCbm = 0,
-  shipmentQuantity = 0,
-} = {}) => {
-  const shippedQuantity = Math.max(0, Number(shipmentQuantity || 0));
-  if (shippedQuantity <= 0) return 0;
-
-  const shipmentCbmSummary = resolveOrderRowCbmSummary(itemDoc, shippedQuantity);
-  if (Number(shipmentCbmSummary?.total || 0) > 0) {
-    return toRoundedCbmValue(shipmentCbmSummary.total);
-  }
-
-  const orderQuantityValue = Math.max(0, Number(orderQuantity || 0));
-  const storedTotalPoCbm = toPositiveCbmNumber(storedPoCbm);
-  if (storedTotalPoCbm > 0 && orderQuantityValue > 0) {
-    return toRoundedCbmValue(
-      (storedTotalPoCbm / orderQuantityValue) * shippedQuantity,
-    );
-  }
-
-  return 0;
 };
 
 const resolveSampleShipmentCbmSummary = (sample = {}, quantity = 0) => {
