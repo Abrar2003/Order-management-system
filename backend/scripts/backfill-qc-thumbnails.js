@@ -21,6 +21,9 @@ const IMAGE_CONTENT_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_BATCH_SIZE = 100;
+const DEFAULT_QUERY_MAX_TIME_MS = 60000;
+const DEFAULT_HEARTBEAT_MS = 30000;
+const DEFAULT_STORAGE_TIMEOUT_MS = 90000;
 const MAX_STORAGE_ATTEMPTS = 3;
 
 let shutdownRequested = false;
@@ -85,6 +88,9 @@ const parseOptions = () => {
     verbose: hasFlag("verbose"),
     delayMs: parsePositiveIntegerArg("delay-ms", 0, { allowZero: true }),
     batchDelayMs: parsePositiveIntegerArg("batch-delay-ms", 0, { allowZero: true }),
+    queryMaxTimeMs: parsePositiveIntegerArg("query-max-time-ms", DEFAULT_QUERY_MAX_TIME_MS, { allowZero: true }),
+    heartbeatMs: parsePositiveIntegerArg("heartbeat-ms", DEFAULT_HEARTBEAT_MS, { allowZero: true }),
+    storageTimeoutMs: parsePositiveIntegerArg("storage-timeout-ms", DEFAULT_STORAGE_TIMEOUT_MS, { allowZero: true }),
   };
 };
 
@@ -205,12 +211,40 @@ const getDownloadedBuffer = (payload) => {
   return null;
 };
 
-const withStorageRetry = async (operation, label = "storage operation") => {
+const withTimeout = async (operation, timeoutMs, label = "operation") => {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return operation();
+  }
+
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    if (typeof timer.unref === "function") {
+      timer.unref();
+    }
+  });
+
+  try {
+    return await Promise.race([operation(), timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+};
+
+const withStorageRetry = async (operation, label = "storage operation", options = {}) => {
   let lastError = null;
 
   for (let attempt = 1; attempt <= MAX_STORAGE_ATTEMPTS; attempt += 1) {
     try {
-      return await operation(attempt);
+      return await withTimeout(
+        () => operation(attempt),
+        options.storageTimeoutMs,
+        label,
+      );
     } catch (error) {
       lastError = error;
       if (attempt >= MAX_STORAGE_ATTEMPTS) break;
@@ -297,6 +331,34 @@ const logVerbose = (options, message, payload = {}) => {
   console.log(message, payload);
 };
 
+const elapsedSeconds = (startedAt) => ((Date.now() - startedAt) / 1000).toFixed(1);
+
+const withHeartbeat = async (operation, options, label, getPayload = () => ({})) => {
+  const startedAt = Date.now();
+  let timer = null;
+
+  if (options.heartbeatMs > 0) {
+    timer = setInterval(() => {
+      console.log("[heartbeat]", {
+        operation: label,
+        elapsed_seconds: elapsedSeconds(startedAt),
+        ...getPayload(),
+      });
+    }, options.heartbeatMs);
+    if (typeof timer.unref === "function") {
+      timer.unref();
+    }
+  }
+
+  try {
+    return await operation();
+  } finally {
+    if (timer) {
+      clearInterval(timer);
+    }
+  }
+};
+
 const processImageRef = async (ref, options, stats) => {
   const sourceKey = normalizeText(ref?.image?.key || ref?.image?.public_id || "");
   const thumbnailKey =
@@ -307,6 +369,7 @@ const processImageRef = async (ref, options, stats) => {
     const thumbnailAlreadyExists = await withStorageRetry(
       () => objectExists(thumbnailKey),
       "thumbnail HEAD",
+      options,
     );
 
     if (thumbnailAlreadyExists) {
@@ -344,6 +407,7 @@ const processImageRef = async (ref, options, stats) => {
     const sourceObject = await withStorageRetry(
       () => getObjectBuffer(sourceKey),
       "source image download",
+      options,
     );
     const thumbnail = await generateQcImageThumbnail({
       sourceBuffer: getDownloadedBuffer(sourceObject),
@@ -359,6 +423,7 @@ const processImageRef = async (ref, options, stats) => {
           cacheControl: QC_THUMBNAIL_CACHE_CONTROL,
         }),
       "thumbnail upload",
+      options,
     );
 
     await updateThumbnailSuccess(
@@ -410,8 +475,20 @@ const processImageRef = async (ref, options, stats) => {
 const processBatch = async (batch, options, stats) => {
   if (batch.length === 0) return;
 
+  const batchNumber = stats.batchesProcessed + 1;
+  const startedAt = Date.now();
   let nextIndex = 0;
   const workerCount = Math.min(options.concurrency, batch.length);
+
+  console.log("[batch-start]", {
+    batch: batchNumber,
+    images: batch.length,
+    concurrency: workerCount,
+    generated: stats.generated,
+    already_existed: stats.alreadyExisted,
+    failed: stats.failed,
+  });
+
   const workers = Array.from({ length: workerCount }, async () => {
     while (!shutdownRequested) {
       const currentIndex = nextIndex;
@@ -422,7 +499,29 @@ const processBatch = async (batch, options, stats) => {
     }
   });
 
-  await Promise.all(workers);
+  await withHeartbeat(
+    () => Promise.all(workers),
+    options,
+    "thumbnail_batch",
+    () => ({
+      batch: batchNumber,
+      images: batch.length,
+      next_index: Math.min(nextIndex, batch.length),
+      generated: stats.generated,
+      already_existed: stats.alreadyExisted,
+      failed: stats.failed,
+    }),
+  );
+  stats.batchesProcessed += 1;
+
+  console.log("[batch-complete]", {
+    batch: batchNumber,
+    images: batch.length,
+    elapsed_seconds: elapsedSeconds(startedAt),
+    generated: stats.generated,
+    already_existed: stats.alreadyExisted,
+    failed: stats.failed,
+  });
 
   if (options.batchDelayMs > 0 && !shutdownRequested) {
     await sleep(options.batchDelayMs);
@@ -463,9 +562,12 @@ const printStats = (stats) => {
   const elapsedSeconds = (elapsedMs / 1000).toFixed(1);
 
   console.log("QC thumbnail backfill complete.");
+  console.log(`docs: ${stats.docs}`);
+  console.log(`pages: ${stats.pages}`);
   console.log(`scanned: ${stats.scanned}`);
   console.log(`eligible: ${stats.eligible}`);
   console.log(`skipped: ${stats.skipped}`);
+  console.log(`batches: ${stats.batchesProcessed}`);
   console.log(`generated: ${stats.generated}`);
   console.log(`already-existed: ${stats.alreadyExisted}`);
   console.log(`failed: ${stats.failed}`);
@@ -499,9 +601,12 @@ const main = async () => {
 
   const stats = {
     startedAt: Date.now(),
+    docs: 0,
+    pages: 0,
     scanned: 0,
     eligible: 0,
     skipped: 0,
+    batchesProcessed: 0,
     generated: 0,
     alreadyExisted: 0,
     failed: 0,
@@ -520,14 +625,47 @@ const main = async () => {
     retry_failed: options.retryFailed,
     inspection_id: options.inspectionId || "",
     from_date: options.fromDate ? options.fromDate.toISOString().slice(0, 10) : "",
+    query_max_time_ms: options.queryMaxTimeMs || "none",
+    heartbeat_ms: options.heartbeatMs || "off",
+    storage_timeout_ms: options.storageTimeoutMs || "none",
   });
 
   while (!shutdownRequested && !reachedLimit) {
-    const docs = await QC.find(withPaginationAfterId(query, lastSeenId))
-      .select("_id qc_images hardware_inspection inspection_record createdAt")
+    const page = stats.pages + 1;
+    const pageStartedAt = Date.now();
+    let pageQuery = QC.find(withPaginationAfterId(query, lastSeenId))
+      .select("_id qc_images hardware_inspection goods_not_ready_images inspection_record createdAt")
       .sort({ _id: 1 })
-      .limit(options.batchSize)
-      .lean();
+      .limit(options.batchSize);
+
+    if (options.queryMaxTimeMs > 0) {
+      pageQuery = pageQuery.maxTimeMS(options.queryMaxTimeMs);
+    }
+
+    const docs = await withHeartbeat(
+      () => pageQuery.lean(),
+      options,
+      "qc_page_query",
+      () => ({
+        page,
+        last_seen_id: lastSeenId ? String(lastSeenId) : "",
+      }),
+    );
+
+    stats.pages += 1;
+    stats.docs += docs.length;
+
+    console.log("[page]", {
+      page,
+      docs: docs.length,
+      queued_images: batch.length,
+      scanned_images: stats.scanned,
+      eligible: stats.eligible,
+      generated: stats.generated,
+      already_existed: stats.alreadyExisted,
+      failed: stats.failed,
+      elapsed_seconds: elapsedSeconds(pageStartedAt),
+    });
 
     if (docs.length === 0) {
       break;
