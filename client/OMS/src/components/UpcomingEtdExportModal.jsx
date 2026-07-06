@@ -7,8 +7,22 @@ import { formatDateDDMMYYYY } from "../utils/date";
 import { exportHtmlToPdf } from "../services/pdfExport.service";
 import "../App.css";
 
+const normalizeBrands = (value) => {
+  if (!value) return ["all"];
+  const list = Array.isArray(value)
+    ? value
+    : String(value)
+        .split(",")
+        .map((b) => b.trim())
+        .filter(Boolean);
+  const filtered = list.filter((b) => !["all", "undefined", "null"].includes(b.toLowerCase()));
+  return filtered.length > 0 ? filtered : ["all"];
+};
+
+const isAllBrands = (values) => !Array.isArray(values) || values.includes("all");
+
 const buildInitialForm = (defaultFilters = {}) => ({
-  brand: String(defaultFilters?.brand || "").trim() === "all" ? "all" : String(defaultFilters?.brand || "").trim(),
+  brand: normalizeBrands(defaultFilters?.brand),
   vendor: String(defaultFilters?.vendor || "").trim() === "all" ? "all" : String(defaultFilters?.vendor || "").trim(),
   to_date: defaultFilters?.to_date || "",
   format: "xlsx",
@@ -103,6 +117,24 @@ const UpcomingEtdExportModal = ({
   const [error, setError] = useState("");
   const [isExporting, setIsExporting] = useState(false);
 
+  const handleBrandChange = (event) => {
+    const { value, checked } = event.target;
+    setForm((prev) => {
+      let nextBrands = prev.brand.filter((entry) => entry !== "all");
+      if (value === "all") {
+        nextBrands = ["all"];
+      } else {
+        nextBrands = checked
+          ? [...nextBrands, value]
+          : nextBrands.filter((entry) => entry !== value);
+      }
+      if (nextBrands.length === 0) {
+        nextBrands = ["all"];
+      }
+      return { ...prev, brand: nextBrands };
+    });
+  };
+
   const brands = Array.isArray(filterOptions?.brand_options)
     ? filterOptions.brand_options
     : Array.isArray(filterOptions?.brands)
@@ -120,7 +152,7 @@ const UpcomingEtdExportModal = ({
       setIsExporting(true);
 
       const params = {
-        brand: form.brand,
+        brand: isAllBrands(form.brand) ? "all" : form.brand.join(","),
         vendor: form.vendor,
         to_date: form.to_date || undefined,
         tz_offset_minutes: new Date().getTimezoneOffset(),
@@ -185,21 +217,49 @@ const UpcomingEtdExportModal = ({
 
           <div className="modal-body d-grid gap-3">
             <div className="row g-3">
-              <div className="col-md-6">
+              <div className="col-md-6 dropdown">
                 <label className="form-label">Brand</label>
-                <select
-                  className="form-select"
-                  value={form.brand}
+                <button
+                  type="button"
+                  className="form-select text-start"
+                  data-bs-toggle="dropdown"
+                  data-bs-auto-close="outside"
                   disabled={isExporting}
-                  onChange={(e) => setForm((prev) => ({ ...prev, brand: e.target.value }))}
                 >
-                  <option value="all">All Brands</option>
+                  <span className="text-truncate d-block">
+                    {isAllBrands(form.brand) ? "All Brands" : form.brand.join(", ")}
+                  </span>
+                </button>
+                <ul className="dropdown-menu packed-goods-filter-menu shadow w-100">
+                  <li>
+                    <label className="packed-goods-filter-option">
+                      <input
+                        type="checkbox"
+                        className="form-check-input"
+                        value="all"
+                        checked={isAllBrands(form.brand)}
+                        disabled={isExporting}
+                        onChange={handleBrandChange}
+                      />
+                      <span className="packed-goods-filter-option-label">All Brands</span>
+                    </label>
+                  </li>
                   {brands.map((brandValue) => (
-                    <option key={brandValue} value={brandValue}>
-                      {brandValue}
-                    </option>
+                    <li key={brandValue}>
+                      <label className="packed-goods-filter-option">
+                        <input
+                          type="checkbox"
+                          className="form-check-input"
+                          value={brandValue}
+                          checked={form.brand.includes(brandValue)}
+                          disabled={isExporting}
+                          onChange={handleBrandChange}
+                        />
+                        <span className="packed-goods-filter-option-label">{brandValue}</span>
+                      </label>
+                    </li>
                   ))}
-                </select>
+                </ul>
               </div>
 
               <div className="col-md-6">

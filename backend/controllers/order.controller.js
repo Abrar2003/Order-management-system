@@ -7707,7 +7707,7 @@ const buildUpcomingEtdReportDataset = async ({
   toDate = "",
   user = null,
 } = {}) => {
-  const selectedBrand = normalizeFilterValue(brand) || "";
+  const selectedBrands = normalizeFilterValues(brand);
   const selectedVendor = normalizeFilterValue(vendor) || "";
   const todayUtc = toUtcDayStart(new Date());
   const defaultRangeEnd = todayUtc
@@ -7918,7 +7918,7 @@ const buildUpcomingEtdReportDataset = async ({
   );
 
   const filteredRows = allRows.filter((row) => {
-    if (selectedBrand && row?.brand !== selectedBrand) return false;
+    if (selectedBrands.length > 0 && !selectedBrands.includes(row?.brand)) return false;
     if (selectedVendor && row?.vendor !== selectedVendor) return false;
     return true;
   });

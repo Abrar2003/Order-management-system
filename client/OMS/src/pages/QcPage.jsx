@@ -254,7 +254,7 @@ const QCPage = () => {
     || normalizedRole === "inspection_manager";
   const canAlignQc = hasPermission("qc", "assign");
   const canTransferRequest = hasPermission("qc", "assign");
-  const showActionColumn = !isViewOnly;
+  const showActionColumn = true;
   const showCheckedColumn = canManageCheckedStatus;
   const tableColumnCount = TABLE_COLUMN_COUNT - (showActionColumn ? 0 : 1) - (showCheckedColumn ? 0 : 1);
   const canUseInspectorFilter = !isQcUser;

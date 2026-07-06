@@ -148,6 +148,8 @@ const DelayedPoReports = () => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState("xls");
   const [exportReportType, setExportReportType] = useState("summary");
+  const [exportBrand, setExportBrand] = useState(DEFAULT_BRANDS);
+  const [exportVendor, setExportVendor] = useState("all");
   const [error, setError] = useState("");
   const [reportDate, setReportDate] = useState("");
   const [syncedQuery, setSyncedQuery] = useState(null);
@@ -227,6 +229,102 @@ const DelayedPoReports = () => {
     )),
     [allRows, appliedFilters],
   );
+
+  const exportFilteredRows = useMemo(() => {
+    const brandFilterToUse = exportingFormat === "pdf" ? exportBrand : appliedFilters.brand;
+    const vendorFilterToUse = exportingFormat === "pdf" ? exportVendor : appliedFilters.vendor;
+    return allRows.filter((row) => (
+      (isAllBrands(brandFilterToUse) || brandFilterToUse.includes(row?.brand))
+      && (vendorFilterToUse === "all" || row?.vendor === vendorFilterToUse)
+      && (appliedFilters.po === "all" || row?.order_id === appliedFilters.po)
+    ));
+  }, [allRows, exportingFormat, exportBrand, exportVendor, appliedFilters]);
+
+  const pdfSortedRows = useMemo(
+    () => sortClientRows(exportFilteredRows, {
+      sortBy,
+      sortOrder,
+      getSortValue: (row, column) => {
+        if (column === "po") return row?.order_id;
+        if (column === "itemCode") return row?.item_code;
+        if (column === "dates") return new Date(row?.etd || row?.po_etd || 0).getTime();
+        if (column === "delayDays") return Number(row?.delay_days || 0);
+        if (column === "orderQuantity") return Number(row?.order_quantity || 0);
+        if (column === "quantities") return Number(row?.pending_quantity || 0);
+        return "";
+      },
+    }),
+    [exportFilteredRows, sortBy, sortOrder],
+  );
+
+  const pdfPoCount = useMemo(
+    () => new Set(exportFilteredRows.map((row) => `${row?.order_id}__${row?.brand}__${row?.vendor}`)).size,
+    [exportFilteredRows],
+  );
+
+  const pdfPoSummaryRows = useMemo(() => {
+    const summaryMap = new Map();
+
+    exportFilteredRows.forEach((row) => {
+      const key = `${row?.order_id}__${row?.brand}__${row?.vendor}`;
+      if (!summaryMap.has(key)) {
+        summaryMap.set(key, {
+          order_id: row?.order_id || "N/A",
+          brand: row?.brand || "N/A",
+          vendor: row?.vendor || "N/A",
+          order_date: row?.order_date || "",
+          etd: row?.po_etd || row?.etd || "",
+          delay_days: row?.delay_days || 0,
+          item_count: 0,
+          shipped_item_count: 0,
+          inspected_item_count: 0,
+          pending_item_count: 0,
+          order_quantity: 0,
+          shipped_quantity: 0,
+          passed_quantity: 0,
+          pending_quantity: 0,
+        });
+      }
+
+      const summary = summaryMap.get(key);
+      const currentOrderDate = new Date(summary.order_date || 0).getTime();
+      const rowOrderDate = new Date(row?.order_date || 0).getTime();
+      if (
+        Number.isFinite(rowOrderDate)
+        && (!Number.isFinite(currentOrderDate) || rowOrderDate < currentOrderDate)
+      ) {
+        summary.order_date = row.order_date;
+      }
+      if (Number(row?.delay_days || 0) > Number(summary.delay_days || 0)) {
+        summary.delay_days = Number(row.delay_days);
+      }
+      summary.item_count += 1;
+      if (
+        Number(row?.order_quantity || 0) > 0
+        && Number(row?.shipped_quantity || 0) >= Number(row?.order_quantity || 0)
+      ) {
+        summary.shipped_item_count += 1;
+      } else if (Number(row?.passed_quantity || 0) > 0) {
+        summary.inspected_item_count += 1;
+      } else {
+        summary.pending_item_count += 1;
+      }
+      summary.order_quantity += Number(row?.order_quantity || 0);
+      summary.shipped_quantity += Number(row?.shipped_quantity || 0);
+      summary.passed_quantity += Number(row?.passed_quantity || 0);
+      summary.pending_quantity += Number(row?.pending_quantity || 0);
+    });
+
+    return Array.from(summaryMap.values()).sort((left, right) => {
+      const etdCompare = String(left?.etd || "").localeCompare(String(right?.etd || ""));
+      if (etdCompare !== 0) return etdCompare;
+      return String(left?.order_id || "").localeCompare(
+        String(right?.order_id || ""),
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      );
+    });
+  }, [exportFilteredRows]);
 
   const sortedRows = useMemo(
     () => sortClientRows(filteredRows, {
@@ -369,7 +467,11 @@ const DelayedPoReports = () => {
     try {
       setExportingFormat("xls");
       const response = await exportDelayedPoReport({
-        ...buildApiParams(appliedFilters),
+        ...buildApiParams({
+          brand: exportBrand,
+          vendor: exportVendor,
+          po: appliedFilters.po,
+        }),
         report_type: reportType,
       });
       downloadBlob(response);
@@ -405,13 +507,13 @@ const DelayedPoReports = () => {
             ? "PO-wise Summary"
             : "Delayed PO Detailed Report",
           subtitle: `Report date: ${formatDateDDMMYYYY(reportDate)} · Brand: ${
-            isAllBrands(appliedFilters.brand)
+            isAllBrands(exportBrand)
               ? "All Brands"
-              : appliedFilters.brand.join(", ")
+              : exportBrand.join(", ")
           } · Vendor: ${
-            appliedFilters.vendor === "all"
+            exportVendor === "all"
               ? "All Vendors"
-              : appliedFilters.vendor
+              : exportVendor
           }`,
         },
         extraCss: `
@@ -455,7 +557,11 @@ const DelayedPoReports = () => {
             <button
               type="button"
               className="btn btn-outline-primary btn-sm"
-              onClick={() => setShowExportModal(true)}
+              onClick={() => {
+                setExportBrand(appliedFilters.brand);
+                setExportVendor(appliedFilters.vendor);
+                setShowExportModal(true);
+              }}
               disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
             >
               {exportingFormat ? "Exporting..." : "Export Report"}
@@ -677,16 +783,16 @@ const DelayedPoReports = () => {
                     <p>Aggregated totals for the currently selected filters.</p>
                     <div className="delayed-po-pdf-summary-meta">
                       <span>Report date: {formatDateDDMMYYYY(reportDate)}</span>
-                      <span>POs: {poCount}</span>
+                      <span>POs: {pdfPoCount}</span>
                       <span>
-                        Brand: {isAllBrands(appliedFilters.brand)
+                        Brand: {isAllBrands(exportBrand)
                           ? "All Brands"
-                          : appliedFilters.brand.join(", ")}
+                          : exportBrand.join(", ")}
                       </span>
                       <span>
-                        Vendor: {appliedFilters.vendor === "all"
+                        Vendor: {exportVendor === "all"
                           ? "All Vendors"
-                          : appliedFilters.vendor}
+                          : exportVendor}
                       </span>
                     </div>
                     <div className="delayed-po-summary-legend delayed-po-pdf-summary-legend">
@@ -729,7 +835,7 @@ const DelayedPoReports = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {poSummaryRows.map((row) => (
+                        {pdfPoSummaryRows.map((row) => (
                           <tr
                             key={`pdf-summary-${row.order_id}-${row.brand}-${row.vendor}`}
                             className={
@@ -790,8 +896,8 @@ const DelayedPoReports = () => {
                       </p>
                     </div>
                     <div className="d-flex flex-wrap justify-content-end gap-2">
-                      <span className="om-summary-chip">POs: {poCount}</span>
-                      <span className="om-summary-chip">Rows: {sortedRows.length}</span>
+                      <span className="om-summary-chip">POs: {pdfPoCount}</span>
+                      <span className="om-summary-chip">Rows: {pdfSortedRows.length}</span>
                     </div>
                   </div>
                   <table className="table table-sm align-middle om-table mb-0 delayed-po-table">
@@ -811,7 +917,7 @@ const DelayedPoReports = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedRows.map((row) => (
+                    {pdfSortedRows.map((row) => (
                       <tr
                         key={`pdf-${row?.id || `${row?.order_id}-${row?.item_code}`}`}
                         className={getDelayedPoPdfRowClass(row)}
@@ -921,6 +1027,85 @@ const DelayedPoReports = () => {
                 />
               </div>
               <div className="modal-body d-grid gap-4">
+                <div className="row g-3">
+                  <div className="col-md-6 dropdown">
+                    <label className="form-label">Brand</label>
+                    <button
+                      type="button"
+                      className="form-select text-start"
+                      data-bs-toggle="dropdown"
+                      data-bs-auto-close="outside"
+                      disabled={Boolean(exportingFormat)}
+                    >
+                      <span className="text-truncate d-block">
+                        {isAllBrands(exportBrand) ? "All Brands" : exportBrand.join(", ")}
+                      </span>
+                    </button>
+                    <ul className="dropdown-menu packed-goods-filter-menu shadow w-100">
+                      <li>
+                        <label className="packed-goods-filter-option">
+                          <input
+                            type="checkbox"
+                            className="form-check-input"
+                            value="all"
+                            checked={isAllBrands(exportBrand)}
+                            disabled={Boolean(exportingFormat)}
+                            onChange={(e) => {
+                              const { value, checked } = e.target;
+                              setExportBrand((prev) => {
+                                if (value === "all") return DEFAULT_BRANDS;
+                                let next = normalizeBrands(prev).filter((entry) => entry !== "all");
+                                next = checked ? [...next, value] : next.filter((entry) => entry !== value);
+                                return normalizeBrands(next);
+                              });
+                            }}
+                          />
+                          <span className="packed-goods-filter-option-label">All Brands</span>
+                        </label>
+                      </li>
+                      {brandOptions.map((brand) => (
+                        <li key={brand}>
+                          <label className="packed-goods-filter-option">
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              value={brand}
+                              checked={exportBrand.includes(brand)}
+                              disabled={Boolean(exportingFormat)}
+                              onChange={(e) => {
+                                const { value, checked } = e.target;
+                                setExportBrand((prev) => {
+                                  let next = normalizeBrands(prev).filter((entry) => entry !== "all");
+                                  next = checked ? [...next, value] : next.filter((entry) => entry !== value);
+                                  return normalizeBrands(next);
+                                });
+                              }}
+                            />
+                            <span className="packed-goods-filter-option-label">{brand}</span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="col-md-6">
+                    <label className="form-label">Vendor</label>
+                    <select
+                      className="form-select"
+                      value={exportVendor}
+                      disabled={Boolean(exportingFormat)}
+                      onChange={(e) => setExportVendor(e.target.value)}
+                    >
+                      <option value="all">All Vendors</option>
+                      {vendorOptions.map((vendor) => (
+                        <option key={vendor} value={vendor}>
+                          {vendor}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 <fieldset>
                   <legend className="form-label">Report type</legend>
                   <div className="upcoming-etd-export-format-grid">

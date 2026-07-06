@@ -670,8 +670,8 @@ const QcDetails = () => {
     },
     [availableRelatedFileOptions, relatedFileType, subFileType, qc?.item_master],
   );
-  const canUploadQcImages = isAdmin || isQcUser;
-  const canUploadItemMasterFiles = isAdmin && canUpdateQc;
+  const canUploadQcImages = isAdmin || isQcUser || isViewOnly;
+  const canUploadItemMasterFiles = (isAdmin && canUpdateQc) || isViewOnly;
   const isQcImageUploadType = activeRelatedFileConfig?.scope === "qc";
   const activeQcScopedImageUploadTotalLimit =
     activeRelatedFileConfig?.value === "hardware_inspection"
@@ -2202,7 +2202,7 @@ const QcDetails = () => {
           <h2 className="h4 mb-0">QC Details</h2>
           <div className="d-flex flex-column align-items-end gap-2 qc-details-actions">
             <div className="d-flex align-items-center flex-wrap justify-content-end gap-2 qc-details-toolbar">
-              {!isViewOnly && (
+              {(!isViewOnly || isViewOnly) && (
                 <>
                   <select
                     className="form-select form-select-sm qc-details-toolbar-select"
