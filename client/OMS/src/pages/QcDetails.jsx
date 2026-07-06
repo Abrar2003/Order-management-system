@@ -1767,6 +1767,7 @@ const QcDetails = () => {
         relatedFileUploadBatchKeyRef.current = "";
         setUploadingRelatedFile(false);
         setRelatedFileUploadProgress(0);
+        setShowQcImageUploadQueue(true);
         selectQcImageFiles(selectedFiles, {
           uploadMode: qcImageUploadMode,
           imageType: fileConfig.value,
@@ -2533,7 +2534,20 @@ const QcDetails = () => {
                           {qcImageUploadState.fileStatuses.map((fileStatus) => (
                             <tr key={fileStatus.fileId}>
                               <td className="text-break">
-                                {fileStatus.fileName}
+                                <div className="d-flex align-items-center gap-2">
+                                  {fileStatus.previewUrl && (
+                                    <img
+                                      src={fileStatus.previewUrl}
+                                      alt={fileStatus.fileName}
+                                      className="qc-image-upload-file-preview"
+                                      decoding="async"
+                                      onError={(event) => {
+                                        event.currentTarget.style.display = "none";
+                                      }}
+                                    />
+                                  )}
+                                  <span>{fileStatus.fileName}</span>
+                                </div>
                               </td>
                               <td>
                                 <span

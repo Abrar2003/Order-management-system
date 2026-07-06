@@ -17,6 +17,14 @@ import {
 } from "../services/browserImageCompression.service";
 
 const RETRY_DELAYS_MS = [2000, 5000, 10000];
+const ACTIVE_FILE_STATUSES = new Set([
+  "compressing",
+  "creating-upload-session",
+  "uploading",
+  "uploaded",
+  "confirming",
+  "retrying",
+]);
 
 const createInitialState = () => ({
   isUploading: false,
@@ -121,6 +129,43 @@ const mergeUniqueFiles = (files = []) =>
     ).values(),
   );
 
+const createLocalPreviewUrl = (file) => {
+  if (
+    typeof URL === "undefined" ||
+    typeof URL.createObjectURL !== "function" ||
+    !(file instanceof Blob)
+  ) {
+    return "";
+  }
+
+  return URL.createObjectURL(file);
+};
+
+const revokeLocalPreviewUrl = (url = "") => {
+  if (
+    typeof URL !== "undefined" &&
+    typeof URL.revokeObjectURL === "function" &&
+    normalizeText(url).startsWith("blob:")
+  ) {
+    URL.revokeObjectURL(url);
+  }
+};
+
+const revokeRemovedPreviewUrls = (previousStatuses = [], nextStatuses = []) => {
+  const retainedUrls = new Set(
+    (Array.isArray(nextStatuses) ? nextStatuses : [])
+      .map((entry) => normalizeText(entry.previewUrl))
+      .filter(Boolean),
+  );
+
+  (Array.isArray(previousStatuses) ? previousStatuses : []).forEach((entry) => {
+    const previewUrl = normalizeText(entry?.previewUrl);
+    if (previewUrl && !retainedUrls.has(previewUrl)) {
+      revokeLocalPreviewUrl(previewUrl);
+    }
+  });
+};
+
 const createFileStatuses = (files = [], batchSize = QC_IMAGE_DIRECT_UPLOAD_CONCURRENCY, previousStatuses = []) => {
   const previousBySignature = new Map(
     (Array.isArray(previousStatuses) ? previousStatuses : []).map((entry) => [
@@ -140,6 +185,7 @@ const createFileStatuses = (files = [], batchSize = QC_IMAGE_DIRECT_UPLOAD_CONCU
       file,
       fileName: normalizeText(file?.name) || `QC image ${index + 1}`,
       fileSize: Number(file?.size || 0),
+      previewUrl: previous?.previewUrl || createLocalPreviewUrl(file),
       batchNumber: Math.floor(index / Math.max(1, Number(batchSize) || QC_IMAGE_DIRECT_UPLOAD_CONCURRENCY)) + 1,
       status: "queued",
       progressPercent: 0,
@@ -156,13 +202,7 @@ const createFileStatuses = (files = [], batchSize = QC_IMAGE_DIRECT_UPLOAD_CONCU
 };
 
 const statusRank = (status = "") => {
-  if (
-    status === "compressing" ||
-    status === "creating-upload-session" ||
-    status === "uploading" ||
-    status === "confirming" ||
-    status === "retrying"
-  ) return 3;
+  if (ACTIVE_FILE_STATUSES.has(status)) return 3;
   if (status === "failed") return 2;
   if (status === "queued") return 1;
   return 0;
@@ -172,18 +212,10 @@ const buildBatchStatuses = (fileStatuses = [], batchSize = QC_IMAGE_BATCH_SIZE) 
   const batches = splitFilesIntoBatches(fileStatuses, batchSize);
 
   return batches.map((files, index) => {
-    const active = files.some((file) =>
-      [
-        "compressing",
-        "creating-upload-session",
-        "uploading",
-        "confirming",
-        "retrying",
-      ].includes(file.status),
-    );
+    const active = files.some((file) => ACTIVE_FILE_STATUSES.has(file.status));
     const failedCount = files.filter((file) => file.status === "failed").length;
     const queuedCount = files.filter((file) => file.status === "queued").length;
-    const uploadedCount = files.filter((file) => file.status === "uploaded" || file.status === "completed").length;
+    const uploadedCount = files.filter((file) => file.status === "completed").length;
     const duplicateCount = files.reduce((sum, file) => sum + Number(file.duplicateCount || 0), 0);
     const progressPercent = files.length > 0
       ? Math.round(
@@ -224,7 +256,7 @@ const buildBatchStatuses = (fileStatuses = [], batchSize = QC_IMAGE_BATCH_SIZE) 
 };
 
 const summarizeFileStatuses = (fileStatuses = []) => {
-  const uploadedStatuses = fileStatuses.filter((file) => file.status === "uploaded" || file.status === "completed");
+  const uploadedStatuses = fileStatuses.filter((file) => file.status === "completed");
   const failedStatuses = fileStatuses.filter((file) => file.status === "failed");
   const uploadedCount = uploadedStatuses.reduce((sum, file) => sum + Number(file.uploadedCount || 0), 0);
   const duplicateCount = uploadedStatuses.reduce((sum, file) => sum + Number(file.duplicateCount || 0), 0);
@@ -248,19 +280,26 @@ const summarizeFileStatuses = (fileStatuses = []) => {
 const computeOverallProgress = (fileStatuses = []) => {
   if (!Array.isArray(fileStatuses) || fileStatuses.length === 0) return 0;
 
+  const hasActiveStatus = fileStatuses.some((file) => ACTIVE_FILE_STATUSES.has(file.status));
+  const averageProgress =
+    fileStatuses.reduce(
+      (sum, file) => sum + Math.max(0, Math.min(100, Number(file.progressPercent || 0))),
+      0,
+    ) / fileStatuses.length;
+
   return Math.max(
     0,
     Math.min(
-      100,
-      Math.round(
-        fileStatuses.reduce(
-          (sum, file) => sum + Math.max(0, Math.min(100, Number(file.progressPercent || 0))),
-          0,
-        ) / fileStatuses.length,
-      ),
+      hasActiveStatus ? 99 : 100,
+      hasActiveStatus ? Math.floor(averageProgress) : Math.round(averageProgress),
     ),
   );
 };
+
+const hasActiveFileStatuses = (fileStatuses = []) =>
+  (Array.isArray(fileStatuses) ? fileStatuses : []).some((file) =>
+    ACTIVE_FILE_STATUSES.has(file.status),
+  );
 
 const createSummaryMessage = ({
   totalSelectedCount = 0,
@@ -308,12 +347,14 @@ export const useBulkQcImageUpload = ({
 } = {}) => {
   const [state, setState] = useState(createInitialState);
   const stateRef = useRef(state);
+  const fileStatusesRef = useRef([]);
   const isMountedRef = useRef(true);
   const abortControllerRef = useRef(null);
   const uploadInFlightRef = useRef(false);
 
   const recomputeState = useCallback((baseState, nextFileStatuses) => {
     const safeFileStatuses = Array.isArray(nextFileStatuses) ? nextFileStatuses : [];
+    fileStatusesRef.current = safeFileStatuses;
     const counts = summarizeFileStatuses(safeFileStatuses);
     const batchStatuses = buildBatchStatuses(safeFileStatuses, QC_IMAGE_DIRECT_UPLOAD_CONCURRENCY);
 
@@ -342,37 +383,48 @@ export const useBulkQcImageUpload = ({
           ? updater(previousState)
           : { ...previousState, ...updater };
       stateRef.current = nextState;
+      fileStatusesRef.current = Array.isArray(nextState.fileStatuses)
+        ? nextState.fileStatuses
+        : fileStatusesRef.current;
       return nextState;
     });
   }, []);
 
   const updateFileStatus = useCallback((fileId, updater) => {
-    updateState((previousState) => {
-      const nextFileStatuses = previousState.fileStatuses.map((fileStatus) => {
-        if (fileStatus.fileId !== fileId) return fileStatus;
-        return typeof updater === "function"
-          ? updater(fileStatus)
-          : { ...fileStatus, ...updater };
-      });
+    const currentFileStatuses = Array.isArray(fileStatusesRef.current)
+      ? fileStatusesRef.current
+      : [];
+    const nextFileStatuses = currentFileStatuses.map((fileStatus) => {
+      if (fileStatus.fileId !== fileId) return fileStatus;
+      return typeof updater === "function"
+        ? updater(fileStatus)
+        : { ...fileStatus, ...updater };
+    });
 
+    fileStatusesRef.current = nextFileStatuses;
+    updateState((previousState) => {
       return recomputeState(previousState, nextFileStatuses);
     });
   }, [recomputeState, updateState]);
 
   useEffect(() => {
     stateRef.current = state;
+    fileStatusesRef.current = state.fileStatuses;
   }, [state]);
 
   useEffect(() => () => {
     isMountedRef.current = false;
     uploadInFlightRef.current = false;
     abortControllerRef.current?.abort();
+    revokeRemovedPreviewUrls(stateRef.current.fileStatuses, []);
   }, []);
 
   const reset = useCallback(() => {
     uploadInFlightRef.current = false;
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
+    revokeRemovedPreviewUrls(stateRef.current.fileStatuses, []);
+    fileStatusesRef.current = [];
     updateState(createInitialState());
   }, [updateState]);
 
@@ -413,6 +465,8 @@ export const useBulkQcImageUpload = ({
       QC_IMAGE_DIRECT_UPLOAD_CONCURRENCY,
       stateRef.current.fileStatuses,
     );
+    revokeRemovedPreviewUrls(stateRef.current.fileStatuses, nextFileStatuses);
+    fileStatusesRef.current = nextFileStatuses;
     const nextBatchStatuses = buildBatchStatuses(nextFileStatuses, QC_IMAGE_DIRECT_UPLOAD_CONCURRENCY);
 
     updateState((previousState) => ({
@@ -651,7 +705,6 @@ export const useBulkQcImageUpload = ({
     const runnableFileStatuses = (Array.isArray(fileStatusesToUpload) ? fileStatusesToUpload : [])
       .filter((fileStatus) =>
         fileStatus?.file &&
-        fileStatus.status !== "uploaded" &&
         fileStatus.status !== "completed",
       )
       .sort((left, right) =>
@@ -729,22 +782,26 @@ export const useBulkQcImageUpload = ({
         },
       );
     } finally {
-      const latestStatuses = stateRef.current.fileStatuses;
+      const latestStatuses = Array.isArray(fileStatusesRef.current)
+        ? fileStatusesRef.current
+        : stateRef.current.fileStatuses;
       const counts = summarizeFileStatuses(latestStatuses);
       const totalSelectedCount = latestStatuses.length;
-      const summary = {
-        totalSelectedCount,
-        ...counts,
-        currentBatchIndex: stateRef.current.currentBatchIndex,
-        totalBatches: stateRef.current.totalBatches,
-        batchStatuses: stateRef.current.batchStatuses,
-        message: createSummaryMessage({
-          totalSelectedCount,
-          uploadedCount: counts.uploadedCount,
-          duplicateCount: counts.duplicateCount,
-          failedCount: counts.failedCount,
-        }),
-      };
+      const summary = hasActiveFileStatuses(latestStatuses)
+        ? null
+        : {
+            totalSelectedCount,
+            ...counts,
+            currentBatchIndex: stateRef.current.currentBatchIndex,
+            totalBatches: stateRef.current.totalBatches,
+            batchStatuses: stateRef.current.batchStatuses,
+            message: createSummaryMessage({
+              totalSelectedCount,
+              uploadedCount: counts.uploadedCount,
+              duplicateCount: counts.duplicateCount,
+              failedCount: counts.failedCount,
+            }),
+          };
 
       abortControllerRef.current = null;
       uploadInFlightRef.current = false;
@@ -761,7 +818,7 @@ export const useBulkQcImageUpload = ({
       }));
     }
 
-    const counts = summarizeFileStatuses(stateRef.current.fileStatuses);
+    const counts = summarizeFileStatuses(fileStatusesRef.current);
     return counts;
   }, [qcId, recomputeState, updateState, uploadSingleFileWithRetry]);
 
@@ -779,6 +836,8 @@ export const useBulkQcImageUpload = ({
         QC_IMAGE_DIRECT_UPLOAD_CONCURRENCY,
         stateRef.current.fileStatuses,
       );
+      revokeRemovedPreviewUrls(stateRef.current.fileStatuses, nextStatuses);
+      fileStatusesRef.current = nextStatuses;
       updateState((previousState) =>
         recomputeState(
           {

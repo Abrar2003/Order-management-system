@@ -6399,6 +6399,16 @@ small,
   padding: 0.5rem;
 }
 
+.qc-image-upload-file-preview {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--om-color-border);
+  border-radius: 0.375rem;
+  background: var(--om-color-surface-muted);
+  object-fit: cover;
+}
+
 .qc-details-action-row .btn {
   white-space: normal;
 }
