@@ -1,11 +1,32 @@
+import axios from "axios";
 import api from "../api/axios";
 
 export const MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST = 100;
 export const QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD = 150;
 export const HARDWARE_INSPECTION_IMAGE_LIMIT = 6;
 export const QC_IMAGE_BATCH_SIZE = 10;
-export const SUPPORTED_QC_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png"];
-export const SUPPORTED_QC_IMAGE_MIME_TYPES = ["image/jpeg", "image/png"];
+export const QC_IMAGE_DIRECT_UPLOAD_CONCURRENCY = 3;
+export const QC_IMAGE_ENABLE_AVIF_UPLOADS =
+  String(import.meta.env.VITE_QC_IMAGE_ENABLE_AVIF_UPLOADS || "")
+    .trim()
+    .toLowerCase() === "true";
+export const SUPPORTED_QC_IMAGE_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".heic",
+  ".heif",
+  ...(QC_IMAGE_ENABLE_AVIF_UPLOADS ? [".avif"] : []),
+];
+export const SUPPORTED_QC_IMAGE_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  ...(QC_IMAGE_ENABLE_AVIF_UPLOADS ? ["image/avif"] : []),
+];
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -96,6 +117,56 @@ export const uploadQcImageBatch = async ({
     onUploadProgress,
   });
 };
+
+export const createQcImageUploadSession = async ({
+  qcId,
+  file,
+  imageType = "qc_images",
+  uploadMode = "bulk",
+  comment = "",
+  idempotencyKey = "",
+  signal,
+} = {}) =>
+  api.post(
+    "/qc-images/upload-session",
+    {
+      qc_id: normalizeText(qcId),
+      image_type: normalizeText(imageType || "qc_images"),
+      upload_mode: normalizeText(uploadMode || "bulk").toLowerCase(),
+      comment: normalizeText(comment),
+      idempotency_key: normalizeText(idempotencyKey),
+      file_name: normalizeText(file?.name),
+      content_type: normalizeText(file?.type) || "application/octet-stream",
+      size_bytes: Number(file?.size || 0),
+    },
+    { signal },
+  );
+
+export const refreshQcImageUploadSession = async ({ uploadId, signal } = {}) =>
+  api.post(`/qc-images/upload-session/${encodeURIComponent(uploadId)}/refresh`, {}, { signal });
+
+export const completeQcImageUploadSession = async ({ uploadId, signal } = {}) =>
+  api.post(`/qc-images/upload-session/${encodeURIComponent(uploadId)}/complete`, {}, { signal });
+
+export const abortQcImageUploadSession = async ({ uploadId, signal } = {}) =>
+  api.delete(`/qc-images/upload-session/${encodeURIComponent(uploadId)}`, { signal });
+
+export const uploadFileToPresignedWasabiUrl = async ({
+  uploadUrl = "",
+  file,
+  headers = {},
+  signal,
+  onUploadProgress,
+} = {}) =>
+  axios.put(uploadUrl, file, {
+    headers: {
+      ...(headers || {}),
+      "Content-Type": normalizeText(headers?.["Content-Type"] || file?.type || "application/octet-stream"),
+    },
+    signal,
+    timeout: 5 * 60 * 1000,
+    onUploadProgress,
+  });
 
 export const downloadQcImageFile = async ({
   qcId,

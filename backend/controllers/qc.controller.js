@@ -1533,8 +1533,15 @@ const buildSignedItemFileList = async (files = [], { logLabel = "Item file" } = 
 
 const buildSignedQcImage = async (image = {}) => {
   const signedImage = await buildSignedItemFile(image, { logLabel: "QC image" });
-  const thumbnailKey = normalizeText(image?.thumbnail_key || "");
+  const sourceKey = normalizeText(image?.storage?.source_key || "");
+  const previewKey = normalizeText(image?.preview?.key || "");
+  const thumbnailKey = normalizeText(image?.thumbnail?.key || image?.thumbnail_key || "");
+  const sourceContentType = normalizeText(
+    image?.storage?.source_content_type || image?.contentType || "",
+  );
   let thumbnailUrl = thumbnailKey ? "" : normalizeText(image?.thumbnail_url || "");
+  let sourceUrl = "";
+  let previewUrl = "";
 
   if (thumbnailKey) {
     try {
@@ -1549,9 +1556,51 @@ const buildSignedQcImage = async (image = {}) => {
       });
     }
   }
+  if (sourceKey) {
+    try {
+      sourceUrl = await getSignedObjectUrl(sourceKey, {
+        expiresIn: 24 * 60 * 60,
+        filename: path.basename(sourceKey) || "qc-image-source",
+      });
+    } catch (error) {
+      console.error("QC image source signed URL generation failed:", {
+        key: sourceKey,
+        error: error?.message || String(error),
+      });
+    }
+  }
+  if (previewKey) {
+    try {
+      previewUrl = await getSignedObjectUrl(previewKey, {
+        expiresIn: 24 * 60 * 60,
+        filename: path.basename(previewKey) || "qc-image-preview.webp",
+      });
+    } catch (error) {
+      console.error("QC image preview signed URL generation failed:", {
+        key: previewKey,
+        error: error?.message || String(error),
+      });
+    }
+  }
 
   return {
     ...(signedImage || {}),
+    storage: {
+      ...(image?.storage || {}),
+      source_url: sourceUrl,
+      source_content_type: sourceContentType,
+    },
+    preview: {
+      ...(image?.preview || {}),
+      url: previewUrl || signedImage?.url || "",
+    },
+    thumbnail: {
+      ...(image?.thumbnail || {}),
+      key: thumbnailKey,
+      url: thumbnailUrl,
+    },
+    processing: image?.processing || {},
+    upload: image?.upload || {},
     thumbnail_key: thumbnailKey,
     thumbnail_url: thumbnailUrl,
     thumbnail_generated_at: image?.thumbnail_generated_at || null,
@@ -10744,6 +10793,9 @@ exports.deleteQcImages = async (req, res) => {
           .flatMap((image) => [
             normalizeText(image?.key || ""),
             normalizeText(image?.thumbnail_key || ""),
+            normalizeText(image?.storage?.source_key || ""),
+            normalizeText(image?.preview?.key || ""),
+            normalizeText(image?.thumbnail?.key || ""),
           ])
           .filter(Boolean),
       ),

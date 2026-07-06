@@ -83,6 +83,7 @@ const parseOptions = () => {
     batchSize: parsePositiveIntegerArg("batch-size", DEFAULT_BATCH_SIZE),
     onlyMissing: hasFlag("only-missing") || !retryFailed,
     retryFailed,
+    legacyOnly: hasFlag("legacy-only"),
     inspectionId: getArgValue("inspection-id", ""),
     fromDate: parseDateArg("from-date"),
     verbose: hasFlag("verbose"),
@@ -118,6 +119,9 @@ const buildMissingThumbnailPredicate = (retryFailed = false) => {
 
 const buildQcQuery = (options) => {
   const candidatePredicate = buildMissingThumbnailPredicate(options.retryFailed);
+  if (options.legacyOnly) {
+    candidatePredicate["storage.source_key"] = { $in: [null, ""] };
+  }
   const andConditions = [
     {
       $or: IMAGE_FIELDS.map((field) => ({
@@ -168,6 +172,9 @@ const isImageRecord = (image = {}) => {
 
 const isThumbnailCandidate = (image = {}, options = {}) => {
   if (!isImageRecord(image)) return false;
+  if (options.legacyOnly && normalizeText(image?.storage?.source_key)) {
+    return false;
+  }
 
   const status = normalizeLower(image?.thumbnail_status);
   const thumbnailKey = normalizeText(image?.thumbnail_key);
@@ -623,6 +630,7 @@ const main = async () => {
     batch_size: options.batchSize,
     only_missing: options.onlyMissing,
     retry_failed: options.retryFailed,
+    legacy_only: options.legacyOnly,
     inspection_id: options.inspectionId || "",
     from_date: options.fromDate ? options.fromDate.toISOString().slice(0, 10) : "",
     query_max_time_ms: options.queryMaxTimeMs || "none",

@@ -12,6 +12,7 @@ const QUEUE_NAMES = Object.freeze({
   calendarSyncQueue: "calendarSyncQueue",
   cbmRecalcQueue: "cbmRecalcQueue",
   imageProcessingQueue: "imageProcessingQueue",
+  qcImageProcessingQueue: "qc-image-processing",
 });
 
 const DEFAULT_JOB_OPTIONS = Object.freeze({
@@ -275,6 +276,34 @@ const enqueueQcImageThumbnailGeneration = ({
   );
 };
 
+const enqueueQcImageDerivativeProcessing = ({
+  qcId = "",
+  imageField = "qc_images",
+  imageId = "",
+} = {}) => {
+  const safeQcId = sanitizeJobIdPart(qcId);
+  const safeImageField = sanitizeJobIdPart(imageField);
+  const safeImageId = sanitizeJobIdPart(imageId);
+
+  return addJob(
+    QUEUE_NAMES.qcImageProcessingQueue,
+    JOB_NAMES.PROCESS_QC_IMAGE_DERIVATIVES,
+    {
+      qcId,
+      imageField,
+      imageId,
+    },
+    {
+      jobId: ["qc-image", safeQcId, safeImageField, safeImageId].join(":"),
+      attempts: 3,
+      backoff: {
+        type: "exponential",
+        delay: 10000,
+      },
+    },
+  );
+};
+
 const closeQueues = async () => {
   const registeredQueues = queues || {};
   const registeredEvents = queueEvents || {};
@@ -302,5 +331,6 @@ module.exports = {
   enqueueBrandCalendarResync,
   enqueuePisFileProcessing,
   enqueueQcImageThumbnailGeneration,
+  enqueueQcImageDerivativeProcessing,
   closeQueues,
 };

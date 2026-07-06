@@ -16,6 +16,7 @@
     "sync:pis": "node scripts/syncPisWorkbooks.js",
     "backfill:po-cbm": "node scripts/backfillTotalPoCbm.js",
     "backfill:item-kd": "node scripts/backfillItemKdFromLegacyFields.js",
+    "validate:qc-heic": "node scripts/validateQcHeicSharp.js",
     "sync:items-inspected-from-latest-inspections": "node scripts/syncItemsInspectedDataFromLatestInspections.js",
     "compare:by-boo-collection": "node scripts/createByBooDbComparisonSheet.js",
     "upload:pis:folder": "node scripts/uploadPisFolderViaApi.js",

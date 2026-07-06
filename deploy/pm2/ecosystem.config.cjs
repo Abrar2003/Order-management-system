@@ -40,5 +40,22 @@ module.exports = {
         NODE_ENV: "production",
       },
     },
+    {
+      name: "oms-qc-image-worker",
+      cwd: path.resolve(__dirname, "../../backend"),
+      script: "qcImageWorker.js",
+
+      instances: 1,
+      exec_mode: "fork",
+
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "900M",
+
+      env: {
+        NODE_ENV: "production",
+        QC_IMAGE_PROCESSING_TZ: "Asia/Kolkata",
+      },
+    },
   ],
 };

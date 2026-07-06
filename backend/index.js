@@ -19,6 +19,7 @@ const connectDB = require("./config/connectDB");
 const orderRouter = require("./routers/orders.routes");
 const authRouter = require("./routers/auth.routes");
 const qcRouter = require("./routers/qc.routes");
+const qcImagesRouter = require("./routers/qcImages.routes");
 const brandRouter = require("./routers/brand.route");
 const inspectorRouter = require("./routers/inspector.routes");
 const userRouter = require("./routers/user.routes");
@@ -119,6 +120,8 @@ app.use(
 app.use("/orders", orderRouter);
 app.use("/auth", authRouter);
 app.use("/qc", qcRouter);
+app.use("/qc-images", qcImagesRouter);
+app.use("/api/qc-images", qcImagesRouter);
 app.use("/brands", brandRouter);
 app.use("/inspectors", inspectorRouter);
 app.use("/users", userRouter);

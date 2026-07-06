@@ -177,8 +177,14 @@ if is_truthy "$REDIS_JOBS_ENABLED_EFFECTIVE"; then
   else
     pm2 start "$PM2_CONFIG" --only oms-worker --update-env
   fi
+  if pm2 describe oms-qc-image-worker >/dev/null 2>&1; then
+    pm2 restart "$PM2_CONFIG" --only oms-qc-image-worker --update-env
+  else
+    pm2 start "$PM2_CONFIG" --only oms-qc-image-worker --update-env
+  fi
 else
   pm2 delete oms-worker >/dev/null 2>&1 || true
+  pm2 delete oms-qc-image-worker >/dev/null 2>&1 || true
 fi
 
 pm2 save
@@ -221,6 +227,15 @@ if is_truthy "$REDIS_JOBS_ENABLED_EFFECTIVE"; then
   fi
 
   echo "oms-worker is running with $RUNNING_PM2_WORKER_INSTANCES instance(s)"
+
+  RUNNING_PM2_QC_IMAGE_WORKER_INSTANCES="$(count_online_pm2_app oms-qc-image-worker)"
+  if [[ "$RUNNING_PM2_QC_IMAGE_WORKER_INSTANCES" -ne 1 ]]; then
+    echo "Expected 1 oms-qc-image-worker PM2 instance, but found $RUNNING_PM2_QC_IMAGE_WORKER_INSTANCES"
+    pm2 list
+    exit 1
+  fi
+
+  echo "oms-qc-image-worker is running with $RUNNING_PM2_QC_IMAGE_WORKER_INSTANCES instance(s)"
 else
   echo "REDIS_JOBS_ENABLED is not true; skipping required oms-worker online check"
 fi

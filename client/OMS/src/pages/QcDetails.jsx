@@ -55,6 +55,8 @@ import {
   HARDWARE_INSPECTION_IMAGE_LIMIT,
   MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST,
   QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD,
+  SUPPORTED_QC_IMAGE_EXTENSIONS,
+  SUPPORTED_QC_IMAGE_MIME_TYPES,
 } from "../services/qcImages.service";
 import Barcode from "react-barcode";
 import "../App.css";
@@ -250,11 +252,11 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     buttonLabel: "QC images",
     scope: "qc",
     previewMode: "image",
-    accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
-    extensions: [".jpg", ".jpeg", ".png"],
-    mimeTypes: ["image/jpeg", "image/png"],
+    accept: [...SUPPORTED_QC_IMAGE_EXTENSIONS, ...SUPPORTED_QC_IMAGE_MIME_TYPES].join(","),
+    extensions: SUPPORTED_QC_IMAGE_EXTENSIONS,
+    mimeTypes: SUPPORTED_QC_IMAGE_MIME_TYPES,
     invalidMessage:
-      "Only JPG, JPEG, or PNG files are allowed for QC images.",
+      "Only JPG, JPEG, PNG, WebP, HEIC, HEIF, or AVIF files are allowed for QC images.",
     supportsBulk: true,
   },
   {
@@ -263,11 +265,11 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     buttonLabel: "hardware inspection images",
     scope: "qc",
     previewMode: "image",
-    accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
-    extensions: [".jpg", ".jpeg", ".png"],
-    mimeTypes: ["image/jpeg", "image/png"],
+    accept: [...SUPPORTED_QC_IMAGE_EXTENSIONS, ...SUPPORTED_QC_IMAGE_MIME_TYPES].join(","),
+    extensions: SUPPORTED_QC_IMAGE_EXTENSIONS,
+    mimeTypes: SUPPORTED_QC_IMAGE_MIME_TYPES,
     invalidMessage:
-      "Only JPG, JPEG, or PNG files are allowed for hardware inspection images.",
+      "Only JPG, JPEG, PNG, WebP, HEIC, HEIF, or AVIF files are allowed for hardware inspection images.",
     supportsBulk: true,
   },
 ]);
@@ -378,14 +380,67 @@ const getQcImageGalleryItemKey = (image = {}, index = 0) =>
     .filter(Boolean)
     .join("__");
 
-const getQcImagePreviewUrl = (image = {}) =>
-  String(image?.url || image?.link || "").trim();
+const isHeicOrHeifImage = (image = {}) => {
+  const contentType = String(
+    image?.storage?.source_content_type ||
+      image?.contentType ||
+      "",
+  ).trim().toLowerCase();
+  const key = String(
+    image?.storage?.source_key ||
+      image?.key ||
+      image?.originalName ||
+      "",
+  ).trim().toLowerCase();
+  return (
+    contentType === "image/heic" ||
+    contentType === "image/heif" ||
+    key.endsWith(".heic") ||
+    key.endsWith(".heif")
+  );
+};
 
-const getQcImageThumbnailUrl = (image = {}) =>
-  String(image?.thumbnail_status || image?.thumbnailStatus || "").trim().toLowerCase() === "completed"
-    ? String(image?.thumbnail_url || image?.thumbnailUrl || "").trim()
-      || getQcImagePreviewUrl(image)
-    : getQcImagePreviewUrl(image);
+const getQcImageProcessingStatus = (image = {}) =>
+  String(image?.processing?.status || image?.processing_status || "").trim().toLowerCase();
+
+const getQcImageSourceUrl = (image = {}) =>
+  String(image?.storage?.source_url || "").trim();
+
+const getQcImageCanonicalUrl = (image = {}) =>
+  String(image?.preview?.url || image?.url || image?.link || "").trim();
+
+const getQcImagePreviewUrl = (image = {}) => {
+  const canonicalUrl = getQcImageCanonicalUrl(image);
+  const sourceUrl = getQcImageSourceUrl(image);
+  const hasDirectSource = Boolean(image?.storage?.source_key || sourceUrl);
+  const processingStatus = getQcImageProcessingStatus(image);
+
+  if (!hasDirectSource) return canonicalUrl;
+  if (processingStatus === "ready" && canonicalUrl) return canonicalUrl;
+  if (sourceUrl && !isHeicOrHeifImage(image)) return sourceUrl;
+  return "";
+};
+
+const getQcImageThumbnailUrl = (image = {}) => {
+  const processingStatus = getQcImageProcessingStatus(image);
+  const thumbnailUrl =
+    String(image?.thumbnail?.url || image?.thumbnail_url || image?.thumbnailUrl || "").trim();
+  if (
+    thumbnailUrl &&
+    (
+      processingStatus === "ready" ||
+      String(image?.thumbnail_status || image?.thumbnailStatus || "").trim().toLowerCase() === "completed"
+    )
+  ) {
+    return thumbnailUrl;
+  }
+  return getQcImagePreviewUrl(image);
+};
+
+const getQcImageUnavailableLabel = (image = {}) =>
+  isHeicOrHeifImage(image) && getQcImageProcessingStatus(image) !== "ready"
+    ? "Processing overnight"
+    : "Preview unavailable";
 
 const getDownloadFileName = (response, fallbackName) => {
   const disposition = String(response?.headers?.["content-disposition"] || "");
@@ -3545,7 +3600,7 @@ const QcDetails = () => {
                                   />
                                 ) : (
                                   <span className="qc-image-gallery-thumb-empty">
-                                    Preview unavailable
+                                    {getQcImageUnavailableLabel(image)}
                                   </span>
                                 )}
                                 {comment && (
@@ -3613,9 +3668,9 @@ const QcDetails = () => {
                     {"<"}
                   </button>
                   <div className="qc-image-carousel-stage">
-                    {String(activeQcImage?.url || "").trim() ? (
+                    {getQcImagePreviewUrl(activeQcImage) ? (
                       <img
-                        src={activeQcImage.url}
+                        src={getQcImagePreviewUrl(activeQcImage)}
                         alt={activeQcImage?.originalName || "QC image"}
                         className="qc-image-carousel-image"
                         loading="eager"
@@ -3624,7 +3679,7 @@ const QcDetails = () => {
                       />
                     ) : (
                       <div className="qc-image-carousel-empty">
-                        Preview unavailable
+                        {getQcImageUnavailableLabel(activeQcImage)}
                       </div>
                     )}
                   </div>

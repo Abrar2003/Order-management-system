@@ -14,9 +14,46 @@ const DEFAULT_QC_IMAGE_MAX_WIDTH = 2200;
 const DEFAULT_QC_IMAGE_JPEG_QUALITY = 78;
 const DEFAULT_QC_IMAGE_WEBP_QUALITY = 78;
 const DEFAULT_QC_IMAGE_MAX_INPUT_PIXELS = 40 * 1024 * 1024;
+const DEFAULT_QC_IMAGE_DIRECT_UPLOAD_URL_TTL_SECONDS = 15 * 60;
+const DEFAULT_QC_IMAGE_PREVIEW_MAX_DIMENSION = 1920;
+const DEFAULT_QC_IMAGE_PREVIEW_WEBP_QUALITY = 82;
+const DEFAULT_QC_IMAGE_THUMBNAIL_MAX_DIMENSION = 480;
+const DEFAULT_QC_IMAGE_THUMBNAIL_WEBP_QUALITY = 72;
 
-const QC_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
-const QC_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
+const isTruthy = (value) =>
+  ["1", "true", "yes", "on"].includes(String(value ?? "").trim().toLowerCase());
+
+const QC_IMAGE_ENABLE_AVIF_UPLOADS = isTruthy(process.env.QC_IMAGE_ENABLE_AVIF_UPLOADS);
+
+const BASE_QC_IMAGE_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+];
+const BASE_QC_IMAGE_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".heic",
+  ".heif",
+];
+const QC_IMAGE_MIME_TYPES = new Set([
+  ...BASE_QC_IMAGE_MIME_TYPES,
+  ...(QC_IMAGE_ENABLE_AVIF_UPLOADS ? ["image/avif"] : []),
+]);
+const QC_IMAGE_EXTENSIONS = new Set([
+  ...BASE_QC_IMAGE_EXTENSIONS,
+  ...(QC_IMAGE_ENABLE_AVIF_UPLOADS ? [".avif"] : []),
+]);
+const QC_IMAGE_BROWSER_RENDERABLE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  ...(QC_IMAGE_ENABLE_AVIF_UPLOADS ? ["image/avif"] : []),
+]);
 const QC_IMAGE_UPLOAD_MODES = Object.freeze({
   SINGLE: "single",
   BULK: "bulk",
@@ -87,6 +124,42 @@ const QC_IMAGE_MAX_INPUT_PIXELS = Math.max(
   ),
 );
 
+const QC_IMAGE_DIRECT_UPLOAD_URL_TTL_SECONDS = Math.max(
+  60,
+  toPositiveInteger(
+    process.env.QC_IMAGE_DIRECT_UPLOAD_URL_TTL_SECONDS,
+    DEFAULT_QC_IMAGE_DIRECT_UPLOAD_URL_TTL_SECONDS,
+  ),
+);
+
+const QC_IMAGE_PREVIEW_MAX_DIMENSION = Math.max(
+  1,
+  toPositiveInteger(
+    process.env.QC_IMAGE_PREVIEW_MAX_DIMENSION,
+    DEFAULT_QC_IMAGE_PREVIEW_MAX_DIMENSION,
+  ),
+);
+
+const QC_IMAGE_PREVIEW_WEBP_QUALITY = clampInteger(
+  process.env.QC_IMAGE_PREVIEW_WEBP_QUALITY || DEFAULT_QC_IMAGE_PREVIEW_WEBP_QUALITY,
+  1,
+  100,
+);
+
+const QC_IMAGE_THUMBNAIL_MAX_DIMENSION = Math.max(
+  1,
+  toPositiveInteger(
+    process.env.QC_IMAGE_THUMBNAIL_MAX_DIMENSION,
+    DEFAULT_QC_IMAGE_THUMBNAIL_MAX_DIMENSION,
+  ),
+);
+
+const QC_IMAGE_THUMBNAIL_WEBP_QUALITY = clampInteger(
+  process.env.QC_IMAGE_THUMBNAIL_WEBP_QUALITY || DEFAULT_QC_IMAGE_THUMBNAIL_WEBP_QUALITY,
+  1,
+  100,
+);
+
 const OMS_TEMP_ROOT_DIR = path.join(process.env.OMS_TEMP_DIR || os.tmpdir(), "oms");
 const QC_IMAGE_TEMP_DIR = path.join(OMS_TEMP_ROOT_DIR, "qc-image-uploads");
 const QC_IMAGE_OPTIMIZATION_TEMP_DIR = path.join(OMS_TEMP_ROOT_DIR, "image-optimization");
@@ -100,6 +173,8 @@ module.exports = {
   ABSOLUTE_MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST,
   QC_IMAGE_MIME_TYPES,
   QC_IMAGE_EXTENSIONS,
+  QC_IMAGE_ENABLE_AVIF_UPLOADS,
+  QC_IMAGE_BROWSER_RENDERABLE_MIME_TYPES,
   QC_IMAGE_UPLOAD_MODES,
   QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD,
   HARDWARE_INSPECTION_IMAGE_LIMIT,
@@ -111,6 +186,11 @@ module.exports = {
   QC_IMAGE_JPEG_QUALITY,
   QC_IMAGE_WEBP_QUALITY,
   QC_IMAGE_MAX_INPUT_PIXELS,
+  QC_IMAGE_DIRECT_UPLOAD_URL_TTL_SECONDS,
+  QC_IMAGE_PREVIEW_MAX_DIMENSION,
+  QC_IMAGE_PREVIEW_WEBP_QUALITY,
+  QC_IMAGE_THUMBNAIL_MAX_DIMENSION,
+  QC_IMAGE_THUMBNAIL_WEBP_QUALITY,
   OMS_TEMP_ROOT_DIR,
   QC_IMAGE_TEMP_DIR,
   QC_IMAGE_OPTIMIZATION_TEMP_DIR,

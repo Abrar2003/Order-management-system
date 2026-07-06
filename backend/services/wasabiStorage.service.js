@@ -233,6 +233,41 @@ const getSignedObjectUrl = async (
   }
 };
 
+const getPresignedUploadUrl = async (
+  key,
+  {
+    contentType = "application/octet-stream",
+    expiresIn = 900,
+  } = {},
+) => {
+  if (!normalizeValue(key)) {
+    throw new Error("Object key is required for presigned upload URL");
+  }
+
+  const client = getClient();
+  const config = getConfig();
+  const safeExpiresIn =
+    Number.isFinite(Number(expiresIn)) && Number(expiresIn) > 0
+      ? Number(expiresIn)
+      : 900;
+
+  try {
+    return await getSignedUrl(
+      client,
+      new PutObjectCommand({
+        Bucket: config.bucket,
+        Key: key,
+        ContentType: normalizeValue(contentType) || "application/octet-stream",
+      }),
+      { expiresIn: safeExpiresIn },
+    );
+  } catch (error) {
+    throw new Error(
+      `Wasabi presigned upload URL generation failed: ${error?.message || String(error)}`,
+    );
+  }
+};
+
 const uploadBuffer = async ({
   buffer,
   key,
@@ -513,6 +548,57 @@ const objectExists = async (key) => {
   }
 };
 
+const getObjectMetadata = async (key) => {
+  if (!normalizeValue(key)) {
+    throw new Error("Object key is required");
+  }
+
+  const client = getClient();
+  const config = getConfig();
+
+  try {
+    const response = await client.send(
+      new HeadObjectCommand({
+        Bucket: config.bucket,
+        Key: key,
+      }),
+    );
+
+    return {
+      exists: true,
+      key,
+      contentType: normalizeValue(response?.ContentType),
+      size: Number(response?.ContentLength || 0),
+      etag: normalizeValue(response?.ETag).replace(/^"|"$/g, ""),
+      lastModified: response?.LastModified || null,
+      metadata: response?.Metadata || {},
+    };
+  } catch (error) {
+    const errorName = normalizeValue(error?.name || error?.Code);
+    const statusCode = Number(error?.$metadata?.httpStatusCode || 0);
+    if (
+      statusCode === 404
+      || errorName === "NotFound"
+      || errorName === "NoSuchKey"
+      || errorName === "NotFoundException"
+    ) {
+      return {
+        exists: false,
+        key,
+        contentType: "",
+        size: 0,
+        etag: "",
+        lastModified: null,
+        metadata: {},
+      };
+    }
+
+    throw new Error(
+      `Wasabi object metadata check failed: ${error?.message || String(error)}`,
+    );
+  }
+};
+
 const getBucketCors = async () => {
   const client = getClient();
   const config = getConfig();
@@ -612,7 +698,9 @@ module.exports = {
   createStorageKey,
   getObjectUrl,
   getSignedObjectUrl,
+  getPresignedUploadUrl,
   getObjectBuffer,
+  getObjectMetadata,
   objectExists,
   getBucketCors,
   putBucketCors,
