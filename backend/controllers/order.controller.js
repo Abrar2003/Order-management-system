@@ -7986,7 +7986,7 @@ const buildUpcomingEtdReportDataset = async ({
 
   return {
     filters: {
-      brand: selectedBrand,
+      brand: selectedBrands,
       vendor: selectedVendor,
       brand_options: brandOptions,
       vendor_options: vendorOptions,
