@@ -3,6 +3,17 @@ import { Navigate, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { usePermissions } from "../auth/PermissionContext";
+import {
+  emptyVendorCode,
+  formatVendorCodes,
+  getAvailableBrandOptions,
+  getCompleteVendorCodes,
+  getVendorCodeSearchValues,
+  hasDuplicateVendorCodeRows,
+  hasIncompleteVendorCodeRows,
+  normalizeBrandOptions,
+  normalizeVendorCodeRows,
+} from "../utils/vendorCodes";
 import "../App.css";
 
 const initialForm = {
@@ -12,7 +23,7 @@ const initialForm = {
   phone: "",
   country: "",
   address: "",
-  vendor_code: "",
+  vendor_code: [{ ...emptyVendorCode }],
   contact_person: [{ name: "", email: "", phone: "", type: "merchant" }],
   is_active: true,
 };
@@ -54,6 +65,8 @@ const CreateVendor = () => {
   const [vendors, setVendors] = useState([]);
   const [loadingVendors, setLoadingVendors] = useState(true);
   const [vendorSearch, setVendorSearch] = useState("");
+  const [brandOptions, setBrandOptions] = useState([]);
+  const [loadingBrands, setLoadingBrands] = useState(true);
 
   const loadVendors = useCallback(async () => {
     if (!canCreateVendors) return;
@@ -70,9 +83,25 @@ const CreateVendor = () => {
     }
   }, [canCreateVendors]);
 
+  const loadBrandOptions = useCallback(async () => {
+    if (!canCreateVendors) return;
+
+    setLoadingBrands(true);
+    try {
+      const response = await api.get("/vendors/brand-options");
+      setBrandOptions(normalizeBrandOptions(response?.data?.data));
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to load brand options.");
+      setBrandOptions([]);
+    } finally {
+      setLoadingBrands(false);
+    }
+  }, [canCreateVendors]);
+
   useEffect(() => {
     loadVendors();
-  }, [loadVendors]);
+    loadBrandOptions();
+  }, [loadBrandOptions, loadVendors]);
 
   const filteredVendors = useMemo(() => {
     const search = vendorSearch.trim().toLowerCase();
@@ -82,7 +111,7 @@ const CreateVendor = () => {
       [
         vendor?.name,
         vendor?.owner_name,
-        vendor?.vendor_code,
+        ...getVendorCodeSearchValues(vendor?.vendor_code),
         vendor?.email,
         vendor?.phone,
         vendor?.country,
@@ -109,6 +138,36 @@ const CreateVendor = () => {
   const handleChange = (event) => {
     const { name, type, checked, value } = event.target;
     setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
+  };
+
+  const handleVendorCodeChange = (index, field, value) => {
+    setForm((prev) => {
+      const vendorCodes = normalizeVendorCodeRows(prev.vendor_code).map((entry) => ({ ...entry }));
+      vendorCodes[index] = {
+        ...(vendorCodes[index] || emptyVendorCode),
+        [field]: value,
+      };
+      return { ...prev, vendor_code: vendorCodes };
+    });
+  };
+
+  const addVendorCode = () => {
+    setForm((prev) => ({
+      ...prev,
+      vendor_code: [...normalizeVendorCodeRows(prev.vendor_code), { ...emptyVendorCode }],
+    }));
+  };
+
+  const removeVendorCode = (index) => {
+    setForm((prev) => {
+      const vendorCodes = normalizeVendorCodeRows(prev.vendor_code).filter(
+        (_, vendorCodeIndex) => vendorCodeIndex !== index,
+      );
+      return {
+        ...prev,
+        vendor_code: vendorCodes.length > 0 ? vendorCodes : [{ ...emptyVendorCode }],
+      };
+    });
   };
 
   const handleContactChange = (index, field, value) => {
@@ -150,8 +209,18 @@ const CreateVendor = () => {
     setError("");
     setSuccess("");
 
-    if (!form.name.trim() || !form.vendor_code.trim()) {
-      setError("Name and vendor code are required.");
+    const vendorCodePayload = getCompleteVendorCodes(form.vendor_code);
+
+    if (!form.name.trim() || vendorCodePayload.length === 0) {
+      setError("Name and at least one vendor code are required.");
+      return;
+    }
+    if (hasIncompleteVendorCodeRows(form.vendor_code)) {
+      setError("Select a brand and enter a code for every vendor code row.");
+      return;
+    }
+    if (hasDuplicateVendorCodeRows(form.vendor_code)) {
+      setError("Duplicate brand and vendor code rows are not allowed.");
       return;
     }
 
@@ -166,13 +235,14 @@ const CreateVendor = () => {
         phone: form.phone.trim(),
         country: form.country.trim() || undefined,
         address: form.address.trim() || undefined,
-        vendor_code: form.vendor_code.trim(),
+        vendor_code: vendorCodePayload,
         contact_person: contactPersonPayload,
         is_active: form.is_active,
       });
       setSuccess("Vendor created successfully.");
       setForm({
         ...initialForm,
+        vendor_code: [{ ...emptyVendorCode }],
         contact_person: [{ ...emptyContactPerson }],
       });
       await loadVendors();
@@ -252,18 +322,6 @@ const CreateVendor = () => {
               </div>
 
               <div className="col-md-6">
-                <label className="form-label">Vendor Code *</label>
-                <input
-                  name="vendor_code"
-                  value={form.vendor_code}
-                  onChange={handleChange}
-                  className="form-control"
-                  placeholder="Vendor code"
-                  required
-                />
-              </div>
-
-              <div className="col-md-6">
                 <label className="form-label">Phone</label>
                 <input
                   name="phone"
@@ -283,6 +341,72 @@ const CreateVendor = () => {
                   className="form-control"
                   placeholder="e.g. India, China, Vietnam"
                 />
+              </div>
+
+              <div className="col-12">
+                <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                  <label className="form-label mb-0">Vendor Codes *</label>
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={addVendorCode}
+                  >
+                    Add Code
+                  </button>
+                </div>
+
+                {normalizeVendorCodeRows(form.vendor_code).map((vendorCode, index) => {
+                  const availableBrandOptions = getAvailableBrandOptions(
+                    brandOptions,
+                    vendorCode.brand,
+                  );
+
+                  return (
+                    <div className="row g-2 align-items-end mb-2" key={`vendor-code-${index}`}>
+                      <div className="col-md-5">
+                        <select
+                          className="form-select"
+                          value={vendorCode.brand}
+                          onChange={(event) =>
+                            handleVendorCodeChange(index, "brand", event.target.value)
+                          }
+                          disabled={loadingBrands}
+                          required
+                        >
+                          <option value="">
+                            {loadingBrands ? "Loading brands..." : "Select Brand"}
+                          </option>
+                          {availableBrandOptions.map((brand) => (
+                            <option key={brand} value={brand}>
+                              {brand}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="col-md-5">
+                        <input
+                          className="form-control"
+                          value={vendorCode.code}
+                          onChange={(event) =>
+                            handleVendorCodeChange(index, "code", event.target.value)
+                          }
+                          placeholder="Vendor code"
+                          required
+                        />
+                      </div>
+                      <div className="col-md-auto d-grid">
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => removeVendorCode(index)}
+                          disabled={normalizeVendorCodeRows(form.vendor_code).length <= 1}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="col-md-6">
@@ -443,7 +567,7 @@ const CreateVendor = () => {
                     <tr>
                       <th>Name</th>
                       <th>Owner Name</th>
-                      <th>Vendor Code</th>
+                      <th>Vendor Codes</th>
                       <th>Email</th>
                       <th>Phone</th>
                       <th>Country</th>
@@ -457,7 +581,7 @@ const CreateVendor = () => {
                       <tr key={vendor._id || `${vendor.name}-${vendor.email}`}>
                         <td className="fw-semibold">{vendor.name || "N/A"}</td>
                         <td>{vendor.owner_name || "N/A"}</td>
-                        <td>{vendor.vendor_code || "N/A"}</td>
+                        <td>{formatVendorCodes(vendor.vendor_code) || "N/A"}</td>
                         <td>{vendor.email || "N/A"}</td>
                         <td>{vendor.phone || "N/A"}</td>
                         <td>

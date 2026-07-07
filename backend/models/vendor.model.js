@@ -22,10 +22,11 @@ const vendorSchema = new mongoose.Schema({
     trim: true,
     default: "",
   },
-  vendor_code: {
-    type: String,
-    required: true,
-  },
+  vendor_code: [{
+    _id: false,
+    brand: { type: String, trim: true, default: "" },
+    code: { type: String, trim: true, default: "" },
+  }],
   contact_person: [{
     name: { type: String },
     email: { type: String },

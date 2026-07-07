@@ -5,6 +5,17 @@ import { isStrictAdminRole } from "../auth/permissions";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { usePermissions } from "../auth/PermissionContext";
+import {
+  emptyVendorCode,
+  formatVendorCodes,
+  getAvailableBrandOptions,
+  getCompleteVendorCodes,
+  getVendorCodeSearchValues,
+  hasDuplicateVendorCodeRows,
+  hasIncompleteVendorCodeRows,
+  normalizeBrandOptions,
+  normalizeVendorCodeRows,
+} from "../utils/vendorCodes";
 import "../App.css";
 
 const CONTACT_PERSON_TYPE_OPTIONS = [
@@ -51,6 +62,8 @@ const VendorDetails = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCountries, setSelectedCountries] = useState([]);
   const [exporting, setExporting] = useState(false);
+  const [brandOptions, setBrandOptions] = useState([]);
+  const [loadingBrands, setLoadingBrands] = useState(true);
 
   // Edit Modal State
   const [editingVendor, setEditingVendor] = useState(null);
@@ -73,9 +86,24 @@ const VendorDetails = () => {
     }
   }, [canViewVendors]);
 
+  const loadBrandOptions = useCallback(async () => {
+    if (!canViewVendors) return;
+
+    setLoadingBrands(true);
+    try {
+      const response = await api.get("/vendors/brand-options");
+      setBrandOptions(normalizeBrandOptions(response?.data?.data));
+    } catch {
+      setBrandOptions([]);
+    } finally {
+      setLoadingBrands(false);
+    }
+  }, [canViewVendors]);
+
   useEffect(() => {
     loadVendors();
-  }, [loadVendors]);
+    loadBrandOptions();
+  }, [loadBrandOptions, loadVendors]);
 
   // Extract all unique countries from vendor list
   const availableCountries = useMemo(() => {
@@ -120,7 +148,7 @@ const VendorDetails = () => {
       const searchableString = [
         vendor?.name,
         vendor?.owner_name,
-        vendor?.vendor_code,
+        ...getVendorCodeSearchValues(vendor?.vendor_code),
         vendor?.email,
         vendor?.phone,
         vendor?.country,
@@ -204,7 +232,7 @@ const VendorDetails = () => {
       _id: vendor._id,
       name: vendor.name || "",
       owner_name: vendor.owner_name || "",
-      vendor_code: vendor.vendor_code || "",
+      vendor_code: normalizeVendorCodeRows(vendor.vendor_code),
       email: vendor.email || "",
       phone: vendor.phone || "",
       country: vendor.country || "",
@@ -227,6 +255,36 @@ const VendorDetails = () => {
   const handleEditChange = (event) => {
     const { name, type, checked, value } = event.target;
     setEditForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
+  };
+
+  const handleEditVendorCodeChange = (index, field, value) => {
+    setEditForm((prev) => {
+      const vendorCodes = normalizeVendorCodeRows(prev.vendor_code).map((entry) => ({ ...entry }));
+      vendorCodes[index] = {
+        ...(vendorCodes[index] || emptyVendorCode),
+        [field]: value,
+      };
+      return { ...prev, vendor_code: vendorCodes };
+    });
+  };
+
+  const addEditVendorCode = () => {
+    setEditForm((prev) => ({
+      ...prev,
+      vendor_code: [...normalizeVendorCodeRows(prev.vendor_code), { ...emptyVendorCode }],
+    }));
+  };
+
+  const removeEditVendorCode = (index) => {
+    setEditForm((prev) => {
+      const vendorCodes = normalizeVendorCodeRows(prev.vendor_code).filter(
+        (_, vendorCodeIndex) => vendorCodeIndex !== index,
+      );
+      return {
+        ...prev,
+        vendor_code: vendorCodes.length > 0 ? vendorCodes : [{ ...emptyVendorCode }],
+      };
+    });
   };
 
   const handleEditContactChange = (index, field, value) => {
@@ -269,8 +327,18 @@ const VendorDetails = () => {
     if (!editForm) return;
 
     setEditError("");
-    if (!editForm.name.trim() || !editForm.vendor_code.trim()) {
-      setEditError("Name and vendor code are required.");
+    const vendorCodePayload = getCompleteVendorCodes(editForm.vendor_code);
+
+    if (!editForm.name.trim() || vendorCodePayload.length === 0) {
+      setEditError("Name and at least one vendor code are required.");
+      return;
+    }
+    if (hasIncompleteVendorCodeRows(editForm.vendor_code)) {
+      setEditError("Select a brand and enter a code for every vendor code row.");
+      return;
+    }
+    if (hasDuplicateVendorCodeRows(editForm.vendor_code)) {
+      setEditError("Duplicate brand and vendor code rows are not allowed.");
       return;
     }
 
@@ -285,7 +353,7 @@ const VendorDetails = () => {
         phone: editForm.phone.trim(),
         country: editForm.country.trim() || undefined,
         address: editForm.address.trim() || undefined,
-        vendor_code: editForm.vendor_code.trim(),
+        vendor_code: vendorCodePayload,
         contact_person: contactPersonPayload,
         is_active: editForm.is_active,
       });
@@ -443,7 +511,7 @@ const VendorDetails = () => {
                       <tr>
                         <th className="ps-4">Vendor Name</th>
                         <th>Owner Name</th>
-                        <th>Vendor Code</th>
+                        <th>Vendor Codes</th>
                         <th>Email</th>
                         <th>Phone</th>
                         <th>Contact Persons</th>
@@ -459,7 +527,7 @@ const VendorDetails = () => {
                           <td>{vendor.owner_name || "N/A"}</td>
                           <td>
                             <code className="text-primary bg-light px-2 py-1 rounded">
-                              {vendor.vendor_code || "N/A"}
+                              {formatVendorCodes(vendor.vendor_code) || "N/A"}
                             </code>
                           </td>
                           <td>{vendor.email || "N/A"}</td>
@@ -554,17 +622,6 @@ const VendorDetails = () => {
                     </div>
 
                     <div className="col-md-6">
-                      <label className="form-label fw-semibold">Vendor Code *</label>
-                      <input
-                        name="vendor_code"
-                        className="form-control"
-                        value={editForm.vendor_code}
-                        onChange={handleEditChange}
-                        required
-                      />
-                    </div>
-
-                    <div className="col-md-6">
                       <label className="form-label fw-semibold">Owner Name</label>
                       <input
                         name="owner_name"
@@ -583,6 +640,75 @@ const VendorDetails = () => {
                         value={editForm.email}
                         onChange={handleEditChange}
                       />
+                    </div>
+
+                    <div className="col-12 pt-2 border-top">
+                      <div className="d-flex justify-content-between align-items-center mb-3">
+                        <label className="form-label fw-semibold mb-0">Vendor Codes *</label>
+                        <button
+                          type="button"
+                          className="btn btn-outline-secondary btn-sm"
+                          onClick={addEditVendorCode}
+                        >
+                          + Add Code
+                        </button>
+                      </div>
+
+                      {normalizeVendorCodeRows(editForm.vendor_code).map((vendorCode, idx) => {
+                        const availableBrandOptions = getAvailableBrandOptions(
+                          brandOptions,
+                          vendorCode.brand,
+                        );
+
+                        return (
+                          <div
+                            className="row g-2 align-items-center mb-2 bg-light p-2 rounded border"
+                            key={`edit-vendor-code-${idx}`}
+                          >
+                            <div className="col-md-5">
+                              <select
+                                className="form-select form-select-sm"
+                                value={vendorCode.brand}
+                                onChange={(event) =>
+                                  handleEditVendorCodeChange(idx, "brand", event.target.value)
+                                }
+                                disabled={loadingBrands}
+                                required
+                              >
+                                <option value="">
+                                  {loadingBrands ? "Loading brands..." : "Select Brand"}
+                                </option>
+                                {availableBrandOptions.map((brand) => (
+                                  <option key={brand} value={brand}>
+                                    {brand}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="col-md-5">
+                              <input
+                                className="form-control form-control-sm"
+                                value={vendorCode.code}
+                                onChange={(event) =>
+                                  handleEditVendorCodeChange(idx, "code", event.target.value)
+                                }
+                                placeholder="Vendor code"
+                                required
+                              />
+                            </div>
+                            <div className="col-md-2 text-end">
+                              <button
+                                type="button"
+                                className="btn btn-outline-danger btn-sm p-1 px-2"
+                                onClick={() => removeEditVendorCode(idx)}
+                                disabled={normalizeVendorCodeRows(editForm.vendor_code).length <= 1}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
 
                     <div className="col-md-6">

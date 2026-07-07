@@ -1,10 +1,17 @@
 const XLSX = require("xlsx");
+const Brand = require("../models/brand.model");
 const Vendor = require("../models/vendor.model");
 
 const normalizeText = (value = "") => String(value ?? "").trim();
 const normalizeEmail = (value = "") => normalizeText(value).toLowerCase();
 const escapeRegex = (value = "") => normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const CONTACT_PERSON_TYPES = new Set(["merchant", "shipment"]);
+
+const createHttpError = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
 
 const normalizeContactPersonType = (value = "") => {
   const normalized = normalizeText(value).toLowerCase();
@@ -30,6 +37,101 @@ const normalizeContactPersons = (value = []) => {
     .filter((contact) => contact.name || contact.email || contact.phone);
 };
 
+const normalizeVendorCodeEntries = (value = []) => {
+  if (typeof value === "string") {
+    const code = normalizeText(value);
+    return code ? [{ brand: "", code }] : [];
+  }
+
+  return (Array.isArray(value) ? value : [])
+    .map((entry = {}) => {
+      if (typeof entry === "string") {
+        return { brand: "", code: normalizeText(entry) };
+      }
+
+      return {
+        brand: normalizeText(entry?.brand || entry?.brand_name || entry?.brandName),
+        code: normalizeText(entry?.code || entry?.vendor_code || entry?.vendorCode),
+      };
+    })
+    .filter((entry) => entry.brand || entry.code);
+};
+
+const formatVendorCodes = (value = []) => {
+  const entries = normalizeVendorCodeEntries(value);
+  if (entries.length === 0) return "";
+
+  return entries
+    .map((entry) =>
+      entry.brand && entry.code
+        ? `${entry.brand}: ${entry.code}`
+        : entry.code || entry.brand,
+    )
+    .filter(Boolean)
+    .join("; ");
+};
+
+const normalizeVendorCodeKey = (entry = {}) =>
+  `${normalizeText(entry.brand).toLowerCase()}\u0000${normalizeText(entry.code).toLowerCase()}`;
+
+const getBrandNameMap = async () => {
+  const brands = await Brand.find({}, "name").sort({ name: 1 }).lean();
+  return new Map(
+    brands
+      .map((brand) => normalizeText(brand?.name))
+      .filter(Boolean)
+      .map((name) => [name.toLowerCase(), name]),
+  );
+};
+
+const normalizeVendorCodesForSave = async (value = []) => {
+  const entries = normalizeVendorCodeEntries(value);
+  if (entries.length === 0) {
+    throw createHttpError(400, "At least one brand and vendor code is required");
+  }
+
+  const incompleteEntry = entries.find((entry) => !entry.brand || !entry.code);
+  if (incompleteEntry) {
+    throw createHttpError(400, "Select a brand and enter a code for every vendor code row");
+  }
+
+  const seen = new Set();
+  for (const entry of entries) {
+    const key = normalizeVendorCodeKey(entry);
+    if (seen.has(key)) {
+      throw createHttpError(400, "Duplicate brand and vendor code rows are not allowed");
+    }
+    seen.add(key);
+  }
+
+  const brandNameMap = await getBrandNameMap();
+  const unknownBrands = [
+    ...new Set(
+      entries
+        .map((entry) => entry.brand)
+        .filter((brand) => !brandNameMap.has(brand.toLowerCase())),
+    ),
+  ];
+  if (unknownBrands.length > 0) {
+    throw createHttpError(400, `Unknown brand selected: ${unknownBrands.join(", ")}`);
+  }
+
+  return entries.map((entry) => ({
+    brand: brandNameMap.get(entry.brand.toLowerCase()),
+    code: entry.code,
+  }));
+};
+
+const buildVendorCodeDuplicateConditions = (vendorCodes = []) =>
+  normalizeVendorCodeEntries(vendorCodes).map((entry) => ({
+    vendor_code: {
+      $elemMatch: {
+        brand: { $regex: `^${escapeRegex(entry.brand)}$`, $options: "i" },
+        code: { $regex: `^${escapeRegex(entry.code)}$`, $options: "i" },
+      },
+    },
+  }));
+
 const serializeVendor = (vendor = {}) => ({
   _id: String(vendor._id || ""),
   name: normalizeText(vendor.name),
@@ -38,7 +140,8 @@ const serializeVendor = (vendor = {}) => ({
   phone: normalizeText(vendor.phone),
   country: normalizeText(vendor.country),
   address: normalizeText(vendor.address),
-  vendor_code: normalizeText(vendor.vendor_code),
+  vendor_code: normalizeVendorCodeEntries(vendor.vendor_code),
+  vendor_code_label: formatVendorCodes(vendor.vendor_code),
   contact_person: normalizeContactPersons(vendor.contact_person),
   is_active: vendor.is_active !== false,
   created_at: vendor.created_at || vendor.createdAt || null,
@@ -51,7 +154,7 @@ const getVendors = async (_req, res) => {
     const vendors = await Vendor.find({
       $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
     })
-      .sort({ country: 1, name: 1, vendor_code: 1 })
+      .sort({ country: 1, name: 1 })
       .lean();
 
     return res.status(200).json({
@@ -67,6 +170,29 @@ const getVendors = async (_req, res) => {
   }
 };
 
+const getVendorBrandOptions = async (_req, res) => {
+  try {
+    const brands = await Brand.find({}, "name").sort({ name: 1 }).lean();
+
+    return res.status(200).json({
+      success: true,
+      data: [
+        ...new Set(
+          brands
+            .map((brand) => normalizeText(brand?.name))
+            .filter(Boolean),
+        ),
+      ],
+    });
+  } catch (error) {
+    console.error("Get Vendor Brand Options Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch brand options",
+    });
+  }
+};
+
 const createVendor = async (req, res) => {
   try {
     const name = normalizeText(req.body?.name);
@@ -75,20 +201,20 @@ const createVendor = async (req, res) => {
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
     const address = normalizeText(req.body?.address);
-    const vendor_code = normalizeText(req.body?.vendor_code);
+    const vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code);
     const contact_person = normalizeContactPersons(req.body?.contact_person);
     const is_active = req.body?.is_active !== false;
 
-    if (!name || !vendor_code) {
+    if (!name) {
       return res.status(400).json({
         success: false,
-        message: "Name and vendor code are required",
+        message: "Name is required",
       });
     }
 
     const duplicateConditions = [
       { name: { $regex: `^${escapeRegex(name)}$`, $options: "i" } },
-      { vendor_code: { $regex: `^${escapeRegex(vendor_code)}$`, $options: "i" } },
+      ...buildVendorCodeDuplicateConditions(vendor_code),
     ];
     if (email) {
       duplicateConditions.push({ email });
@@ -102,8 +228,8 @@ const createVendor = async (req, res) => {
       return res.status(409).json({
         success: false,
         message: email
-          ? "Vendor with this name, email, or vendor code already exists"
-          : "Vendor with this name or vendor code already exists",
+          ? "Vendor with this name, email, or brand/code pair already exists"
+          : "Vendor with this name or brand/code pair already exists",
       });
     }
 
@@ -125,6 +251,12 @@ const createVendor = async (req, res) => {
       data: serializeVendor(vendor.toObject()),
     });
   } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
     console.error("Create Vendor Error:", error);
     return res.status(500).json({
       success: false,
@@ -142,7 +274,7 @@ const updateVendor = async (req, res) => {
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
     const address = normalizeText(req.body?.address);
-    const vendor_code = normalizeText(req.body?.vendor_code);
+    const vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code);
     const contact_person = normalizeContactPersons(req.body?.contact_person);
     const is_active = req.body?.is_active !== false;
 
@@ -153,10 +285,10 @@ const updateVendor = async (req, res) => {
       });
     }
 
-    if (!name || !vendor_code) {
+    if (!name) {
       return res.status(400).json({
         success: false,
-        message: "Name and vendor code are required",
+        message: "Name is required",
       });
     }
 
@@ -170,7 +302,7 @@ const updateVendor = async (req, res) => {
 
     const duplicateConditions = [
       { name: { $regex: `^${escapeRegex(name)}$`, $options: "i" } },
-      { vendor_code: { $regex: `^${escapeRegex(vendor_code)}$`, $options: "i" } },
+      ...buildVendorCodeDuplicateConditions(vendor_code),
     ];
     if (email) {
       duplicateConditions.push({ email });
@@ -185,8 +317,8 @@ const updateVendor = async (req, res) => {
       return res.status(409).json({
         success: false,
         message: email
-          ? "Another vendor with this name, email, or vendor code already exists"
-          : "Another vendor with this name or vendor code already exists",
+          ? "Another vendor with this name, email, or brand/code pair already exists"
+          : "Another vendor with this name or brand/code pair already exists",
       });
     }
 
@@ -209,6 +341,12 @@ const updateVendor = async (req, res) => {
       data: serializeVendor(existingVendor.toObject()),
     });
   } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
     console.error("Update Vendor Error:", error);
     return res.status(500).json({
       success: false,
@@ -235,7 +373,7 @@ const exportVendors = async (req, res) => {
     const rawVendors = await Vendor.find({
       $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
     })
-      .sort({ country: 1, name: 1, vendor_code: 1 })
+      .sort({ country: 1, name: 1 })
       .lean();
 
     let vendors = rawVendors.map(serializeVendor);
@@ -254,7 +392,7 @@ const exportVendors = async (req, res) => {
     const columns = [
       { header: "Vendor Name", value: (v) => v.name || "N/A" },
       { header: "Owner Name", value: (v) => v.owner_name || "N/A" },
-      { header: "Vendor Code", value: (v) => v.vendor_code || "N/A" },
+      { header: "Vendor Codes", value: (v) => v.vendor_code_label || "N/A" },
       { header: "Email", value: (v) => v.email || "N/A" },
       { header: "Phone", value: (v) => v.phone || "N/A" },
       { header: "Country", value: (v) => v.country || "Unspecified" },
@@ -309,6 +447,7 @@ const exportVendors = async (req, res) => {
 
 module.exports = {
   createVendor,
+  getVendorBrandOptions,
   getVendors,
   updateVendor,
   exportVendors,
