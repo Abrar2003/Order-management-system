@@ -439,10 +439,12 @@ const processImageQueue = async (job) => {
     await job.updateProgress(10);
     const result = await generateThumbnailForStoredQcImage({
       qcId: job.data?.qcId,
+      inspectionId: job.data?.inspectionId,
       imageField: job.data?.imageField,
       imageId: job.data?.imageId,
       sourceKey: job.data?.sourceKey,
       idempotencyKey: job.data?.idempotencyKey,
+      ownerModel: job.data?.ownerModel,
     });
     await job.updateProgress(100);
     return result;

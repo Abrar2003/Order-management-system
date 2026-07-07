@@ -502,6 +502,7 @@ export const useBulkQcImageUpload = ({
     fileStatus,
     uploadMode,
     imageType,
+    inspectionId,
     comment,
     signal,
     uploadRunContentHashes,
@@ -588,6 +589,7 @@ export const useBulkQcImageUpload = ({
           }));
           const sessionResponse = await createQcImageUploadSession({
             qcId,
+            inspectionId,
             file: uploadFile,
             idempotencyKey: fileStatus.idempotencyKey,
             uploadMode,
@@ -756,6 +758,7 @@ export const useBulkQcImageUpload = ({
   const runUpload = useCallback(async ({
     uploadMode = "bulk",
     imageType = "qc_images",
+    inspectionId = "",
     comment = "",
     fileStatusesToUpload = [],
   } = {}) => {
@@ -850,6 +853,7 @@ export const useBulkQcImageUpload = ({
             fileStatus,
             uploadMode: normalizedUploadMode,
             imageType: normalizedImageType,
+            inspectionId,
             comment,
             signal: abortController.signal,
             uploadRunContentHashes,
@@ -900,6 +904,7 @@ export const useBulkQcImageUpload = ({
   const startUpload = useCallback(async ({
     uploadMode = "bulk",
     imageType = "qc_images",
+    inspectionId = "",
     comment = "",
     files = null,
   } = {}) => {
@@ -932,12 +937,18 @@ export const useBulkQcImageUpload = ({
     return runUpload({
       uploadMode,
       imageType,
+      inspectionId,
       comment,
       fileStatusesToUpload: uploadCandidates,
     });
   }, [recomputeState, runUpload, updateState]);
 
-  const retryFailedFiles = useCallback(async ({ uploadMode = "bulk", imageType = "qc_images", comment = "" } = {}) => {
+  const retryFailedFiles = useCallback(async ({
+    uploadMode = "bulk",
+    imageType = "qc_images",
+    inspectionId = "",
+    comment = "",
+  } = {}) => {
     const retryStatuses = stateRef.current.fileStatuses.filter((fileStatus) => fileStatus.status === "failed");
 
     if (retryStatuses.length === 0) {
@@ -951,6 +962,7 @@ export const useBulkQcImageUpload = ({
     return runUpload({
       uploadMode,
       imageType,
+      inspectionId,
       comment,
       fileStatusesToUpload: retryStatuses,
     });

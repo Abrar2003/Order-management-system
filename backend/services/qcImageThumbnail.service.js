@@ -1,6 +1,7 @@
 const path = require("path");
 const mongoose = require("mongoose");
 const QC = require("../models/qc.model");
+const Inspection = require("../models/inspection.model");
 const {
   getObjectBuffer,
   getObjectUrl,
@@ -17,9 +18,15 @@ const {
 } = require("./cacheInvalidation.service");
 
 const VALID_QC_IMAGE_FIELDS = new Set(["qc_images", "hardware_inspection", "goods_not_ready_images"]);
+const OWNER_MODEL_INSPECTION = "inspection";
 
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
+const resolveOwnerModel = ({ ownerModel = "qc", inspectionId = "" } = {}) =>
+  normalizeKey(ownerModel) === OWNER_MODEL_INSPECTION ||
+  mongoose.Types.ObjectId.isValid(normalizeText(inspectionId))
+    ? OWNER_MODEL_INSPECTION
+    : "qc";
 
 const toConciseError = (error) =>
   normalizeText(error?.message || String(error)).replace(/\s+/g, " ").slice(0, 300);
@@ -109,6 +116,8 @@ const buildImageArrayFilter = ({
 
 const updateThumbnailSuccess = async ({
   qcId = "",
+  inspectionId = "",
+  ownerModel = "qc",
   imageField = "qc_images",
   imageId = "",
   sourceKey = "",
@@ -116,17 +125,30 @@ const updateThumbnailSuccess = async ({
   thumbnailKey = "",
 } = {}) => {
   const field = resolveImageField(imageField);
+  const owner = resolveOwnerModel({ ownerModel, inspectionId });
   const { queryMatch, arrayFilter } = buildImageArrayFilter({
     imageId,
     sourceKey,
     idempotencyKey,
   });
 
-  const result = await QC.updateOne(
-    {
-      _id: qcId,
-      [`${field}`]: { $elemMatch: queryMatch },
-    },
+  const Model = owner === OWNER_MODEL_INSPECTION ? Inspection : QC;
+  const query =
+    owner === OWNER_MODEL_INSPECTION
+      ? {
+          ...(mongoose.Types.ObjectId.isValid(normalizeText(inspectionId))
+            ? { _id: inspectionId }
+            : {}),
+          qc: qcId,
+          [`${field}`]: { $elemMatch: queryMatch },
+        }
+      : {
+          _id: qcId,
+          [`${field}`]: { $elemMatch: queryMatch },
+        };
+
+  const result = await Model.updateOne(
+    query,
     {
       $set: {
         [`${field}.$[image].thumbnail_key`]: thumbnailKey,
@@ -150,6 +172,8 @@ const updateThumbnailSuccess = async ({
 
 const updateThumbnailFailure = async ({
   qcId = "",
+  inspectionId = "",
+  ownerModel = "qc",
   imageField = "qc_images",
   imageId = "",
   sourceKey = "",
@@ -157,17 +181,30 @@ const updateThumbnailFailure = async ({
   error,
 } = {}) => {
   const field = resolveImageField(imageField);
+  const owner = resolveOwnerModel({ ownerModel, inspectionId });
   const { queryMatch, arrayFilter } = buildImageArrayFilter({
     imageId,
     sourceKey,
     idempotencyKey,
   });
 
-  const result = await QC.updateOne(
-    {
-      _id: qcId,
-      [`${field}`]: { $elemMatch: queryMatch },
-    },
+  const Model = owner === OWNER_MODEL_INSPECTION ? Inspection : QC;
+  const query =
+    owner === OWNER_MODEL_INSPECTION
+      ? {
+          ...(mongoose.Types.ObjectId.isValid(normalizeText(inspectionId))
+            ? { _id: inspectionId }
+            : {}),
+          qc: qcId,
+          [`${field}`]: { $elemMatch: queryMatch },
+        }
+      : {
+          _id: qcId,
+          [`${field}`]: { $elemMatch: queryMatch },
+        };
+
+  const result = await Model.updateOne(
+    query,
     {
       $set: {
         [`${field}.$[image].thumbnail_status`]: "failed",
@@ -191,6 +228,8 @@ const updateThumbnailFailure = async ({
 
 const generateThumbnailForStoredQcImage = async ({
   qcId = "",
+  inspectionId = "",
+  ownerModel = "qc",
   imageField = "qc_images",
   imageId = "",
   sourceKey = "",
@@ -202,14 +241,37 @@ const generateThumbnailForStoredQcImage = async ({
   }
 
   const field = resolveImageField(imageField);
-  const qcDoc = await QC.findById(normalizedQcId)
-    .select(`_id ${field}`)
-    .lean();
-  if (!qcDoc) {
-    return { skipped: true, reason: "qc_not_found", qcId: normalizedQcId };
+  const owner = resolveOwnerModel({ ownerModel, inspectionId });
+  const { queryMatch } = buildImageArrayFilter({
+    imageId,
+    sourceKey,
+    idempotencyKey,
+  });
+  const ownerDoc =
+    owner === OWNER_MODEL_INSPECTION
+      ? await Inspection.findOne({
+          ...(mongoose.Types.ObjectId.isValid(normalizeText(inspectionId))
+            ? { _id: inspectionId }
+            : {}),
+          qc: normalizedQcId,
+          [`${field}`]: { $elemMatch: queryMatch },
+        })
+          .select(`_id qc ${field}`)
+          .lean()
+      : await QC.findById(normalizedQcId)
+          .select(`_id ${field}`)
+          .lean();
+  if (!ownerDoc) {
+    return {
+      skipped: true,
+      reason: owner === OWNER_MODEL_INSPECTION ? "inspection_not_found" : "qc_not_found",
+      qcId: normalizedQcId,
+      inspectionId: normalizeText(inspectionId),
+      ownerModel: owner,
+    };
   }
 
-  const image = findStoredImage(qcDoc, {
+  const image = findStoredImage(ownerDoc, {
     imageField: field,
     imageId,
     sourceKey,
@@ -233,6 +295,8 @@ const generateThumbnailForStoredQcImage = async ({
     if (await objectExists(thumbnailKey)) {
       await updateThumbnailSuccess({
         qcId: normalizedQcId,
+        inspectionId: normalizeText(ownerDoc?._id || inspectionId),
+        ownerModel: owner,
         imageField: field,
         imageId: resolvedImageId,
         sourceKey: resolvedSourceKey,
@@ -243,6 +307,8 @@ const generateThumbnailForStoredQcImage = async ({
         completed: true,
         alreadyExisted: true,
         qcId: normalizedQcId,
+        inspectionId: normalizeText(ownerDoc?._id || inspectionId),
+        ownerModel: owner,
         imageField: field,
         sourceKey: resolvedSourceKey,
         thumbnailKey,
@@ -264,6 +330,8 @@ const generateThumbnailForStoredQcImage = async ({
 
     await updateThumbnailSuccess({
       qcId: normalizedQcId,
+      inspectionId: normalizeText(ownerDoc?._id || inspectionId),
+      ownerModel: owner,
       imageField: field,
       imageId: resolvedImageId,
       sourceKey: resolvedSourceKey,
@@ -275,6 +343,8 @@ const generateThumbnailForStoredQcImage = async ({
       completed: true,
       generated: true,
       qcId: normalizedQcId,
+      inspectionId: normalizeText(ownerDoc?._id || inspectionId),
+      ownerModel: owner,
       imageField: field,
       sourceKey: resolvedSourceKey,
       thumbnailKey,
@@ -285,6 +355,8 @@ const generateThumbnailForStoredQcImage = async ({
   } catch (error) {
     await updateThumbnailFailure({
       qcId: normalizedQcId,
+      inspectionId: normalizeText(ownerDoc?._id || inspectionId),
+      ownerModel: owner,
       imageField: field,
       imageId: resolvedImageId,
       sourceKey: resolvedSourceKey,

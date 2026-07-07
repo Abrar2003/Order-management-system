@@ -83,6 +83,11 @@ const {
   buildArchiveFileName,
   streamQcImagesArchive,
 } = require("../services/qcImageDownload.service");
+const {
+  INSPECTION_IMAGE_ARRAY_FIELDS,
+  resolveInspectionImageUploadTarget,
+  sortInspectionRecordsLatestFirst,
+} = require("../services/qcInspectionImageOwnership.service");
 const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
 const {
   buildFormDraftCleanupPipeline,
@@ -1630,6 +1635,129 @@ const buildSignedQcImageList = async (images = []) =>
 
 const getImageListFromQc = (qcDoc = {}, field = "qc_images") =>
   Array.isArray(qcDoc?.[field]) ? qcDoc[field] : [];
+
+const getStoredImageReference = (image = {}) =>
+  normalizeText(
+    image?.key ||
+      image?.storage?.source_key ||
+      image?.preview?.key ||
+      image?.thumbnail?.key ||
+      image?.thumbnail_key ||
+      image?.url ||
+      image?.link ||
+      "",
+  );
+
+const hasStoredImageReference = (image = {}) =>
+  Boolean(getStoredImageReference(image));
+
+const getSingleImageAsList = (image = null) =>
+  image && hasStoredImageReference(image) ? [image] : [];
+
+const getInspectionImageEntriesForField = (inspections = [], field = "qc_images") =>
+  (Array.isArray(inspections) ? inspections : []).flatMap((inspection) =>
+    getImageListFromQc(inspection, field),
+  );
+
+const getQcWideImageEntriesForField = ({
+  qc = null,
+  inspections = [],
+  field = "qc_images",
+} = {}) => [
+  ...getImageListFromQc(qc, field),
+  ...getInspectionImageEntriesForField(inspections, field),
+];
+
+const getLatestRejectedInspectionImage = (inspectionRecords = []) =>
+  (Array.isArray(inspectionRecords) ? [...inspectionRecords] : [])
+    .sort(sortInspectionRecordsLatestFirst)
+    .map((record) => record?.rejected_image)
+    .find((image) => hasStoredImageReference(image)) || null;
+
+const buildImageObjectKeysForCleanup = (image = {}) => [
+  normalizeText(image?.key || ""),
+  normalizeText(image?.thumbnail_key || ""),
+  normalizeText(image?.storage?.source_key || ""),
+  normalizeText(image?.preview?.key || ""),
+  normalizeText(image?.thumbnail?.key || ""),
+].filter(Boolean);
+
+const buildOwnedImageBuckets = ({
+  qc = null,
+  inspections = [],
+  includeSingleImages = false,
+  fields = INSPECTION_IMAGE_ARRAY_FIELDS,
+} = {}) => {
+  const buckets = [];
+  const arrayFields = Array.isArray(fields) ? fields : INSPECTION_IMAGE_ARRAY_FIELDS;
+
+  arrayFields.forEach((field) => {
+    buckets.push({
+      ownerModel: "qc",
+      ownerId: String(qc?._id || ""),
+      field,
+      isArray: true,
+      images: getImageListFromQc(qc, field),
+    });
+  });
+
+  if (includeSingleImages) {
+    buckets.push({
+      ownerModel: "qc",
+      ownerId: String(qc?._id || ""),
+      field: "rejected_image",
+      isArray: false,
+      images: getSingleImageAsList(qc?.rejected_image),
+    });
+  }
+
+  (Array.isArray(inspections) ? inspections : []).forEach((inspection) => {
+    arrayFields.forEach((field) => {
+      buckets.push({
+        ownerModel: "inspection",
+        ownerId: String(inspection?._id || ""),
+        qcId: String(inspection?.qc || qc?._id || ""),
+        field,
+        isArray: true,
+        images: getImageListFromQc(inspection, field),
+      });
+    });
+
+    if (includeSingleImages) {
+      buckets.push({
+        ownerModel: "inspection",
+        ownerId: String(inspection?._id || ""),
+        qcId: String(inspection?.qc || qc?._id || ""),
+        field: "rejected_image",
+        isArray: false,
+        images: getSingleImageAsList(inspection?.rejected_image),
+      });
+    }
+  });
+
+  return buckets;
+};
+
+const findMatchingOwnedImages = ({
+  buckets = [],
+  requestedImageIds = [],
+  requestedImageKeys = [],
+} = {}) =>
+  (Array.isArray(buckets) ? buckets : []).flatMap((bucket) =>
+    (Array.isArray(bucket.images) ? bucket.images : [])
+      .filter((image) => {
+        const imageId = String(image?._id || "").trim();
+        const imageKey = normalizeText(image?.key || "");
+        return (
+          (imageId && requestedImageIds.includes(imageId)) ||
+          (imageKey && requestedImageKeys.includes(imageKey))
+        );
+      })
+      .map((image) => ({
+        ...bucket,
+        image,
+      })),
+  );
 
 const normalizeUploadIdempotencyKeys = (body = {}, expectedCount = 0) => {
   const rawValue =
@@ -8376,17 +8504,42 @@ exports.markGoodsNotReady = async (req, res) => {
     const requestedQuantityForRecord = latestRequestedQuantity;
     const inspectionSizeSource = await findInspectionSizeSourceForQc(qc, null, req.user);
     const imageFiles = flattenUploadedFiles(req.files);
-    const existingGoodsNotReadyImages = Array.isArray(qc?.goods_not_ready_images)
-      ? qc.goods_not_ready_images
-      : [];
-    if (existingGoodsNotReadyImages.length + imageFiles.length > 10) {
-      return res.status(400).json({
-        message: `Goods-not-ready images are limited to 10. This QC already has ${existingGoodsNotReadyImages.length}.`,
-      });
-    }
     if (imageFiles.length > 0 && !isWasabiConfigured()) {
       return res.status(503).json({
         message: "Wasabi storage is not configured for goods-not-ready images",
+      });
+    }
+
+    const inspectionRecord = await upsertInspectionRecordForRequest({
+      qcDoc: qc,
+      inspectorId: inspectionInspectorId,
+      requestDate: requestedDateForRecord,
+      requestHistoryId: latestRequestEntry?._id || null,
+      requestedQuantity: requestedQuantityForRecord,
+      inspectionDate,
+      remarks: reason,
+      createdBy: req.user._id,
+      auditUser: req.user,
+      addChecked: 0,
+      addPassed: 0,
+      addProvision: 0,
+      appendLabelRanges: [],
+      appendLabels: [],
+      replaceCbmSnapshot: false,
+      goodsNotReady: {
+        ready: true,
+        reason,
+      },
+      currentSizeSource: inspectionSizeSource,
+    });
+    const existingGoodsNotReadyImages = Array.isArray(
+      inspectionRecord?.goods_not_ready_images,
+    )
+      ? inspectionRecord.goods_not_ready_images
+      : [];
+    if (existingGoodsNotReadyImages.length + imageFiles.length > 10) {
+      return res.status(400).json({
+        message: `Goods-not-ready images are limited to 10. This inspection already has ${existingGoodsNotReadyImages.length}.`,
       });
     }
 
@@ -8422,34 +8575,13 @@ exports.markGoodsNotReady = async (req, res) => {
     qc.remarks = reason;
     qc.updated_by = buildAuditActor(req.user);
     if (goodsNotReadyImages.length > 0) {
-      qc.goods_not_ready_images = [
+      inspectionRecord.goods_not_ready_images = [
         ...existingGoodsNotReadyImages,
         ...goodsNotReadyImages,
       ];
+      inspectionRecord.updated_by = buildAuditActor(req.user);
+      await inspectionRecord.save();
     }
-
-    const inspectionRecord = await upsertInspectionRecordForRequest({
-      qcDoc: qc,
-      inspectorId: inspectionInspectorId,
-      requestDate: requestedDateForRecord,
-      requestHistoryId: latestRequestEntry?._id || null,
-      requestedQuantity: requestedQuantityForRecord,
-      inspectionDate,
-      remarks: reason,
-      createdBy: req.user._id,
-      auditUser: req.user,
-      addChecked: 0,
-      addPassed: 0,
-      addProvision: 0,
-      appendLabelRanges: [],
-      appendLabels: [],
-      replaceCbmSnapshot: false,
-      goodsNotReady: {
-        ready: true,
-        reason,
-      },
-      currentSizeSource: inspectionSizeSource,
-    });
 
     if (latestRequestEntry && inspectionRecord) {
       latestRequestEntry.status = "inspected";
@@ -8632,9 +8764,7 @@ exports.rejectAllQc = async (req, res) => {
       uploadedAt,
       uploadedBy,
     });
-    const previousRejectedImageKey = normalizeText(
-      qc?.rejected_image?.key || "",
-    );
+    let previousRejectedImageKey = "";
     const inspectionSizeSource = await findInspectionSizeSourceForQc(qc, null, req.user);
     const inspectionSizeSnapshot = buildInspectionSizeSnapshot({
       qcDoc: qc,
@@ -8724,6 +8854,10 @@ exports.rejectAllQc = async (req, res) => {
       inspectionRecord.updated_by = buildAuditActor(req.user);
     }
 
+    previousRejectedImageKey = normalizeText(
+      inspectionRecord?.rejected_image?.key || "",
+    );
+    inspectionRecord.rejected_image = nextRejectedImageEntry;
     await inspectionRecord.save();
 
     qc.inspection_record = Array.isArray(qc.inspection_record)
@@ -8761,7 +8895,6 @@ exports.rejectAllQc = async (req, res) => {
 
     qc.last_inspected_date = inspectionDate;
     qc.remarks = reason;
-    qc.rejected_image = nextRejectedImageEntry;
     qc.updated_by = buildAuditActor(req.user);
 
     if (qc?.order) {
@@ -10566,6 +10699,18 @@ exports.uploadQcImages = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid image type" });
     }
 
+    const requestedInspectionId = normalizeText(
+      req.body?.inspection_id || req.body?.inspectionId || "",
+    );
+    const targetInspection = await resolveInspectionImageUploadTarget({
+      qc,
+      user: req.user,
+      inspectionId: requestedInspectionId,
+    });
+    const allInspectionRecords = await Inspection.find({ qc: qc._id })
+      .select("_id qc qc_images hardware_inspection")
+      .lean();
+
     const singleImageComment =
       uploadMode === QC_IMAGE_UPLOAD_MODES.SINGLE
         ? normalizeText(req.body?.comment || "")
@@ -10580,20 +10725,25 @@ exports.uploadQcImages = async (req, res) => {
       imageType === "hardware_inspection" ? "hardware inspection image" : "QC image";
     const storageFolder =
       imageType === "hardware_inspection" ? "hardware-inspection" : "qc-images";
+    const targetInspectionImages = getImageListFromQc(targetInspection, imageType);
+    const duplicateSourceImages = getQcWideImageEntriesForField({
+      qc,
+      inspections: allInspectionRecords,
+      field: imageType,
+    });
 
     if (imageType === "hardware_inspection") {
-      currentCount = Array.isArray(qc.hardware_inspection)
-        ? qc.hardware_inspection.length
-        : 0;
+      currentCount = targetInspectionImages.length;
       totalLimit = HARDWARE_INSPECTION_IMAGE_LIMIT;
       maxSuccessfulUploads = Math.max(0, totalLimit - currentCount);
       limitMessage =
         `Hardware inspection image limit reached (max ${HARDWARE_INSPECTION_IMAGE_LIMIT} images).`;
     } else {
-      currentCount = getQcImageCurrentCount(qc);
-      totalLimit = getQcImageUploadTotalLimit(qc);
-      maxSuccessfulUploads = getRemainingQcImageUploadSlots(qc);
-      limitMessage = buildQcImageUploadLimitMessage(qc);
+      currentCount = targetInspectionImages.length;
+      totalLimit = QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD;
+      maxSuccessfulUploads = Math.max(0, totalLimit - currentCount);
+      limitMessage =
+        `QC image limit reached. ${currentCount} of ${totalLimit} images already uploaded for this inspection.`;
     }
 
     if (maxSuccessfulUploads <= 0) {
@@ -10602,11 +10752,12 @@ exports.uploadQcImages = async (req, res) => {
         message: limitMessage,
         data: {
           image_type: imageType,
-          total_limit: totalLimit,
-          current_count: currentCount,
-          remaining_slots: 0,
-          inspection_record_count: getQcInspectionRecordCount(qc),
-        },
+        total_limit: totalLimit,
+        current_count: currentCount,
+        remaining_slots: 0,
+        inspection_id: targetInspection._id,
+        inspection_record_count: getQcInspectionRecordCount(qc),
+      },
       });
     }
 
@@ -10622,8 +10773,11 @@ exports.uploadQcImages = async (req, res) => {
       totalRequestedCount,
     } = await processQcImageBatch({
       qc,
+      inspectionId: String(targetInspection._id),
+      ownerModel: "inspection",
       files,
       idempotencyKeys: normalizeUploadIdempotencyKeys(req.body, files.length),
+      existingImages: duplicateSourceImages,
       uploadMode,
       singleImageComment,
       uploadedBy,
@@ -10665,6 +10819,7 @@ exports.uploadQcImages = async (req, res) => {
         processed_count: processedCount,
         total_requested_count: totalRequestedCount,
         image_type: imageType,
+        inspection_id: targetInspection._id,
         total_limit: totalLimit,
         current_count: currentCount + uploadedCount,
         remaining_slots: Math.max(0, maxSuccessfulUploads - uploadedCount),
@@ -10673,7 +10828,7 @@ exports.uploadQcImages = async (req, res) => {
     });
   } catch (error) {
     console.error("Upload QC Images Error:", error);
-    return res.status(500).json({
+    return res.status(Number(error?.statusCode || 500)).json({
       success: false,
       message: error.message || "Failed to upload QC images",
     });
@@ -10758,27 +10913,19 @@ exports.deleteQcImages = async (req, res) => {
       });
     }
 
-    const imageCollections = [
-      { field: "qc_images", images: getImageListFromQc(qc, "qc_images") },
-      {
-        field: "hardware_inspection",
-        images: getImageListFromQc(qc, "hardware_inspection"),
-      },
-    ];
-    const imagesToDeleteByField = imageCollections.map((collection) => ({
-      field: collection.field,
-      images: collection.images.filter((image) => {
-        const imageId = String(image?._id || "").trim();
-        const imageKey = normalizeText(image?.key || "");
-        return (
-          (imageId && requestedImageIds.includes(imageId)) ||
-          (imageKey && requestedImageKeys.includes(imageKey))
-        );
+    const inspectionImageRecords = await Inspection.find({ qc: qc._id })
+      .select("_id qc qc_images hardware_inspection goods_not_ready_images")
+      .lean();
+    const matchingImageEntries = findMatchingOwnedImages({
+      buckets: buildOwnedImageBuckets({
+        qc,
+        inspections: inspectionImageRecords,
+        fields: INSPECTION_IMAGE_ARRAY_FIELDS,
       }),
-    }));
-    const imagesToDelete = imagesToDeleteByField.flatMap(
-      (entry) => entry.images,
-    );
+      requestedImageIds,
+      requestedImageKeys,
+    });
+    const imagesToDelete = matchingImageEntries.map((entry) => entry.image);
 
     if (imagesToDelete.length === 0) {
       return res.status(404).json({
@@ -10788,17 +10935,7 @@ exports.deleteQcImages = async (req, res) => {
     }
 
     const objectKeysToDelete = [
-      ...new Set(
-        imagesToDelete
-          .flatMap((image) => [
-            normalizeText(image?.key || ""),
-            normalizeText(image?.thumbnail_key || ""),
-            normalizeText(image?.storage?.source_key || ""),
-            normalizeText(image?.preview?.key || ""),
-            normalizeText(image?.thumbnail?.key || ""),
-          ])
-          .filter(Boolean),
-      ),
+      ...new Set(imagesToDelete.flatMap(buildImageObjectKeysForCleanup)),
     ];
 
     const buildPullCondition = (images = []) => {
@@ -10819,30 +10956,56 @@ exports.deleteQcImages = async (req, res) => {
       if (conditions.length === 0) return null;
       return conditions.length === 1 ? conditions[0] : { $or: conditions };
     };
-    const pullPayload = {};
+    const deleteGroups = new Map();
+    matchingImageEntries
+      .filter((entry) => entry.isArray)
+      .forEach((entry) => {
+        const groupKey = [
+          entry.ownerModel,
+          entry.ownerId,
+          entry.field,
+        ].join(":");
+        const group = deleteGroups.get(groupKey) || {
+          ownerModel: entry.ownerModel,
+          ownerId: entry.ownerId,
+          qcId: entry.qcId,
+          field: entry.field,
+          images: [],
+        };
+        group.images.push(entry.image);
+        deleteGroups.set(groupKey, group);
+      });
 
-    imagesToDeleteByField.forEach((entry) => {
-      const condition = buildPullCondition(entry.images);
-      if (condition) {
-        pullPayload[entry.field] = condition;
-      }
-    });
-
-    if (Object.keys(pullPayload).length === 0) {
+    if (deleteGroups.size === 0) {
       return res.status(400).json({
         success: false,
         message: "Selected QC images are invalid",
       });
     }
 
-    await QC.updateOne(
-      { _id: qc._id },
-      {
-        $pull: pullPayload,
-        $set: {
-          updated_by: buildAuditActor(req.user),
-        },
-      },
+    await Promise.all(
+      [...deleteGroups.values()].map((group) => {
+        const condition = buildPullCondition(group.images);
+        if (!condition) return Promise.resolve();
+
+        const Model = group.ownerModel === "inspection" ? Inspection : QC;
+        const query =
+          group.ownerModel === "inspection"
+            ? { _id: group.ownerId, qc: qc._id }
+            : { _id: qc._id };
+
+        return Model.updateOne(
+          query,
+          {
+            $pull: {
+              [group.field]: condition,
+            },
+            $set: {
+              updated_by: buildAuditActor(req.user),
+            },
+          },
+        );
+      }),
     );
 
     const storageDeleteResults = await Promise.allSettled(
@@ -10898,7 +11061,9 @@ exports.downloadQcImageFile = async (req, res) => {
     }
 
     const qc = await QC.findById(qcId)
-      .select("order order_id inspector qc_images hardware_inspection")
+      .select(
+        "order order_id inspector qc_images hardware_inspection goods_not_ready_images rejected_image",
+      )
       .populate({
         path: "order",
         match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
@@ -10933,18 +11098,21 @@ exports.downloadQcImageFile = async (req, res) => {
       }
     }
 
-    const qcImages = [
-      ...getImageListFromQc(qc, "qc_images"),
-      ...getImageListFromQc(qc, "hardware_inspection"),
-    ];
-    const imageToDownload = qcImages.find((image) => {
-      const imageId = String(image?._id || "").trim();
-      const imageKey = normalizeText(image?.key || "");
-      return (
-        (requestedImageId && imageId === requestedImageId) ||
-        (requestedImageKey && imageKey === requestedImageKey)
-      );
+    const inspectionImageRecords = await Inspection.find({ qc: qc._id })
+      .select(
+        "_id qc qc_images hardware_inspection goods_not_ready_images rejected_image",
+      )
+      .lean();
+    const matchingImages = findMatchingOwnedImages({
+      buckets: buildOwnedImageBuckets({
+        qc,
+        inspections: inspectionImageRecords,
+        includeSingleImages: true,
+      }),
+      requestedImageIds: requestedImageId ? [requestedImageId] : [],
+      requestedImageKeys: requestedImageKey ? [requestedImageKey] : [],
     });
+    const imageToDownload = matchingImages[0]?.image || null;
 
     if (!imageToDownload) {
       return res.status(404).json({
@@ -11000,7 +11168,7 @@ exports.downloadQcImages = async (req, res) => {
 
     const qc = await QC.findById(qcId)
       .select(
-        "order order_id order_meta item last_inspected_date inspector qc_images hardware_inspection",
+        "order order_id order_meta item last_inspected_date inspector qc_images hardware_inspection goods_not_ready_images rejected_image",
       )
       .populate({
         path: "order",
@@ -11066,13 +11234,42 @@ exports.downloadQcImages = async (req, res) => {
         qcDoc: qc,
         user: req.user,
       });
+    const currentInspectionImageRecords = await Inspection.find({ qc: qc._id })
+      .select(
+        "_id qc qc_images hardware_inspection goods_not_ready_images rejected_image",
+      )
+      .lean();
+    const previousQcIds = previousInspectionRecords
+      .map((record) => record?._id)
+      .filter(Boolean);
+    const previousInspectionImageRecords = previousQcIds.length > 0
+      ? await Inspection.find({ qc: { $in: previousQcIds } })
+          .select(
+            "_id qc qc_images hardware_inspection goods_not_ready_images rejected_image",
+          )
+          .lean()
+      : [];
+    const getImagesFromBuckets = (buckets = []) =>
+      (Array.isArray(buckets) ? buckets : []).flatMap((bucket) => bucket.images);
     const eligibleImages = [
-      ...getImageListFromQc(qc, "qc_images"),
-      ...getImageListFromQc(qc, "hardware_inspection"),
-      ...previousInspectionRecords.flatMap((record) => [
-        ...getImageListFromQc(record, "qc_images"),
-        ...getImageListFromQc(record, "hardware_inspection"),
-      ]),
+      ...getImagesFromBuckets(
+        buildOwnedImageBuckets({
+          qc,
+          inspections: currentInspectionImageRecords,
+          includeSingleImages: true,
+        }),
+      ),
+      ...previousInspectionRecords.flatMap((record) =>
+        getImagesFromBuckets(
+          buildOwnedImageBuckets({
+            qc: record,
+            inspections: previousInspectionImageRecords.filter(
+              (inspection) => String(inspection?.qc || "") === String(record?._id || ""),
+            ),
+            includeSingleImages: true,
+          }),
+        ),
+      ),
     ];
     const dedupedEligibleImages = [
       ...new Map(
@@ -11340,34 +11537,89 @@ exports.getQCById = async (req, res) => {
       await buildSignedQcImageList(qcData?.hardware_inspection);
     const goodsNotReadyImagesWithSignedUrls =
       await buildSignedQcImageList(qcData?.goods_not_ready_images);
+    const sortedInspectionRecords = Array.isArray(qcData.inspection_record)
+      ? [...qcData.inspection_record].sort(sortInspectionRecordsLatestFirst)
+      : [];
+    const signedInspectionRecords = await Promise.all(
+      sortedInspectionRecords.map(async (record) => ({
+        ...record,
+        qc_images: await buildSignedQcImageList(record?.qc_images),
+        hardware_inspection: await buildSignedQcImageList(
+          record?.hardware_inspection,
+        ),
+        goods_not_ready_images: await buildSignedQcImageList(
+          record?.goods_not_ready_images,
+        ),
+        rejected_image: record?.rejected_image
+          ? {
+              ...record.rejected_image,
+              ...(await buildSignedQcImage(record.rejected_image)),
+            }
+          : null,
+      })),
+    );
     const previousInspectionRecords =
       await findPreviousInspectedQcRecordsForItem({
         qcDoc: qcData,
         user: req.user,
       });
     const previousInspectedPoImages = await Promise.all(
-      previousInspectionRecords.map(async (record) => ({
-        qc_id: record?._id,
-        order_id:
-          normalizeText(record?.order_meta?.order_id) ||
-          normalizeText(record?.order?.order_id),
-        brand:
-          normalizeText(record?.order_meta?.brand) ||
-          normalizeText(record?.order?.brand),
-        vendor:
-          normalizeText(record?.order_meta?.vendor) ||
-          normalizeText(record?.order?.vendor),
-        item_code: normalizeText(record?.item?.item_code || itemCode),
-        last_inspected_date: record?.last_inspected_date || "",
-        qc_images: await buildSignedQcImageList(record?.qc_images),
-        hardware_inspection: await buildSignedQcImageList(
-          record?.hardware_inspection,
-        ),
-      })),
+      previousInspectionRecords.map(async (record) => {
+        const previousRecordInspections = await Inspection.find({
+          qc: record?._id,
+        })
+          .select(
+            "qc_images hardware_inspection goods_not_ready_images rejected_image inspection_date createdAt",
+          )
+          .lean();
+
+        return {
+          qc_id: record?._id,
+          order_id:
+            normalizeText(record?.order_meta?.order_id) ||
+            normalizeText(record?.order?.order_id),
+          brand:
+            normalizeText(record?.order_meta?.brand) ||
+            normalizeText(record?.order?.brand),
+          vendor:
+            normalizeText(record?.order_meta?.vendor) ||
+            normalizeText(record?.order?.vendor),
+          item_code: normalizeText(record?.item?.item_code || itemCode),
+          last_inspected_date: record?.last_inspected_date || "",
+          qc_images: await buildSignedQcImageList([
+            ...getImageListFromQc(record, "qc_images"),
+            ...getInspectionImageEntriesForField(
+              previousRecordInspections,
+              "qc_images",
+            ),
+          ]),
+          hardware_inspection: await buildSignedQcImageList([
+            ...getImageListFromQc(record, "hardware_inspection"),
+            ...getInspectionImageEntriesForField(
+              previousRecordInspections,
+              "hardware_inspection",
+            ),
+          ]),
+          goods_not_ready_images: await buildSignedQcImageList([
+            ...getImageListFromQc(record, "goods_not_ready_images"),
+            ...getInspectionImageEntriesForField(
+              previousRecordInspections,
+              "goods_not_ready_images",
+            ),
+          ]),
+          rejected_image: getLatestRejectedInspectionImage(previousRecordInspections)
+            ? await buildSignedQcImage(
+                getLatestRejectedInspectionImage(previousRecordInspections),
+              )
+            : null,
+        };
+      }),
     );
     const rejectedImageWithSignedUrl = qcData?.rejected_image
       ? await buildSignedQcImage(qcData.rejected_image)
       : null;
+    const latestInspectionRejectedImage =
+      getLatestRejectedInspectionImage(signedInspectionRecords);
     const sortedLabels = normalizeLabels(qcData.labels);
     const sortedRequestHistory = Array.isArray(qcData.request_history)
       ? [...qcData.request_history].sort((a, b) => {
@@ -11382,18 +11634,6 @@ exports.getQCById = async (req, res) => {
           return bTime - aTime;
         })
       : [];
-    const sortedInspectionRecords = Array.isArray(qcData.inspection_record)
-      ? [...qcData.inspection_record].sort((a, b) => {
-          const aTime =
-            toSortableTimestamp(a?.inspection_date) ||
-            toSortableTimestamp(a?.createdAt);
-          const bTime =
-            toSortableTimestamp(b?.inspection_date) ||
-            toSortableTimestamp(b?.createdAt);
-          return bTime - aTime;
-        })
-      : [];
-
     if (qcData?.order) {
       qcData.order = {
         ...qcData.order,
@@ -11409,7 +11649,9 @@ exports.getQCById = async (req, res) => {
         hardware_inspection: hardwareInspectionImagesWithSignedUrls,
         previous_inspected_po_images: previousInspectedPoImages,
         goods_not_ready_images: goodsNotReadyImagesWithSignedUrls,
-        rejected_image: rejectedImageWithSignedUrl
+        rejected_image: latestInspectionRejectedImage
+          ? latestInspectionRejectedImage
+          : rejectedImageWithSignedUrl
           ? {
               ...qcData.rejected_image,
               ...rejectedImageWithSignedUrl,
@@ -11417,7 +11659,7 @@ exports.getQCById = async (req, res) => {
           : qcData?.rejected_image || null,
         labels: sortedLabels,
         request_history: sortedRequestHistory,
-        inspection_record: sortedInspectionRecords,
+        inspection_record: signedInspectionRecords,
       },
     });
   } catch (err) {

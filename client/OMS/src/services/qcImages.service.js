@@ -110,6 +110,7 @@ export const uploadQcImageBatch = async ({
   idempotencyKeys = [],
   uploadMode = "bulk",
   imageType = "qc_images",
+  inspectionId = "",
   comment = "",
   signal,
   onUploadProgress,
@@ -117,6 +118,9 @@ export const uploadQcImageBatch = async ({
   const formData = new FormData();
   formData.append("upload_mode", normalizeText(uploadMode || "bulk").toLowerCase());
   formData.append("image_type", normalizeText(imageType || "qc_images"));
+  if (normalizeText(inspectionId)) {
+    formData.append("inspection_id", normalizeText(inspectionId));
+  }
 
   if (normalizeText(uploadMode).toLowerCase() === "single" && normalizeText(comment)) {
     formData.append("comment", normalizeText(comment));
@@ -139,6 +143,7 @@ export const uploadQcImageBatch = async ({
 
 export const createQcImageUploadSession = async ({
   qcId,
+  inspectionId = "",
   file,
   imageType = "qc_images",
   uploadMode = "bulk",
@@ -151,6 +156,7 @@ export const createQcImageUploadSession = async ({
     "/qc-images/upload-session",
     {
       qc_id: normalizeText(qcId),
+      inspection_id: normalizeText(inspectionId),
       image_type: normalizeText(imageType || "qc_images"),
       upload_mode: normalizeText(uploadMode || "bulk").toLowerCase(),
       comment: normalizeText(comment),

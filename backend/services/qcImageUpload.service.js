@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const QC = require("../models/qc.model");
+const Inspection = require("../models/inspection.model");
 const { safeDeleteFiles } = require("../helpers/fileCleanup");
 const { optimizeImageFileForStorage } = require("./imageOptimization.service");
 const {
@@ -292,6 +293,7 @@ const uploadPreparedQcImage = async ({
   preparedUpload = null,
   folder = "qc-images",
   qcId = "",
+  inspectionId = "",
   targetField = "qc_images",
   idempotencyKey = "",
 } = {}) => {
@@ -304,6 +306,9 @@ const uploadPreparedQcImage = async ({
     ? [
       normalizeText(folder).replace(/^\/+|\/+$/g, "") || "qc-images",
       sanitizeStorageKeyPart(qcId, "qc"),
+      ...(normalizeText(inspectionId)
+        ? ["inspection", sanitizeStorageKeyPart(inspectionId, "inspection")]
+        : []),
       sanitizeStorageKeyPart(targetField, "images"),
       `${sanitizeStorageKeyPart(normalizedIdempotencyKey, "image")}${preparedUpload.extension || ".jpg"}`,
     ].join("/")
@@ -333,6 +338,8 @@ const uploadPreparedQcImage = async ({
 
 const persistSingleQcImageEntry = async ({
   qcId = "",
+  inspectionId = "",
+  ownerModel = "qc",
   imageEntry = null,
   hash = "",
   idempotencyKey = "",
@@ -341,8 +348,12 @@ const persistSingleQcImageEntry = async ({
 } = {}) => {
   const normalizedHash = normalizeQcImageHash(hash);
   const normalizedIdempotencyKey = normalizeQcImageIdempotencyKey(idempotencyKey);
+  const normalizedOwnerModel = normalizeText(ownerModel).toLowerCase();
   if (!qcId || !imageEntry || !normalizedHash) {
     throw new Error("QC image persistence requires qcId, imageEntry, and hash");
+  }
+  if (normalizedOwnerModel === "inspection" && !inspectionId) {
+    throw new Error("Inspection image persistence requires inspectionId");
   }
 
   // This document-level conditional update is the final duplicate guard when
@@ -356,11 +367,21 @@ const persistSingleQcImageEntry = async ({
     };
   }
 
-  return QC.updateOne(
-    {
-      _id: qcId,
-      ...duplicateGuards,
-    },
+  const Model = normalizedOwnerModel === "inspection" ? Inspection : QC;
+  const query =
+    normalizedOwnerModel === "inspection"
+      ? {
+          _id: inspectionId,
+          qc: qcId,
+          ...duplicateGuards,
+        }
+      : {
+          _id: qcId,
+          ...duplicateGuards,
+        };
+
+  return Model.updateOne(
+    query,
     {
       $push: {
         [targetField]: imageEntry,
@@ -374,6 +395,8 @@ const persistSingleQcImageEntry = async ({
 
 const queueQcImageThumbnailGeneration = ({
   qcId = "",
+  inspectionId = "",
+  ownerModel = "qc",
   targetField = "qc_images",
   imageEntry = {},
 } = {}) => {
@@ -383,12 +406,16 @@ const queueQcImageThumbnailGeneration = ({
   setImmediate(() => {
     enqueueQcImageThumbnailGeneration({
       qcId,
+      inspectionId,
+      ownerModel,
       imageField: targetField,
       sourceKey,
       idempotencyKey: imageEntry?.idempotency_key || "",
     }).catch((error) => {
       console.warn("[qc-image-upload] thumbnail_enqueue_failed", {
         qcId,
+        inspectionId,
+        ownerModel,
         targetField,
         sourceKey,
         reason: error?.message || String(error),
@@ -400,6 +427,8 @@ const queueQcImageThumbnailGeneration = ({
 const processSingleQcImageFile = async ({
   file = null,
   qc = null,
+  inspectionId = "",
+  ownerModel = "qc",
   idempotencyKey = "",
   singleImageComment = "",
   uploadedBy = null,
@@ -509,6 +538,7 @@ const processSingleQcImageFile = async ({
       preparedUpload,
       folder: storageFolder,
       qcId: String(qc?._id || ""),
+      inspectionId,
       targetField,
       idempotencyKey: normalizedIdempotencyKey,
     });
@@ -527,6 +557,8 @@ const processSingleQcImageFile = async ({
 
     const persistResult = await persistSingleQcImageEntry({
       qcId: String(qc?._id || ""),
+      inspectionId,
+      ownerModel,
       imageEntry,
       hash: normalizedHash,
       idempotencyKey: normalizedIdempotencyKey,
@@ -560,6 +592,8 @@ const processSingleQcImageFile = async ({
     }
     queueQcImageThumbnailGeneration({
       qcId: String(qc?._id || ""),
+      inspectionId,
+      ownerModel,
       targetField,
       imageEntry,
     });
@@ -602,8 +636,11 @@ const processSingleQcImageFile = async ({
 
 const processQcImageBatch = async ({
   qc = null,
+  inspectionId = "",
+  ownerModel = "qc",
   files = [],
   idempotencyKeys = [],
+  existingImages = null,
   uploadMode = "",
   singleImageComment = "",
   uploadedBy = null,
@@ -621,13 +658,16 @@ const processQcImageBatch = async ({
     file,
     idempotencyKey: normalizeQcImageIdempotencyKey(safeIdempotencyKeys[index]),
   }));
+  const duplicateSourceImages = Array.isArray(existingImages)
+    ? existingImages
+    : (Array.isArray(qc?.[targetField]) ? qc[targetField] : []);
   const existingHashes = new Set(
-    (Array.isArray(qc?.[targetField]) ? qc[targetField] : [])
+    duplicateSourceImages
       .map((image) => normalizeQcImageHash(image?.hash))
       .filter(Boolean),
   );
   const existingIdempotencyKeys = new Set(
-    (Array.isArray(qc?.[targetField]) ? qc[targetField] : [])
+    duplicateSourceImages
       .map((image) => normalizeQcImageIdempotencyKey(image?.idempotency_key))
       .filter(Boolean),
   );
@@ -650,6 +690,8 @@ const processQcImageBatch = async ({
 
   logQcImageUploadEvent("start", {
     qcId: String(qc?._id || ""),
+    inspectionId,
+    ownerModel,
     uploadMode: normalizeText(uploadMode),
     requestedFileCount: safeFiles.length,
     chunkCount: fileChunks.length,
@@ -666,6 +708,8 @@ const processQcImageBatch = async ({
         processSingleQcImageFile({
           file: item?.file,
           qc,
+          inspectionId,
+          ownerModel,
           idempotencyKey: item?.idempotencyKey,
           singleImageComment,
           uploadedBy,
@@ -703,6 +747,8 @@ const processQcImageBatch = async ({
 
     logQcImageUploadEvent("chunk_complete", {
       qcId: String(qc?._id || ""),
+      inspectionId,
+      ownerModel,
       uploadMode: normalizeText(uploadMode),
       chunkIndex: chunkIndex + 1,
       chunkCount: fileChunks.length,

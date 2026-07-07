@@ -122,8 +122,10 @@ const createQcImageWorker = () => {
       await job.updateProgress(10);
       const result = await processQcImageDerivatives({
         qcId: job.data?.qcId,
+        inspectionId: job.data?.inspectionId,
         imageField: job.data?.imageField,
         imageId: job.data?.imageId,
+        ownerModel: job.data?.ownerModel,
       });
       await job.updateProgress(100);
       return result;

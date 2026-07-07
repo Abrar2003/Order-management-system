@@ -317,7 +317,8 @@ const getSelectedFileSignature = (file) =>
   ].join("__");
 
 const getQcImageSelectionValue = (image) =>
-  image?.gallery_source === "goods_not_ready"
+  image?.gallery_source === "goods_not_ready" ||
+  image?.gallery_source === "previous_goods_not_ready"
     ? ""
     : [
         image?.gallery_parent_qc_id || "",
@@ -481,6 +482,7 @@ const resolveBlobErrorMessage = async (error, fallbackMessage) => {
 const buildSelectedFileBatchKey = ({
   qcId = "",
   fileType = "",
+  inspectionId = "",
   uploadMode = "",
   comment = "",
   files = [],
@@ -488,6 +490,7 @@ const buildSelectedFileBatchKey = ({
   [
     String(qcId || "").trim(),
     String(fileType || "").trim().toLowerCase(),
+    String(inspectionId || "").trim(),
     String(uploadMode || "").trim().toLowerCase(),
     String(comment || "").trim(),
     ...(
@@ -516,6 +519,7 @@ const QcDetails = () => {
   });
   const [subFileType, setSubFileType] = useState("shipping_marks");
   const [qcImageUploadMode, setQcImageUploadMode] = useState("single");
+  const [selectedQcImageInspectionId, setSelectedQcImageInspectionId] = useState("");
   const [qcSingleImageComment, setQcSingleImageComment] = useState("");
   const [uploadingRelatedFile, setUploadingRelatedFile] = useState(false);
   const [deletingRelatedFile, setDeletingRelatedFile] = useState(false);
@@ -547,24 +551,71 @@ const QcDetails = () => {
 
   const navigate = useNavigate();
   const location = useLocation();
+  const user = getUserFromToken();
+  const isViewOnly = isViewOnlyUser(user);
+  const normalizedRole = normalizeUserRole(user?.role);
+  const currentUserId = String(user?.id || user?._id || "").trim();
+  const isQcUser = normalizedRole === "qc";
+  const isAdmin = isManagerLikeRole(normalizedRole);
+  const isStrictAdmin = isStrictAdminRole(normalizedRole);
+  const isCurrentUserLabelExempt = isLabelExemptUser(currentUserId);
   const qcInspectionRecordCount = Array.isArray(qc?.inspection_record)
     ? qc.inspection_record.length
     : 0;
-  const qcImageCurrentTotalCount = Array.isArray(qc?.qc_images)
-    ? qc.qc_images.length
+  const sortedUploadInspectionRecords = useMemo(
+    () =>
+      (Array.isArray(qc?.inspection_record) ? [...qc.inspection_record] : [])
+        .sort((left, right) => {
+          const leftTime =
+            toTimestamp(left?.inspection_date) ||
+            toTimestamp(left?.createdAt);
+          const rightTime =
+            toTimestamp(right?.inspection_date) ||
+            toTimestamp(right?.createdAt);
+          return rightTime - leftTime;
+        }),
+    [qc?.inspection_record],
+  );
+  const selectedUploadInspectionRecord = sortedUploadInspectionRecords.find(
+    (record) =>
+      String(record?._id || "").trim() ===
+      String(selectedQcImageInspectionId || "").trim(),
+  ) || sortedUploadInspectionRecords[0] || null;
+  const latestAssignedUploadInspectionRecord =
+    sortedUploadInspectionRecords.find((record) => {
+      const inspectorId = String(
+        record?.inspector?._id || record?.inspector || "",
+      ).trim();
+      return Boolean(currentUserId) && inspectorId === currentUserId;
+    }) || null;
+  const activeUploadInspectionRecord = isAdmin
+    ? selectedUploadInspectionRecord
+    : latestAssignedUploadInspectionRecord;
+  const activeUploadInspectionId = String(
+    activeUploadInspectionRecord?._id || "",
+  ).trim();
+  const qcImageCurrentTotalCount = Array.isArray(
+    activeUploadInspectionRecord?.qc_images,
+  )
+    ? activeUploadInspectionRecord.qc_images.length
     : 0;
-  const hardwareInspectionCurrentTotalCount = Array.isArray(qc?.hardware_inspection)
-    ? qc.hardware_inspection.length
+  const hardwareInspectionCurrentTotalCount = Array.isArray(
+    activeUploadInspectionRecord?.hardware_inspection,
+  )
+    ? activeUploadInspectionRecord.hardware_inspection.length
     : 0;
-  const qcImageUploadTotalLimit =
-    qcInspectionRecordCount * QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD;
+  const qcImageUploadTotalLimit = activeUploadInspectionRecord
+    ? QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD
+    : 0;
   const qcImageUploadRemainingSlots = Math.max(
     0,
     qcImageUploadTotalLimit - qcImageCurrentTotalCount,
   );
   const hardwareInspectionRemainingSlots = Math.max(
     0,
-    HARDWARE_INSPECTION_IMAGE_LIMIT - hardwareInspectionCurrentTotalCount,
+    activeUploadInspectionRecord
+      ? HARDWARE_INSPECTION_IMAGE_LIMIT - hardwareInspectionCurrentTotalCount
+      : 0,
   );
   const activeQcScopedImageUploadRemainingSlots =
     relatedFileType === "hardware_inspection"
@@ -589,14 +640,6 @@ const QcDetails = () => {
     qcId: id,
     maxFiles: activeQcScopedImageUploadRemainingSlots,
   });
-  const user = getUserFromToken();
-  const isViewOnly = isViewOnlyUser(user);
-  const normalizedRole = normalizeUserRole(user?.role);
-  const currentUserId = String(user?.id || user?._id || "").trim();
-  const isQcUser = normalizedRole === "qc";
-  const isAdmin = isManagerLikeRole(normalizedRole);
-  const isStrictAdmin = isStrictAdminRole(normalizedRole);
-  const isCurrentUserLabelExempt = isLabelExemptUser(currentUserId);
   const canTransferInspectionRecords = isAdmin;
   const canDeleteInspectionRecords = isStrictAdmin;
   const canFinalizeShipping = hasShipmentPrivilegeRole(normalizedRole);
@@ -730,7 +773,9 @@ const QcDetails = () => {
   const isQcImageUploadType = activeRelatedFileConfig?.scope === "qc";
   const activeQcScopedImageUploadTotalLimit =
     activeRelatedFileConfig?.value === "hardware_inspection"
-      ? HARDWARE_INSPECTION_IMAGE_LIMIT
+      ? activeUploadInspectionRecord
+        ? HARDWARE_INSPECTION_IMAGE_LIMIT
+        : 0
       : qcImageUploadTotalLimit;
   const activeQcScopedImageCurrentTotalCount =
     activeRelatedFileConfig?.value === "hardware_inspection"
@@ -773,6 +818,32 @@ const QcDetails = () => {
     }
   }, [showQcImageUploadPanel]);
 
+  useEffect(() => {
+    if (!isAdmin) {
+      if (selectedQcImageInspectionId) {
+        setSelectedQcImageInspectionId("");
+      }
+      return;
+    }
+
+    const firstInspectionId = String(
+      sortedUploadInspectionRecords[0]?._id || "",
+    ).trim();
+    const selectedExists = sortedUploadInspectionRecords.some(
+      (record) =>
+        String(record?._id || "").trim() ===
+        String(selectedQcImageInspectionId || "").trim(),
+    );
+
+    if (firstInspectionId && !selectedExists) {
+      setSelectedQcImageInspectionId(firstInspectionId);
+    }
+  }, [
+    isAdmin,
+    selectedQcImageInspectionId,
+    sortedUploadInspectionRecords,
+  ]);
+
   const relatedFileUploadDisabledReason = !canUploadActiveRelatedFile
     ? activeRelatedFileConfig?.scope === "item_master" && !qc?.item_master?._id
       ? "Item master not found for this QC."
@@ -780,6 +851,10 @@ const QcDetails = () => {
       ? "Only admin or manager can upload item related files."
       : activeRelatedFileConfig?.scope === "qc" && qcInspectionRecordCount <= 0
       ? "QC image uploads are available after at least one inspection record exists."
+      : activeRelatedFileConfig?.scope === "qc" && !activeUploadInspectionRecord
+      ? isQcUser
+        ? "No assigned inspection record was found for this QC user."
+        : "Select an inspection record before uploading QC images."
       : activeRelatedFileConfig?.scope === "qc" && !canUploadMoreQcImages
       ? `${activeRelatedFileConfig?.label || "QC image"} upload limit reached (${activeQcScopedImageCurrentTotalCount}/${activeQcScopedImageUploadTotalLimit}).`
       : activeRelatedFileConfig?.scope === "qc"
@@ -1079,6 +1154,68 @@ const QcDetails = () => {
             };
           })
         : [];
+      const decorateCurrentInspectionImage = (record, image, field, label) => {
+        const recordId = String(record?._id || "").trim();
+        const subtitleParts = [
+          `PO ${orderId}`,
+          getInspectionRecordInspectorName(record) ||
+            getQcImageUploaderName(image),
+        ].filter(Boolean);
+
+        return {
+          ...image,
+          gallery_source:
+            field === "hardware_inspection"
+              ? "hardware_inspection"
+              : field === "goods_not_ready_images"
+              ? "goods_not_ready"
+              : "qc",
+          gallery_source_label: label,
+          gallery_parent_qc_id: String(qc?._id || id || "").trim(),
+          gallery_image_field: field,
+          gallery_group_key: recordId
+            ? `current-inspection-${recordId}`
+            : "current-inspection-images",
+          gallery_group_title: record
+            ? `Inspection ${getInspectionRecordDateLabel(record)}`
+            : "Current QC Images",
+          gallery_group_subtitle: subtitleParts.join(" | "),
+          gallery_inspection_record_id: recordId,
+          gallery_can_delete: field !== "goods_not_ready_images",
+        };
+      };
+      const currentInspectionImages = inspectionRecords.flatMap((record) => [
+        ...(Array.isArray(record?.qc_images)
+          ? record.qc_images.map((image) =>
+              decorateCurrentInspectionImage(
+                record,
+                image,
+                "qc_images",
+                "QC Image",
+              ),
+            )
+          : []),
+        ...(Array.isArray(record?.hardware_inspection)
+          ? record.hardware_inspection.map((image) =>
+              decorateCurrentInspectionImage(
+                record,
+                image,
+                "hardware_inspection",
+                "Hardware",
+              ),
+            )
+          : []),
+        ...(Array.isArray(record?.goods_not_ready_images)
+          ? record.goods_not_ready_images.map((image) =>
+              decorateCurrentInspectionImage(
+                record,
+                image,
+                "goods_not_ready_images",
+                "Goods Not Ready",
+              ),
+            )
+          : []),
+      ]);
       const previousPoImages = (Array.isArray(qc?.previous_inspected_po_images)
         ? qc.previous_inspected_po_images
         : []
@@ -1094,9 +1231,12 @@ const QcDetails = () => {
         ].filter(Boolean).join(" | ");
         const decoratePreviousImage = (image, field, label) => ({
           ...image,
-          gallery_source: field === "hardware_inspection"
-            ? "previous_hardware_inspection"
-            : "previous_qc",
+          gallery_source:
+            field === "hardware_inspection"
+              ? "previous_hardware_inspection"
+              : field === "goods_not_ready_images"
+              ? "previous_goods_not_ready"
+              : "previous_qc",
           gallery_source_label: label,
           gallery_parent_qc_id: String(record?.qc_id || "").trim(),
           gallery_image_field: field,
@@ -1122,6 +1262,15 @@ const QcDetails = () => {
                 ),
               )
             : []),
+          ...(Array.isArray(record?.goods_not_ready_images)
+            ? record.goods_not_ready_images.map((image) =>
+                decoratePreviousImage(
+                  image,
+                  "goods_not_ready_images",
+                  "Previous Goods Not Ready",
+                ),
+              )
+            : []),
         ];
       });
       const goodsNotReadyImages = Array.isArray(qc?.goods_not_ready_images)
@@ -1139,6 +1288,7 @@ const QcDetails = () => {
       return [
         ...currentQcImages,
         ...currentHardwareImages,
+        ...currentInspectionImages,
         ...previousPoImages,
         ...goodsNotReadyImages,
       ].sort(
@@ -1725,6 +1875,7 @@ const QcDetails = () => {
     const batchKey = buildSelectedFileBatchKey({
       qcId: id,
       fileType: fileConfig.value,
+      inspectionId: isAdmin ? activeUploadInspectionId : "",
       uploadMode: qcImageUploadMode,
       comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
       files: selectedFiles,
@@ -1817,6 +1968,8 @@ const QcDetails = () => {
     fetchQcDetails,
     handleRelatedFileUploadProgress,
     id,
+    activeUploadInspectionId,
+    isAdmin,
     qc?.item_master?._id,
     qcImageUploadMode,
     activeRelatedFileConfig,
@@ -1828,6 +1981,7 @@ const QcDetails = () => {
     const result = await startQcImageUpload({
       uploadMode: qcImageUploadMode,
       imageType: activeRelatedFileConfig?.value || "qc_images",
+      inspectionId: isAdmin ? activeUploadInspectionId : "",
       comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
     });
 
@@ -1840,8 +1994,10 @@ const QcDetails = () => {
   }, [
     fetchQcDetails,
     activeRelatedFileConfig?.value,
+    activeUploadInspectionId,
     qcImageUploadMode,
     qcSingleImageComment,
+    isAdmin,
     startQcImageUpload,
   ]);
 
@@ -1849,6 +2005,7 @@ const QcDetails = () => {
     const result = await retryFailedQcImageFiles({
       uploadMode: qcImageUploadMode,
       imageType: activeRelatedFileConfig?.value || "qc_images",
+      inspectionId: isAdmin ? activeUploadInspectionId : "",
       comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
     });
 
@@ -1861,8 +2018,10 @@ const QcDetails = () => {
   }, [
     fetchQcDetails,
     activeRelatedFileConfig?.value,
+    activeUploadInspectionId,
     qcImageUploadMode,
     qcSingleImageComment,
+    isAdmin,
     retryFailedQcImageFiles,
   ]);
 
@@ -1882,6 +2041,7 @@ const QcDetails = () => {
     if (!isQcImageUploadType) return;
     handleResetQcImageUpload();
   }, [
+    activeUploadInspectionId,
     activeRelatedFileConfig?.value,
     handleResetQcImageUpload,
     isQcImageUploadType,
@@ -2296,6 +2456,30 @@ const QcDetails = () => {
 
                   {activeRelatedFileConfig?.scope === "qc" && (
                     <>
+                      {isAdmin && sortedUploadInspectionRecords.length > 0 && (
+                        <select
+                          className="form-select form-select-sm qc-details-toolbar-select"
+                          value={activeUploadInspectionId}
+                          onChange={(e) =>
+                            setSelectedQcImageInspectionId(String(e.target.value || ""))
+                          }
+                          disabled={isRelatedUploadBusy || deletingRelatedFile}
+                          title="Select inspection for this upload"
+                        >
+                          {sortedUploadInspectionRecords.map((record) => {
+                            const recordId = String(record?._id || "").trim();
+                            const inspectorName =
+                              getInspectionRecordInspectorName(record) ||
+                              "Unassigned";
+                            return (
+                              <option key={recordId} value={recordId}>
+                                {`Inspection ${getInspectionRecordDateLabel(record)} - ${inspectorName}`}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      )}
+
                       <select
                         className="form-select form-select-sm qc-details-toolbar-select qc-details-mode-select"
                         value={qcImageUploadMode}
@@ -2434,11 +2618,15 @@ const QcDetails = () => {
                     {" | "}
                     {qcImageUploadMode === "single" ? "Single mode" : "Bulk mode"}
                     {" | "}
-                    Limit {qcImageUploadTotalLimit} ({qcInspectionRecordCount} inspection record{qcInspectionRecordCount === 1 ? "" : "s"} x {QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD})
+                    {activeUploadInspectionRecord
+                      ? `Target Inspection ${getInspectionRecordDateLabel(activeUploadInspectionRecord)}`
+                      : "No upload target"}
                     {" | "}
-                    Uploaded {qcImageCurrentTotalCount}
+                    Limit {activeQcScopedImageUploadTotalLimit}
                     {" | "}
-                    Remaining {qcImageUploadRemainingSlots}
+                    Uploaded {activeQcScopedImageCurrentTotalCount}
+                    {" | "}
+                    Remaining {activeQcScopedImageUploadRemainingSlots}
                     {" | "}
                     Up to {MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST} per request
                   </div>

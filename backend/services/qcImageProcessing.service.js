@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const sharp = require("sharp");
 
 const QC = require("../models/qc.model");
+const Inspection = require("../models/inspection.model");
 const {
   QC_IMAGE_MAX_INPUT_PIXELS,
   QC_IMAGE_PREVIEW_MAX_DIMENSION,
@@ -25,7 +26,13 @@ const {
   enqueueQcImageDerivativeProcessing,
 } = require("../queues");
 
-const VALID_IMAGE_FIELDS = Object.freeze(["qc_images", "hardware_inspection"]);
+const VALID_IMAGE_FIELDS = Object.freeze([
+  "qc_images",
+  "hardware_inspection",
+  "goods_not_ready_images",
+]);
+const OWNER_MODEL_QC = "qc";
+const OWNER_MODEL_INSPECTION = "inspection";
 const DIRECT_PROCESSING_STATUSES = new Set(["queued", "failed"]);
 const MAX_PROCESSING_ATTEMPTS = 3;
 const PREVIEW_CACHE_CONTROL = "private, max-age=31536000, immutable";
@@ -33,6 +40,11 @@ const PROCESSING_LOCK_MS = 30 * 60 * 1000;
 
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
+const resolveOwnerModel = ({ ownerModel = OWNER_MODEL_QC, inspectionId = "" } = {}) =>
+  normalizeKey(ownerModel) === OWNER_MODEL_INSPECTION ||
+  mongoose.Types.ObjectId.isValid(normalizeText(inspectionId))
+    ? OWNER_MODEL_INSPECTION
+    : OWNER_MODEL_QC;
 const toConciseError = (error) =>
   normalizeText(error?.message || String(error)).replace(/\s+/g, " ").slice(0, 500);
 
@@ -146,6 +158,7 @@ const createThumbnailDerivative = async (sourceBuffer) => {
 const buildDerivativeBaseKey = ({
   sourceKey = "",
   qcId = "",
+  inspectionId = "",
   imageField = "qc_images",
   imageId = "",
 } = {}) => {
@@ -158,6 +171,9 @@ const buildDerivativeBaseKey = ({
   return [
     imageField === "hardware_inspection" ? "hardware-inspection" : "qc-images",
     normalizeKey(qcId) || "qc",
+    ...(normalizeText(inspectionId)
+      ? ["inspection", normalizeKey(inspectionId) || "inspection"]
+      : []),
     normalizeKey(imageField) || "images",
     normalizeKey(imageId) || "image",
   ].join("/");
@@ -182,18 +198,43 @@ const getImageById = (qc = {}, field = "qc_images", imageId = "") =>
     normalizeText(image?._id) === normalizeText(imageId),
   ) || null;
 
-const claimImageForProcessing = async ({ qcId = "", imageField = "qc_images", imageId = "" } = {}) => {
+const claimImageForProcessing = async ({
+  qcId = "",
+  inspectionId = "",
+  ownerModel = OWNER_MODEL_QC,
+  imageField = "qc_images",
+  imageId = "",
+} = {}) => {
   const field = resolveImageField(imageField);
   if (!mongoose.Types.ObjectId.isValid(qcId) || !mongoose.Types.ObjectId.isValid(imageId)) {
+    return null;
+  }
+
+  const owner = resolveOwnerModel({ ownerModel, inspectionId });
+  if (
+    owner === OWNER_MODEL_INSPECTION &&
+    normalizeText(inspectionId) &&
+    !mongoose.Types.ObjectId.isValid(inspectionId)
+  ) {
     return null;
   }
 
   const now = new Date();
   const imageObjectId = new mongoose.Types.ObjectId(imageId);
   const lockUntil = new Date(now.getTime() + PROCESSING_LOCK_MS);
-  const result = await QC.updateOne(
+  const ownerQuery =
+    owner === OWNER_MODEL_INSPECTION
+      ? {
+          ...(mongoose.Types.ObjectId.isValid(normalizeText(inspectionId))
+            ? { _id: inspectionId }
+            : {}),
+          qc: qcId,
+        }
+      : { _id: qcId };
+  const Model = owner === OWNER_MODEL_INSPECTION ? Inspection : QC;
+  const result = await Model.updateOne(
     {
-      _id: qcId,
+      ...ownerQuery,
       [field]: {
         $elemMatch: {
           _id: imageObjectId,
@@ -242,13 +283,26 @@ const claimImageForProcessing = async ({ qcId = "", imageField = "qc_images", im
 
   if (Number(result?.modifiedCount || 0) <= 0) return null;
 
-  const qc = await QC.findById(qcId).select(`_id ${field}`).lean();
-  const image = getImageById(qc, field, imageId);
-  return image ? { qc, image, imageField: field } : null;
+  const doc =
+    owner === OWNER_MODEL_INSPECTION
+      ? await Inspection.findOne(ownerQuery).select(`_id qc ${field}`).lean()
+      : await QC.findById(qcId).select(`_id ${field}`).lean();
+  const image = getImageById(doc, field, imageId);
+  return image
+    ? {
+        qc: owner === OWNER_MODEL_INSPECTION ? { _id: qcId } : doc,
+        inspection: owner === OWNER_MODEL_INSPECTION ? doc : null,
+        image,
+        imageField: field,
+        ownerModel: owner,
+      }
+    : null;
 };
 
 const markImageProcessingFailed = async ({
   qcId = "",
+  inspectionId = "",
+  ownerModel = OWNER_MODEL_QC,
   imageField = "qc_images",
   imageId = "",
   error,
@@ -257,8 +311,21 @@ const markImageProcessingFailed = async ({
     return null;
   }
 
-  return QC.updateOne(
-    { _id: qcId, [`${imageField}._id`]: new mongoose.Types.ObjectId(imageId) },
+  const owner = resolveOwnerModel({ ownerModel, inspectionId });
+  const Model = owner === OWNER_MODEL_INSPECTION ? Inspection : QC;
+  const query =
+    owner === OWNER_MODEL_INSPECTION
+      ? {
+          ...(mongoose.Types.ObjectId.isValid(normalizeText(inspectionId))
+            ? { _id: inspectionId }
+            : {}),
+          qc: qcId,
+          [`${imageField}._id`]: new mongoose.Types.ObjectId(imageId),
+        }
+      : { _id: qcId, [`${imageField}._id`]: new mongoose.Types.ObjectId(imageId) };
+
+  return Model.updateOne(
+    query,
     {
       $set: {
         [`${imageField}.$[image].processing.status`]: "failed",
@@ -274,6 +341,8 @@ const markImageProcessingFailed = async ({
 
 const processLegacyThumbnail = async ({
   qcId = "",
+  inspectionId = "",
+  ownerModel = OWNER_MODEL_QC,
   imageField = "qc_images",
   image = {},
   sourceBuffer,
@@ -293,8 +362,21 @@ const processLegacyThumbnail = async ({
   });
   await verifyDerivativeObject({ key: thumbnailKey });
 
-  await QC.updateOne(
-    { _id: qcId, [`${imageField}._id`]: image._id },
+  const owner = resolveOwnerModel({ ownerModel, inspectionId });
+  const Model = owner === OWNER_MODEL_INSPECTION ? Inspection : QC;
+  const query =
+    owner === OWNER_MODEL_INSPECTION
+      ? {
+          ...(mongoose.Types.ObjectId.isValid(normalizeText(inspectionId))
+            ? { _id: inspectionId }
+            : {}),
+          qc: qcId,
+          [`${imageField}._id`]: image._id,
+        }
+      : { _id: qcId, [`${imageField}._id`]: image._id };
+
+  await Model.updateOne(
+    query,
     {
       $set: {
         [`${imageField}.$[image].thumbnail_key`]: thumbnailKey,
@@ -322,6 +404,8 @@ const processLegacyThumbnail = async ({
   return {
     legacy: true,
     qcId,
+    inspectionId,
+    ownerModel: owner,
     imageField,
     imageId: String(image._id),
     thumbnailKey,
@@ -331,14 +415,29 @@ const processLegacyThumbnail = async ({
 
 const processDirectSourceImage = async ({
   qcId = "",
+  inspectionId = "",
+  ownerModel = OWNER_MODEL_QC,
   imageField = "qc_images",
   image = {},
   sourceBuffer,
 } = {}) => {
   const sourceKey = normalizeText(image?.storage?.source_key || image?.key || "");
   const imageId = String(image?._id || "");
-  const previewKey = buildPreviewKey({ sourceKey, qcId, imageField, imageId });
-  const thumbnailKey = buildThumbnailKey({ sourceKey, qcId, imageField, imageId });
+  const owner = resolveOwnerModel({ ownerModel, inspectionId });
+  const previewKey = buildPreviewKey({
+    sourceKey,
+    qcId,
+    inspectionId,
+    imageField,
+    imageId,
+  });
+  const thumbnailKey = buildThumbnailKey({
+    sourceKey,
+    qcId,
+    inspectionId,
+    imageField,
+    imageId,
+  });
   const [preview, thumbnail] = await Promise.all([
     createPreviewDerivative(sourceBuffer),
     createThumbnailDerivative(sourceBuffer),
@@ -363,8 +462,20 @@ const processDirectSourceImage = async ({
   await verifyDerivativeObject({ key: thumbnailKey });
 
   const now = new Date();
-  await QC.updateOne(
-    { _id: qcId, [`${imageField}._id`]: image._id },
+  const Model = owner === OWNER_MODEL_INSPECTION ? Inspection : QC;
+  const query =
+    owner === OWNER_MODEL_INSPECTION
+      ? {
+          ...(mongoose.Types.ObjectId.isValid(normalizeText(inspectionId))
+            ? { _id: inspectionId }
+            : {}),
+          qc: qcId,
+          [`${imageField}._id`]: image._id,
+        }
+      : { _id: qcId, [`${imageField}._id`]: image._id };
+
+  await Model.updateOne(
+    query,
     {
       $set: {
         [`${imageField}.$[image].key`]: previewKey,
@@ -414,8 +525,8 @@ const processDirectSourceImage = async ({
     });
   }
 
-  await QC.updateOne(
-    { _id: qcId, [`${imageField}._id`]: image._id },
+  await Model.updateOne(
+    query,
     {
       $set: {
         [`${imageField}.$[image].storage.source_cleanup_status`]: sourceCleanupStatus,
@@ -430,6 +541,8 @@ const processDirectSourceImage = async ({
   return {
     legacy: false,
     qcId,
+    inspectionId,
+    ownerModel: owner,
     imageField,
     imageId,
     previewKey,
@@ -442,19 +555,56 @@ const processDirectSourceImage = async ({
 
 const processQcImageDerivatives = async ({
   qcId = "",
+  inspectionId = "",
+  ownerModel = OWNER_MODEL_QC,
   imageField = "qc_images",
   imageId = "",
 } = {}) => {
-  const claimed = await claimImageForProcessing({ qcId, imageField, imageId });
+  const claimed = await claimImageForProcessing({
+    qcId,
+    inspectionId,
+    ownerModel,
+    imageField,
+    imageId,
+  });
   if (!claimed) {
-    return { skipped: true, reason: "not_claimed", qcId, imageField, imageId };
+    return {
+      skipped: true,
+      reason: "not_claimed",
+      qcId,
+      inspectionId,
+      ownerModel,
+      imageField,
+      imageId,
+    };
   }
 
-  const { image, imageField: field } = claimed;
+  const {
+    image,
+    imageField: field,
+    ownerModel: claimedOwnerModel,
+    inspection,
+  } = claimed;
+  const resolvedInspectionId = normalizeText(inspection?._id || inspectionId);
   const sourceKey = normalizeText(image?.storage?.source_key || image?.key || image?.public_id || "");
   if (!sourceKey) {
-    await markImageProcessingFailed({ qcId, imageField: field, imageId, error: new Error("Image source key is missing") });
-    return { skipped: true, reason: "missing_source_key", qcId, imageField: field, imageId };
+    await markImageProcessingFailed({
+      qcId,
+      inspectionId: resolvedInspectionId,
+      ownerModel: claimedOwnerModel,
+      imageField: field,
+      imageId,
+      error: new Error("Image source key is missing"),
+    });
+    return {
+      skipped: true,
+      reason: "missing_source_key",
+      qcId,
+      inspectionId: resolvedInspectionId,
+      ownerModel: claimedOwnerModel,
+      imageField: field,
+      imageId,
+    };
   }
 
   try {
@@ -469,6 +619,8 @@ const processQcImageDerivatives = async ({
     if (normalizeText(image?.storage?.source_key)) {
       return await processDirectSourceImage({
         qcId,
+        inspectionId: resolvedInspectionId,
+        ownerModel: claimedOwnerModel,
         imageField: field,
         image,
         sourceBuffer,
@@ -477,12 +629,21 @@ const processQcImageDerivatives = async ({
 
     return await processLegacyThumbnail({
       qcId,
+      inspectionId: resolvedInspectionId,
+      ownerModel: claimedOwnerModel,
       imageField: field,
       image,
       sourceBuffer,
     });
   } catch (error) {
-    await markImageProcessingFailed({ qcId, imageField: field, imageId, error });
+    await markImageProcessingFailed({
+      qcId,
+      inspectionId: resolvedInspectionId,
+      ownerModel: claimedOwnerModel,
+      imageField: field,
+      imageId,
+      error,
+    });
     throw error;
   }
 };
@@ -546,6 +707,10 @@ const scanAndEnqueuePendingQcImages = async ({
     .select(`_id ${VALID_IMAGE_FIELDS.join(" ")}`)
     .limit(safeLimit)
     .lean();
+  const inspections = await Inspection.find(query)
+    .select(`_id qc ${VALID_IMAGE_FIELDS.join(" ")}`)
+    .limit(safeLimit)
+    .lean();
   let enqueued = 0;
 
   for (const doc of docs) {
@@ -558,13 +723,36 @@ const scanAndEnqueuePendingQcImages = async ({
           qcId: String(doc._id),
           imageField: field,
           imageId: String(image._id),
+          ownerModel: OWNER_MODEL_QC,
         });
         enqueued += 1;
       }
     }
   }
 
-  return { docs: docs.length, enqueued };
+  for (const inspection of inspections) {
+    for (const field of VALID_IMAGE_FIELDS) {
+      const images = Array.isArray(inspection?.[field]) ? inspection[field] : [];
+      for (const image of images) {
+        if (legacyOnly && normalizeText(image?.storage?.source_key || "")) continue;
+        if (!shouldEnqueueImage(image)) continue;
+        await enqueueQcImageDerivativeProcessing({
+          qcId: String(inspection.qc || ""),
+          inspectionId: String(inspection._id),
+          imageField: field,
+          imageId: String(image._id),
+          ownerModel: OWNER_MODEL_INSPECTION,
+        });
+        enqueued += 1;
+      }
+    }
+  }
+
+  return {
+    docs: docs.length,
+    inspections: inspections.length,
+    enqueued,
+  };
 };
 
 const cleanupAbandonedUploadSessions = async ({ olderThan = new Date() } = {}) => {
@@ -579,6 +767,19 @@ const cleanupAbandonedUploadSessions = async ({ olderThan = new Date() } = {}) =
     })),
   })
     .select(`_id ${VALID_IMAGE_FIELDS.join(" ")}`)
+    .limit(500)
+    .lean();
+  const inspections = await Inspection.find({
+    $or: VALID_IMAGE_FIELDS.map((field) => ({
+      [field]: {
+        $elemMatch: {
+          "processing.status": "uploading",
+          "upload.expires_at": { $lte: olderThan },
+        },
+      },
+    })),
+  })
+    .select(`_id qc ${VALID_IMAGE_FIELDS.join(" ")}`)
     .limit(500)
     .lean();
   let cleaned = 0;
@@ -608,7 +809,36 @@ const cleanupAbandonedUploadSessions = async ({ olderThan = new Date() } = {}) =
     }
   }
 
-  return { docs: docs.length, cleaned };
+  for (const inspection of inspections) {
+    for (const field of VALID_IMAGE_FIELDS) {
+      const expiredImages = (Array.isArray(inspection?.[field]) ? inspection[field] : []).filter((image) =>
+        normalizeKey(image?.processing?.status) === "uploading" &&
+        image?.upload?.expires_at &&
+        new Date(image.upload.expires_at).getTime() <= olderThan.getTime(),
+      );
+      for (const image of expiredImages) {
+        const sourceKey = normalizeText(image?.storage?.source_key || image?.key || "");
+        if (sourceKey) {
+          await deleteObject(sourceKey).catch(() => {});
+        }
+        await Inspection.updateOne(
+          { _id: inspection._id },
+          {
+            $pull: {
+              [field]: { _id: image._id },
+            },
+          },
+        );
+        cleaned += 1;
+      }
+    }
+  }
+
+  return {
+    docs: docs.length,
+    inspections: inspections.length,
+    cleaned,
+  };
 };
 
 module.exports = {

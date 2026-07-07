@@ -18,6 +18,7 @@ exports.createUploadSession = async (req, res) => {
     const result = await createUploadSession({
       user: req.user,
       qcId: normalizeText(req.body?.qc_id || req.body?.qcId),
+      inspectionId: normalizeText(req.body?.inspection_id || req.body?.inspectionId),
       imageType: normalizeText(req.body?.image_type || req.body?.imageType || "qc_images"),
       fileName: normalizeText(req.body?.file_name || req.body?.fileName || req.body?.name),
       contentType: normalizeText(req.body?.content_type || req.body?.contentType || req.body?.type),

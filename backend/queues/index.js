@@ -244,29 +244,42 @@ const enqueuePisFileProcessing = ({
 
 const enqueueQcImageThumbnailGeneration = ({
   qcId = "",
+  inspectionId = "",
   imageField = "qc_images",
   sourceKey = "",
   imageId = "",
   idempotencyKey = "",
+  ownerModel = "qc",
 } = {}) => {
   const safeQcId = sanitizeJobIdPart(qcId);
+  const safeInspectionId = sanitizeJobIdPart(inspectionId);
   const safeImageField = sanitizeJobIdPart(imageField);
   const safeImageRef = sanitizeJobIdPart(
     idempotencyKey || imageId || sourceKey || "image",
   );
+  const safeOwnerModel = sanitizeJobIdPart(ownerModel);
 
   return addJob(
     QUEUE_NAMES.imageProcessingQueue,
     JOB_NAMES.GENERATE_QC_IMAGE_THUMBNAIL,
     {
       qcId,
+      inspectionId,
       imageField,
       sourceKey,
       imageId,
       idempotencyKey,
+      ownerModel,
     },
     {
-      jobId: ["qc-thumbnail", safeQcId, safeImageField, safeImageRef].join(":"),
+      jobId: [
+        "qc-thumbnail",
+        safeOwnerModel,
+        safeQcId,
+        safeInspectionId,
+        safeImageField,
+        safeImageRef,
+      ].join(":"),
       attempts: 3,
       backoff: {
         type: "exponential",
@@ -278,23 +291,36 @@ const enqueueQcImageThumbnailGeneration = ({
 
 const enqueueQcImageDerivativeProcessing = ({
   qcId = "",
+  inspectionId = "",
   imageField = "qc_images",
   imageId = "",
+  ownerModel = "qc",
 } = {}) => {
   const safeQcId = sanitizeJobIdPart(qcId);
+  const safeInspectionId = sanitizeJobIdPart(inspectionId);
   const safeImageField = sanitizeJobIdPart(imageField);
   const safeImageId = sanitizeJobIdPart(imageId);
+  const safeOwnerModel = sanitizeJobIdPart(ownerModel);
 
   return addJob(
     QUEUE_NAMES.qcImageProcessingQueue,
     JOB_NAMES.PROCESS_QC_IMAGE_DERIVATIVES,
     {
       qcId,
+      inspectionId,
       imageField,
       imageId,
+      ownerModel,
     },
     {
-      jobId: ["qc-image", safeQcId, safeImageField, safeImageId].join(":"),
+      jobId: [
+        "qc-image",
+        safeOwnerModel,
+        safeQcId,
+        safeInspectionId,
+        safeImageField,
+        safeImageId,
+      ].join(":"),
       attempts: 3,
       backoff: {
         type: "exponential",
