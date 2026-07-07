@@ -5,6 +5,7 @@ import {
   QC_IMAGE_BATCH_SIZE,
   QC_IMAGE_DIRECT_UPLOAD_CONCURRENCY,
   completeQcImageUploadSession,
+  computeQcImageContentHash,
   createQcImageUploadSession,
   getQcImageFileSignature,
   isSupportedQcImageFile,
@@ -194,6 +195,7 @@ const createFileStatuses = (files = [], batchSize = QC_IMAGE_DIRECT_UPLOAD_CONCU
       duplicateCount: 0,
       optimizedCount: 0,
       bytesSaved: 0,
+      contentHash: previous?.contentHash || "",
       message: "",
       errorMessage: "",
       failure: null,
@@ -308,7 +310,10 @@ const createSummaryMessage = ({
   failedCount = 0,
 } = {}) => {
   if (uploadedCount > 0 || duplicateCount > 0) {
-    let message = `${uploadedCount + duplicateCount} of ${totalSelectedCount} image${totalSelectedCount === 1 ? "" : "s"} confirmed uploaded`;
+    let message = `${uploadedCount + duplicateCount} of ${totalSelectedCount} image${totalSelectedCount === 1 ? "" : "s"} processed`;
+    if (uploadedCount > 0) {
+      message += `. ${uploadedCount} uploaded`;
+    }
     if (duplicateCount > 0) {
       message += `. ${duplicateCount} duplicate${duplicateCount === 1 ? "" : "s"} skipped`;
     }
@@ -499,12 +504,14 @@ export const useBulkQcImageUpload = ({
     imageType,
     comment,
     signal,
+    uploadRunContentHashes,
   }) => {
     const maxAttempts = 1 + RETRY_DELAYS_MS.length;
     let uploadFile = null;
     let uploadSession = null;
     let uploadSucceeded = false;
     let compressionResult = null;
+    let contentHash = normalizeText(fileStatus.contentHash);
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const retrying = attempt > 1;
@@ -534,6 +541,45 @@ export const useBulkQcImageUpload = ({
           }));
         }
 
+        if (!contentHash) {
+          updateFileStatus(fileStatus.fileId, (current) => ({
+            ...current,
+            progressPercent: Math.max(current.progressPercent || 0, 10),
+            message: "Fingerprinting image.",
+          }));
+
+          contentHash = normalizeText(await computeQcImageContentHash(uploadFile));
+          if (contentHash) {
+            const existingHashOwner = uploadRunContentHashes?.get(contentHash);
+            if (existingHashOwner && existingHashOwner !== fileStatus.fileId) {
+              updateFileStatus(fileStatus.fileId, (current) => ({
+                ...current,
+                status: "completed",
+                progressPercent: 100,
+                uploadedCount: 0,
+                duplicateCount: 1,
+                optimizedCount: compressionResult?.optimized ? 1 : 0,
+                bytesSaved: compressionResult?.bytesSaved || 0,
+                contentHash,
+                errorMessage: "",
+                failure: null,
+                message: "Duplicate skipped before upload.",
+              }));
+              return { uploaded: false, duplicate: true };
+            }
+
+            if (!existingHashOwner) {
+              uploadRunContentHashes?.set(contentHash, fileStatus.fileId);
+            }
+          }
+
+          updateFileStatus(fileStatus.fileId, (current) => ({
+            ...current,
+            contentHash,
+            progressPercent: Math.max(current.progressPercent || 0, 11),
+          }));
+        }
+
         if (!uploadSession) {
           updateFileStatus(fileStatus.fileId, (current) => ({
             ...current,
@@ -547,15 +593,33 @@ export const useBulkQcImageUpload = ({
             uploadMode,
             imageType,
             comment,
+            contentHash,
             signal,
           });
           uploadSession = sessionResponse?.data?.data || {};
+          if (uploadSession.duplicate) {
+            updateFileStatus(fileStatus.fileId, (current) => ({
+              ...current,
+              status: "completed",
+              progressPercent: 100,
+              uploadedCount: 0,
+              duplicateCount: 1,
+              optimizedCount: compressionResult?.optimized ? 1 : 0,
+              bytesSaved: compressionResult?.bytesSaved || 0,
+              contentHash,
+              errorMessage: "",
+              failure: null,
+              message: "Duplicate skipped before upload.",
+            }));
+            return { uploaded: false, duplicate: true };
+          }
           if (uploadSession.already_completed) {
             updateFileStatus(fileStatus.fileId, (current) => ({
               ...current,
               status: "completed",
               progressPercent: 100,
               uploadedCount: 1,
+              contentHash,
               errorMessage: "",
               failure: null,
               message: "Upload already confirmed.",
@@ -640,6 +704,7 @@ export const useBulkQcImageUpload = ({
           duplicateCount: 0,
           optimizedCount: compressionResult?.optimized ? 1 : 0,
           bytesSaved: compressionResult?.bytesSaved || 0,
+          contentHash,
           errorMessage: "",
           failure: null,
           message: "Uploaded directly to Wasabi and confirmed.",
@@ -740,6 +805,15 @@ export const useBulkQcImageUpload = ({
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    const uploadRunContentHashes = new Map(
+      (Array.isArray(stateRef.current.fileStatuses) ? stateRef.current.fileStatuses : [])
+        .filter((fileStatus) =>
+          fileStatus?.status === "completed" &&
+          Number(fileStatus?.uploadedCount || 0) > 0 &&
+          normalizeText(fileStatus?.contentHash),
+        )
+        .map((fileStatus) => [normalizeText(fileStatus.contentHash), fileStatus.fileId]),
+    );
 
     updateState((previousState) => ({
       ...previousState,
@@ -778,6 +852,7 @@ export const useBulkQcImageUpload = ({
             imageType: normalizedImageType,
             comment,
             signal: abortController.signal,
+            uploadRunContentHashes,
           });
         },
       );

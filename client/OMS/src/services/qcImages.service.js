@@ -40,6 +40,25 @@ export const getQcImageFileSignature = (file) =>
     normalizeText(file?.type).toLowerCase(),
   ].join("__");
 
+const toHexDigest = (buffer) =>
+  Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+export const computeQcImageContentHash = async (file) => {
+  if (
+    !file ||
+    typeof file.arrayBuffer !== "function" ||
+    !globalThis.crypto?.subtle?.digest
+  ) {
+    return "";
+  }
+
+  const buffer = await file.arrayBuffer();
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer);
+  return toHexDigest(digest);
+};
+
 export const splitFilesIntoBatches = (files = [], batchSize = QC_IMAGE_BATCH_SIZE) => {
   const safeFiles = Array.isArray(files) ? files.filter(Boolean) : [];
   const safeBatchSize = Math.max(1, Number(batchSize) || QC_IMAGE_BATCH_SIZE);
@@ -125,6 +144,7 @@ export const createQcImageUploadSession = async ({
   uploadMode = "bulk",
   comment = "",
   idempotencyKey = "",
+  contentHash = "",
   signal,
 } = {}) =>
   api.post(
@@ -135,6 +155,7 @@ export const createQcImageUploadSession = async ({
       upload_mode: normalizeText(uploadMode || "bulk").toLowerCase(),
       comment: normalizeText(comment),
       idempotency_key: normalizeText(idempotencyKey),
+      content_hash: normalizeText(contentHash),
       file_name: normalizeText(file?.name),
       content_type: normalizeText(file?.type) || "application/octet-stream",
       size_bytes: Number(file?.size || 0),

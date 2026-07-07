@@ -23,6 +23,12 @@ exports.createUploadSession = async (req, res) => {
       contentType: normalizeText(req.body?.content_type || req.body?.contentType || req.body?.type),
       sizeBytes: req.body?.size_bytes ?? req.body?.sizeBytes ?? req.body?.size,
       idempotencyKey: normalizeText(req.body?.idempotency_key || req.body?.idempotencyKey),
+      contentHash: normalizeText(
+        req.body?.content_hash ||
+          req.body?.contentHash ||
+          req.body?.hash ||
+          req.body?.sha256,
+      ),
       uploadMode: normalizeText(req.body?.upload_mode || req.body?.uploadMode || "bulk"),
       comment: normalizeText(req.body?.comment),
     });

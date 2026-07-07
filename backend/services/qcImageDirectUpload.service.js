@@ -52,6 +52,7 @@ const MIME_TO_EXTENSION = Object.freeze({
 
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
+const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/i;
 
 const createHttpError = (statusCode, message) => {
   const error = new Error(message);
@@ -74,6 +75,11 @@ const sanitizeStorageKeyPart = (value = "", fallback = "value") =>
 const normalizeImageField = (value = "qc_images") => {
   const normalized = normalizeText(value);
   return VALID_IMAGE_FIELDS.has(normalized) ? normalized : "qc_images";
+};
+
+const normalizeImageContentHash = (value = "") => {
+  const normalized = normalizeKey(value);
+  return SHA256_HEX_PATTERN.test(normalized) ? normalized : "";
 };
 
 const getQcInspectionRecordCount = (qc = {}) =>
@@ -214,6 +220,7 @@ const buildUploadSessionResponse = async ({
     method: "PUT",
     source_key: sourceKey,
     content_type: contentType || image?.storage?.source_content_type || image?.contentType || "",
+    content_hash: normalizeImageContentHash(image?.hash),
     expires_at: safeExpiresAt,
     already_completed: completed,
     headers: {
@@ -230,6 +237,38 @@ const findImageByIdempotencyKey = (qc = {}, imageField = "qc_images", idempotenc
   ) || null;
 };
 
+const findImageByHash = (qc = {}, imageField = "qc_images", contentHash = "") => {
+  const normalizedHash = normalizeImageContentHash(contentHash);
+  if (!normalizedHash) return null;
+  return (Array.isArray(qc?.[imageField]) ? qc[imageField] : []).find((image) =>
+    normalizeImageContentHash(image?.hash) === normalizedHash,
+  ) || null;
+};
+
+const buildDuplicateUploadSessionResponse = ({
+  qc,
+  image,
+  imageField,
+  contentHash = "",
+} = {}) => ({
+  qc_id: String(qc?._id || ""),
+  image_id: String(image?._id || ""),
+  image_type: imageField,
+  upload_id: "",
+  upload_url: "",
+  method: "PUT",
+  source_key: normalizeText(image?.storage?.source_key || image?.key || ""),
+  content_type: normalizeText(image?.storage?.source_content_type || image?.contentType || ""),
+  content_hash: normalizeImageContentHash(contentHash || image?.hash),
+  expires_at: null,
+  already_completed: true,
+  duplicate: true,
+  duplicate_reason: "already_uploaded_hash",
+  existing_image_id: String(image?._id || ""),
+  processing_status: normalizeKey(image?.processing?.status || "ready"),
+  headers: {},
+});
+
 const createUploadSession = async ({
   user,
   qcId = "",
@@ -238,6 +277,7 @@ const createUploadSession = async ({
   contentType = "",
   sizeBytes = 0,
   idempotencyKey = "",
+  contentHash = "",
   uploadMode = "bulk",
   comment = "",
 } = {}) => {
@@ -259,6 +299,7 @@ const createUploadSession = async ({
 
   const normalizedIdempotencyKey =
     normalizeKey(idempotencyKey) || crypto.randomUUID();
+  const normalizedContentHash = normalizeImageContentHash(contentHash);
   const existingImage = findImageByIdempotencyKey(qc, imageField, normalizedIdempotencyKey);
   if (existingImage) {
     if (!userCanUseUploadSession(existingImage, user)) {
@@ -272,6 +313,16 @@ const createUploadSession = async ({
       imageField,
       contentType: resolvedContentType,
       completed: processingStatus === "ready" || processingStatus === "queued",
+    });
+  }
+
+  const duplicateImage = findImageByHash(qc, imageField, normalizedContentHash);
+  if (duplicateImage) {
+    return buildDuplicateUploadSessionResponse({
+      qc,
+      image: duplicateImage,
+      imageField,
+      contentHash: normalizedContentHash,
     });
   }
 
@@ -315,7 +366,7 @@ const createUploadSession = async ({
     originalName: safeOriginalName,
     contentType: resolvedContentType,
     size: normalizedSize,
-    hash: "",
+    hash: normalizedContentHash,
     idempotency_key: normalizedIdempotencyKey,
     thumbnail_key: null,
     thumbnail_url: null,
@@ -367,13 +418,33 @@ const createUploadSession = async ({
     uploaded_by: uploadedBy,
   };
 
-  await QC.updateOne(
-    { _id: qc._id },
+  const createSessionResult = await QC.updateOne(
+    {
+      _id: qc._id,
+      ...(normalizedContentHash
+        ? { [`${imageField}.hash`]: { $ne: normalizedContentHash } }
+        : {}),
+    },
     {
       $push: { [imageField]: imageEntry },
       $set: { updated_by: uploadedBy },
     },
   );
+
+  if (Number(createSessionResult?.modifiedCount || 0) <= 0) {
+    const latestQc = await QC.findById(qc._id).select(`${imageField}`).lean();
+    const latestDuplicate = findImageByHash(latestQc, imageField, normalizedContentHash);
+    if (latestDuplicate) {
+      return buildDuplicateUploadSessionResponse({
+        qc,
+        image: latestDuplicate,
+        imageField,
+        contentHash: normalizedContentHash,
+      });
+    }
+
+    throw createHttpError(409, "QC image upload session could not be created");
+  }
 
   return buildUploadSessionResponse({
     qc,
@@ -586,4 +657,9 @@ module.exports = {
   createUploadSession,
   refreshUploadSession,
   resolveSupportedImageType,
+  __test__: {
+    buildDuplicateUploadSessionResponse,
+    findImageByHash,
+    normalizeImageContentHash,
+  },
 };
