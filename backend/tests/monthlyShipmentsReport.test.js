@@ -135,6 +135,63 @@ test("same container can be counted once for each contained vendor", () => {
   );
 });
 
+test("report includes month-based brand and vendor chart matrices", () => {
+  const rows = [
+    row({
+      container: "MSCU-101010-1",
+      brand: "Brand A",
+      vendor: "Vendor A",
+      date: "2026-01-12",
+      allocatedCbm: 4,
+    }),
+    row({
+      container: "MSCU-202020-2",
+      brand: "Brand A",
+      vendor: "Vendor B",
+      date: "2026-02-18",
+      allocatedCbm: 6,
+    }),
+    row({
+      container: "MSCU-303030-3",
+      brand: "Brand B",
+      vendor: "Vendor A",
+      date: "2026-02-20",
+      allocatedCbm: 8,
+    }),
+  ];
+  const report = buildMonthlyShipmentsReportFromRows({ rows, period });
+
+  const overallJanuary = report.overall.monthly_brand_totals.rows.find(
+    (entry) => entry.month === "2026-01",
+  );
+  const overallFebruary = report.overall.monthly_brand_totals.rows.find(
+    (entry) => entry.month === "2026-02",
+  );
+  assert.equal(overallJanuary.unique_container_count, 1);
+  assert.deepEqual(
+    overallJanuary.totals.map((entry) => [entry.brand, entry.unique_container_count]),
+    [["Brand A", 1], ["Brand B", 0]],
+  );
+  assert.equal(overallFebruary.unique_container_count, 2);
+
+  const brandATrend = report.by_brand.monthly_vendor_trends.find(
+    (entry) => entry.brand === "Brand A",
+  );
+  assert.deepEqual(brandATrend.vendors, ["Vendor A", "Vendor B"]);
+  assert.deepEqual(
+    brandATrend.rows
+      .filter((entry) => ["2026-01", "2026-02"].includes(entry.month))
+      .map((entry) => [
+        entry.month,
+        entry.totals.map((total) => [total.vendor, total.unique_container_count]),
+      ]),
+    [
+      ["2026-01", [["Vendor A", 1], ["Vendor B", 0]]],
+      ["2026-02", [["Vendor A", 0], ["Vendor B", 1]]],
+    ],
+  );
+});
+
 test("base match includes only shipped statuses, active orders, dated shipment rows, and scoped access", () => {
   const match = buildShipmentBaseMatch({
     period,

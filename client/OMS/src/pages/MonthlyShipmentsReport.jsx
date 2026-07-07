@@ -83,8 +83,11 @@ const emptyReport = {
     total_allocated_cbm: 0,
     vendors_count: 0,
   },
-  overall: { vendor_totals: [] },
-  by_brand: { brands: [] },
+  overall: {
+    vendor_totals: [],
+    monthly_brand_totals: { brands: [], rows: [] },
+  },
+  by_brand: { brands: [], monthly_vendor_trends: [] },
   by_vendor: {
     distribution: { brands: [], rows: [] },
     monthly_trend: { vendor: "", brands: [], rows: [] },
@@ -136,6 +139,8 @@ const buildYearOptions = () => {
 const getBrandColor = (brand, index = 0) =>
   BRAND_COLORS[index % BRAND_COLORS.length] || BRAND_COLORS[0];
 
+const normalizeKey = (value) => String(value ?? "").trim().toLowerCase();
+
 const formatNumber = (value) => {
   const parsed = Number(value || 0);
   if (!Number.isFinite(parsed)) return "0";
@@ -149,16 +154,22 @@ const getBarPayload = (entry) => entry?.payload || entry || {};
 const getSeriesMeta = (row, seriesEntry = {}) => {
   const meta = row?.__meta || {};
   if (seriesEntry.key && meta[seriesEntry.key]) return meta[seriesEntry.key];
-  const brandKey = normalizeKey(seriesEntry.brand);
-  return Object.values(meta).find((entry) => normalizeKey(entry?.brand) === brandKey) || {};
+  const seriesKey = normalizeKey(
+    seriesEntry.brand || seriesEntry.vendor || seriesEntry.label,
+  );
+  return Object.values(meta).find((entry) =>
+    normalizeKey(entry?.brand || entry?.vendor || entry?.label) === seriesKey,
+  ) || {};
 };
 
 const getTooltipSeriesMeta = (item) => {
   const row = getBarPayload(item);
   const meta = row?.__meta || {};
   if (item?.dataKey && meta[item.dataKey]) return meta[item.dataKey];
-  const brandKey = normalizeKey(item?.name);
-  return Object.values(meta).find((entry) => normalizeKey(entry?.brand) === brandKey) || {};
+  const seriesKey = normalizeKey(item?.name);
+  return Object.values(meta).find((entry) =>
+    normalizeKey(entry?.brand || entry?.vendor || entry?.label) === seriesKey,
+  ) || {};
 };
 
 const getTooltipAxisValue = ({ row, label, xKey } = {}) =>
@@ -238,16 +249,23 @@ const TooltipBox = ({ title, rows }) => (
   </div>
 );
 
-const OverallTooltip = ({ active, payload, periodLabel }) => {
+const OverallMonthlyTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
   const row = payload[0]?.payload || {};
+  const brandRows = (Array.isArray(row.brand_totals) ? row.brand_totals : [])
+    .filter((entry) => Number(entry?.unique_container_count || 0) > 0)
+    .map((entry) => ({
+      label: entry.brand || "Brand",
+      value: formatNumber(entry.unique_container_count),
+    }));
+
   return (
     <TooltipBox
-      title={row.vendor || "Vendor"}
+      title={row.month_label || "Month"}
       rows={[
-        { label: "Containers", value: formatNumber(row.containers) },
+        { label: "Total Containers", value: formatNumber(row.containers) },
+        ...brandRows,
         { label: "Allocated CBM", value: formatCbm(row.cbm) },
-        { label: "Period", value: periodLabel || "N/A" },
       ]}
     />
   );
@@ -258,11 +276,12 @@ const GroupedTooltip = ({ active, payload, label, periodLabel, xLabel, xKey }) =
   const item = payload.find((entry) => Number(entry?.value || 0) > 0) || payload[0];
   const row = getBarPayload(item);
   const meta = getTooltipSeriesMeta(item);
-  const brand = meta.brand || String(item?.name || item?.dataKey || "");
+  const seriesLabel =
+    meta.brand || meta.vendor || meta.label || String(item?.name || item?.dataKey || "");
   const axisValue = getTooltipAxisValue({ row, label, xKey });
   return (
     <TooltipBox
-      title={brand || axisValue || "Brand"}
+      title={seriesLabel || axisValue || "Series"}
       rows={[
         { label: xLabel, value: axisValue },
         { label: "Containers", value: formatNumber(meta.unique_container_count ?? item?.value) },
@@ -273,40 +292,21 @@ const GroupedTooltip = ({ active, payload, label, periodLabel, xLabel, xKey }) =
   );
 };
 
-const toSingleBarRows = (rows = [], labelKey = "vendor") =>
-  rows.map((entry) => ({
-    [labelKey]: entry?.[labelKey] || "N/A",
-    containers: Number(entry?.unique_container_count || 0),
-    cbm: Number(entry?.total_allocated_cbm || 0),
-  }));
-
 const toBrandSeries = (brands = []) =>
   (Array.isArray(brands) ? brands : []).map((brand, index) => ({
     brand,
+    label: brand,
     key: `brand_${index}`,
   }));
 
-const toGroupedRows = ({ rows = [], series = [], xKey = "vendor" } = {}) =>
-  rows.map((entry) => {
-    const chartRow = {
-      [xKey]: entry?.[xKey] || "N/A",
-      __meta: {},
-    };
-    series.forEach((seriesEntry) => {
-      const total = (entry?.totals || []).find(
-        (item) => item?.brand === seriesEntry.brand,
-      );
-      chartRow[seriesEntry.key] = Number(total?.unique_container_count || 0);
-      chartRow.__meta[seriesEntry.key] = {
-        brand: seriesEntry.brand,
-        unique_container_count: Number(total?.unique_container_count || 0),
-        total_allocated_cbm: Number(total?.total_allocated_cbm || 0),
-      };
-    });
-    return chartRow;
-  });
+const toVendorSeries = (vendors = []) =>
+  (Array.isArray(vendors) ? vendors : []).map((vendor, index) => ({
+    vendor,
+    label: vendor,
+    key: `vendor_${index}`,
+  }));
 
-const toMonthlyRows = ({ rows = [], series = [] } = {}) =>
+const toMonthlyRows = ({ rows = [], series = [], seriesField = "brand" } = {}) =>
   rows.map((entry) => {
     const chartRow = {
       month: entry?.month || "",
@@ -314,18 +314,29 @@ const toMonthlyRows = ({ rows = [], series = [] } = {}) =>
       __meta: {},
     };
     series.forEach((seriesEntry) => {
+      const seriesValue = seriesEntry?.[seriesField] || seriesEntry?.label || "";
       const total = (entry?.totals || []).find(
-        (item) => item?.brand === seriesEntry.brand,
+        (item) => normalizeKey(item?.[seriesField]) === normalizeKey(seriesValue),
       );
       chartRow[seriesEntry.key] = Number(total?.unique_container_count || 0);
       chartRow.__meta[seriesEntry.key] = {
-        brand: seriesEntry.brand,
+        [seriesField]: seriesValue,
+        label: seriesValue,
         unique_container_count: Number(total?.unique_container_count || 0),
         total_allocated_cbm: Number(total?.total_allocated_cbm || 0),
       };
     });
     return chartRow;
   });
+
+const toOverallMonthlyRows = (rows = []) =>
+  (Array.isArray(rows) ? rows : []).map((entry) => ({
+    month: entry?.month || "",
+    month_label: entry?.month_label || entry?.month || "N/A",
+    containers: Number(entry?.unique_container_count || 0),
+    cbm: Number(entry?.total_allocated_cbm || 0),
+    brand_totals: Array.isArray(entry?.totals) ? entry.totals : [],
+  }));
 
 const DetailModal = ({ detail, onClose, onOpenContainer }) => {
   if (!detail?.open) return null;
@@ -637,23 +648,14 @@ const MonthlyShipmentsReport = () => {
   const options = report?.filters?.options || emptyReport.filters.options;
   const periodLabel = report?.period?.label || "N/A";
   const activeSummary = report?.summary || emptyReport.summary;
+  const overallMonthly = report?.overall?.monthly_brand_totals || emptyReport.overall.monthly_brand_totals;
   const overallRows = useMemo(
-    () => toSingleBarRows(report?.overall?.vendor_totals || [], "vendor"),
-    [report?.overall?.vendor_totals],
+    () => toOverallMonthlyRows(overallMonthly?.rows || []),
+    [overallMonthly?.rows],
   );
   const brandSections = useMemo(
-    () => report?.by_brand?.brands || [],
-    [report?.by_brand?.brands],
-  );
-  const distribution = report?.by_vendor?.distribution || emptyReport.by_vendor.distribution;
-  const distributionBrands = distribution?.brands || [];
-  const distributionSeries = useMemo(
-    () => toBrandSeries(distributionBrands),
-    [distributionBrands],
-  );
-  const distributionRows = useMemo(
-    () => toGroupedRows({ rows: distribution?.rows || [], series: distributionSeries, xKey: "vendor" }),
-    [distribution?.rows, distributionSeries],
+    () => report?.by_brand?.monthly_vendor_trends || [],
+    [report?.by_brand?.monthly_vendor_trends],
   );
   const monthlyTrend = report?.by_vendor?.monthly_trend || emptyReport.by_vendor.monthly_trend;
   const monthlyBrands = monthlyTrend?.brands || [];
@@ -908,23 +910,30 @@ const MonthlyShipmentsReport = () => {
             </select>
           </div>
 
-          {includeGlobalVendorFilter && (
-            <div>
-              <label className="form-label mb-1">Vendor</label>
-              <select
-                className="form-select"
-                value={vendorFilter}
-                onChange={(event) => setVendorFilter(normalizeFilter(event.target.value))}
-              >
-                <option value="">All Vendors</option>
-                {(options.vendors || []).map((vendor) => (
-                  <option key={vendor} value={vendor}>
-                    {vendor}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div>
+            <label className="form-label mb-1">Vendor</label>
+            <select
+              className="form-select"
+              value={activeTab === "by-vendor" ? selectedVendorValue : vendorFilter}
+              onChange={(event) => {
+                const nextVendor = normalizeFilter(event.target.value);
+                if (activeTab === "by-vendor") {
+                  setSelectedVendor(nextVendor);
+                } else {
+                  setVendorFilter(nextVendor);
+                }
+              }}
+            >
+              <option value="">
+                {activeTab === "by-vendor" ? "Select Vendor" : "All Vendors"}
+              </option>
+              {(options.vendors || []).map((vendor) => (
+                <option key={vendor} value={vendor}>
+                  {vendor}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div className="monthly-shipments-filter-actions">
             <button
@@ -971,6 +980,10 @@ const MonthlyShipmentsReport = () => {
       ) : (
         <div className="card om-card">
           <div className="card-body">
+            <div className="d-flex flex-wrap justify-content-between gap-2 mb-3">
+              <h3 className="h6 mb-0">Monthly Containers</h3>
+              <span className="om-summary-chip">Period: {periodLabel}</span>
+            </div>
             <ChartFrame height={380}>
               {({ width, height }) => (
                 <BarChart
@@ -982,16 +995,14 @@ const MonthlyShipmentsReport = () => {
                 >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis
-                    dataKey="vendor"
+                    dataKey="month_label"
                     interval={0}
-                    angle={-28}
-                    textAnchor="end"
-                    height={94}
+                    height={64}
                     tick={{ fontSize: 12 }}
                   />
                   <YAxis allowDecimals={false} />
                   <Tooltip
-                    content={<OverallTooltip periodLabel={periodLabel} />}
+                    content={<OverallMonthlyTooltip />}
                     cursor={{ fill: "rgba(37, 99, 235, 0.08)" }}
                   />
                   <Bar
@@ -1006,12 +1017,13 @@ const MonthlyShipmentsReport = () => {
                   >
                     {overallRows.map((row) => (
                       <Cell
-                        key={`overall-${row.vendor}`}
-                        cursor="pointer"
+                        key={`overall-${row.month}`}
+                        cursor={Number(row.containers || 0) > 0 ? "pointer" : "default"}
                         onClick={() => {
+                          if (Number(row.containers || 0) <= 0) return;
                           fetchDetail(
-                            { detail_vendor: row.vendor },
-                            `Containers - ${row.vendor || "Vendor"}`,
+                            { month: row.month },
+                            `Containers - ${row.month_label || "Month"}`,
                           );
                         }}
                       />
@@ -1029,7 +1041,12 @@ const MonthlyShipmentsReport = () => {
   const renderBrandSection = (section) => {
     const brand = section?.brand || "N/A";
     const isCollapsed = collapsedBrands.has(brand);
-    const rows = toSingleBarRows(section?.vendors || [], "vendor");
+    const vendorSeries = toVendorSeries(section?.vendors || []);
+    const rows = toMonthlyRows({
+      rows: section?.rows || [],
+      series: vendorSeries,
+      seriesField: "vendor",
+    });
 
     return (
       <div key={brand} className="card om-card monthly-shipments-brand-section">
@@ -1056,7 +1073,7 @@ const MonthlyShipmentsReport = () => {
           </div>
 
           {!isCollapsed && (
-            rows.length === 0 ? (
+            rows.length === 0 || vendorSeries.length === 0 ? (
               <div className="text-secondary">No vendor shipments found.</div>
             ) : (
             <ChartFrame height={360}>
@@ -1070,44 +1087,55 @@ const MonthlyShipmentsReport = () => {
                   >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis
-                      dataKey="vendor"
+                      dataKey="month_label"
                       interval={0}
-                      angle={-28}
-                      textAnchor="end"
-                      height={94}
+                      height={64}
                       tick={{ fontSize: 12 }}
                     />
                     <YAxis allowDecimals={false} />
                     <Tooltip
-                      content={<OverallTooltip periodLabel={periodLabel} />}
-                      cursor={{ fill: "rgba(22, 163, 74, 0.08)" }}
+                      shared={false}
+                      content={<GroupedTooltip periodLabel={periodLabel} xLabel="Month" xKey="month_label" />}
+                      cursor={{ fill: "rgba(71, 85, 105, 0.08)" }}
                     />
-                    <Bar
-                      dataKey="containers"
-                      name="Containers"
-                      fill="#16a34a"
-                      barSize={getAdaptiveBarSize({
-                        chartWidth: width,
-                        itemCount: rows.length,
-                        maxSize: 48,
-                      })}
-                    >
-                      {rows.map((row) => (
-                        <Cell
-                          key={`${brand}-${row.vendor}`}
-                          cursor="pointer"
-                          onClick={() => {
-                            fetchDetail(
-                              {
-                                detail_brand: brand,
-                                detail_vendor: row.vendor,
-                              },
-                              `Containers - ${brand} / ${row.vendor || "Vendor"}`,
-                            );
-                          }}
-                        />
-                      ))}
-                    </Bar>
+                    <Legend />
+                    {vendorSeries.map((seriesEntry, index) => (
+                      <Bar
+                        key={seriesEntry.key}
+                        dataKey={seriesEntry.key}
+                        name={seriesEntry.vendor}
+                        fill={getBrandColor(seriesEntry.vendor, index)}
+                        barSize={getAdaptiveBarSize({
+                          chartWidth: width,
+                          itemCount: rows.length,
+                          seriesCount: vendorSeries.length,
+                          minSize: 4,
+                          maxSize: 24,
+                        })}
+                      >
+                        {rows.map((row) => {
+                          const meta = getSeriesMeta(row, seriesEntry);
+                          const vendor = meta.vendor || seriesEntry.vendor;
+                          return (
+                            <Cell
+                              key={`${brand}-${seriesEntry.key}-${row.month}`}
+                              cursor={Number(meta.unique_container_count || 0) > 0 ? "pointer" : "default"}
+                              onClick={() => {
+                                if (Number(meta.unique_container_count || 0) <= 0) return;
+                                fetchDetail(
+                                  {
+                                    detail_brand: brand,
+                                    detail_vendor: vendor,
+                                    month: row.month,
+                                  },
+                                  `Containers - ${brand} / ${vendor || "Vendor"} / ${row.month_label || "Month"}`,
+                                );
+                              }}
+                            />
+                          );
+                        })}
+                      </Bar>
+                    ))}
                   </BarChart>
                 )}
               </ChartFrame>
@@ -1128,110 +1156,14 @@ const MonthlyShipmentsReport = () => {
     )
   );
 
-  const renderDistributionChart = () => (
-    distributionRows.length === 0 || distributionBrands.length === 0 ? (
-      <EmptyState>No vendor and brand shipment distribution found.</EmptyState>
-    ) : (
-      <div className="card om-card">
-        <div className="card-body">
-          <div className="d-flex flex-wrap justify-content-between gap-2 mb-3">
-            <h3 className="h6 mb-0">Vendor vs Brand Container Distribution</h3>
-            <span className="om-summary-chip">Period: {periodLabel}</span>
-          </div>
-          <ChartFrame height={410}>
-            {({ width, height }) => (
-              <BarChart
-                width={width}
-                height={height}
-                data={distributionRows}
-                margin={{ top: 24, right: 24, left: 0, bottom: 12 }}
-                barCategoryGap="18%"
-                barGap={2}
-              >
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="vendor"
-                  interval={0}
-                  angle={-28}
-                  textAnchor="end"
-                  height={98}
-                  tick={{ fontSize: 12 }}
-                />
-                <YAxis allowDecimals={false} />
-                <Tooltip
-                  shared={false}
-                  content={<GroupedTooltip periodLabel={periodLabel} xLabel="Vendor" xKey="vendor" />}
-                  cursor={{ fill: "rgba(71, 85, 105, 0.08)" }}
-                />
-                <Legend />
-                {distributionSeries.map((seriesEntry, index) => (
-                  <Bar
-                    key={seriesEntry.key}
-                    dataKey={seriesEntry.key}
-                    name={seriesEntry.brand}
-                    fill={getBrandColor(seriesEntry.brand, index)}
-                    barSize={getAdaptiveBarSize({
-                      chartWidth: width,
-                      itemCount: distributionRows.length,
-                      seriesCount: distributionSeries.length,
-                      minSize: 4,
-                      maxSize: 24,
-                    })}
-                  >
-                    {distributionRows.map((row) => {
-                      const meta = getSeriesMeta(row, seriesEntry);
-                      const vendor = row.vendor || "";
-                      const brand = meta.brand || seriesEntry.brand;
-                      return (
-                        <Cell
-                          key={`${seriesEntry.key}-${vendor}`}
-                          cursor={Number(meta.unique_container_count || 0) > 0 ? "pointer" : "default"}
-                          onClick={() => {
-                            if (!vendor || Number(meta.unique_container_count || 0) <= 0) return;
-                            setSelectedVendor(vendor);
-                            fetchDetail(
-                              {
-                                detail_vendor: vendor,
-                                detail_brand: brand,
-                              },
-                              `Containers - ${vendor || "Vendor"} / ${brand}`,
-                            );
-                          }}
-                        />
-                      );
-                    })}
-                  </Bar>
-                ))}
-              </BarChart>
-            )}
-          </ChartFrame>
-        </div>
-      </div>
-    )
-  );
-
   const renderMonthlyTrend = () => (
     <div className="card om-card">
       <div className="card-body">
         <div className="d-flex flex-wrap justify-content-between gap-2 align-items-end mb-3">
-          <div>
-            <h3 className="h6 mb-1">Monthly Trend</h3>
+          <h3 className="h6 mb-0">Monthly Trend</h3>
+          <div className="d-flex flex-wrap gap-2">
+            <span className="om-summary-chip">Vendor: {selectedVendorValue || "Select vendor"}</span>
             <span className="om-summary-chip">Period: {periodLabel}</span>
-          </div>
-          <div className="monthly-shipments-vendor-select">
-            <label className="form-label mb-1">Vendor</label>
-            <select
-              className="form-select"
-              value={selectedVendorValue}
-              onChange={(event) => setSelectedVendor(normalizeFilter(event.target.value))}
-            >
-              <option value="">Select Vendor</option>
-              {(options.vendors || []).map((vendor) => (
-                <option key={vendor} value={vendor}>
-                  {vendor}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
 
@@ -1305,10 +1237,7 @@ const MonthlyShipmentsReport = () => {
   );
 
   const renderByVendor = () => (
-    <div className="d-grid gap-3">
-      {renderDistributionChart()}
-      {renderMonthlyTrend()}
-    </div>
+    renderMonthlyTrend()
   );
 
   const renderActiveTab = () => {

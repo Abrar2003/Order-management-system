@@ -453,6 +453,46 @@ const buildOverallVendorTotals = (rows = []) => {
     .sort((left, right) => sortText(left.vendor, right.vendor));
 };
 
+const getEmptyMetricPayload = () => ({
+  unique_container_count: 0,
+  total_allocated_cbm: 0,
+});
+
+const buildMonthlyBrandTotals = ({ rows = [], period } = {}) => {
+  const brandNames = new Map();
+  rows.forEach((row) => brandNames.set(row.brand_key, row.brand));
+  const brands = [...brandNames.values()].sort(sortText);
+
+  return {
+    brands,
+    rows: period.months.map((month) => {
+      const monthMetric = createMetric();
+      const brandMap = new Map();
+
+      rows
+        .filter((row) => row.month_key === month.key)
+        .forEach((row) => {
+          addMetricRow(monthMetric, row);
+          const brandEntry = ensureMapEntry(brandMap, row.brand_key, row.brand);
+          addMetricRow(brandEntry.metric, row);
+        });
+
+      return {
+        month: month.key,
+        month_label: month.label,
+        ...serializeMetric(monthMetric),
+        totals: brands.map((brand) => {
+          const entry = brandMap.get(normalizeKey(brand));
+          return {
+            brand,
+            ...(entry ? serializeMetric(entry.metric) : getEmptyMetricPayload()),
+          };
+        }),
+      };
+    }),
+  };
+};
+
 const buildBrandSections = (rows = []) => {
   const brandMap = new Map();
 
@@ -479,6 +519,60 @@ const buildBrandSections = (rows = []) => {
         }))
         .sort((left, right) => sortText(left.vendor, right.vendor)),
     }))
+    .sort((left, right) => sortText(left.brand, right.brand));
+};
+
+const buildBrandMonthlyVendorSections = ({ rows = [], period } = {}) => {
+  const brandMap = new Map();
+
+  rows.forEach((row) => {
+    const brandEntry = ensureMapEntry(brandMap, row.brand_key, row.brand);
+    addMetricRow(brandEntry.metric, row);
+    if (!brandEntry.vendors) brandEntry.vendors = new Map();
+    ensureMapEntry(brandEntry.vendors, row.vendor_key, row.vendor);
+  });
+
+  return [...brandMap.values()]
+    .map((brandEntry) => {
+      const vendors = [...(brandEntry.vendors || new Map()).values()]
+        .map((vendorEntry) => vendorEntry.label)
+        .sort(sortText);
+
+      return {
+        brand: brandEntry.label,
+        ...serializeMetric(brandEntry.metric),
+        vendors,
+        rows: period.months.map((month) => {
+          const monthMetric = createMetric();
+          const vendorMap = new Map();
+
+          rows
+            .filter(
+              (row) =>
+                row.brand_key === normalizeKey(brandEntry.label) &&
+                row.month_key === month.key,
+            )
+            .forEach((row) => {
+              addMetricRow(monthMetric, row);
+              const vendorEntry = ensureMapEntry(vendorMap, row.vendor_key, row.vendor);
+              addMetricRow(vendorEntry.metric, row);
+            });
+
+          return {
+            month: month.key,
+            month_label: month.label,
+            ...serializeMetric(monthMetric),
+            totals: vendors.map((vendor) => {
+              const entry = vendorMap.get(normalizeKey(vendor));
+              return {
+                vendor,
+                ...(entry ? serializeMetric(entry.metric) : getEmptyMetricPayload()),
+              };
+            }),
+          };
+        }),
+      };
+    })
     .sort((left, right) => sortText(left.brand, right.brand));
 };
 
@@ -718,9 +812,17 @@ const buildMonthlyShipmentsReportFromRows = ({
     },
     overall: {
       vendor_totals: buildOverallVendorTotals(filteredRows),
+      monthly_brand_totals: buildMonthlyBrandTotals({
+        rows: filteredRows,
+        period,
+      }),
     },
     by_brand: {
       brands: buildBrandSections(filteredRows),
+      monthly_vendor_trends: buildBrandMonthlyVendorSections({
+        rows: filteredRows,
+        period,
+      }),
     },
     by_vendor: {
       distribution: buildVendorDistribution(filteredRows),
