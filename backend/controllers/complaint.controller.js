@@ -2,6 +2,7 @@ const path = require("path");
 const mongoose = require("mongoose");
 
 const { Complaint } = require("../models/complaint.model");
+const { COMPLAINT_UPLOAD_MAX_FILE_COUNT } = require("../config/multer.config");
 const Item = require("../models/item.model");
 const {
   ComplaintCategory,
@@ -41,6 +42,15 @@ const SEARCH_FIELDS = [
   "po",
   "first_comment",
 ];
+
+const getComplaintFileLimitMessage = () =>
+  `You can upload up to ${COMPLAINT_UPLOAD_MAX_FILE_COUNT} complain files.`;
+
+const getRequestFileCount = (files = []) =>
+  (Array.isArray(files) ? files.length : 0);
+
+const getComplaintFileCount = (files = []) =>
+  (Array.isArray(files) ? files.length : 0);
 
 const normalizeText = (value = "") => String(value ?? "").trim();
 const escapeRegex = (value = "") =>
@@ -703,10 +713,7 @@ exports.updateComplaint = async (req, res) => {
         .map((comment) => getObjectIdString(comment))
         .filter(Boolean),
     );
-    const uploadedFiles = await uploadComplaintFiles(req.files, actor);
-    if (category) {
-      await ensureComplaintCategory(category, actor);
-    }
+    const incomingFileCount = getRequestFileCount(req.files);
 
     complaint.brand = brand;
     complaint.vendor = vendor;
@@ -759,9 +766,20 @@ exports.updateComplaint = async (req, res) => {
     const removedFiles = existingFiles.filter((file) =>
       replaceFiles || requestedRemoveFileIds.has(getObjectIdString(file)),
     );
-    complaint.files = existingFiles.filter((file) =>
+    const remainingFiles = existingFiles.filter((file) =>
       !replaceFiles && !requestedRemoveFileIds.has(getObjectIdString(file)),
     );
+    if (remainingFiles.length + incomingFileCount > COMPLAINT_UPLOAD_MAX_FILE_COUNT) {
+      return res.status(400).json({
+        success: false,
+        message: getComplaintFileLimitMessage(),
+      });
+    }
+    if (category) {
+      await ensureComplaintCategory(category, actor);
+    }
+    const uploadedFiles = await uploadComplaintFiles(req.files, actor);
+    complaint.files = remainingFiles;
     if (uploadedFiles.length > 0) {
       complaint.files.push(...uploadedFiles);
     }
@@ -976,9 +994,19 @@ exports.addComplaintFiles = async (req, res) => {
       return res.status(404).json({ success: false, message: "Complain not found." });
     }
     const actor = buildActor(req.user);
-    const uploadedFiles = await uploadComplaintFiles(req.files, actor);
-    if (uploadedFiles.length === 0) {
+    const incomingFileCount = getRequestFileCount(req.files);
+    if (incomingFileCount === 0) {
       return res.status(400).json({ success: false, message: "Select at least one file." });
+    }
+    if (getComplaintFileCount(complaint.files) + incomingFileCount > COMPLAINT_UPLOAD_MAX_FILE_COUNT) {
+      return res.status(400).json({
+        success: false,
+        message: getComplaintFileLimitMessage(),
+      });
+    }
+    const uploadedFiles = await uploadComplaintFiles(req.files, actor);
+    if (!Array.isArray(complaint.files)) {
+      complaint.files = [];
     }
     complaint.files.push(...uploadedFiles);
     complaint.updated_by = actor;

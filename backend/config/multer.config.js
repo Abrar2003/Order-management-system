@@ -66,7 +66,7 @@ const COMPLAINT_UPLOAD_MAX_FILE_SIZE = Math.max(
 );
 const COMPLAINT_UPLOAD_MAX_FILE_COUNT = Math.max(
   1,
-  Number.parseInt(String(process.env.COMPLAINT_UPLOAD_MAX_FILE_COUNT || 10), 10) || 10,
+  Number.parseInt(String(process.env.COMPLAINT_UPLOAD_MAX_FILE_COUNT || 50), 10) || 50,
 );
 const SAMPLE_UPLOAD_MAX_FILE_SIZE = Math.max(
   1,

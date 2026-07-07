@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { COMPLAINT_FILE_ACCEPT } from "./complaintConstants";
+import {
+  COMPLAINT_FILE_ACCEPT,
+  COMPLAINT_FILE_MAX_COUNT,
+  getComplaintFileLimitMessage,
+} from "./complaintConstants";
 
 const initialForm = {
   brand: "",
@@ -88,11 +92,27 @@ const AddComplaintModal = ({
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
+  const handleFilesChange = (event) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    if (selectedFiles.length > COMPLAINT_FILE_MAX_COUNT) {
+      setFiles([]);
+      setError(getComplaintFileLimitMessage());
+      event.target.value = "";
+      return;
+    }
+    setError("");
+    setFiles(selectedFiles);
+  };
+
   const handleSubmit = (event) => {
     event.preventDefault();
     setError("");
     if (!form.brand.trim() || !form.vendor.trim() || !form.item_code.trim() || !form.first_comment.trim()) {
       setError("Brand, vendor, item code, and first comment are required.");
+      return;
+    }
+    if (files.length > COMPLAINT_FILE_MAX_COUNT) {
+      setError(getComplaintFileLimitMessage());
       return;
     }
 
@@ -237,7 +257,7 @@ const AddComplaintModal = ({
                     className="form-control"
                     accept={COMPLAINT_FILE_ACCEPT}
                     multiple
-                    onChange={(event) => setFiles(Array.from(event.target.files || []))}
+                    onChange={handleFilesChange}
                   />
                   {fileNames.length > 0 && (
                     <div className="small text-secondary mt-2">

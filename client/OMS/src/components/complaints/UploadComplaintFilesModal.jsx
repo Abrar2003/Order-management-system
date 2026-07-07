@@ -1,16 +1,43 @@
 import { useMemo, useState } from "react";
-import { COMPLAINT_FILE_ACCEPT } from "./complaintConstants";
+import {
+  COMPLAINT_FILE_ACCEPT,
+  COMPLAINT_FILE_MAX_COUNT,
+  getComplaintFileLimitMessage,
+} from "./complaintConstants";
 
 const UploadComplaintFilesModal = ({ complaint, onClose, onSubmit, saving = false }) => {
   const [files, setFiles] = useState([]);
   const [error, setError] = useState("");
   const fileNames = useMemo(() => files.map((file) => file.name), [files]);
+  const existingFileCount = Array.isArray(complaint?.files) ? complaint.files.length : 0;
+
+  const handleFilesChange = (event) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    if (selectedFiles.length > COMPLAINT_FILE_MAX_COUNT) {
+      setFiles([]);
+      setError(getComplaintFileLimitMessage());
+      event.target.value = "";
+      return;
+    }
+    if (existingFileCount + selectedFiles.length > COMPLAINT_FILE_MAX_COUNT) {
+      setFiles([]);
+      setError(getComplaintFileLimitMessage());
+      event.target.value = "";
+      return;
+    }
+    setError("");
+    setFiles(selectedFiles);
+  };
 
   const handleSubmit = (event) => {
     event.preventDefault();
     setError("");
     if (files.length === 0) {
       setError("Select at least one file.");
+      return;
+    }
+    if (existingFileCount + files.length > COMPLAINT_FILE_MAX_COUNT) {
+      setError(getComplaintFileLimitMessage());
       return;
     }
     const formData = new FormData();
@@ -37,7 +64,7 @@ const UploadComplaintFilesModal = ({ complaint, onClose, onSubmit, saving = fals
                 className="form-control"
                 accept={COMPLAINT_FILE_ACCEPT}
                 multiple
-                onChange={(event) => setFiles(Array.from(event.target.files || []))}
+                onChange={handleFilesChange}
               />
               {fileNames.length > 0 && (
                 <div className="small text-secondary mt-2">

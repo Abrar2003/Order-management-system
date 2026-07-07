@@ -1099,8 +1099,13 @@ const UpdateQcModal = ({
   const barcodeValidationItemMaster = isInspectionRecordUpdate
     ? buildInspectionRecordMeasurementSource(inspectionRecord)
     : qc?.item_master || {};
+  const barcodeValidationExempted =
+    qc?.item_master?.barcode_exempted === true ||
+    barcodeValidationItemMaster?.barcode_exempted === true;
   const requiresBarcodeValidation =
-    isQcUser && !(isInspectionRecordUpdate && isCurrentUserLabelExempt);
+    isQcUser &&
+    !barcodeValidationExempted &&
+    !(isInspectionRecordUpdate && isCurrentUserLabelExempt);
   const qcBarcodeValidationLocked =
     requiresBarcodeValidation && !barcodeValidated;
   const latestInspectionRecord = getLatestInspectionRecord(qc);
@@ -2385,6 +2390,9 @@ const UpdateQcModal = ({
           allowFallback: true,
         })
         : qc?.item_master || {};
+    const submitBarcodeValidationExempted =
+      qc?.item_master?.barcode_exempted === true ||
+      existingItemMaster?.barcode_exempted === true;
     const existingInspectedBoxMode = detectBoxPackagingMode(
       existingItemMaster?.inspected_box_mode,
       existingItemMaster?.inspected_box_sizes,
@@ -2697,7 +2705,7 @@ const UpdateQcModal = ({
       return;
     }
 
-    if (isQcUser) {
+    if (isQcUser && !submitBarcodeValidationExempted) {
       const typeLabel = selectedBarcodeValidationOption.label.toLowerCase();
 
       if (!isPositiveBarcodeText(effectiveMasterBarcodeValue)) {
@@ -2826,7 +2834,7 @@ const UpdateQcModal = ({
         }
       }
 
-      if (isQcUser) {
+      if (isQcUser && !submitBarcodeValidationExempted) {
         payload.barcode_validation_type = selectedBarcodeValidationOption.value;
         payload.barcode_validated = true;
         payload.barcode_scanned = barcodeScannedInSession;

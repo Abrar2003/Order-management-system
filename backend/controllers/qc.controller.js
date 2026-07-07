@@ -5798,6 +5798,8 @@ const updateQC = async (req, res) => {
         ),
       );
     }
+    const itemIsBarcodeValidationExempt =
+      itemDocForBarcodeRequirement?.barcode_exempted === true;
 
     /* ────────────────────────
          🔢 BARCODE
@@ -5864,7 +5866,7 @@ const updateQC = async (req, res) => {
       qc.inner_barcode = nextInnerBarcode;
     }
 
-    if (isQcUser) {
+    if (isQcUser && !itemIsBarcodeValidationExempt) {
       if (!itemDocForBarcodeRequirement) {
         return res.status(400).json({
           message: "Item master with PIS barcode is required before QC can update this record.",

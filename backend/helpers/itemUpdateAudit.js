@@ -456,17 +456,20 @@ const collectSizeMissingFields = (
 const collectMissingFields = (afterSnapshot = {}, scopes = []) => {
   const item = afterSnapshot?.raw || {};
   const missingFields = [];
+  const barcodeExempted = item?.barcode_exempted === true;
 
   normalizeScopes(scopes).forEach((scope) => {
     if (scope === AUDIT_SCOPES.PIS) {
       if (!normalizeText(item?.country_of_origin)) {
         pushMissing(missingFields, scope, "country_of_origin", "Country of Origin");
       }
-      if (!normalizeText(item?.pis_master_barcode || item?.pis_barcode)) {
-        pushMissing(missingFields, scope, "pis_master_barcode", "PIS Master Barcode");
-      }
-      if (!normalizeText(item?.pis_inner_barcode)) {
-        pushMissing(missingFields, scope, "pis_inner_barcode", "PIS Inner Barcode");
+      if (!barcodeExempted) {
+        if (!normalizeText(item?.pis_master_barcode || item?.pis_barcode)) {
+          pushMissing(missingFields, scope, "pis_master_barcode", "PIS Master Barcode");
+        }
+        if (!normalizeText(item?.pis_inner_barcode)) {
+          pushMissing(missingFields, scope, "pis_inner_barcode", "PIS Inner Barcode");
+        }
       }
       collectSizeMissingFields(
         missingFields,
@@ -497,11 +500,13 @@ const collectMissingFields = (afterSnapshot = {}, scopes = []) => {
       if (!normalizeText(item?.country_of_origin)) {
         pushMissing(missingFields, scope, "country_of_origin", "Country of Origin");
       }
-      if (!normalizeText(item?.pd_master_barcode || item?.pd_barcode)) {
-        pushMissing(missingFields, scope, "pd_master_barcode", "PD Master Barcode");
-      }
-      if (!normalizeText(item?.pd_inner_barcode)) {
-        pushMissing(missingFields, scope, "pd_inner_barcode", "PD Inner Barcode");
+      if (!barcodeExempted) {
+        if (!normalizeText(item?.pd_master_barcode || item?.pd_barcode)) {
+          pushMissing(missingFields, scope, "pd_master_barcode", "PD Master Barcode");
+        }
+        if (!normalizeText(item?.pd_inner_barcode)) {
+          pushMissing(missingFields, scope, "pd_inner_barcode", "PD Inner Barcode");
+        }
       }
       if (!normalizeText(item?.product_type?.key || item?.product_type?.label)) {
         pushMissing(missingFields, scope, "product_type", "Product Type");

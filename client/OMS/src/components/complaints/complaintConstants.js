@@ -15,6 +15,11 @@ export const COMPLAINT_FILE_ACCEPT = [
   ".txt",
 ].join(",");
 
+export const COMPLAINT_FILE_MAX_COUNT = 50;
+
+export const getComplaintFileLimitMessage = () =>
+  `You can upload up to ${COMPLAINT_FILE_MAX_COUNT} complain files.`;
+
 export const formatComplaintDateTime = (value) => {
   if (!value) return "N/A";
   const parsed = new Date(value);
