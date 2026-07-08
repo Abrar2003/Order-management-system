@@ -455,17 +455,49 @@ const getDownloadFileName = (response, fallbackName) => {
 };
 
 const downloadBlobResponse = (response, fallbackName, fallbackType) => {
-  const blob = new Blob([response.data], {
-    type: response?.headers?.["content-type"] || fallbackType,
+  const responseType = response?.headers?.["content-type"] || fallbackType;
+  const blob = response.data instanceof Blob
+    ? response.data
+    : response.data instanceof ArrayBuffer
+      ? new Blob([response.data], { type: responseType })
+      : new Blob([response.data], { type: responseType });
+  const fileName = getDownloadFileName(response, fallbackName);
+  console.log("[qc-image-download][client] blob:download", {
+    status: response?.status,
+    statusText: response?.statusText,
+    fileName,
+    blobSize: blob.size,
+    blobType: blob.type,
+    contentType: response?.headers?.["content-type"],
+    contentLength: response?.headers?.["content-length"],
+    contentDisposition: response?.headers?.["content-disposition"],
   });
+  if (blob.size > 0 && blob.size <= 512) {
+    blob.text()
+      .then((text) => {
+        console.warn("[qc-image-download][client] blob:suspicious-small-preview", {
+          fileName,
+          blobSize: blob.size,
+          preview: text.slice(0, 300),
+        });
+      })
+      .catch((error) => {
+        console.warn("[qc-image-download][client] blob:preview-failed", {
+          fileName,
+          message: error?.message || String(error),
+        });
+      });
+  }
   const url = window.URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = getDownloadFileName(response, fallbackName);
+  anchor.download = fileName;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  window.URL.revokeObjectURL(url);
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(url);
+  }, 1000);
 };
 
 const resolveBlobErrorMessage = async (error, fallbackMessage) => {
@@ -2212,15 +2244,51 @@ const QcDetails = () => {
 
     try {
       setDownloadingQcImages(true);
+      console.log("[qc-image-download][client] request:start", {
+        qcId: id,
+        orderId: qc?.order_id || "",
+        selectedCount: selectedQcImages.length,
+        imageIdsCount: imageIds.length,
+        imageKeysCount: imageKeys.length,
+        imageIdSample: imageIds.slice(0, 5),
+        imageKeySample: imageKeys.slice(0, 5),
+        selectedSample: selectedQcImages.slice(0, 5).map((image) => ({
+          id: String(image?._id || ""),
+          key: String(image?.key || ""),
+          originalName: String(image?.originalName || ""),
+          contentType: String(image?.contentType || ""),
+          size: Number(image?.size || 0),
+        })),
+      });
       const response = await downloadSelectedQcImages({
         qcId: id,
         imageIds,
         imageKeys,
       });
+      console.log("[qc-image-download][client] request:response", {
+        status: response?.status,
+        statusText: response?.statusText,
+        contentType: response?.headers?.["content-type"],
+        contentLength: response?.headers?.["content-length"],
+        contentDisposition: response?.headers?.["content-disposition"],
+        dataType: Object.prototype.toString.call(response?.data),
+        blobSize: response?.data instanceof Blob ? response.data.size : undefined,
+      });
       const fallbackName = `qc-images-${String(qc?.order_id || id || "download").trim() || "download"}.zip`;
       downloadBlobResponse(response, fallbackName, "application/zip");
     } catch (error) {
-      console.error(error);
+      console.error("[qc-image-download][client] request:failed", {
+        status: error?.response?.status,
+        statusText: error?.response?.statusText,
+        contentType: error?.response?.headers?.["content-type"],
+        contentLength: error?.response?.headers?.["content-length"],
+        dataType: Object.prototype.toString.call(error?.response?.data),
+        blobSize: error?.response?.data instanceof Blob
+          ? error.response.data.size
+          : undefined,
+        message: error?.message || String(error),
+        error,
+      });
       alert(
         await resolveBlobErrorMessage(
           error,

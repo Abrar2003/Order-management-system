@@ -9,9 +9,22 @@ let refreshRequest = null;
 
 const VENDOR_SINGLE_KEYS = new Set(["vendor"]);
 const VENDOR_ARRAY_KEYS = new Set(["vendors", "uploaded_vendors", "vendor_options"]);
+const BINARY_RESPONSE_TYPES = new Set(["arraybuffer", "blob", "document", "stream"]);
 
 const isPlainObject = (value) =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
+  Object.prototype.toString.call(value) === "[object Object]";
+
+const isBinaryResponse = (res) => {
+  const responseType = String(res?.config?.responseType || "").trim().toLowerCase();
+  if (BINARY_RESPONSE_TYPES.has(responseType)) return true;
+
+  const data = res?.data;
+  return (
+    (typeof Blob !== "undefined" && data instanceof Blob) ||
+    (typeof ArrayBuffer !== "undefined" && data instanceof ArrayBuffer) ||
+    (typeof FormData !== "undefined" && data instanceof FormData)
+  );
+};
 
 const isVendorRefObject = (value) =>
   isPlainObject(value) &&
@@ -76,7 +89,7 @@ const redirectToSignin = () => {
 
 instance.interceptors.response.use(
   (res) => {
-    if (res?.data) {
+    if (res?.data && !isBinaryResponse(res)) {
       res.data = normalizeApiVendorRefs(res.data);
     }
     return res;
