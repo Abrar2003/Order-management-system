@@ -57,7 +57,24 @@ const RectifyPdfModal = ({
   const [previewRows, setPreviewRows] = useState([]);
   const [checkedRows, setCheckedRows] = useState({});
   const [activePreviousOrderRow, setActivePreviousOrderRow] = useState(null);
-  const { brandOptions, loadingBrands } = useBrandOptions([brand]);
+  const {
+    brandOptions,
+    vendorOptions,
+    loadingBrands,
+    loadingVendors,
+  } = useBrandOptions([brand]);
+
+  const availableVendorOptions = useMemo(
+    () =>
+      [
+        ...new Set(
+          [...(Array.isArray(vendorOptions) ? vendorOptions : []), vendor]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean),
+        ),
+      ].sort((left, right) => left.localeCompare(right)),
+    [vendorOptions, vendor],
+  );
 
   const toDateText = (value) => {
     const formatted = formatDateDDMMYYYY(value, "");
@@ -252,14 +269,19 @@ const RectifyPdfModal = ({
               </div>
               <div className="col-md-6">
                 <label className="form-label">Vendor</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={vendor}
                   onChange={(e) => setVendor(e.target.value)}
-                  disabled={loading}
-                  placeholder="e.g. Lumi Art"
-                />
+                  disabled={loading || loadingVendors}
+                >
+                  <option value="">{loadingVendors ? "Loading vendors..." : "Select Vendor"}</option>
+                  {availableVendorOptions.map((vendorValue) => (
+                    <option key={vendorValue} value={vendorValue}>
+                      {vendorValue}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 

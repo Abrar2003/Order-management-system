@@ -3,7 +3,7 @@ import api from "../api/axios";
 
 const normalizeText = (value) => String(value ?? "").trim();
 
-const normalizeBrandOptions = (values = []) =>
+const normalizeTextOptions = (values = []) =>
   [
     ...new Set(
       (Array.isArray(values) ? values : [])
@@ -14,6 +14,7 @@ const normalizeBrandOptions = (values = []) =>
 
 export const useBrandOptions = (extraOptions = []) => {
   const [brands, setBrands] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -24,9 +25,13 @@ export const useBrandOptions = (extraOptions = []) => {
         setLoading(true);
         const response = await api.get("/orders/brands-and-vendors");
         if (cancelled) return;
-        setBrands(normalizeBrandOptions(response?.data?.brands));
+        setBrands(normalizeTextOptions(response?.data?.brands));
+        setVendors(normalizeTextOptions(response?.data?.vendors));
       } catch {
-        if (!cancelled) setBrands([]);
+        if (!cancelled) {
+          setBrands([]);
+          setVendors([]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -40,11 +45,21 @@ export const useBrandOptions = (extraOptions = []) => {
   }, []);
 
   const options = useMemo(
-    () => normalizeBrandOptions([...brands, ...(Array.isArray(extraOptions) ? extraOptions : [])]),
+    () => normalizeTextOptions([...brands, ...(Array.isArray(extraOptions) ? extraOptions : [])]),
     [brands, extraOptions],
   );
 
-  return { brandOptions: options, loadingBrands: loading };
+  const vendorOptions = useMemo(
+    () => normalizeTextOptions(vendors),
+    [vendors],
+  );
+
+  return {
+    brandOptions: options,
+    vendorOptions,
+    loadingBrands: loading,
+    loadingVendors: loading,
+  };
 };
 
 export default useBrandOptions;
