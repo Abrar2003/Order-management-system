@@ -7,6 +7,7 @@ const Finish = require("../models/finish.model");
 const QcEditLog = require("../models/qcEditLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
 const XLSX = require("xlsx");
+const fsp = require("fs/promises");
 const path = require("path");
 const {
   isAdminLikeRole,
@@ -80,8 +81,7 @@ const {
   scanBarcodeFromUpload,
 } = require("../services/qcBarcodeScan.service");
 const {
-  buildArchiveFileName,
-  streamQcImagesArchive,
+  createQcImagesArchiveFile,
 } = require("../services/qcImageDownload.service");
 const {
   INSPECTION_IMAGE_ARRAY_FIELDS,
@@ -11337,20 +11337,43 @@ exports.downloadQcImages = async (req, res) => {
     }
 
     const archiveLabel = normalizeText(qc?.order_id || qc?._id || "qc-images");
-    const archiveFileName = buildArchiveFileName(archiveLabel);
-
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${String(archiveFileName || "qc-images.zip").replace(/"/g, "")}"`,
-    );
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders?.();
-
-    await streamQcImagesArchive({
+    const archiveResult = await createQcImagesArchiveFile({
       images: imagesToDownload,
       archiveLabel,
-      outputStream: res,
+    });
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Length", String(archiveResult.archiveSize));
+    res.setHeader("X-Accel-Buffering", "no");
+
+    await new Promise((resolve, reject) => {
+      try {
+        res.download(
+          archiveResult.archivePath,
+          String(archiveResult.archiveFileName || "qc-images.zip").replace(/"/g, ""),
+          (downloadError) => {
+            fsp.rm(archiveResult.archivePath, { force: true }).catch(() => {});
+
+            if (!downloadError) {
+              resolve();
+              return;
+            }
+
+            if (res.headersSent) {
+              console.warn("QC image archive download ended after headers were sent:", {
+                message: downloadError?.message || String(downloadError),
+              });
+              resolve();
+              return;
+            }
+
+            reject(downloadError);
+          },
+        );
+      } catch (downloadError) {
+        fsp.rm(archiveResult.archivePath, { force: true }).catch(() => {});
+        reject(downloadError);
+      }
     });
     return undefined;
   } catch (error) {

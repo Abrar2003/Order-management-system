@@ -136,7 +136,7 @@ router.get(
   "/pis-diffs",
   auth,
   requirePermission("pis", "view"),
-  cacheRoute("items", MEDIUM_CACHE_TTL),
+  cacheRoute("pis-diffs-v2", MEDIUM_CACHE_TTL),
   getPisDiffItems,
 );
 
@@ -152,7 +152,7 @@ router.get(
   "/pis-diffs/export-preview",
   auth,
   requirePermission("pis", "export"),
-  cacheRoute("reports", MEDIUM_CACHE_TTL),
+  cacheRoute("pis-diff-reports-v2", MEDIUM_CACHE_TTL),
   getPisDiffCheckedReportPreview,
 );
 

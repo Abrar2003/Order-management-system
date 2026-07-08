@@ -1,4 +1,7 @@
 const path = require("path");
+const fs = require("fs");
+const fsp = require("fs/promises");
+const os = require("os");
 const axios = require("axios");
 const archiver = require("archiver");
 const { getObjectBuffer } = require("./wasabiStorage.service");
@@ -75,6 +78,15 @@ const buildArchiveFileName = (archiveLabel = "") => {
   const dateStamp = new Date().toISOString().slice(0, 10);
 
   return `${safeLabel || "qc-images"}-${dateStamp}.zip`;
+};
+
+const createTempArchivePath = (archiveLabel = "") => {
+  const safeLabel = sanitizeFileBaseName(archiveLabel, "qc-images")
+    .toLowerCase()
+    .replace(/\s+/gu, "-")
+    .slice(0, 40);
+  const suffix = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+  return path.join(os.tmpdir(), `${safeLabel || "qc-images"}-${suffix}.zip`);
 };
 
 const getQcImageDownloadMemorySnapshot = () => {
@@ -312,11 +324,53 @@ const streamQcImagesArchive = async ({
   };
 };
 
+const createQcImagesArchiveFile = async ({
+  images = [],
+  archiveLabel = "",
+  fetchImageContent = fetchQcImageContent,
+  concurrency = DOWNLOAD_CONCURRENCY,
+} = {}) => {
+  const archivePath = createTempArchivePath(archiveLabel);
+  const outputStream = fs.createWriteStream(archivePath);
+
+  try {
+    const result = await streamQcImagesArchive({
+      images,
+      archiveLabel,
+      outputStream,
+      fetchImageContent,
+      concurrency,
+    });
+    if (Number(result?.downloadedCount || 0) <= 0) {
+      throw new Error("Selected QC images could not be loaded from storage");
+    }
+
+    const stats = await fsp.stat(archivePath);
+    const archiveSize = Number(stats?.size || 0);
+
+    if (archiveSize < 22) {
+      throw new Error("Generated QC image archive is empty or incomplete");
+    }
+
+    return {
+      ...result,
+      archivePath,
+      archiveSize,
+    };
+  } catch (error) {
+    outputStream.destroy();
+    await fsp.rm(archivePath, { force: true }).catch(() => {});
+    throw error;
+  }
+};
+
 module.exports = {
   buildArchiveFileName,
+  createQcImagesArchiveFile,
   streamQcImagesArchive,
   __test__: {
     buildArchiveEntryName,
+    createQcImagesArchiveFile,
     ensureUniqueArchiveEntryName,
     streamQcImagesArchive,
   },

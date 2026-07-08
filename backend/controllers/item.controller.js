@@ -1941,6 +1941,11 @@ const compareMeasurementEntryGroups = (
         hasAnyPositiveMeasurementLbh(entry)
         || (weightKey ? hasPositiveMeasurementWeight(entry?.[weightKey]) : false),
     ),
+    hasPisData: pisEntriesWithKeys.some(
+      (entry) =>
+        hasAnyPositiveMeasurementLbh(entry)
+        || (weightKey ? hasPositiveMeasurementWeight(entry?.[weightKey]) : false),
+    ),
     sizeMismatch,
     weightMismatch,
   };
@@ -1985,6 +1990,12 @@ const buildPisDiffSummary = (item = {}) => {
     item?.cbm?.calculated_inspected_total,
     item?.cbm?.calculated_pis_total,
   );
+  const hasPisMeasurementData =
+    itemComparison.hasPisData
+    || boxComparison.hasPisData;
+  if (!hasPisMeasurementData) {
+    return null;
+  }
 
   const hasInspectedData =
     itemComparison.hasInspectedData
