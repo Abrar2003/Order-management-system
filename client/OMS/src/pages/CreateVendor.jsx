@@ -12,7 +12,7 @@ import {
   hasDuplicateVendorCodeRows,
   hasIncompleteVendorCodeRows,
   normalizeBrandOptions,
-  normalizeVendorCodeRows,
+  normalizeVendorCodeDraftRows,
 } from "../utils/vendorCodes";
 import "../App.css";
 
@@ -142,7 +142,7 @@ const CreateVendor = () => {
 
   const handleVendorCodeChange = (index, field, value) => {
     setForm((prev) => {
-      const vendorCodes = normalizeVendorCodeRows(prev.vendor_code).map((entry) => ({ ...entry }));
+      const vendorCodes = normalizeVendorCodeDraftRows(prev.vendor_code).map((entry) => ({ ...entry }));
       vendorCodes[index] = {
         ...(vendorCodes[index] || emptyVendorCode),
         [field]: value,
@@ -154,13 +154,13 @@ const CreateVendor = () => {
   const addVendorCode = () => {
     setForm((prev) => ({
       ...prev,
-      vendor_code: [...normalizeVendorCodeRows(prev.vendor_code), { ...emptyVendorCode }],
+      vendor_code: [...normalizeVendorCodeDraftRows(prev.vendor_code), { ...emptyVendorCode }],
     }));
   };
 
   const removeVendorCode = (index) => {
     setForm((prev) => {
-      const vendorCodes = normalizeVendorCodeRows(prev.vendor_code).filter(
+      const vendorCodes = normalizeVendorCodeDraftRows(prev.vendor_code).filter(
         (_, vendorCodeIndex) => vendorCodeIndex !== index,
       );
       return {
@@ -355,7 +355,7 @@ const CreateVendor = () => {
                   </button>
                 </div>
 
-                {normalizeVendorCodeRows(form.vendor_code).map((vendorCode, index) => {
+                {normalizeVendorCodeDraftRows(form.vendor_code).map((vendorCode, index) => {
                   const availableBrandOptions = getAvailableBrandOptions(
                     brandOptions,
                     vendorCode.brand,
@@ -399,7 +399,7 @@ const CreateVendor = () => {
                           type="button"
                           className="btn btn-outline-danger btn-sm"
                           onClick={() => removeVendorCode(index)}
-                          disabled={normalizeVendorCodeRows(form.vendor_code).length <= 1}
+                          disabled={normalizeVendorCodeDraftRows(form.vendor_code).length <= 1}
                         >
                           Remove
                         </button>

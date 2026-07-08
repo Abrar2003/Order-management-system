@@ -24,6 +24,25 @@ export const normalizeVendorCodeRows = (value = []) => {
   return rows.length > 0 ? rows : [{ ...emptyVendorCode }];
 };
 
+export const normalizeVendorCodeDraftRows = (value = []) => {
+  if (typeof value === "string") {
+    return [{ brand: "", code: normalizeText(value) }];
+  }
+
+  const rows = (Array.isArray(value) ? value : []).map((entry = {}) => {
+    if (typeof entry === "string") {
+      return { brand: "", code: normalizeText(entry) };
+    }
+
+    return {
+      brand: normalizeText(entry?.brand || entry?.brand_name || entry?.brandName),
+      code: normalizeText(entry?.code || entry?.vendor_code || entry?.vendorCode),
+    };
+  });
+
+  return rows.length > 0 ? rows : [{ ...emptyVendorCode }];
+};
+
 export const getCompleteVendorCodes = (value = []) =>
   normalizeVendorCodeRows(value)
     .map((entry) => ({

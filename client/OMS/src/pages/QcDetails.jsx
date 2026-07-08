@@ -1225,7 +1225,11 @@ const QcDetails = () => {
         : []
       ).flatMap((record) => {
         const previousOrderId = String(record?.order_id || "").trim() || "Previous PO";
-        const groupKey = `previous-qc-${String(record?.qc_id || previousOrderId)}`;
+        const previousOrderGroupKey =
+          previousOrderId === "Previous PO"
+            ? String(record?.qc_id || previousOrderId)
+            : previousOrderId;
+        const groupKey = `previous-po-${previousOrderGroupKey}`;
         const groupTitle = `Previous PO ${previousOrderId}`;
         const groupSubtitle = [
           record?.last_inspected_date

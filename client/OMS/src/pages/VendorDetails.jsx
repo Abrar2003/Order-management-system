@@ -14,7 +14,7 @@ import {
   hasDuplicateVendorCodeRows,
   hasIncompleteVendorCodeRows,
   normalizeBrandOptions,
-  normalizeVendorCodeRows,
+  normalizeVendorCodeDraftRows,
 } from "../utils/vendorCodes";
 import "../App.css";
 
@@ -232,7 +232,7 @@ const VendorDetails = () => {
       _id: vendor._id,
       name: vendor.name || "",
       owner_name: vendor.owner_name || "",
-      vendor_code: normalizeVendorCodeRows(vendor.vendor_code),
+      vendor_code: normalizeVendorCodeDraftRows(vendor.vendor_code),
       email: vendor.email || "",
       phone: vendor.phone || "",
       country: vendor.country || "",
@@ -259,7 +259,7 @@ const VendorDetails = () => {
 
   const handleEditVendorCodeChange = (index, field, value) => {
     setEditForm((prev) => {
-      const vendorCodes = normalizeVendorCodeRows(prev.vendor_code).map((entry) => ({ ...entry }));
+      const vendorCodes = normalizeVendorCodeDraftRows(prev.vendor_code).map((entry) => ({ ...entry }));
       vendorCodes[index] = {
         ...(vendorCodes[index] || emptyVendorCode),
         [field]: value,
@@ -271,13 +271,13 @@ const VendorDetails = () => {
   const addEditVendorCode = () => {
     setEditForm((prev) => ({
       ...prev,
-      vendor_code: [...normalizeVendorCodeRows(prev.vendor_code), { ...emptyVendorCode }],
+      vendor_code: [...normalizeVendorCodeDraftRows(prev.vendor_code), { ...emptyVendorCode }],
     }));
   };
 
   const removeEditVendorCode = (index) => {
     setEditForm((prev) => {
-      const vendorCodes = normalizeVendorCodeRows(prev.vendor_code).filter(
+      const vendorCodes = normalizeVendorCodeDraftRows(prev.vendor_code).filter(
         (_, vendorCodeIndex) => vendorCodeIndex !== index,
       );
       return {
@@ -593,7 +593,7 @@ const VendorDetails = () => {
           tabIndex="-1"
           style={{ backgroundColor: "rgba(0, 0, 0, 0.5)", zIndex: 1055 }}
         >
-          <div className="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+          <div className="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable vendor-edit-modal-dialog">
             <div className="modal-content shadow-lg border-0">
               <div className="modal-header bg-light">
                 <h5 className="modal-title fw-bold">Edit Vendor Details</h5>
@@ -605,8 +605,8 @@ const VendorDetails = () => {
                 />
               </div>
 
-              <form onSubmit={handleSaveEdit}>
-                <div className="modal-body p-4">
+              <form className="vendor-edit-modal-form" onSubmit={handleSaveEdit}>
+                <div className="modal-body vendor-edit-modal-body p-4">
                   {editError && <div className="alert alert-danger py-2">{editError}</div>}
 
                   <div className="row g-3">
@@ -654,7 +654,7 @@ const VendorDetails = () => {
                         </button>
                       </div>
 
-                      {normalizeVendorCodeRows(editForm.vendor_code).map((vendorCode, idx) => {
+                      {normalizeVendorCodeDraftRows(editForm.vendor_code).map((vendorCode, idx) => {
                         const availableBrandOptions = getAvailableBrandOptions(
                           brandOptions,
                           vendorCode.brand,
@@ -701,7 +701,7 @@ const VendorDetails = () => {
                                 type="button"
                                 className="btn btn-outline-danger btn-sm p-1 px-2"
                                 onClick={() => removeEditVendorCode(idx)}
-                                disabled={normalizeVendorCodeRows(editForm.vendor_code).length <= 1}
+                                disabled={normalizeVendorCodeDraftRows(editForm.vendor_code).length <= 1}
                               >
                                 Remove
                               </button>

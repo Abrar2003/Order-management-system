@@ -174,6 +174,22 @@ test("report includes month-based brand and vendor chart matrices", () => {
   );
   assert.equal(overallFebruary.unique_container_count, 2);
 
+  const vendorJanuary = report.overall.monthly_vendor_totals.rows.find(
+    (entry) => entry.month === "2026-01",
+  );
+  const vendorFebruary = report.overall.monthly_vendor_totals.rows.find(
+    (entry) => entry.month === "2026-02",
+  );
+  assert.deepEqual(report.overall.monthly_vendor_totals.vendors, ["Vendor A", "Vendor B"]);
+  assert.deepEqual(
+    vendorJanuary.totals.map((entry) => [entry.vendor, entry.unique_container_count]),
+    [["Vendor A", 1], ["Vendor B", 0]],
+  );
+  assert.deepEqual(
+    vendorFebruary.totals.map((entry) => [entry.vendor, entry.unique_container_count]),
+    [["Vendor A", 1], ["Vendor B", 1]],
+  );
+
   const brandATrend = report.by_brand.monthly_vendor_trends.find(
     (entry) => entry.brand === "Brand A",
   );

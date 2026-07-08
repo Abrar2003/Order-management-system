@@ -1789,6 +1789,14 @@ const findPreviousInspectedQcRecordsForItem = async ({
     qcDoc?.item?.item_code || qcDoc?.order?.item?.item_code || "",
   );
   const currentInspectionTime = toSortableTimestamp(qcDoc?.last_inspected_date);
+  const getOrderKey = (record = {}) =>
+    normalizeText(record?.order?._id) ||
+    normalizeKey(
+      record?.order_meta?.order_id ||
+        record?.order?.order_id ||
+        record?.order_id ||
+        "",
+    );
 
   if (!itemCode || currentInspectionTime <= 0) {
     return [];
@@ -1802,7 +1810,7 @@ const findPreviousInspectedQcRecordsForItem = async ({
     },
   })
     .select(
-      "_id order order_id order_meta item last_inspected_date qc_images hardware_inspection",
+      "_id order order_id order_meta item last_inspected_date qc_images hardware_inspection goods_not_ready_images rejected_image",
     )
     .populate({
       path: "order",
@@ -1832,15 +1840,30 @@ const findPreviousInspectedQcRecordsForItem = async ({
     return [];
   }
 
+  const previousOrderKeys = new Set(
+    eligibleRecords
+      .filter((record) => record.__lastInspectedTime === previousInspectionTime)
+      .map(getOrderKey)
+      .filter(Boolean),
+  );
+
+  if (previousOrderKeys.size === 0) {
+    return [];
+  }
+
   return eligibleRecords
-    .filter((record) => record.__lastInspectedTime === previousInspectionTime)
-    .sort((a, b) =>
-      normalizeText(a?.order_meta?.order_id || a?.order?.order_id || "").localeCompare(
+    .filter((record) => previousOrderKeys.has(getOrderKey(record)))
+    .sort((a, b) => {
+      const orderSort = normalizeText(
+        a?.order_meta?.order_id || a?.order?.order_id || "",
+      ).localeCompare(
         normalizeText(b?.order_meta?.order_id || b?.order?.order_id || ""),
         undefined,
         { numeric: true, sensitivity: "base" },
-      ),
-    );
+      );
+      if (orderSort !== 0) return orderSort;
+      return b.__lastInspectedTime - a.__lastInspectedTime;
+    });
 };
 
 const buildFinishImagePublicUrl = (finishEntry = {}) => {

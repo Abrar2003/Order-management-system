@@ -86,6 +86,7 @@ const emptyReport = {
   overall: {
     vendor_totals: [],
     monthly_brand_totals: { brands: [], rows: [] },
+    monthly_vendor_totals: { vendors: [], rows: [] },
   },
   by_brand: { brands: [], monthly_vendor_trends: [] },
   by_vendor: {
@@ -162,8 +163,8 @@ const getSeriesMeta = (row, seriesEntry = {}) => {
   ) || {};
 };
 
-const getTooltipSeriesMeta = (item) => {
-  const row = getBarPayload(item);
+const getTooltipSeriesMeta = (item, rowOverride = null) => {
+  const row = rowOverride || getBarPayload(item);
   const meta = row?.__meta || {};
   if (item?.dataKey && meta[item.dataKey]) return meta[item.dataKey];
   const seriesKey = normalizeKey(item?.name);
@@ -173,7 +174,30 @@ const getTooltipSeriesMeta = (item) => {
 };
 
 const getTooltipAxisValue = ({ row, label, xKey } = {}) =>
-  row?.[xKey] || label || "N/A";
+  label || row?.[xKey] || "N/A";
+
+const resolveGroupedTooltipRow = ({ item, rows = [], label, xKey } = {}) => {
+  const fallbackRow = getBarPayload(item);
+  const chartRows = Array.isArray(rows) ? rows : [];
+  const normalizedLabel = normalizeKey(label);
+
+  if (normalizedLabel) {
+    const rowByAxisLabel = chartRows.find(
+      (row) => normalizeKey(row?.[xKey]) === normalizedLabel,
+    );
+    if (rowByAxisLabel) return rowByAxisLabel;
+  }
+
+  const fallbackMonth = normalizeKey(fallbackRow?.month);
+  if (fallbackMonth) {
+    const rowByMonth = chartRows.find(
+      (row) => normalizeKey(row?.month) === fallbackMonth,
+    );
+    if (rowByMonth) return rowByMonth;
+  }
+
+  return fallbackRow;
+};
 
 const clampNumber = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -252,30 +276,39 @@ const TooltipBox = ({ title, rows }) => (
 const OverallMonthlyTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
   const row = payload[0]?.payload || {};
-  const brandRows = (Array.isArray(row.brand_totals) ? row.brand_totals : [])
+  const vendorRows = (Array.isArray(row.vendor_totals) ? row.vendor_totals : [])
     .filter((entry) => Number(entry?.unique_container_count || 0) > 0)
     .map((entry) => ({
-      label: entry.brand || "Brand",
+      label: entry.vendor || "Vendor",
       value: formatNumber(entry.unique_container_count),
     }));
+  const brandFallbackRows = vendorRows.length > 0
+    ? []
+    : (Array.isArray(row.brand_totals) ? row.brand_totals : [])
+      .filter((entry) => Number(entry?.unique_container_count || 0) > 0)
+      .map((entry) => ({
+        label: entry.brand || "Brand",
+        value: formatNumber(entry.unique_container_count),
+      }));
 
   return (
     <TooltipBox
       title={row.month_label || "Month"}
       rows={[
         { label: "Total Containers", value: formatNumber(row.containers) },
-        ...brandRows,
+        ...vendorRows,
+        ...brandFallbackRows,
         { label: "Allocated CBM", value: formatCbm(row.cbm) },
       ]}
     />
   );
 };
 
-const GroupedTooltip = ({ active, payload, label, periodLabel, xLabel, xKey }) => {
+const GroupedTooltip = ({ active, payload, label, periodLabel, xLabel, xKey, rows }) => {
   if (!active || !payload?.length) return null;
   const item = payload.find((entry) => Number(entry?.value || 0) > 0) || payload[0];
-  const row = getBarPayload(item);
-  const meta = getTooltipSeriesMeta(item);
+  const row = resolveGroupedTooltipRow({ item, rows, label, xKey });
+  const meta = getTooltipSeriesMeta(item, row);
   const seriesLabel =
     meta.brand || meta.vendor || meta.label || String(item?.name || item?.dataKey || "");
   const axisValue = getTooltipAxisValue({ row, label, xKey });
@@ -329,13 +362,18 @@ const toMonthlyRows = ({ rows = [], series = [], seriesField = "brand" } = {}) =
     return chartRow;
   });
 
-const toOverallMonthlyRows = (rows = []) =>
+const toOverallMonthlyRows = (rows = [], totalsField = "vendor") =>
   (Array.isArray(rows) ? rows : []).map((entry) => ({
     month: entry?.month || "",
     month_label: entry?.month_label || entry?.month || "N/A",
     containers: Number(entry?.unique_container_count || 0),
     cbm: Number(entry?.total_allocated_cbm || 0),
-    brand_totals: Array.isArray(entry?.totals) ? entry.totals : [],
+    brand_totals: totalsField === "brand" && Array.isArray(entry?.totals)
+      ? entry.totals
+      : [],
+    vendor_totals: totalsField === "vendor" && Array.isArray(entry?.totals)
+      ? entry.totals
+      : [],
   }));
 
 const DetailModal = ({ detail, onClose, onOpenContainer }) => {
@@ -648,10 +686,18 @@ const MonthlyShipmentsReport = () => {
   const options = report?.filters?.options || emptyReport.filters.options;
   const periodLabel = report?.period?.label || "N/A";
   const activeSummary = report?.summary || emptyReport.summary;
-  const overallMonthly = report?.overall?.monthly_brand_totals || emptyReport.overall.monthly_brand_totals;
+  const vendorMonthly = report?.overall?.monthly_vendor_totals || emptyReport.overall.monthly_vendor_totals;
+  const brandMonthly = report?.overall?.monthly_brand_totals || emptyReport.overall.monthly_brand_totals;
+  const hasVendorMonthlyRows =
+    Array.isArray(vendorMonthly?.rows) && vendorMonthly.rows.length > 0;
+  const overallMonthly = hasVendorMonthlyRows ? vendorMonthly : brandMonthly;
+  const overallMonthlyTotalsField = hasVendorMonthlyRows ? "vendor" : "brand";
   const overallRows = useMemo(
-    () => toOverallMonthlyRows(overallMonthly?.rows || []),
-    [overallMonthly?.rows],
+    () => toOverallMonthlyRows(
+      overallMonthly?.rows || [],
+      overallMonthlyTotalsField,
+    ),
+    [overallMonthly?.rows, overallMonthlyTotalsField],
   );
   const brandSections = useMemo(
     () => report?.by_brand?.monthly_vendor_trends || [],
@@ -1095,7 +1141,14 @@ const MonthlyShipmentsReport = () => {
                     <YAxis allowDecimals={false} />
                     <Tooltip
                       shared={false}
-                      content={<GroupedTooltip periodLabel={periodLabel} xLabel="Month" xKey="month_label" />}
+                      content={(
+                        <GroupedTooltip
+                          periodLabel={periodLabel}
+                          xLabel="Month"
+                          xKey="month_label"
+                          rows={rows}
+                        />
+                      )}
                       cursor={{ fill: "rgba(71, 85, 105, 0.08)" }}
                     />
                     <Legend />
@@ -1187,7 +1240,14 @@ const MonthlyShipmentsReport = () => {
                 <YAxis allowDecimals={false} />
                 <Tooltip
                   shared={false}
-                  content={<GroupedTooltip periodLabel={periodLabel} xLabel="Month" xKey="month_label" />}
+                  content={(
+                    <GroupedTooltip
+                      periodLabel={periodLabel}
+                      xLabel="Month"
+                      xKey="month_label"
+                      rows={monthlyRows}
+                    />
+                  )}
                   cursor={{ fill: "rgba(71, 85, 105, 0.08)" }}
                 />
                 <Legend />

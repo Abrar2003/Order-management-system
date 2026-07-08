@@ -4305,6 +4305,44 @@ small,
   letter-spacing: 0.01em;
 }
 
+.vendor-edit-modal-dialog {
+  width: min(760px, calc(100vw - 1.5rem));
+  max-width: min(760px, calc(100vw - 1.5rem));
+  margin: 0.75rem auto;
+}
+
+.vendor-edit-modal-dialog .modal-content {
+  max-height: min(calc(100dvh - 1.5rem), calc(var(--visual-viewport-height, 100dvh) - 1.5rem));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.vendor-edit-modal-dialog .modal-header,
+.vendor-edit-modal-dialog .modal-footer {
+  flex: 0 0 auto;
+}
+
+.vendor-edit-modal-form {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.vendor-edit-modal-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.vendor-edit-modal-body .row,
+.vendor-edit-modal-body [class*="col-"] {
+  min-width: 0;
+}
+
 .list-group-item {
   border-color: rgba(203, 189, 170, 0.4);
 }
