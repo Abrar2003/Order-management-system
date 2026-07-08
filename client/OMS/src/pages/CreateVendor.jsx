@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { usePermissions } from "../auth/PermissionContext";
+import { getCountryOptions } from "../constants/countries";
 import {
   emptyVendorCode,
   formatVendorCodes,
@@ -32,6 +33,7 @@ const CONTACT_PERSON_TYPE_OPTIONS = [
   { value: "merchant", label: "Merchant" },
   { value: "shipment", label: "Shipment" },
 ];
+const VENDOR_COUNTRY_OPTIONS = getCountryOptions();
 
 const emptyContactPerson = { name: "", email: "", phone: "", type: "merchant" };
 const normalizeContactPersonType = (value) => {
@@ -334,13 +336,19 @@ const CreateVendor = () => {
 
               <div className="col-md-6">
                 <label className="form-label">Country</label>
-                <input
+                <select
                   name="country"
                   value={form.country}
                   onChange={handleChange}
-                  className="form-control"
-                  placeholder="e.g. India, China, Vietnam"
-                />
+                  className="form-select"
+                >
+                  <option value="">Select country</option>
+                  {VENDOR_COUNTRY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="col-12">

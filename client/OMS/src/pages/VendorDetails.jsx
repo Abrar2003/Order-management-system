@@ -5,6 +5,7 @@ import { isStrictAdminRole } from "../auth/permissions";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { usePermissions } from "../auth/PermissionContext";
+import { getCountryOptions } from "../constants/countries";
 import {
   emptyVendorCode,
   formatVendorCodes,
@@ -192,6 +193,10 @@ const VendorDetails = () => {
       vendors: groups[key],
     }));
   }, [filteredVendors]);
+  const editCountryOptions = useMemo(
+    () => getCountryOptions(editForm?.country),
+    [editForm?.country],
+  );
 
   const handleExportXls = async () => {
     try {
@@ -723,13 +728,19 @@ const VendorDetails = () => {
 
                     <div className="col-md-6">
                       <label className="form-label fw-semibold">Country</label>
-                      <input
+                      <select
                         name="country"
-                        className="form-control"
-                        placeholder="e.g. India, China, Vietnam"
+                        className="form-select"
                         value={editForm.country}
                         onChange={handleEditChange}
-                      />
+                      >
+                        <option value="">Select country</option>
+                        {editCountryOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
                     <div className="col-md-6 d-flex align-items-end">
