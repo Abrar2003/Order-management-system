@@ -38,6 +38,17 @@ const vendorSchema = new mongoose.Schema({
       type: { type: String, enum: ["merchant", "shipment"] },
     },
   ],
+  brands: [
+    {
+      brand_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "brands",
+      },
+      brand_name: {
+        type: String,
+      },
+    },
+  ],
   is_active: {
     type: Boolean,
     default: true,
