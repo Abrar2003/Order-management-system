@@ -241,6 +241,8 @@ const formatClaimPercentage = (value) => {
   return parsed.toFixed(2).replace(/\.?0+$/, "");
 };
 
+const QC_IMAGE_PICKER_ACCEPT = "image/*";
+
 const RELATED_FILE_OPTIONS = Object.freeze([
   ...ITEM_FILE_OPTIONS.map((option) => ({
     ...option,
@@ -252,7 +254,9 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     buttonLabel: "QC images",
     scope: "qc",
     previewMode: "image",
-    accept: [...SUPPORTED_QC_IMAGE_EXTENSIONS, ...SUPPORTED_QC_IMAGE_MIME_TYPES].join(","),
+    // Android's photo picker can hide gallery folders when given a long exact
+    // extension/MIME accept list. Use a broad picker hint and validate below.
+    accept: QC_IMAGE_PICKER_ACCEPT,
     extensions: SUPPORTED_QC_IMAGE_EXTENSIONS,
     mimeTypes: SUPPORTED_QC_IMAGE_MIME_TYPES,
     invalidMessage:
@@ -265,7 +269,7 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     buttonLabel: "hardware inspection images",
     scope: "qc",
     previewMode: "image",
-    accept: [...SUPPORTED_QC_IMAGE_EXTENSIONS, ...SUPPORTED_QC_IMAGE_MIME_TYPES].join(","),
+    accept: QC_IMAGE_PICKER_ACCEPT,
     extensions: SUPPORTED_QC_IMAGE_EXTENSIONS,
     mimeTypes: SUPPORTED_QC_IMAGE_MIME_TYPES,
     invalidMessage:
