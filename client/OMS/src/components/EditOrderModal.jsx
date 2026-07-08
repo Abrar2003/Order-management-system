@@ -15,6 +15,7 @@ import {
   SHIPPED_BY_VENDOR_OPTION,
   useShippingInspectors,
 } from "../hooks/useShippingInspectors";
+import { normalizeTextOptions } from "../utils/optionText";
 import { normalizeShipmentCheckedDraft } from "../utils/shipmentRows";
 import "../App.css";
 
@@ -22,15 +23,6 @@ const normalizeShipmentDraftInvoiceNumber = (value) => {
   const normalized = String(value ?? "").trim();
   return normalized && normalized !== "N/A" ? normalized : "";
 };
-
-const normalizeUniqueOptions = (values = []) =>
-  [
-    ...new Set(
-      (Array.isArray(values) ? values : [])
-        .map((value) => String(value || "").trim())
-        .filter(Boolean),
-    ),
-  ].sort((left, right) => left.localeCompare(right));
 
 const normalizeStuffedById = (entry = {}) => {
   const id = String(entry?.stuffed_by?.id ?? "").trim();
@@ -139,7 +131,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
         setBrandOptionsLoading(true);
         const response = await api.get("/orders/brands-and-vendors");
         if (cancelled) return;
-        setBrandOptions(normalizeUniqueOptions(response?.data?.brands));
+        setBrandOptions(normalizeTextOptions(response?.data?.brands));
       } catch (fetchError) {
         if (cancelled) return;
         setBrandOptions([]);
@@ -200,7 +192,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     );
   }, [form.shipment, inspectors]);
   const availableBrandOptions = useMemo(
-    () => normalizeUniqueOptions([...brandOptions, form.brand]),
+    () => normalizeTextOptions([...brandOptions, form.brand]),
     [brandOptions, form.brand],
   );
 

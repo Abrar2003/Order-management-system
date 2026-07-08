@@ -1,16 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
-
-const normalizeText = (value) => String(value ?? "").trim();
-
-const normalizeTextOptions = (values = []) =>
-  [
-    ...new Set(
-      (Array.isArray(values) ? values : [])
-        .map(normalizeText)
-        .filter(Boolean),
-    ),
-  ].sort((left, right) => left.localeCompare(right));
+import { normalizeTextOptions } from "../utils/optionText";
 
 export const useBrandOptions = (extraOptions = []) => {
   const [brands, setBrands] = useState([]);

@@ -22,6 +22,7 @@ import {
   uploadComplaintFiles,
 } from "../services/complaints.service";
 import api from "../api/axios";
+import { normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const DEFAULT_FILTERS = {
@@ -39,15 +40,6 @@ const truncate = (value = "", limit = 90) => {
   if (text.length <= limit) return text || "N/A";
   return `${text.slice(0, limit - 1)}...`;
 };
-const normalizeTextOptions = (values = []) =>
-  [
-    ...new Set(
-      (Array.isArray(values) ? values : [])
-        .map((value) => String(value || "").trim())
-        .filter(Boolean),
-    ),
-  ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
-
 const Complaints = () => {
   const { hasPermission, role } = usePermissions();
   const canRead = hasPermission("complaints", "view") && isManagerLikeRole(role);

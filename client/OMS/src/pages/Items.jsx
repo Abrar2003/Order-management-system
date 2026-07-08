@@ -27,6 +27,7 @@ import {
 } from "../utils/clientSort";
 import { formatCbm } from "../utils/cbm";
 import { formatFixedNumber } from "../utils/measurementDisplay";
+import { normalizeTextOptions } from "../utils/optionText";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -227,15 +228,6 @@ const getVendorNames = (item = {}) =>
   Array.isArray(item?.vendors) && item.vendors.length > 0
     ? item.vendors.filter(Boolean).join(", ")
     : "N/A";
-
-const normalizeTextOptions = (values = []) =>
-  [
-    ...new Set(
-      (Array.isArray(values) ? values : [])
-        .map((value) => String(value || "").trim())
-        .filter(Boolean),
-    ),
-  ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
 
 const getPrimaryBrand = (item = {}) =>
   String(

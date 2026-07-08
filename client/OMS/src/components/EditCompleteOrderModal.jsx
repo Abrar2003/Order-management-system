@@ -3,6 +3,7 @@ import api from "../api/axios";
 import { editCompleteOrder } from "../services/orders.service";
 import OrderEtdWithHistory from "./OrderEtdWithHistory";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
+import { normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const createInitialForm = (order) => ({
@@ -12,10 +13,6 @@ const createInitialForm = (order) => ({
   order_date: toISODateString(order?.order_date) || "",
   ETD: toISODateString(order?.ETD) || "",
 });
-
-const normalizeUniqueOptions = (values = []) =>
-  [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right));
 
 const EditCompleteOrderModal = ({
   order,
@@ -42,8 +39,8 @@ const EditCompleteOrderModal = ({
         if (cancelled) return;
 
         setOptions({
-          brands: normalizeUniqueOptions(response?.data?.brands),
-          vendors: normalizeUniqueOptions(response?.data?.vendors),
+          brands: normalizeTextOptions(response?.data?.brands),
+          vendors: normalizeTextOptions(response?.data?.vendors),
         });
       } catch (fetchError) {
         if (cancelled) return;
@@ -59,11 +56,11 @@ const EditCompleteOrderModal = ({
   }, []);
 
   const brandOptions = useMemo(
-    () => normalizeUniqueOptions([...options.brands, form.brand]),
+    () => normalizeTextOptions([...options.brands, form.brand]),
     [form.brand, options.brands],
   );
   const vendorOptions = useMemo(
-    () => normalizeUniqueOptions([...options.vendors, form.vendor]),
+    () => normalizeTextOptions([...options.vendors, form.vendor]),
     [form.vendor, options.vendors],
   );
 
