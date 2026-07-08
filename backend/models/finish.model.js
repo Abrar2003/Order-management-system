@@ -1,4 +1,9 @@
 const mongoose = require("mongoose");
+const {
+  coerceVendorValueForSchema,
+  embeddedVendorSchema,
+  resolveDocumentVendorFields,
+} = require("../helpers/vendorRef");
 
 const finishImageSchema = new mongoose.Schema(
   {
@@ -17,7 +22,11 @@ const finishSchema = new mongoose.Schema(
     color: { type: String, required: true, trim: true },
     color_code: { type: String, required: true, trim: true, uppercase: true },
     image: { type: finishImageSchema, default: () => ({}) },
-    vendor: { type: String, required: true, trim: true },
+    vendor: {
+      type: embeddedVendorSchema,
+      required: true,
+      set: coerceVendorValueForSchema,
+    },
     vendor_code: { type: String, required: true, trim: true, uppercase: true },
     item_codes: {
       type: [{ type: String, required: true, trim: true }],
@@ -34,5 +43,9 @@ const finishSchema = new mongoose.Schema(
   }, 
   { timestamps: true },
 );
+
+finishSchema.pre("validate", async function resolveVendorReferences() {
+  await resolveDocumentVendorFields(this, { single: ["vendor"] });
+});
 
 module.exports = mongoose.model("finish", finishSchema);

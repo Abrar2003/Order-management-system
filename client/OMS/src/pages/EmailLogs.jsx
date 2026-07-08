@@ -36,6 +36,10 @@ const normalizeFilterParam = (value, fallback = "all") => {
 };
 
 const normalizeSearchParam = (value) => String(value || "").trim();
+const getVendorDisplayName = (vendor) =>
+  typeof vendor === "string"
+    ? vendor.trim()
+    : String(vendor?.name || vendor?.vendor_name || vendor?.vendorName || "").trim();
 
 const EmailLogs = () => {
   const navigate = useNavigate();
@@ -276,7 +280,7 @@ const EmailLogs = () => {
           }
           if (column === "orderId") return log?.order_id?.order_id;
           if (column === "brand") return log?.brand?.name;
-          if (column === "vendor") return log?.vendor?.name;
+          if (column === "vendor") return getVendorDisplayName(log?.vendor);
           if (column === "logMatter") return log?.log;
           if (column === "createdBy") return log?.created_by?.name;
           return "";
@@ -515,7 +519,7 @@ const EmailLogs = () => {
                         <td>{formatDateDDMMYYYY(log.creation_date) || "-"}</td>
                         <td>{log.order_id?.order_id || "-"}</td>
                         <td>{log.brand?.name || "-"}</td>
-                        <td>{log.vendor?.name || "-"}</td>
+                        <td>{getVendorDisplayName(log.vendor) || "-"}</td>
                         <td>
                           <div className="text-truncate" title={log.log}>
                             {log.log || "-"}

@@ -1,5 +1,10 @@
 const mongoose = require("mongoose");
 const {
+  coerceVendorArrayForSchema,
+  embeddedVendorSchema,
+  resolveDocumentVendorFields,
+} = require("../helpers/vendorRef");
+const {
   BOX_PACKAGING_MODES,
   BOX_ENTRY_TYPES,
   BOX_SIZE_REMARK_OPTIONS,
@@ -124,7 +129,11 @@ const sampleSchema = new mongoose.Schema(
     name: { type: String, default: "", trim: true },
     description: { type: String, default: "", trim: true },
     brand: { type: String, default: "", trim: true },
-    vendor: { type: [String], default: [] },
+    vendor: {
+      type: [embeddedVendorSchema],
+      default: [],
+      set: coerceVendorArrayForSchema,
+    },
     item_sizes: {
       type: [itemSizeEntrySchema],
       default: [],
@@ -206,6 +215,10 @@ sampleSchema.index(
   { "shipment.container": 1, brand: 1, updatedAt: -1, code: 1 },
   { name: "samples_shipment_container_brand_idx" },
 );
+
+sampleSchema.pre("validate", async function resolveVendorReferences() {
+  await resolveDocumentVendorFields(this, { array: ["vendor"] });
+});
 
 sampleSchema.pre("validate", function backfillLegacyShipmentInvoices() {
   if (!Array.isArray(this.shipment)) return;

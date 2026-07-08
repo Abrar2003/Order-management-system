@@ -1,4 +1,12 @@
 const mongoose = require("mongoose");
+const {
+  coerceVendorArrayForSchema,
+  coerceVendorValueForSchema,
+  embeddedVendorSchema,
+  isEmbeddedVendor,
+  resolveVendorFromInput,
+  resolveDocumentVendorFields,
+} = require("../helpers/vendorRef");
 
 const UploadedOrderSummarySchema = new mongoose.Schema(
   {
@@ -12,7 +20,11 @@ const UploadedOrderSummarySchema = new mongoose.Schema(
 const VendorUploadSummarySchema = new mongoose.Schema(
   {
     brand: { type: String, required: true, trim: true },
-    vendor: { type: String, required: true, trim: true },
+    vendor: {
+      type: embeddedVendorSchema,
+      required: true,
+      set: coerceVendorValueForSchema,
+    },
     uploaded_order_ids: { type: [String], default: [] },
     uploaded_orders_count: { type: Number, default: 0, min: 0 },
     uploaded_items_count: { type: Number, default: 0, min: 0 },
@@ -41,7 +53,11 @@ const UploadConflictSchema = new mongoose.Schema(
       enum: ["OPEN_ORDER_MISSING_IN_UPLOAD"],
     },
     brand: { type: String, required: true, trim: true },
-    vendor: { type: String, required: true, trim: true },
+    vendor: {
+      type: embeddedVendorSchema,
+      required: true,
+      set: coerceVendorValueForSchema,
+    },
     order_id: { type: String, required: true, trim: true },
     message: { type: String, required: true, trim: true },
   },
@@ -72,7 +88,11 @@ const UploadLogSchema = new mongoose.Schema(
     duplicate_entries: { type: [DuplicateEntrySchema], default: [] },
 
     uploaded_brands: { type: [String], default: [] },
-    uploaded_vendors: { type: [String], default: [] },
+    uploaded_vendors: {
+      type: [embeddedVendorSchema],
+      default: [],
+      set: coerceVendorArrayForSchema,
+    },
     total_distinct_orders_uploaded: { type: Number, default: 0, min: 0 },
 
     vendor_summaries: { type: [VendorUploadSummarySchema], default: [] },
@@ -92,9 +112,27 @@ const UploadLogSchema = new mongoose.Schema(
 UploadLogSchema.index({ createdAt: -1 });
 UploadLogSchema.index({ uploaded_by: 1, createdAt: -1 });
 UploadLogSchema.index({ uploaded_brands: 1, createdAt: -1 });
-UploadLogSchema.index({ uploaded_vendors: 1, createdAt: -1 });
+UploadLogSchema.index({ "uploaded_vendors.vendor_id": 1, createdAt: -1 });
 UploadLogSchema.index({ "vendor_summaries.brand": 1, createdAt: -1 });
-UploadLogSchema.index({ "vendor_summaries.vendor": 1, createdAt: -1 });
-UploadLogSchema.index({ "conflicts.brand": 1, "conflicts.vendor": 1, "conflicts.order_id": 1 });
+UploadLogSchema.index({ "vendor_summaries.vendor.vendor_id": 1, createdAt: -1 });
+UploadLogSchema.index({ "conflicts.brand": 1, "conflicts.vendor.vendor_id": 1, "conflicts.order_id": 1 });
+
+UploadLogSchema.pre("validate", async function resolveVendorReferences() {
+  await resolveDocumentVendorFields(this, { array: ["uploaded_vendors"] });
+
+  if (Array.isArray(this.vendor_summaries)) {
+    for (const summary of this.vendor_summaries) {
+      if (!summary?.vendor || isEmbeddedVendor(summary.vendor)) continue;
+      summary.vendor = await resolveVendorFromInput(summary.vendor);
+    }
+  }
+
+  if (Array.isArray(this.conflicts)) {
+    for (const conflict of this.conflicts) {
+      if (!conflict?.vendor || isEmbeddedVendor(conflict.vendor)) continue;
+      conflict.vendor = await resolveVendorFromInput(conflict.vendor);
+    }
+  }
+});
 
 module.exports = mongoose.model("upload_logs", UploadLogSchema);

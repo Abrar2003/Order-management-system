@@ -1,5 +1,11 @@
 const mongoose = require("mongoose");
 const { formDraftSchema } = require("../helpers/formDrafts");
+const {
+  coerceVendorValueForSchema,
+  embeddedVendorSchema,
+  resolveVendorFromInput,
+  isEmbeddedVendor,
+} = require("../helpers/vendorRef");
 
 const AuditActorSchema = new mongoose.Schema(
   {
@@ -23,7 +29,11 @@ const qcSchema = new mongoose.Schema(
     },
     order_meta: {
       order_id: { type: String, required: true },
-      vendor: { type: String, required: true },
+      vendor: {
+        type: embeddedVendorSchema,
+        required: true,
+        set: coerceVendorValueForSchema,
+      },
       brand: { type: String, required: true },
     },
     request_date: {
@@ -449,7 +459,7 @@ const qcSchema = new mongoose.Schema(
 qcSchema.index({ inspector: 1, request_date: -1 });
 
 // 2) Vendor + date (common for ops views)
-qcSchema.index({ "order_meta.vendor": 1, request_date: -1 });
+qcSchema.index({ "order_meta.vendor.vendor_id": 1, request_date: -1 });
 
 // 3) Brand + date
 qcSchema.index({ "order_meta.brand": 1, request_date: -1 });
@@ -459,7 +469,7 @@ qcSchema.index({ "item.item_code": 1, request_date: -1 });
 
 // 5) If you often filter by vendor+brand together:
 qcSchema.index({
-  "order_meta.vendor": 1,
+  "order_meta.vendor.vendor_id": 1,
   "order_meta.brand": 1,
   request_date: -1,
 });
@@ -470,10 +480,16 @@ qcSchema.index({ "checked.checked_status": 1, request_date: -1 });
 
 qcSchema.index({ "order_meta.order_id": 1, request_date: -1 });
 qcSchema.index({
-  "order_meta.vendor": 1,
+  "order_meta.vendor.vendor_id": 1,
   "order_meta.order_id": 1,
   request_date: -1,
 }); // optional if you often filter both
+
+qcSchema.pre("validate", async function resolveVendorReferences() {
+  if (this.order_meta?.vendor && !isEmbeddedVendor(this.order_meta.vendor)) {
+    this.order_meta.vendor = await resolveVendorFromInput(this.order_meta.vendor);
+  }
+});
 
 qcSchema.pre("validate", function syncPrimaryBarcode() {
   const masterBarcode = Number(this.master_barcode || 0);

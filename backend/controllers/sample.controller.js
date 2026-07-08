@@ -13,6 +13,12 @@ const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const { calculateTotalPoCbm } = require("../services/orderCbm.service");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const wasabiStorage = require("../services/wasabiStorage.service");
+const {
+  buildVendorsArrayFilter,
+  getVendorId,
+  getVendorName,
+  normalizeVendorDisplayList,
+} = require("../helpers/vendorRef");
 
 const SHIPPED_BY_VENDOR_ID = "shipped_by_vendor";
 const SHIPPED_BY_VENDOR_NAME = "Shipped By Vendor";
@@ -149,14 +155,51 @@ const validateRemarkOption = (remark = "", options = [], fieldLabel = "Remark") 
   }
 };
 
-const normalizeVendorList = (value) => {
-  if (Array.isArray(value)) {
-    return [...new Set(value.map((entry) => normalizeText(entry)).filter(Boolean))];
-  }
-  const normalized = normalizeText(value);
-  if (!normalized) return [];
-  return [...new Set(normalized.split(",").map((entry) => normalizeText(entry)).filter(Boolean))];
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const splitVendorString = (value) =>
+  normalizeText(value)
+    .split(",")
+    .map((entry) => normalizeText(entry))
+    .filter(Boolean);
+
+const normalizeVendorList = (value, options = {}) => {
+  const vendorIds = Array.isArray(options.vendorIds)
+    ? options.vendorIds
+    : options.vendorId
+      ? [options.vendorId]
+      : null;
+  const rawValues = vendorIds ||
+    (Array.isArray(value)
+      ? value
+      : isPlainObject(value)
+        ? [value]
+        : splitVendorString(value));
+  const seen = new Set();
+
+  return rawValues
+    .flatMap((entry) => {
+      if (Array.isArray(entry)) return entry;
+      if (isPlainObject(entry)) return [entry];
+      return splitVendorString(entry);
+    })
+    .map((entry) => {
+      const vendorId = getVendorId(entry);
+      const vendorName = getVendorName(entry);
+      const key = normalizeLower(vendorId || vendorName || entry);
+      if (!key || seen.has(key)) return null;
+      seen.add(key);
+      return entry;
+    })
+    .filter(Boolean);
 };
+
+const getVendorPayloadList = (payload = {}) =>
+  normalizeVendorList(payload.vendor ?? payload.vendors, {
+    vendorId: payload.vendor_id ?? payload.vendorId,
+    vendorIds: payload.vendor_ids ?? payload.vendorIds,
+  });
 
 const normalizeShipmentInvoiceNumber = (value, fallback = "") => {
   const normalized = normalizeText(value);
@@ -400,9 +443,9 @@ const serializeSample = (sample = {}) => {
   return {
     ...plain,
     _id: String(plain?._id || ""),
-    vendors: normalizeDistinctValues(plain?.vendor),
+    vendors: normalizeVendorDisplayList(plain?.vendor),
     vendor_summary: {
-      vendors: normalizeDistinctValues(plain?.vendor),
+      vendors: normalizeVendorDisplayList(plain?.vendor),
     },
   };
 };
@@ -417,7 +460,7 @@ const buildSampleMatch = (query = {}) => {
 
   if (brand) match.brand = { $regex: `^${escapeRegex(brand)}$`, $options: "i" };
   if (vendor) {
-    match.vendor = { $elemMatch: { $regex: escapeRegex(vendor), $options: "i" } };
+    Object.assign(match, buildVendorsArrayFilter({ field: "vendor", vendorId: vendor, vendorName: vendor }));
   }
   if (dateFrom || dateTo) {
     match.updatedAt = {};
@@ -431,7 +474,8 @@ const buildSampleMatch = (query = {}) => {
       { name: { $regex: escaped, $options: "i" } },
       { description: { $regex: escaped, $options: "i" } },
       { brand: { $regex: escaped, $options: "i" } },
-      { vendor: { $elemMatch: { $regex: escaped, $options: "i" } } },
+      { "vendor.name": { $regex: escaped, $options: "i" } },
+      buildVendorsArrayFilter({ field: "vendor", vendorName: search }),
     ];
     if (match.$or) {
       match.$and = [{ $or: match.$or }, { $or: searchOr }];
@@ -458,7 +502,7 @@ const flattenSampleShipmentRows = (samples = []) =>
         sample_name: sample?.name || "",
         description: sample?.description || "",
         brand: sample?.brand || "",
-        vendor: normalizeDistinctValues(sample?.vendor).join(", "),
+        vendor: normalizeVendorDisplayList(sample?.vendor).join(", "),
         order_quantity: quantity,
         quantity,
         pending: Math.max(0, toSafeNumber(entry?.pending, 0)),
@@ -622,7 +666,7 @@ exports.getSamples = async (req, res) => {
       },
       filters: {
         brands: normalizeDistinctValues(brandsRaw),
-        vendors: normalizeDistinctValues(vendorsRaw),
+        vendors: normalizeVendorDisplayList(vendorsRaw),
       },
     });
   } catch (error) {
@@ -667,7 +711,7 @@ exports.createSample = async (req, res) => {
       name: normalizeText(payload.name),
       description: normalizeText(payload.description),
       brand: normalizeText(payload.brand),
-      vendor: normalizeVendorList(payload.vendor),
+      vendor: getVendorPayloadList(payload),
       item_sizes: normalizeItemSizeEntries(parseJsonBodyField(payload.item_sizes, "item_sizes")),
       box_sizes: normalizeBoxSizeEntries(parseJsonBodyField(payload.box_sizes, "box_sizes"), boxMode),
       box_mode: boxMode,
@@ -723,7 +767,16 @@ exports.updateSample = async (req, res) => {
     sample.name = normalizeText(payload.name ?? sample.name);
     sample.description = normalizeText(payload.description ?? sample.description);
     sample.brand = normalizeText(payload.brand ?? sample.brand);
-    if (payload.vendor !== undefined) sample.vendor = normalizeVendorList(payload.vendor);
+    if (
+      payload.vendor !== undefined ||
+      payload.vendors !== undefined ||
+      payload.vendor_id !== undefined ||
+      payload.vendorId !== undefined ||
+      payload.vendor_ids !== undefined ||
+      payload.vendorIds !== undefined
+    ) {
+      sample.vendor = getVendorPayloadList(payload);
+    }
     if (payload.item_sizes !== undefined) {
       sample.item_sizes = normalizeItemSizeEntries(parseJsonBodyField(payload.item_sizes, "item_sizes"));
     }
@@ -818,7 +871,7 @@ exports.getShippedSamples = async (req, res) => {
       },
       filters: {
         brands: normalizeDistinctValues(samples.map((sample) => sample?.brand)),
-        vendors: normalizeDistinctValues(samples.map((sample) => sample?.vendor)),
+        vendors: normalizeVendorDisplayList(samples.flatMap((sample) => sample?.vendor || [])),
         containers: normalizeDistinctValues(rows.map((row) => row?.container)),
         sample_codes: normalizeDistinctValues(samples.map((sample) => sample?.code)),
       },

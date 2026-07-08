@@ -8,6 +8,11 @@ const {
   applyBrandDocumentAccessMatch,
   applyDataAccessMatch,
 } = require("../services/userDataAccess.service");
+const {
+  buildVendorFilter,
+  getVendorId,
+  getVendorName,
+} = require("../helpers/vendorRef");
 
 const DEFAULT_PAGE_LIMIT = 30;
 const PAGE_LIMIT_OPTIONS = [7, 30, 50, 90];
@@ -15,7 +20,7 @@ const PAGE_LIMIT_OPTIONS = [7, 30, 50, 90];
 const hasOwn = (value, key) =>
   Object.prototype.hasOwnProperty.call(value || {}, key);
 
-const normalizeText = (value = "") => String(value ?? "").trim();
+const normalizeText = (value = "") => getVendorName(value) || String(value ?? "").trim();
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsedValue = Number.parseInt(value, 10);
@@ -68,13 +73,13 @@ const normalizeOptionList = (values = []) =>
   [...new Set(
     (Array.isArray(values) ? values : [])
       .filter((value) => value !== undefined && value !== null)
-      .map((value) => String(value).trim())
+      .map((value) => normalizeText(value))
       .filter(Boolean),
   )].sort((left, right) => left.localeCompare(right));
 
 const normalizeVendorInput = (value) => {
   if (value && typeof value === "object" && !Array.isArray(value)) {
-    return normalizeText(value.name ?? value.value ?? "");
+    return normalizeText(value.name ?? value.label ?? value.value ?? "");
   }
 
   return normalizeText(value);
@@ -139,16 +144,18 @@ const findBrandDoc = async (brandPayload, user = null) => {
 const resolveEmailLogInput = async (payload = {}, currentLog = null, user = null) => {
   const hasOrderIdInput = hasOwn(payload, "order_id") || hasOwn(payload, "orderId");
   const hasBrandInput = hasOwn(payload, "brand") || hasOwn(payload, "brand_id") || hasOwn(payload, "brandId");
-  const hasVendorInput = hasOwn(payload, "vendor") || hasOwn(payload, "vendor_name") || hasOwn(payload, "vendorName");
+  const hasVendorInput = hasOwn(payload, "vendor") || hasOwn(payload, "vendor_name") || hasOwn(payload, "vendorName") || hasOwn(payload, "vendor_id") || hasOwn(payload, "vendorId");
   const hasLogInput = hasOwn(payload, "log") || hasOwn(payload, "log_matter") || hasOwn(payload, "logMatter");
   const hasCreationDateInput = hasOwn(payload, "creation_date") || hasOwn(payload, "creationDate");
 
   const orderId = hasOrderIdInput
     ? normalizeText(pickFirstOwn(payload, ["order_id", "orderId"]))
     : normalizeText(currentLog?.order_id);
-  const vendorName = hasVendorInput
-    ? normalizeVendorInput(pickFirstOwn(payload, ["vendor", "vendor_name", "vendorName"]))
-    : normalizeVendorInput(currentLog?.vendor?.name);
+  const rawVendorPayload = hasVendorInput
+    ? pickFirstOwn(payload, ["vendor", "vendor_name", "vendorName", "vendor_id", "vendorId"])
+    : currentLog?.vendor;
+  const vendorName = normalizeVendorInput(rawVendorPayload);
+  const vendorId = getVendorId(rawVendorPayload);
   const logText = hasLogInput
     ? normalizeText(pickFirstOwn(payload, ["log", "log_matter", "logMatter"]))
     : normalizeText(currentLog?.log);
@@ -171,7 +178,7 @@ const resolveEmailLogInput = async (payload = {}, currentLog = null, user = null
     return { error: "A valid brand is required" };
   }
 
-  if (!vendorName) {
+  if (!vendorName && !vendorId) {
     return { error: "vendor is required" };
   }
 
@@ -186,9 +193,9 @@ const resolveEmailLogInput = async (payload = {}, currentLog = null, user = null
         id: brandDoc._id,
         name: normalizeText(brandDoc.name),
       },
-      vendor: {
-        name: vendorName,
-      },
+      vendor: vendorId
+        ? { vendor_id: vendorId, name: vendorName }
+        : { name: vendorName },
       log: logText,
       creation_date: creationDate,
     },
@@ -198,14 +205,15 @@ const resolveEmailLogInput = async (payload = {}, currentLog = null, user = null
 const findMatchingOrder = async ({ order_id, brand, vendor, user = null }) => {
   const orderId = normalizeText(order_id);
   const brandName = normalizeText(brand?.name);
-  const vendorName = normalizeText(vendor?.name);
+  const vendorName = normalizeText(vendor);
+  const vendorId = getVendorId(vendor);
 
   const exactOrder = await Order.findOne(
     applyDataAccessMatch(
       {
         order_id: orderId,
         brand: brandName,
-        vendor: vendorName,
+        ...buildVendorFilter({ field: "vendor", vendorId, vendorName }),
       },
       user,
     ),
@@ -328,7 +336,11 @@ const findExistingDateConflicts = async ({
   const query = {
     order_id: normalizeText(order_id),
     "brand.id": brandId,
-    "vendor.name": normalizeText(vendorName),
+    ...buildVendorFilter({
+      field: "vendor",
+      vendorId: getVendorId(vendorName),
+      vendorName: normalizeText(vendorName),
+    }),
     creation_date: {
       $gte: rangeStart,
       $lt: rangeEnd,
@@ -370,12 +382,12 @@ exports.getAllEmailLogs = async (req, res) => {
     }
 
     if (vendor) {
-      query["vendor.name"] = vendor;
+      Object.assign(query, buildVendorFilter({ field: "vendor", vendorId: vendor, vendorName: vendor }));
     }
 
     const scopedQuery = applyDataAccessMatch(query, req.user, {
       brandFields: ["brand.name"],
-      vendorFields: ["vendor.name"],
+      vendorFields: ["vendor"],
     });
 
     const totalRecords = await EmailLogs.countDocuments(scopedQuery);
@@ -463,7 +475,7 @@ exports.getEmailLogsByOrderId = async (req, res) => {
     const emailLogs = await EmailLogs.find(
       applyDataAccessMatch({ order_id: orderId }, req.user, {
         brandFields: ["brand.name"],
-        vendorFields: ["vendor.name"],
+        vendorFields: ["vendor"],
       }),
     )
       .sort({ creation_date: 1 })
@@ -593,7 +605,7 @@ exports.updateEmailLog = async (req, res) => {
     const emailLog = await EmailLogs.findOne(
       applyDataAccessMatch({ _id: id }, req.user, {
         brandFields: ["brand.name"],
-        vendorFields: ["vendor.name"],
+        vendorFields: ["vendor"],
       }),
     );
     if (!emailLog) {
@@ -678,7 +690,7 @@ exports.getFilterOptions = async (req, res) => {
   try {
     const scopedQuery = applyDataAccessMatch({}, req.user, {
       brandFields: ["brand.name"],
-      vendorFields: ["vendor.name"],
+      vendorFields: ["vendor"],
     });
     const brands = await EmailLogs.distinct("brand.name", scopedQuery);
     const vendors = await EmailLogs.distinct("vendor.name", scopedQuery);
@@ -710,7 +722,7 @@ exports.deleteEmailLog = async (req, res) => {
     const emailLog = await EmailLogs.findOneAndDelete(
       applyDataAccessMatch({ _id: id }, req.user, {
         brandFields: ["brand.name"],
-        vendorFields: ["vendor.name"],
+        vendorFields: ["vendor"],
       }),
     );
 

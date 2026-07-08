@@ -1,4 +1,9 @@
 const mongoose = require("mongoose");
+const {
+  coerceVendorValueForSchema,
+  embeddedVendorSchema,
+  resolveDocumentVendorFields,
+} = require("../helpers/vendorRef");
 
 const ACTIVE_ORDER_STATUSES = [
   "Pending",
@@ -86,7 +91,11 @@ const Order_Schema = new mongoose.Schema(
       description: { type: String }
     },
     brand: { type: String, required: true },
-    vendor: { type: String, required: true },
+    vendor: {
+      type: embeddedVendorSchema,
+      required: true,
+      set: coerceVendorValueForSchema,
+    },
     ETD: { type: Date },
     revised_ETD: { type: Date },
     revised_etd_history: { type: [RevisedEtdHistorySchema], default: [] },
@@ -133,7 +142,7 @@ const Order_Schema = new mongoose.Schema(
 
 // Exact PO + brand + vendor lookups drive calendar sync and order-link resolution.
 Order_Schema.index(
-  { order_id: 1, brand: 1, vendor: 1 },
+  { order_id: 1, brand: 1, "vendor.vendor_id": 1 },
   { name: "orders_order_brand_vendor_idx" },
 );
 
@@ -145,7 +154,7 @@ Order_Schema.index(
 
 // Vendor/status screens page newest orders first, so keep the filter and recency sort together.
 Order_Schema.index(
-  { vendor: 1, status: 1, order_date: -1, order_id: 1 },
+  { "vendor.vendor_id": 1, status: 1, order_date: -1, order_id: 1 },
   { name: "orders_vendor_status_order_date_idx" },
 );
 
@@ -159,7 +168,7 @@ Order_Schema.index(
 Order_Schema.index(
   {
     "shipment.container": 1,
-    vendor: 1,
+    "vendor.vendor_id": 1,
     order_date: -1,
     updatedAt: -1,
     order_id: 1,
@@ -181,7 +190,7 @@ Order_Schema.index(
     "shipment.stuffing_date": 1,
     "shipment.container": 1,
     brand: 1,
-    vendor: 1,
+    "vendor.vendor_id": 1,
   },
   {
     name: "orders_monthly_shipments_report_idx",
@@ -196,6 +205,10 @@ Order_Schema.index(
     partialFilterExpression: { archived: true },
   },
 );
+
+Order_Schema.pre("validate", async function resolveVendorReferences() {
+  await resolveDocumentVendorFields(this, { single: ["vendor"] });
+});
 
 Order_Schema.pre("validate", function backfillLegacyShipmentInvoices() {
   if (!Array.isArray(this.shipment)) return;

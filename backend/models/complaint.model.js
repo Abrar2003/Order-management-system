@@ -1,4 +1,9 @@
 const mongoose = require("mongoose");
+const {
+  coerceVendorValueForSchema,
+  embeddedVendorSchema,
+  resolveDocumentVendorFields,
+} = require("../helpers/vendorRef");
 
 const AUDIT_ACTOR_SCHEMA = {
   user: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
@@ -57,7 +62,11 @@ const ComplaintSchema = new mongoose.Schema(
       trim: true,
     },
     brand: { type: String, required: true, index: true, trim: true },
-    vendor: { type: String, required: true, index: true, trim: true },
+    vendor: {
+      type: embeddedVendorSchema,
+      required: true,
+      set: coerceVendorValueForSchema,
+    },
     item_code: { type: String, required: true, index: true, trim: true },
     po: { type: String, default: "", trim: true },
     category: { type: String, default: "", index: true, trim: true },
@@ -83,8 +92,12 @@ const ComplaintSchema = new mongoose.Schema(
 );
 
 ComplaintSchema.index({ created_at: -1 });
-ComplaintSchema.index({ brand: 1, vendor: 1, item_code: 1 });
+ComplaintSchema.index({ brand: 1, "vendor.vendor_id": 1, item_code: 1 });
 ComplaintSchema.index({ item_code: 1, archived: 1, updated_at: -1 });
+
+ComplaintSchema.pre("validate", async function resolveVendorReferences() {
+  await resolveDocumentVendorFields(this, { single: ["vendor"] });
+});
 
 module.exports = {
   Complaint: mongoose.model("complaints", ComplaintSchema),

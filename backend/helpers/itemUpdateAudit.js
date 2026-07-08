@@ -5,6 +5,10 @@ const {
   detectBoxPackagingMode,
 } = require("./boxMeasurement");
 const { formatEan13BarcodeDisplay } = require("./barcodeFormat");
+const {
+  getVendorName,
+  normalizeVendorDisplayList,
+} = require("./vendorRef");
 
 const AUDIT_SCOPES = Object.freeze({
   PIS: "PIS",
@@ -14,7 +18,7 @@ const AUDIT_SCOPES = Object.freeze({
 });
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
-const normalizeText = (value) => String(value ?? "").trim();
+const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
 const normalizeId = (value) => normalizeText(value?._id || value?.id || value);
 
@@ -42,9 +46,7 @@ const getPrimaryBrand = (item = {}) =>
   );
 
 const getVendors = (item = {}) =>
-  Array.isArray(item?.vendors)
-    ? item.vendors.map((entry) => normalizeText(entry)).filter(Boolean)
-    : [];
+  normalizeVendorDisplayList(item?.vendors);
 
 const formatRemark = (entry = {}, fallback = "Entry") => {
   const raw = normalizeKey(entry?.remark || entry?.box_type || entry?.type);

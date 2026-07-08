@@ -18,8 +18,12 @@ const {
 const {
   evaluateCommonInspectionErrors,
 } = require("../helpers/commonInspectionErrors");
+const {
+  buildVendorFilter,
+  getVendorName,
+} = require("../helpers/vendorRef");
 
-const normalizeText = (value) => String(value ?? "").trim();
+const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
 const escapeRegex = (value = "") =>
   String(value)
     .trim()
@@ -1043,6 +1047,32 @@ const buildTrimmedStringExpression = (fieldPath) => ({
   },
 });
 
+const buildVendorNameExpression = (fieldPath) => ({
+  $let: {
+    vars: {
+      sourceValue: buildScalarValueExpression(fieldPath, ""),
+    },
+    in: {
+      $trim: {
+        input: {
+          $convert: {
+            input: {
+              $cond: [
+                { $eq: [{ $type: "$$sourceValue" }, "object"] },
+                "$$sourceValue.name",
+                "$$sourceValue",
+              ],
+            },
+            to: "string",
+            onError: "",
+            onNull: "",
+          },
+        },
+      },
+    },
+  },
+});
+
 const buildNumericValueExpression = (valueExpression) => ({
   $convert: {
     input: { $ifNull: [valueExpression, 0] },
@@ -1242,7 +1272,13 @@ const buildQcLookupStages = ({ selectedVendor = "" } = {}) => [
           },
         },
         ...(selectedVendor
-          ? [{ $match: { "order_meta.vendor": selectedVendor } }]
+          ? [{
+              $match: buildVendorFilter({
+                field: "order_meta.vendor",
+                vendorId: selectedVendor,
+                vendorName: selectedVendor,
+              }),
+            }]
           : []),
         {
           $project: {
@@ -1276,7 +1312,7 @@ const buildQcLookupStages = ({ selectedVendor = "" } = {}) => [
   },
   {
     $addFields: {
-      vendor_value: buildTrimmedStringExpression("$qc_doc.order_meta.vendor"),
+      vendor_value: buildVendorNameExpression("$qc_doc.order_meta.vendor"),
       brand_value: buildTrimmedStringExpression("$qc_doc.order_meta.brand"),
       order_id_value: buildTrimmedStringExpression("$qc_doc.order_meta.order_id"),
       item_code_value: buildTrimmedStringExpression("$qc_doc.item.item_code"),
@@ -2042,7 +2078,13 @@ const buildCommonErrorsReportDataset = async ({
   });
 
   if (normalizedBrand) qcMatch["order_meta.brand"] = normalizedBrand;
-  if (normalizedVendor) qcMatch["order_meta.vendor"] = normalizedVendor;
+  if (normalizedVendor) {
+    Object.assign(qcMatch, buildVendorFilter({
+      field: "order_meta.vendor",
+      vendorId: normalizedVendor,
+      vendorName: normalizedVendor,
+    }));
+  }
 
   const qcRows = await QC.find(qcMatch)
     .select("_id order order_meta item")

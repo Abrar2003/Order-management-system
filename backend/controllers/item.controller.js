@@ -115,6 +115,12 @@ const {
   serializeFormDraft,
   upsertFormDraft,
 } = require("../helpers/formDrafts");
+const {
+  buildVendorsArrayFilter,
+  getVendorId,
+  getVendorName,
+  normalizeVendorDisplayList,
+} = require("../helpers/vendorRef");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -140,6 +146,49 @@ const parsePositiveInt = (value, fallback) => {
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
 const normalizeTextField = (value) => String(value ?? "").trim();
+
+const normalizeVendorTextField = (value) =>
+  getVendorName(value) || normalizeTextField(value);
+
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const splitVendorText = (value) =>
+  normalizeTextField(value)
+    .split(",")
+    .map((entry) => normalizeTextField(entry))
+    .filter(Boolean);
+
+const normalizeVendorPayloadList = (payload = {}) => {
+  const vendorIds = Array.isArray(payload.vendor_ids ?? payload.vendorIds)
+    ? (payload.vendor_ids ?? payload.vendorIds)
+    : payload.vendor_id || payload.vendorId
+      ? [payload.vendor_id || payload.vendorId]
+      : null;
+  const value = vendorIds || payload.vendors || payload.vendor;
+  const rawValues = Array.isArray(value)
+    ? value
+    : isPlainObject(value)
+      ? [value]
+      : splitVendorText(value);
+  const seen = new Set();
+
+  return rawValues
+    .flatMap((entry) => {
+      if (Array.isArray(entry)) return entry;
+      if (isPlainObject(entry)) return [entry];
+      return splitVendorText(entry);
+    })
+    .map((entry) => {
+      const key = String(getVendorId(entry) || getVendorName(entry) || entry || "")
+        .trim()
+        .toLowerCase();
+      if (!key || seen.has(key)) return null;
+      seen.add(key);
+      return entry;
+    })
+    .filter(Boolean);
+};
 
 const toNonNegativeNumber = (value, fieldLabel) => {
   if (value === undefined) return undefined;
@@ -1507,7 +1556,7 @@ const buildItemMatch = ({ search, brand, vendor } = {}) => {
   }
 
   if (normalizedVendor) {
-    conditions.push({ vendors: normalizedVendor });
+    conditions.push(buildVendorsArrayFilter({ field: "vendors", vendorId: normalizedVendor, vendorName: normalizedVendor }));
   }
 
   if (conditions.length === 0) return {};
@@ -2088,7 +2137,7 @@ const getPisDiffBrand = (item = {}) =>
 
 const getPisDiffVendors = (item = {}) =>
   Array.isArray(item?.vendors) && item.vendors.length > 0
-    ? item.vendors.join(", ")
+    ? normalizeVendorDisplayList(item.vendors).join(", ")
     : "";
 
 const formatPisDiffRemarkLabel = (remark = "", fallback = "Value") => {
@@ -2563,7 +2612,7 @@ const buildPisDiffReportPayload = ({
   const uniqueBrands = normalizeDistinctValues(
     checkedDiffRows.map((item) => getPisDiffBrand(item)),
   );
-  const uniqueVendors = normalizeDistinctValues(
+  const uniqueVendors = normalizeVendorDisplayList(
     checkedDiffRows.flatMap((item) => Array.isArray(item?.vendors) ? item.vendors : []),
   );
 
@@ -2652,7 +2701,7 @@ const buildFinalPisCheckMatch = ({ search, brand, vendor } = {}) => {
   }
 
   if (normalizedVendor) {
-    conditions.push({ vendors: normalizedVendor });
+    conditions.push(buildVendorsArrayFilter({ field: "vendors", vendorId: normalizedVendor, vendorName: normalizedVendor }));
   }
 
   return { $and: conditions };
@@ -3113,7 +3162,7 @@ exports.getProductDatabaseItems = async (req, res) => {
           ...(brandsRaw || []),
           ...(brandNamesRaw || []),
         ]),
-        vendor_options: normalizeDistinctValues(vendorsRaw),
+        vendor_options: normalizeVendorDisplayList(vendorsRaw),
       },
       pagination: {
         page,
@@ -3240,7 +3289,7 @@ exports.exportProductDatabaseItems = async (req, res) => {
       brand:
         normalizeTextField(row?.brand_name || row?.brand) ||
         (Array.isArray(row?.brands) ? row.brands.join(", ") : ""),
-      vendors: Array.isArray(row?.vendors) ? row.vendors.join(", ") : "",
+      vendors: normalizeVendorDisplayList(row?.vendors).join(", "),
       country_of_origin: normalizeTextField(row?.country_of_origin),
       master_barcode: normalizeTextField(
         row?.pd_master_barcode || row?.pd_barcode,
@@ -3377,10 +3426,10 @@ const buildItemDatabaseRow = ({
   brand: item?.brand || item?.brand_name || productDatabaseRow?.brand || productDatabaseRow?.brand_name || "",
   brands: Array.isArray(item?.brands) ? item.brands : [],
   vendor:
-    Array.isArray(item?.vendors) && item.vendors.length > 0
-      ? item.vendors.filter(Boolean).join(", ")
+    normalizeVendorDisplayList(item?.vendors).length > 0
+      ? normalizeVendorDisplayList(item.vendors).join(", ")
       : "",
-  vendors: Array.isArray(item?.vendors) ? item.vendors : [],
+  vendors: normalizeVendorDisplayList(item?.vendors),
   current_running_pos: Number(runningPo?.count || 0),
   current_running_po_ids: Array.isArray(runningPo?.order_ids) ? runningPo.order_ids : [],
   last_inspected_date: latestInspectionReport?.last_inspected_date || "",
@@ -3501,7 +3550,7 @@ const getItemDatabaseDataset = async ({
         ...(brandsRaw || []),
         ...(brandNamesRaw || []),
       ]),
-      vendor_options: normalizeDistinctValues(vendorsRaw),
+        vendor_options: normalizeVendorDisplayList(vendorsRaw),
     },
   };
 };
@@ -3592,8 +3641,8 @@ exports.exportItemDatabaseItems = async (req, res) => {
         String(row?.brand || "").trim() ||
         (Array.isArray(row?.brands) ? row.brands.join(", ") : ""),
       vendor:
-        String(row?.vendor || "").trim() ||
-        (Array.isArray(row?.vendors) ? row.vendors.join(", ") : ""),
+        normalizeVendorTextField(row?.vendor) ||
+        normalizeVendorDisplayList(row?.vendors).join(", "),
       current_running_pos: Number(row?.current_running_pos || 0),
       current_running_po_ids: Array.isArray(row?.current_running_po_ids)
         ? row.current_running_po_ids.join(", ")
@@ -3728,7 +3777,7 @@ exports.getPisUpdateLogs = async (req, res) => {
     }
 
     if (vendor) {
-      match.vendors = vendor;
+      Object.assign(match, buildVendorsArrayFilter({ field: "vendors", vendorId: vendor, vendorName: vendor }));
     }
 
     if (dataScope) {
@@ -3782,7 +3831,7 @@ exports.getPisUpdateLogs = async (req, res) => {
       },
       filters: {
         brands: normalizeDistinctValues(brandsRaw),
-        vendors: normalizeDistinctValues(vendorsRaw),
+        vendors: normalizeVendorDisplayList(vendorsRaw),
         data_scopes: normalizeDistinctValues(scopesRaw),
         operation_types: normalizeDistinctValues(operationsRaw),
       },
@@ -4089,7 +4138,7 @@ exports.getItems = async (req, res) => {
           ...(brandsRaw || []),
           ...(brandNamesRaw || []),
         ]),
-        vendors: normalizeDistinctValues(vendorsRaw),
+        vendors: normalizeVendorDisplayList(vendorsRaw),
         item_codes: normalizeDistinctValues(codesRaw),
       },
     });
@@ -4160,7 +4209,7 @@ exports.getItemMasters = async (req, res) => {
           ...(brandsRaw || []),
           ...(brandNamesRaw || []),
         ]),
-        vendors: normalizeDistinctValues(vendorsRaw),
+        vendors: normalizeVendorDisplayList(vendorsRaw),
         item_codes: normalizeDistinctValues(codesRaw),
       },
     });
@@ -4247,7 +4296,7 @@ exports.getPisDiffItems = async (req, res) => {
             ...(Array.isArray(item?.brands) ? item.brands : []),
           ]),
         ),
-        vendors: normalizeDistinctValues(
+        vendors: normalizeVendorDisplayList(
           vendorOptionRows.flatMap((item) =>
             Array.isArray(item?.vendors) ? item.vendors : [],
           ),
@@ -5279,7 +5328,7 @@ exports.getItemOrdersHistory = async (req, res) => {
         id: String(order?._id || ""),
         order_id: String(order?.order_id || "").trim(),
         brand: String(order?.brand || "").trim(),
-        vendor: String(order?.vendor || "").trim(),
+        vendor: normalizeVendorTextField(order?.vendor),
         status: Boolean(order?.archived)
           ? "Archived"
           : deriveOrderStatus({ orderEntry: order }),
@@ -5572,7 +5621,7 @@ const buildComparisonInspectionRow = (inspection = {}, order = {}) => ({
   createdAt: inspection?.createdAt || null,
   inspection_date: String(inspection?.inspection_date || "").trim(),
   brand: String(order?.brand || "").trim(),
-  vendor: String(order?.vendor || "").trim(),
+  vendor: normalizeVendorTextField(order?.vendor),
   status: String(inspection?.status || "").trim(),
   checked: Math.max(0, toSafeNumber(inspection?.checked, 0)),
   passed: Math.max(0, toSafeNumber(inspection?.passed, 0)),
@@ -5727,7 +5776,7 @@ exports.getPisInspectionMasterComparison = async (req, res) => {
           (Array.isArray(item?.brands) ? item.brands[0] : "") ||
           "",
         brands: Array.isArray(item?.brands) ? item.brands : [],
-        vendors: Array.isArray(item?.vendors) ? item.vendors : [],
+        vendors: normalizeVendorDisplayList(item?.vendors),
         pis_box_mode: item?.pis_box_mode || "",
         master_box_mode: item?.master_box_mode || "",
         barcodes: {
@@ -6003,7 +6052,7 @@ exports.createItem = async (req, res) => {
       payload.name || importedCommonFields.name || description,
     );
     const brand = normalizeTextField(payload.brand);
-    const vendor = normalizeTextField(payload.vendor);
+    const vendorEntries = normalizeVendorPayloadList(payload);
     const importedPisMasterBarcode = normalizeTextField(
       importedCommonFields.pis_master_barcode || importedCommonFields.pis_barcode,
     );
@@ -6032,7 +6081,7 @@ exports.createItem = async (req, res) => {
         message: "brand is required",
       });
     }
-    if (!vendor) {
+    if (vendorEntries.length === 0) {
       return res.status(400).json({
         success: false,
         message: "vendor is required",
@@ -6095,7 +6144,7 @@ exports.createItem = async (req, res) => {
       brand,
       brand_name: brand,
       brands: [brand],
-      vendors: [vendor],
+      vendors: vendorEntries,
       ...(productTypeContext.productTypeSnapshot
         ? { product_type: productTypeContext.productTypeSnapshot }
         : {}),

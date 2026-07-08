@@ -1,5 +1,13 @@
 const mongoose = require("mongoose");
 const {
+  coerceVendorArrayForSchema,
+  coerceVendorValueForSchema,
+  embeddedVendorSchema,
+  isEmbeddedVendor,
+  resolveVendorFromInput,
+  resolveDocumentVendorFields,
+} = require("../helpers/vendorRef");
+const {
   BOX_PACKAGING_MODES,
   BOX_ENTRY_TYPES,
 } = require("../helpers/boxMeasurement");
@@ -111,7 +119,11 @@ const finishAssignmentSchema = new mongoose.Schema(
       default: null,
     },
     unique_code: { type: String, default: "", trim: true, uppercase: true },
-    vendor: { type: String, default: "", trim: true },
+    vendor: {
+      type: embeddedVendorSchema,
+      default: undefined,
+      set: coerceVendorValueForSchema,
+    },
     vendor_code: { type: String, default: "", trim: true, uppercase: true },
     color: { type: String, default: "", trim: true },
     color_code: { type: String, default: "", trim: true, uppercase: true },
@@ -300,7 +312,11 @@ const itemSchema = new mongoose.Schema(
     brand: { type: String, default: "", trim: true },
     brand_name: { type: String, default: "", trim: true },
     brands: { type: [String], default: [] },
-    vendors: { type: [String], default: [] },
+    vendors: {
+      type: [embeddedVendorSchema],
+      default: [],
+      set: coerceVendorArrayForSchema,
+    },
     country_of_origin: { type: String, default: "", trim: true },
     product_type: {
       type: productTypeSnapshotSchema,
@@ -571,7 +587,6 @@ itemSchema.index({ description: 1 });
 itemSchema.index({ brand: 1 });
 itemSchema.index({ brand_name: 1 });
 itemSchema.index({ brands: 1 });
-itemSchema.index({ vendors: 1 });
 itemSchema.index({ pis_checked_flag: 1 });
 itemSchema.index({ pd_checked: 1 });
 itemSchema.index({ "product_type.key": 1 });
@@ -637,6 +652,17 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
         value_text: String(entry?.value_text || "").trim(),
         source_header: String(entry?.source_header || "").trim(),
       }));
+    }
+  }
+});
+
+itemSchema.pre("validate", async function resolveVendorReferences() {
+  await resolveDocumentVendorFields(this, { array: ["vendors"] });
+
+  if (Array.isArray(this.finish)) {
+    for (const entry of this.finish) {
+      if (!entry?.vendor || isEmbeddedVendor(entry.vendor)) continue;
+      entry.vendor = await resolveVendorFromInput(entry.vendor);
     }
   }
 });

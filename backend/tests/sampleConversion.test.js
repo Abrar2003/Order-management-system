@@ -5,6 +5,7 @@ const Item = require("../models/item.model");
 const Sample = require("../models/sample.model");
 const sampleController = require("../controllers/sample.controller");
 const wasabiStorage = require("../services/wasabiStorage.service");
+const { getVendorName } = require("../helpers/vendorRef");
 
 const makeResponse = () => ({
   statusVal: 0,
@@ -415,7 +416,7 @@ test("convertToItem creates an item from sample data and copies the sample image
     assert.equal(savedItem.code, "ITEM-CONV-2");
     assert.equal(savedItem.name, "Converted Name");
     assert.equal(savedItem.brand, "Brand A");
-    assert.deepEqual(savedItem.vendors, ["Vendor A"]);
+    assert.deepEqual(savedItem.vendors.map(getVendorName), ["Vendor A"]);
     assert.deepEqual(
       savedItem.inspected_item_sizes.map((entry) => entry.remark),
       ["item", "stretcher"],

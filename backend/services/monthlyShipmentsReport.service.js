@@ -7,6 +7,10 @@ const {
   resolveShipmentRowCbm,
   toRoundedCbmValue,
 } = require("./shipmentCbmAllocation.service");
+const {
+  buildVendorFilter,
+  getVendorName,
+} = require("../helpers/vendorRef");
 
 const INCLUDED_STATUSES = Object.freeze(["Partial Shipped", "Shipped"]);
 const TIMEZONE = "Asia/Kolkata";
@@ -47,7 +51,7 @@ const MONTH_NAMES_SHORT = Object.freeze([
 
 const pad2 = (value) => String(value).padStart(2, "0");
 
-const normalizeText = (value) => String(value ?? "").trim();
+const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
 
 const normalizeOptionalFilter = (value) => {
@@ -958,16 +962,33 @@ const fetchMonthlyShipmentContributionRows = async ({
   const match = combineMongoMatches(
     buildShipmentBaseMatch({ period, user }),
     buildExactTextMatch("brand", query.brand),
-    buildExactTextMatch("vendor", query.vendor),
+    query.vendor
+      ? buildVendorFilter({
+          field: "vendor",
+          vendorId: normalizeOptionalFilter(query.vendor),
+          vendorName: normalizeOptionalFilter(query.vendor),
+        })
+      : {},
   );
 
   const pipeline = [
     { $match: match },
     {
+      $addFields: {
+        vendor_display_name: {
+          $cond: [
+            { $eq: [{ $type: "$vendor" }, "object"] },
+            "$vendor.name",
+            "$vendor",
+          ],
+        },
+      },
+    },
+    {
       $project: {
         order_id: 1,
         brand: 1,
-        vendor: 1,
+        vendor: "$vendor_display_name",
         status: 1,
         quantity: 1,
         total_po_cbm: 1,

@@ -3,6 +3,11 @@ import api from "../api/axios";
 import { toISODateString } from "../utils/date";
 import "../App.css";
 
+const getVendorDisplayName = (vendor) =>
+  typeof vendor === "string"
+    ? vendor.trim()
+    : String(vendor?.name || vendor?.vendor_name || vendor?.vendorName || "").trim();
+
 const createInitialForm = (record = null) => ({
   order_id: String(
     record?.order_id?.order_id
@@ -11,7 +16,7 @@ const createInitialForm = (record = null) => ({
     || "",
   ).trim(),
   brandId: String(record?.brand?.id || "").trim(),
-  vendor: String(record?.vendor?.name || "").trim(),
+  vendor: getVendorDisplayName(record?.vendor),
   creation_date: toISODateString(record?.creation_date) || "",
   log: String(record?.log || ""),
 });

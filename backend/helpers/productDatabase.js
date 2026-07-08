@@ -12,6 +12,9 @@ const {
   isManagerLikeRole,
   normalizeUserRoleKey,
 } = require("./userRole");
+const {
+  normalizeVendorDisplayList,
+} = require("./vendorRef");
 
 const ITEM_SIZE_ENTRY_LIMIT = 5;
 const BOX_SIZE_ENTRY_LIMIT = 4;
@@ -1196,7 +1199,7 @@ const buildProductDatabaseRow = (item = {}, user = {}) => {
     brand: item?.brand || "",
     brand_name: item?.brand_name || "",
     brands: Array.isArray(item?.brands) ? item.brands : [],
-    vendors: Array.isArray(item?.vendors) ? item.vendors : [],
+    vendors: normalizeVendorDisplayList(item?.vendors),
     country_of_origin: state.country_of_origin,
     pd_barcode: state.pd_barcode,
     pd_master_barcode: state.pd_master_barcode,

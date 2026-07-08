@@ -1,5 +1,9 @@
 const mongoose = require("mongoose");
 const Brand = require("../models/brand.model");
+const {
+  buildVendorAccessCondition,
+  getVendorName,
+} = require("../helpers/vendorRef");
 
 const ALL_VENDOR_TOKEN = "all";
 const BRAND_SCOPE_ALL = "all";
@@ -44,7 +48,7 @@ const normalizeVendorList = (value, { defaultAll = true } = {}) => {
   const result = [];
 
   for (const entry of toArray(value)) {
-    const vendor = normalizeText(entry);
+    const vendor = normalizeText(getVendorName(entry) || entry);
     if (!vendor) continue;
     const key = vendor.toLowerCase();
     if (key === ALL_VENDOR_TOKEN) {
@@ -287,7 +291,7 @@ const buildDataAccessMatch = (
     conditions.push(buildBrandScopeCondition(brandFields, brandScope));
   }
   if (allowedVendors) {
-    conditions.push(buildFieldAccessCondition(vendorFields, allowedVendors));
+    conditions.push(buildVendorAccessCondition(vendorFields, allowedVendors));
   }
 
   return combineMongoMatches(...conditions);

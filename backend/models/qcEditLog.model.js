@@ -1,4 +1,9 @@
 const mongoose = require("mongoose");
+const {
+  coerceVendorValueForSchema,
+  embeddedVendorSchema,
+  resolveDocumentVendorFields,
+} = require("../helpers/vendorRef");
 
 const QcEditChangeSchema = new mongoose.Schema(
   {
@@ -29,7 +34,11 @@ const QcEditLogSchema = new mongoose.Schema(
     },
     order_id: { type: String, default: "", trim: true },
     brand: { type: String, default: "", trim: true },
-    vendor: { type: String, default: "", trim: true },
+    vendor: {
+      type: embeddedVendorSchema,
+      default: undefined,
+      set: coerceVendorValueForSchema,
+    },
     item_code: { type: String, default: "", trim: true },
     operation_type: {
       type: String,
@@ -58,5 +67,10 @@ QcEditLogSchema.index({ createdAt: -1 });
 QcEditLogSchema.index({ qc: 1, createdAt: -1 });
 QcEditLogSchema.index({ order_id: 1, createdAt: -1 });
 QcEditLogSchema.index({ edited_by: 1, createdAt: -1 });
+QcEditLogSchema.index({ "vendor.vendor_id": 1, createdAt: -1 });
+
+QcEditLogSchema.pre("validate", async function resolveVendorReferences() {
+  await resolveDocumentVendorFields(this, { single: ["vendor"] });
+});
 
 module.exports = mongoose.model("qc_edit_logs", QcEditLogSchema);

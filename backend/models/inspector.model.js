@@ -1,4 +1,10 @@
 const mongoose = require("mongoose");
+const {
+  coerceVendorValueForSchema,
+  embeddedVendorSchema,
+  isEmbeddedVendor,
+  resolveVendorFromInput,
+} = require("../helpers/vendorRef");
 
 const LabelHistoryActorSchema = new mongoose.Schema(
   {
@@ -69,7 +75,11 @@ const LabelUsedHistorySchema = new mongoose.Schema(
     qc_meta: {
       order_id: { type: String, default: "" },
       brand: { type: String, default: "" },
-      vendor: { type: String, default: "" },
+      vendor: {
+        type: embeddedVendorSchema,
+        default: undefined,
+        set: coerceVendorValueForSchema,
+      },
       item_code: { type: String, default: "" },
       description: { type: String, default: "" },
     },
@@ -106,4 +116,14 @@ const inspectorSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+inspectorSchema.pre("validate", async function resolveVendorReferences() {
+  if (!Array.isArray(this.label_used_history)) return;
+  for (const entry of this.label_used_history) {
+    const vendor = entry?.qc_meta?.vendor;
+    if (!vendor || isEmbeddedVendor(vendor)) continue;
+    entry.qc_meta.vendor = await resolveVendorFromInput(vendor);
+  }
+});
+
 module.exports = mongoose.model("inspectors", inspectorSchema);

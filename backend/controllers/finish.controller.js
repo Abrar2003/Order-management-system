@@ -11,8 +11,13 @@ const {
   getObjectBuffer,
   getObjectUrl,
 } = require("../services/wasabiStorage.service");
+const {
+  buildVendorsArrayFilter,
+  getVendorName,
+  normalizeVendorDisplayList,
+} = require("../helpers/vendorRef");
 
-const normalizeText = (value) => String(value ?? "").trim();
+const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
 
 const normalizeCode = (value) =>
   String(value ?? "")
@@ -133,10 +138,11 @@ const buildVendorItemMatch = ({ vendor = "", search = "" } = {}) => {
     return null;
   }
 
-  const vendorRegex = new RegExp(`^${escapeRegex(normalizedVendor)}$`, "i");
-  const match = {
-    vendors: vendorRegex,
-  };
+  const match = buildVendorsArrayFilter({
+    field: "vendors",
+    vendorId: normalizedVendor,
+    vendorName: normalizedVendor,
+  });
 
   const normalizedSearch = normalizeText(search);
   if (!normalizedSearch) return match;
@@ -191,7 +197,7 @@ exports.getVendorItemsForFinish = async (req, res) => {
         name: normalizeText(item?.name),
         description: normalizeText(item?.description),
         brand: normalizeText(item?.brand_name || item?.brand),
-        vendors: Array.isArray(item?.vendors) ? item.vendors : [],
+        vendors: normalizeVendorDisplayList(item?.vendors),
         finish: Array.isArray(item?.finish) ? item.finish : [],
       })),
     });
@@ -313,7 +319,7 @@ exports.upsertFinish = async (req, res) => {
   let cleanupUploadedImage = false;
 
   try {
-    const vendor = normalizeText(req.body?.vendor);
+    const vendor = normalizeText(req.body?.vendor_id ?? req.body?.vendorId ?? req.body?.vendor);
     const vendorCode = normalizeCode(req.body?.vendor_code);
     const color = normalizeText(req.body?.color);
     const colorCode = normalizeCode(req.body?.color_code);

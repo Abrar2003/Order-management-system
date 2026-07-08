@@ -2,6 +2,11 @@ const { google } = require("googleapis");
 const Order = require("../models/order.model");
 const Brand = require("../models/brand.model");
 const { parseDateOnly, toDateOnlyIso } = require("../helpers/dateOnly");
+const {
+  buildVendorFilter,
+  getVendorId,
+  getVendorName,
+} = require("../helpers/vendorRef");
 
 function getCalendarClient() {
   const missing = [
@@ -40,8 +45,18 @@ function addDays(dateOnlyISO, days) {
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const normalizeString = (value) => String(value ?? "").trim();
+const normalizeString = (value) => getVendorName(value) || String(value ?? "").trim();
 const OMS_KEY_PREFIX = "oms:";
+
+const buildOrderGroupMatch = ({ order_id, brand, vendor } = {}) => ({
+  order_id,
+  brand,
+  ...buildVendorFilter({
+    field: "vendor",
+    vendorId: getVendorId(vendor) || normalizeString(vendor),
+    vendorName: normalizeString(vendor),
+  }),
+});
 
 async function resolveBrandCalendarId(brandName) {
   const normalizedBrandName = normalizeString(brandName);
@@ -64,7 +79,7 @@ async function resolveBrandCalendarId(brandName) {
 
 function makeKey({ order_id, brand, vendor }) {
   // stable key to identify the event for this group
-  return `${OMS_KEY_PREFIX}${order_id}:${brand}:${vendor}`;
+  return `${OMS_KEY_PREFIX}${normalizeString(order_id)}:${normalizeString(brand)}:${normalizeString(vendor)}`;
 }
 
 async function deleteOmsEventsFromCalendar({ calendar, calendarId }) {
@@ -261,7 +276,8 @@ async function syncOrderGroup({ order_id, brand, vendor }) {
   const key = makeKey({ order_id, brand, vendor });
 
   // Pull all docs for this group
-  const docs = await Order.find({ order_id, brand, vendor }).select("ETD status").lean();
+  const groupMatch = buildOrderGroupMatch({ order_id, brand, vendor });
+  const docs = await Order.find(groupMatch).select("ETD status").lean();
 
   if (!docs.length) {
     const calendarId = await resolveBrandCalendarId(brand);
@@ -278,7 +294,7 @@ async function syncOrderGroup({ order_id, brand, vendor }) {
   if (!calendarId) {
     const errorMessage = `No Google Calendar ID configured for brand "${normalizeString(brand) || "unknown"}"`;
     await Order.updateMany(
-      { order_id, brand, vendor },
+      groupMatch,
       {
         $set: {
           "gcal.calendarId": null,
@@ -297,7 +313,7 @@ async function syncOrderGroup({ order_id, brand, vendor }) {
 
   if (etds.length === 0) {
     const del = await deleteEventByKey({ calendar, calendarId, key });
-    await Order.updateMany({ order_id, brand, vendor }, {
+    await Order.updateMany(groupMatch, {
       $set: {
         "gcal.calendarId": null,
         "gcal.eventId": null,
@@ -312,13 +328,16 @@ async function syncOrderGroup({ order_id, brand, vendor }) {
   const minEtd = new Date(Math.min(...etds.map((entry) => entry.getTime())));
   const etdISO = toDateOnlyISO(minEtd);
 
-  const summary = `${order_id} | ${vendor}`;
-  const description = `Order: ${order_id}\nBrand: ${brand}\nVendor: ${vendor}\nETD: ${etdISO}`;
+  const orderLabel = normalizeString(order_id);
+  const brandLabel = normalizeString(brand);
+  const vendorLabel = normalizeString(vendor);
+  const summary = `${orderLabel} | ${vendorLabel}`;
+  const description = `Order: ${orderLabel}\nBrand: ${brandLabel}\nVendor: ${vendorLabel}\nETD: ${etdISO}`;
 
   const upsert = await createOrUpdateEvent({ calendar, calendarId, key, summary, etdISO, description });
 
   // store eventId on all docs in the group
-  await Order.updateMany({ order_id, brand, vendor }, {
+  await Order.updateMany(groupMatch, {
     $set: {
       "gcal.calendarId": calendarId,
       "gcal.eventId": upsert.eventId,

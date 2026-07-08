@@ -7,6 +7,12 @@ const { BOX_PACKAGING_MODES, BOX_ENTRY_TYPES } = require("../helpers/boxMeasurem
 const { normalizeUserRoleKey } = require("../helpers/userRole");
 const { calculateTotalPoCbm } = require("../services/orderCbm.service");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const {
+  buildVendorsArrayFilter,
+  getVendorId,
+  getVendorName,
+  normalizeVendorDisplayList,
+} = require("../helpers/vendorRef");
 
 const ITEM_SIZE_ENTRY_LIMIT = 5;
 const BOX_SIZE_ENTRY_LIMIT = 4;
@@ -141,14 +147,51 @@ const validateRemarkOption = (remark = "", options = [], fieldLabel = "Remark") 
   }
 };
 
-const normalizeVendorList = (value) => {
-  if (Array.isArray(value)) {
-    return [...new Set(value.map((entry) => normalizeText(entry)).filter(Boolean))];
-  }
-  const normalized = normalizeText(value);
-  if (!normalized) return [];
-  return [...new Set(normalized.split(",").map((entry) => normalizeText(entry)).filter(Boolean))];
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const splitVendorString = (value) =>
+  normalizeText(value)
+    .split(",")
+    .map((entry) => normalizeText(entry))
+    .filter(Boolean);
+
+const normalizeVendorList = (value, options = {}) => {
+  const vendorIds = Array.isArray(options.vendorIds)
+    ? options.vendorIds
+    : options.vendorId
+      ? [options.vendorId]
+      : null;
+  const rawValues = vendorIds ||
+    (Array.isArray(value)
+      ? value
+      : isPlainObject(value)
+        ? [value]
+        : splitVendorString(value));
+  const seen = new Set();
+
+  return rawValues
+    .flatMap((entry) => {
+      if (Array.isArray(entry)) return entry;
+      if (isPlainObject(entry)) return [entry];
+      return splitVendorString(entry);
+    })
+    .map((entry) => {
+      const vendorId = getVendorId(entry);
+      const vendorName = getVendorName(entry);
+      const key = normalizeLower(vendorId || vendorName || entry);
+      if (!key || seen.has(key)) return null;
+      seen.add(key);
+      return entry;
+    })
+    .filter(Boolean);
 };
+
+const getVendorPayloadList = (payload = {}) =>
+  normalizeVendorList(payload.vendor ?? payload.vendors, {
+    vendorId: payload.vendor_id ?? payload.vendorId,
+    vendorIds: payload.vendor_ids ?? payload.vendorIds,
+  });
 
 const isBlankItemSizeEntry = (entry = {}) =>
   !isPositiveNumericInput(entry?.L) &&
@@ -293,9 +336,9 @@ const serializeSampleWorkflow = (sample = {}) => {
   return {
     ...plain,
     _id: String(plain?._id || ""),
-    vendors: normalizeDistinctValues(plain?.vendor),
+    vendors: normalizeVendorDisplayList(plain?.vendor),
     vendor_summary: {
-      vendors: normalizeDistinctValues(plain?.vendor),
+      vendors: normalizeVendorDisplayList(plain?.vendor),
     },
   };
 };
@@ -310,7 +353,7 @@ const buildSampleWorkflowMatch = (query = {}) => {
 
   if (brand) match.brand = { $regex: `^${escapeRegex(brand)}$`, $options: "i" };
   if (vendor) {
-    match.vendor = { $elemMatch: { $regex: escapeRegex(vendor), $options: "i" } };
+    Object.assign(match, buildVendorsArrayFilter({ field: "vendor", vendorId: vendor, vendorName: vendor }));
   }
   if (dateFrom || dateTo) {
     match.updatedAt = {};
@@ -324,7 +367,8 @@ const buildSampleWorkflowMatch = (query = {}) => {
       { name: { $regex: escaped, $options: "i" } },
       { description: { $regex: escaped, $options: "i" } },
       { brand: { $regex: escaped, $options: "i" } },
-      { vendor: { $elemMatch: { $regex: escaped, $options: "i" } } },
+      { "vendor.name": { $regex: escaped, $options: "i" } },
+      buildVendorsArrayFilter({ field: "vendor", vendorName: search }),
     ];
     if (match.$or) {
       match.$and = [{ $or: match.$or }, { $or: searchOr }];
@@ -380,7 +424,7 @@ exports.getSampleWorkflows = async (req, res) => {
       },
       filters: {
         brands: normalizeDistinctValues(brandsRaw),
-        vendors: normalizeDistinctValues(vendorsRaw),
+        vendors: normalizeVendorDisplayList(vendorsRaw),
       },
     });
   } catch (error) {
@@ -425,7 +469,7 @@ exports.createSampleWorkflow = async (req, res) => {
       name: normalizeText(payload.name),
       description: normalizeText(payload.description),
       brand: normalizeText(payload.brand),
-      vendor: normalizeVendorList(payload.vendor),
+      vendor: getVendorPayloadList(payload),
       item_sizes: normalizeItemSizeEntries(parseJsonBodyField(payload.item_sizes, "item_sizes")),
       box_sizes: normalizeBoxSizeEntries(parseJsonBodyField(payload.box_sizes, "box_sizes"), boxMode),
       box_mode: boxMode,

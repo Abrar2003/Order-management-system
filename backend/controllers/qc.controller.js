@@ -101,6 +101,11 @@ const {
   upsertFormDraft,
 } = require("../helpers/formDrafts");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
+const {
+  buildVendorFilter,
+  getVendorName,
+  normalizeVendorDisplayList,
+} = require("../helpers/vendorRef");
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
@@ -200,7 +205,7 @@ const toNormalizedCbmString = (value) => {
   return fixed.replace(/\.?0+$/, "") || "0";
 };
 
-const normalizeText = (value) => String(value ?? "").trim();
+const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
 const normalizeComparableBarcode = (value) => {
   const normalized = normalizeText(value).replace(/\s+/g, "");
   if (!normalized) return "";
@@ -3445,7 +3450,10 @@ const lastInspectedDateToDateExpression = buildStringDateToDateExpression(
 const normalizeDistinctValues = (values = []) =>
   [
     ...new Set(
-      values.map((value) => String(value ?? "").trim()).filter(Boolean),
+      (Array.isArray(values) ? values : [values])
+        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .map((value) => normalizeText(value))
+        .filter(Boolean),
     ),
   ].sort((a, b) => a.localeCompare(b));
 
@@ -3465,7 +3473,7 @@ const buildQcListMatch = ({
   const match = {};
 
   const inspectorId = String(inspector || "").trim();
-  const vendorValue = String(vendor || "").trim();
+  const vendorValue = normalizeText(vendor);
   const brandValue = String(brand || "").trim();
   const orderValue = String(order || "").trim();
   const searchValue = String(search || "").trim();
@@ -3478,7 +3486,11 @@ const buildQcListMatch = ({
   }
 
   if (includeVendor && vendorValue) {
-    match["order_meta.vendor"] = vendorValue;
+    Object.assign(match, buildVendorFilter({
+      field: "order_meta.vendor",
+      vendorId: vendorValue,
+      vendorName: vendorValue,
+    }));
   }
 
   if (brandValue) {
@@ -3966,7 +3978,7 @@ exports.getQCList = async (req, res) => {
         sort_order: sortOrder,
       },
       filters: {
-        vendors: normalizeDistinctValues(
+        vendors: normalizeVendorDisplayList(
           vendorsRaw.map((entry) => entry?.value),
         ),
         orders: normalizeDistinctValues(ordersRaw.map((entry) => entry?.value)),

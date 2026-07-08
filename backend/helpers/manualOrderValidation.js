@@ -1,4 +1,6 @@
-const normalizeText = (value) => String(value ?? "").trim();
+const { getVendorName } = require("./vendorRef");
+
+const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
 
 const getMissingManualOrderFields = ({
   orderId = "",

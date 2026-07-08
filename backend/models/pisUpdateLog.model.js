@@ -1,4 +1,9 @@
 const mongoose = require("mongoose");
+const {
+  coerceVendorArrayForSchema,
+  embeddedVendorSchema,
+  resolveDocumentVendorFields,
+} = require("../helpers/vendorRef");
 
 const PisUpdateChangeSchema = new mongoose.Schema(
   {
@@ -47,7 +52,11 @@ const PisUpdateLogSchema = new mongoose.Schema(
     item_name: { type: String, default: "", trim: true },
     description: { type: String, default: "", trim: true },
     brand: { type: String, default: "", trim: true },
-    vendors: { type: [String], default: [] },
+    vendors: {
+      type: [embeddedVendorSchema],
+      default: [],
+      set: coerceVendorArrayForSchema,
+    },
     page_name: { type: String, default: "", trim: true },
     source: { type: String, default: "", trim: true },
     operation_type: {
@@ -90,5 +99,10 @@ PisUpdateLogSchema.index({ item: 1, createdAt: -1 });
 PisUpdateLogSchema.index({ edited_by: 1, createdAt: -1 });
 PisUpdateLogSchema.index({ brand: 1, createdAt: -1 });
 PisUpdateLogSchema.index({ operation_type: 1, createdAt: -1 });
+PisUpdateLogSchema.index({ "vendors.vendor_id": 1, createdAt: -1 });
+
+PisUpdateLogSchema.pre("validate", async function resolveVendorReferences() {
+  await resolveDocumentVendorFields(this, { array: ["vendors"] });
+});
 
 module.exports = mongoose.model("pis_update_logs", PisUpdateLogSchema);

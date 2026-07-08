@@ -17,6 +17,9 @@ const {
   normalizeSingleItemSizeRemarks,
   normalizeSingleBoxSizeRemarks,
 } = require("./masterSizeRemarks");
+const {
+  normalizeVendorDisplayList,
+} = require("./vendorRef");
 
 const FINAL_PIS_CHECK_ITEM_SELECT = [
   "code",
@@ -307,7 +310,7 @@ const getFinalPisCheckBrandList = (item = {}) =>
   ]);
 
 const getFinalPisCheckVendorList = (item = {}) =>
-  normalizeDistinctValues(Array.isArray(item?.vendors) ? item.vendors : []);
+  normalizeVendorDisplayList(item?.vendors);
 
 const getFinalPisCheckVendorsText = (item = {}) =>
   getFinalPisCheckVendorList(item).join(", ");

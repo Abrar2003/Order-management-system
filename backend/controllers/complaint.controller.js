@@ -23,6 +23,10 @@ const {
   isSuperAdminLikeRole,
   normalizeUserRoleKey,
 } = require("../helpers/userRole");
+const {
+  buildVendorFilter,
+  getVendorName,
+} = require("../helpers/vendorRef");
 
 const QC_COMPLAINT_ROLE_KEYS = new Set([
   "admin",
@@ -37,7 +41,7 @@ const SEARCH_FIELDS = [
   "complaint_no",
   "item_code",
   "brand",
-  "vendor",
+  "vendor.name",
   "category",
   "po",
   "first_comment",
@@ -52,7 +56,7 @@ const getRequestFileCount = (files = []) =>
 const getComplaintFileCount = (files = []) =>
   (Array.isArray(files) ? files.length : 0);
 
-const normalizeText = (value = "") => String(value ?? "").trim();
+const normalizeText = (value = "") => getVendorName(value) || String(value ?? "").trim();
 const escapeRegex = (value = "") =>
   normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const parsePositiveInt = (value, fallback = 1) => {
@@ -220,7 +224,7 @@ const buildComplaintMatch = (query = {}) => {
     match.brand = { $regex: `^${escapeRegex(brand)}$`, $options: "i" };
   }
   if (vendor && vendor.toLowerCase() !== "all") {
-    match.vendor = { $regex: `^${escapeRegex(vendor)}$`, $options: "i" };
+    Object.assign(match, buildVendorFilter({ field: "vendor", vendorId: vendor, vendorName: vendor }));
   }
   if (category && category.toLowerCase() !== "all") {
     match.category = { $regex: `^${escapeRegex(category)}$`, $options: "i" };
@@ -529,7 +533,7 @@ exports.getItemRelatedComplaints = async (req, res) => {
 exports.createComplaint = async (req, res) => {
   try {
     const brand = normalizeText(req.body?.brand);
-    const vendor = normalizeText(req.body?.vendor);
+    const vendor = normalizeText(req.body?.vendor_id ?? req.body?.vendorId ?? req.body?.vendor);
     const itemCode = normalizeText(req.body?.item_code || req.body?.itemCode);
     const po = normalizeText(req.body?.po);
     const category = normalizeCategoryName(req.body?.category);
@@ -653,7 +657,7 @@ exports.updateComplaint = async (req, res) => {
     }
 
     const brand = normalizeText(req.body?.brand);
-    const vendor = normalizeText(req.body?.vendor);
+    const vendor = normalizeText(req.body?.vendor_id ?? req.body?.vendorId ?? req.body?.vendor);
     const itemCode = normalizeText(req.body?.item_code || req.body?.itemCode);
     const po = normalizeText(req.body?.po);
     const category = normalizeCategoryName(req.body?.category);

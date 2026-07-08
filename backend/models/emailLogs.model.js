@@ -1,4 +1,9 @@
 const mongoose = require("mongoose");
+const {
+  coerceVendorValueForSchema,
+  embeddedVendorSchema,
+  resolveDocumentVendorFields,
+} = require("../helpers/vendorRef");
 
 const emailLogsSchema = new mongoose.Schema({
   order_id: {
@@ -14,7 +19,9 @@ const emailLogsSchema = new mongoose.Schema({
     },
   },
   vendor: {
-    name: { type: String, required: true },
+    type: embeddedVendorSchema,
+    required: true,
+    set: coerceVendorValueForSchema,
   },
   log: { type: String, trim: true, default: "" },
   creation_date: { type: Date, default: Date.now },
@@ -23,6 +30,12 @@ const emailLogsSchema = new mongoose.Schema({
     ref: "users",
     required: true,
   },
+});
+
+emailLogsSchema.index({ "vendor.vendor_id": 1, creation_date: -1 });
+
+emailLogsSchema.pre("validate", async function resolveVendorReferences() {
+  await resolveDocumentVendorFields(this, { single: ["vendor"] });
 });
 
 module.exports = mongoose.model("emailLogs", emailLogsSchema);

@@ -61,6 +61,12 @@ const {
   createStorageKey,
   uploadBuffer,
 } = require("../services/wasabiStorage.service");
+const {
+  buildVendorFilter,
+  buildVendorsArrayFilter,
+  getVendorName,
+  normalizeVendorDisplayList,
+} = require("../helpers/vendorRef");
 
 const DEFAULT_PO_STATUS_REPORT_STATUS = "Inspection Done";
 const PO_STATUS_REPORT_STATUS_OPTIONS = [
@@ -135,11 +141,14 @@ const withTimeout = (promise, timeoutMs, label = "operation") =>
 const normalizeDistinctValues = (values = []) =>
   [
     ...new Set(
-      values.map((value) => String(value ?? "").trim()).filter(Boolean),
+      (Array.isArray(values) ? values : [values])
+        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .map((value) => getVendorName(value) || String(value ?? "").trim())
+        .filter(Boolean),
     ),
   ].sort((a, b) => a.localeCompare(b));
 
-const normalizeLooseString = (value) => String(value ?? "").trim();
+const normalizeLooseString = (value) => getVendorName(value) || String(value ?? "").trim();
 const normalizeFilterValues = (value) => {
   const rawValues = Array.isArray(value)
     ? value
@@ -541,7 +550,7 @@ const buildOrderListMatch = ({
   }
 
   if (includeVendor && normalizedVendor) {
-    match.vendor = normalizedVendor;
+    Object.assign(match, buildVendorFilter({ field: "vendor", vendorId: normalizedVendor, vendorName: normalizedVendor }));
   }
 
   if (includeStatus && normalizedStatus) {
@@ -609,7 +618,7 @@ const buildShipmentMatch = ({
   }
 
   if (includeVendor && normalizedVendor) {
-    match.vendor = normalizedVendor;
+    Object.assign(match, buildVendorFilter({ field: "vendor", vendorId: normalizedVendor, vendorName: normalizedVendor }));
   }
 
   if (includeOrderId && normalizedOrderId) {
@@ -1503,8 +1512,14 @@ const loadExistingOrdersForBrandVendorPairs = async (pairs = []) => {
   const existingOrders = await Order.find({
     ...ACTIVE_ORDER_MATCH,
     $or: normalizedPairs.map((entry) => ({
-      brand: entry.brand,
-      vendor: entry.vendor,
+      $and: [
+        { brand: entry.brand },
+        buildVendorFilter({
+          field: "vendor",
+          vendorId: entry.vendor,
+          vendorName: entry.vendor,
+        }),
+      ],
     })),
   })
     .select(
@@ -3174,7 +3189,7 @@ const buildPoBucketDataset = async ({
       sort_order: sortOrder,
     },
     filters: {
-      vendors: normalizeDistinctValues(bucketRows.map((row) => row.vendor)),
+      vendors: normalizeVendorDisplayList(bucketRows.map((row) => row.vendor)),
       brands: normalizeDistinctValues(bucketRows.map((row) => row.brand)),
       statuses: normalizeStatusList(bucketRows.map((row) => row.totalStatus)),
       order_ids: normalizeDistinctValues(bucketRows.map((row) => row.order_id)),
@@ -3410,12 +3425,7 @@ const buildSampleShipmentMatch = ({
     match.brand = { $regex: escapeRegex(normalizedBrand), $options: "i" };
   }
   if (normalizedVendor) {
-    match.vendor = {
-      $elemMatch: {
-        $regex: escapeRegex(normalizedVendor),
-        $options: "i",
-      },
-    };
+    Object.assign(match, buildVendorsArrayFilter({ field: "vendor", vendorId: normalizedVendor, vendorName: normalizedVendor }));
   }
   if (normalizedItemCode) {
     match.$or = [
@@ -3445,7 +3455,7 @@ const buildSampleShipmentMatch = ({
 const mapSamplesToShipmentRows = (samples = []) =>
   samples.flatMap((sample) => {
     const shipmentEntries = Array.isArray(sample?.shipment) ? sample.shipment : [];
-    const vendorLabel = normalizeDistinctValues(sample?.vendor).join(", ");
+    const vendorLabel = normalizeVendorDisplayList(sample?.vendor).join(", ");
 
     return shipmentEntries.map((entry, index) => {
       const parsedShipmentQuantity = Number(entry?.quantity);
@@ -3797,7 +3807,7 @@ const getShipmentDataset = async ({
         ...derivedOrders.map((row) => row?.brand),
         ...samples.map((row) => row?.brand),
       ]),
-      vendors: normalizeDistinctValues([
+      vendors: normalizeVendorDisplayList([
         ...derivedOrders.map((row) => row?.vendor),
         ...samples.map((row) => row?.vendor),
       ]),
@@ -5547,7 +5557,7 @@ exports.getUploadLogs = async (req, res) => {
     }
 
     if (vendor) {
-      match.uploaded_vendors = vendor;
+      Object.assign(match, buildVendorsArrayFilter({ field: "uploaded_vendors", vendorId: vendor, vendorName: vendor }));
     }
 
     if (status) {
@@ -5623,7 +5633,18 @@ exports.getUploadLogs = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: logs,
+      data: logs.map((log) => ({
+        ...log,
+        uploaded_vendors: normalizeVendorDisplayList(log?.uploaded_vendors),
+        vendor_summaries: (Array.isArray(log?.vendor_summaries) ? log.vendor_summaries : []).map((entry) => ({
+          ...entry,
+          vendor: normalizeLooseString(entry?.vendor),
+        })),
+        conflicts: (Array.isArray(log?.conflicts) ? log.conflicts : []).map((entry) => ({
+          ...entry,
+          vendor: normalizeLooseString(entry?.vendor),
+        })),
+      })),
       pagination: {
         page,
         limit,
@@ -5632,7 +5653,7 @@ exports.getUploadLogs = async (req, res) => {
       },
       filters: {
         brands: normalizeDistinctValues(brandsRaw),
-        vendors: normalizeDistinctValues(vendorsRaw),
+        vendors: normalizeVendorDisplayList(vendorsRaw),
         statuses: normalizeDistinctValues(statusesRaw),
       },
       summary,
@@ -5669,7 +5690,7 @@ exports.getOrderEditLogs = async (req, res) => {
     }
 
     if (vendor) {
-      match.vendor = vendor;
+      Object.assign(match, buildVendorFilter({ field: "vendor", vendorId: vendor, vendorName: vendor }));
     }
 
     if (orderId) {
@@ -5718,7 +5739,10 @@ exports.getOrderEditLogs = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: logs,
+      data: logs.map((log) => ({
+        ...log,
+        vendor: normalizeLooseString(log?.vendor),
+      })),
       pagination: {
         page,
         limit,
@@ -5727,7 +5751,7 @@ exports.getOrderEditLogs = async (req, res) => {
       },
       filters: {
         brands: normalizeDistinctValues(brandsRaw),
-        vendors: normalizeDistinctValues(vendorsRaw),
+        vendors: normalizeVendorDisplayList(vendorsRaw),
         operation_types: normalizeDistinctValues(operationsRaw),
       },
       summary: {
@@ -5805,7 +5829,7 @@ exports.getPoStatusReport = async (req, res) => {
       reportMatch.brand = selectedBrand;
     }
     if (selectedVendor) {
-      reportMatch.vendor = selectedVendor;
+      Object.assign(reportMatch, buildVendorFilter({ field: "vendor", vendorId: selectedVendor, vendorName: selectedVendor }));
     }
     const scopedReportMatch = applyDataAccessMatch(reportMatch, req.user);
 
@@ -6000,7 +6024,7 @@ exports.getPoStatusReport = async (req, res) => {
         vendor: selectedVendor || "",
         status: selectedStatus,
         brand_options: normalizeDistinctValues(brandOptionsRaw),
-        vendor_options: normalizeDistinctValues(vendorOptionsRaw),
+        vendor_options: normalizeVendorDisplayList(vendorOptionsRaw),
         status_options: [...PO_STATUS_REPORT_STATUS_OPTIONS],
       },
       summary: {
@@ -7670,7 +7694,7 @@ const buildReformedDelayedPoReportDataset = async ({
       brands: normalizeDistinctValues(
         brandFilterSource.map((row) => row?.brand),
       ),
-      vendors: normalizeDistinctValues(
+      vendors: normalizeVendorDisplayList(
         brandFilteredRows.map((row) => row?.vendor),
       ),
       order_ids: normalizeDistinctValues(
@@ -8162,7 +8186,7 @@ const buildPendingPoReportDataset = async ({
       vendor: selectedVendor,
       order_id: selectedOrderId,
       brand_options: normalizeDistinctValues(allRows.map((row) => row?.brand)),
-      vendor_options: normalizeDistinctValues(allRows.map((row) => row?.vendor)),
+      vendor_options: normalizeVendorDisplayList(allRows.map((row) => row?.vendor)),
       po_options: normalizeDistinctValues(allRows.map((row) => row?.order_id)),
     },
     summary: {
@@ -9128,7 +9152,7 @@ const buildPackedGoodsDataset = async ({
     rows,
     filters: {
       brands: normalizeDistinctValues(brandFilterSource.map((row) => row?.brand)),
-      vendors: normalizeDistinctValues(brandFilteredRows.map((row) => row?.vendor)),
+      vendors: normalizeVendorDisplayList(brandFilteredRows.map((row) => row?.vendor)),
       order_ids: normalizeDistinctValues(
         brandVendorFilteredRows.map((row) => row?.order_id),
       ),
@@ -9774,11 +9798,14 @@ exports.editOrder = async (req, res) => {
     const oldGroup = {
       order_id: order.order_id,
       brand: order.brand,
-      vendor: order.vendor,
+      vendor: normalizeLooseString(order.vendor),
     };
 
     const hasBrand = hasOwn(payload, "brand");
-    const hasVendor = hasOwn(payload, "vendor");
+    const hasVendor =
+      hasOwn(payload, "vendor") ||
+      hasOwn(payload, "vendor_id") ||
+      hasOwn(payload, "vendorId");
     const hasItemCode = hasOwn(payload, "item_code");
     const hasDescription = hasOwn(payload, "description");
     const hasQuantity = hasOwn(payload, "quantity");
@@ -9816,9 +9843,13 @@ exports.editOrder = async (req, res) => {
     const nextBrand = hasBrand
       ? String(payload.brand ?? "").trim()
       : String(order.brand || "").trim();
-    const nextVendor = hasVendor
-      ? String(payload.vendor ?? "").trim()
-      : String(order.vendor || "").trim();
+    const nextVendor = hasOwn(payload, "vendor_id")
+      ? payload.vendor_id
+      : hasOwn(payload, "vendorId")
+        ? payload.vendorId
+        : hasVendor
+          ? payload.vendor
+          : order.vendor;
     const nextItemCode = hasItemCode
       ? String(payload.item_code ?? "").trim()
       : String(order?.item?.item_code || "").trim();
@@ -9838,7 +9869,7 @@ exports.editOrder = async (req, res) => {
       return res.status(400).json({ message: "brand is required" });
     }
 
-    if (!nextVendor) {
+    if (!normalizeLooseString(nextVendor)) {
       return res.status(400).json({ message: "vendor is required" });
     }
 
@@ -10080,16 +10111,16 @@ exports.editOrder = async (req, res) => {
     const newGroup = {
       order_id: order.order_id,
       brand: order.brand,
-      vendor: order.vendor,
+      vendor: normalizeLooseString(order.vendor),
     };
 
     const groupMap = new Map();
     groupMap.set(
-      `${oldGroup.order_id}__${oldGroup.brand}__${oldGroup.vendor}`,
+      `${oldGroup.order_id}__${oldGroup.brand}__${normalizeLooseString(oldGroup.vendor)}`,
       oldGroup,
     );
     groupMap.set(
-      `${newGroup.order_id}__${newGroup.brand}__${newGroup.vendor}`,
+      `${newGroup.order_id}__${newGroup.brand}__${normalizeLooseString(newGroup.vendor)}`,
       newGroup,
     );
     const groupsToSync = [...groupMap.values()];
@@ -10260,7 +10291,10 @@ exports.editCompleteOrder = async (req, res) => {
     const payload = req.body || {};
     const hasOrderId = hasOwn(payload, "order_id");
     const hasBrand = hasOwn(payload, "brand");
-    const hasVendor = hasOwn(payload, "vendor");
+    const hasVendor =
+      hasOwn(payload, "vendor") ||
+      hasOwn(payload, "vendor_id") ||
+      hasOwn(payload, "vendorId");
     const hasOrderDate =
       hasOwn(payload, "order_date") || hasOwn(payload, "orderDate");
     const hasEtd = hasOwn(payload, "ETD") || hasOwn(payload, "etd");
@@ -10278,9 +10312,13 @@ exports.editCompleteOrder = async (req, res) => {
     const nextBrand = hasBrand
       ? String(payload.brand ?? "").trim()
       : String(anchorOrder.brand || "").trim();
-    const nextVendor = hasVendor
-      ? String(payload.vendor ?? "").trim()
-      : String(anchorOrder.vendor || "").trim();
+    const nextVendor = hasOwn(payload, "vendor_id")
+      ? payload.vendor_id
+      : hasOwn(payload, "vendorId")
+        ? payload.vendorId
+        : hasVendor
+          ? payload.vendor
+          : anchorOrder.vendor;
 
     const rawOrderDate = hasOwn(payload, "order_date")
       ? payload.order_date
@@ -10293,7 +10331,7 @@ exports.editCompleteOrder = async (req, res) => {
     if (!nextBrand) {
       return res.status(400).json({ message: "brand is required" });
     }
-    if (!nextVendor) {
+    if (!normalizeLooseString(nextVendor)) {
       return res.status(400).json({ message: "vendor is required" });
     }
 
@@ -10383,7 +10421,7 @@ exports.editCompleteOrder = async (req, res) => {
       const oldGroup = {
         order_id: String(orderDoc?.order_id || "").trim(),
         brand: String(orderDoc?.brand || "").trim(),
-        vendor: String(orderDoc?.vendor || "").trim(),
+        vendor: normalizeLooseString(orderDoc?.vendor),
       };
       oldGroupMap.set(
         `${oldGroup.order_id}__${oldGroup.brand}__${oldGroup.vendor}`,
@@ -10424,11 +10462,11 @@ exports.editCompleteOrder = async (req, res) => {
     const newGroup = {
       order_id: nextOrderId,
       brand: nextBrand,
-      vendor: nextVendor,
+      vendor: normalizeLooseString(nextVendor),
     };
     const groupMap = new Map(oldGroupMap);
     groupMap.set(
-      `${newGroup.order_id}__${newGroup.brand}__${newGroup.vendor}`,
+      `${newGroup.order_id}__${newGroup.brand}__${normalizeLooseString(newGroup.vendor)}`,
       newGroup,
     );
     const groupsToSync = [...groupMap.values()];
@@ -10658,7 +10696,7 @@ exports.getArchivedOrders = async (req, res) => {
 
     const match = { archived: true };
     if (vendor) {
-      match.vendor = vendor;
+      Object.assign(match, buildVendorFilter({ field: "vendor", vendorId: vendor, vendorName: vendor }));
     }
     if (brand) {
       match.brand = brand;
@@ -10694,7 +10732,10 @@ exports.getArchivedOrders = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: rowsWithRestoreStatus,
+      data: rowsWithRestoreStatus.map((row) => ({
+        ...row,
+        vendor: normalizeLooseString(row?.vendor),
+      })),
       pagination: {
         page,
         limit,
@@ -10702,7 +10743,7 @@ exports.getArchivedOrders = async (req, res) => {
         totalRecords,
       },
       filters: {
-        vendors: normalizeDistinctValues(vendorsRaw),
+        vendors: normalizeVendorDisplayList(vendorsRaw),
         brands: normalizeDistinctValues(brandsRaw),
       },
     });
@@ -11131,8 +11172,19 @@ exports.reSync = async (req, res) => {
         $match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
       },
       {
+        $addFields: {
+          vendor_display_name: {
+            $cond: [
+              { $eq: [{ $type: "$vendor" }, "object"] },
+              "$vendor.name",
+              "$vendor",
+            ],
+          },
+        },
+      },
+      {
         $group: {
-          _id: { order_id: "$order_id", brand: "$brand", vendor: "$vendor" },
+          _id: { order_id: "$order_id", brand: "$brand", vendor: "$vendor_display_name" },
         },
       },
       {
