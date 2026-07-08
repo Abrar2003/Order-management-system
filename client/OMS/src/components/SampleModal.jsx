@@ -368,8 +368,11 @@ const SampleModal = ({
     };
   };
 
-  const createSample = async () => {
-    const payload = buildSamplePayload();
+  const createSample = async (extraPayload = {}) => {
+    const payload = {
+      ...buildSamplePayload(),
+      ...extraPayload,
+    };
     const response = await api.post("/samples", payload);
     return response?.data?.data || null;
   };
@@ -398,6 +401,7 @@ const SampleModal = ({
         invoice_number: shippingContext.invoice_number || "",
         stuffed_by: stuffedBy,
         quantity,
+        remaining_remarks: String(remarks || "").trim(),
         remarks: String(remarks || "").trim(),
       };
     }
@@ -426,6 +430,7 @@ const SampleModal = ({
       invoice_number: String(invoiceNumber || "").trim(),
       stuffed_by: stuffedBy,
       quantity,
+      remaining_remarks: String(remarks || "").trim(),
       remarks: String(remarks || "").trim(),
     };
   };
@@ -442,11 +447,17 @@ const SampleModal = ({
         return;
       }
 
-      let sampleToShip = selectedSample;
       if (shippingMode === "create") {
-        sampleToShip = await createSample();
+        const shipmentPayload = buildShipmentPayload();
+        const sampleToShip = await createSample({
+          shipment: [shipmentPayload],
+        });
+        onShipped?.(sampleToShip);
+        onClose?.();
+        return;
       }
 
+      let sampleToShip = selectedSample;
       const sampleId = String(sampleToShip?._id || "").trim();
       if (!sampleId) {
         throw new Error("Select an existing sample or create a new one.");

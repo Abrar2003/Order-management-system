@@ -20,19 +20,24 @@ const vendorSchema = new mongoose.Schema({
   country: {
     type: String,
     trim: true,
-    default: "",
+    default: "India",
+    enum: ["India", "China", "Vietnam"],
   },
-  vendor_code: [{
-    _id: false,
-    brand: { type: String, trim: true, default: "" },
-    code: { type: String, trim: true, default: "" },
-  }],
-  contact_person: [{
-    name: { type: String },
-    email: { type: String },
-    phone: { type: String },
-    type: { type: String, enum: ['merchant', 'shipment'] },
-  }],
+  vendor_code: [
+    {
+      _id: false,
+      brand: { type: String, trim: true, default: "" },
+      code: { type: String, trim: true, default: "" },
+    },
+  ],
+  contact_person: [
+    {
+      name: { type: String },
+      email: { type: String },
+      phone: { type: String },
+      type: { type: String, enum: ["merchant", "shipment"] },
+    },
+  ],
   is_active: {
     type: Boolean,
     default: true,
