@@ -11,7 +11,7 @@ const {
 const {
   buildVendorFilter,
   getVendorId,
-  getVendorName,
+  normalizeVendorText,
 } = require("../helpers/vendorRef");
 
 const DEFAULT_PAGE_LIMIT = 30;
@@ -20,7 +20,7 @@ const PAGE_LIMIT_OPTIONS = [7, 30, 50, 90];
 const hasOwn = (value, key) =>
   Object.prototype.hasOwnProperty.call(value || {}, key);
 
-const normalizeText = (value = "") => getVendorName(value) || String(value ?? "").trim();
+const normalizeText = (value = "") => normalizeVendorText(value);
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsedValue = Number.parseInt(value, 10);

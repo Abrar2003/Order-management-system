@@ -3,7 +3,7 @@ import { applyRectifiedRows, rectifyPdfOrders } from "../services/orders.service
 import PreviousOrderCheckModal from "./PreviousOrderCheckModal";
 import { formatDateDDMMYYYY } from "../utils/date";
 import useBrandOptions from "../hooks/useBrandOptions";
-import { normalizeTextOptions } from "../utils/optionText";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const decodeBase64ToBlob = (base64String, mimeType) => {
@@ -95,15 +95,18 @@ const RectifyPdfModal = ({
   };
 
   const handlePreview = async () => {
+    const normalizedBrand = String(brand || "").trim();
+    const normalizedVendor = getOptionText(vendor);
+
     if (!file) {
       setError("Please select a PDF file.");
       return;
     }
-    if (!String(brand || "").trim()) {
+    if (!normalizedBrand) {
       setError("Brand is required.");
       return;
     }
-    if (!String(vendor || "").trim()) {
+    if (!normalizedVendor) {
       setError("Vendor is required.");
       return;
     }
@@ -117,8 +120,8 @@ const RectifyPdfModal = ({
 
       const response = await rectifyPdfOrders({
         file,
-        brand,
-        vendor,
+        brand: normalizedBrand,
+        vendor: normalizedVendor,
         applyChanges: false,
       });
 
@@ -170,8 +173,19 @@ const RectifyPdfModal = ({
 
   const handleApplyChecked = async () => {
     const rowsToApply = selectableRows.filter((row) => checkedRows[row.row_id]);
+    const normalizedBrand = String(brand || "").trim();
+    const normalizedVendor = getOptionText(vendor);
+
     if (rowsToApply.length === 0) {
       setError("Please check at least one row to update.");
+      return;
+    }
+    if (!normalizedBrand) {
+      setError("Brand is required.");
+      return;
+    }
+    if (!normalizedVendor) {
+      setError("Vendor is required.");
       return;
     }
 
@@ -180,8 +194,8 @@ const RectifyPdfModal = ({
       setError("");
       const response = await applyRectifiedRows({
         rows: rowsToApply,
-        brand,
-        vendor,
+        brand: normalizedBrand,
+        vendor: normalizedVendor,
         sourceFileName: file?.name || "",
       });
 

@@ -9,7 +9,7 @@ const {
 } = require("./shipmentCbmAllocation.service");
 const {
   buildVendorFilter,
-  getVendorName,
+  normalizeVendorText,
 } = require("../helpers/vendorRef");
 
 const INCLUDED_STATUSES = Object.freeze(["Partial Shipped", "Shipped"]);
@@ -51,7 +51,7 @@ const MONTH_NAMES_SHORT = Object.freeze([
 
 const pad2 = (value) => String(value).padStart(2, "0");
 
-const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
+const normalizeText = (value) => normalizeVendorText(value);
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
 
 const normalizeOptionalFilter = (value) => {

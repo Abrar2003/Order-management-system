@@ -8,9 +8,20 @@ const OPTION_TEXT_KEYS = [
   "value",
 ];
 
+const INVALID_OPTION_TEXT_VALUES = new Set([
+  "[object Object]",
+  "undefined",
+  "null",
+]);
+
+const normalizeOptionText = (value) => {
+  const text = String(value ?? "").trim();
+  return INVALID_OPTION_TEXT_VALUES.has(text) ? "" : text;
+};
+
 export const getOptionText = (value) => {
   if (typeof value === "string" || typeof value === "number") {
-    return String(value).trim();
+    return normalizeOptionText(value);
   }
 
   if (!value || typeof value !== "object" || Array.isArray(value)) {

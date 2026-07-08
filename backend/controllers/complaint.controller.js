@@ -25,7 +25,7 @@ const {
 } = require("../helpers/userRole");
 const {
   buildVendorFilter,
-  getVendorName,
+  normalizeVendorText,
 } = require("../helpers/vendorRef");
 
 const QC_COMPLAINT_ROLE_KEYS = new Set([
@@ -56,7 +56,7 @@ const getRequestFileCount = (files = []) =>
 const getComplaintFileCount = (files = []) =>
   (Array.isArray(files) ? files.length : 0);
 
-const normalizeText = (value = "") => getVendorName(value) || String(value ?? "").trim();
+const normalizeText = (value = "") => normalizeVendorText(value);
 const escapeRegex = (value = "") =>
   normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const parsePositiveInt = (value, fallback = 1) => {

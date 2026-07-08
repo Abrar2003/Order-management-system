@@ -12,6 +12,7 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
+import { normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const DEFAULT_TAB = "summary";
@@ -114,12 +115,7 @@ const getDateRangeFromSearchParams = (searchParams, timelineValue) => {
 };
 
 const mergeTextOptions = (...groups) =>
-  [...new Set(
-    groups
-      .flatMap((group) => (Array.isArray(group) ? group : []))
-      .map((entry) => String(entry || "").trim())
-      .filter(Boolean),
-  )].sort((left, right) => left.localeCompare(right));
+  normalizeTextOptions(groups.flatMap((group) => (Array.isArray(group) ? group : [])));
 
 const mergeInspectorOptions = (...groups) => {
   const optionMap = new Map();

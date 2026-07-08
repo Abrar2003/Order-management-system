@@ -103,8 +103,8 @@ const {
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const {
   buildVendorFilter,
-  getVendorName,
   normalizeVendorDisplayList,
+  normalizeVendorText,
 } = require("../helpers/vendorRef");
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
@@ -205,7 +205,7 @@ const toNormalizedCbmString = (value) => {
   return fixed.replace(/\.?0+$/, "") || "0";
 };
 
-const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
+const normalizeText = (value) => normalizeVendorText(value);
 const normalizeComparableBarcode = (value) => {
   const normalized = normalizeText(value).replace(/\s+/g, "");
   if (!normalized) return "";

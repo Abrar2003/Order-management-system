@@ -5,7 +5,7 @@ const { parseDateOnly, toDateOnlyIso } = require("../helpers/dateOnly");
 const {
   buildVendorFilter,
   getVendorId,
-  getVendorName,
+  normalizeVendorText,
 } = require("../helpers/vendorRef");
 
 function getCalendarClient() {
@@ -45,7 +45,7 @@ function addDays(dateOnlyISO, days) {
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const normalizeString = (value) => getVendorName(value) || String(value ?? "").trim();
+const normalizeString = (value) => normalizeVendorText(value);
 const OMS_KEY_PREFIX = "oms:";
 
 const buildOrderGroupMatch = ({ order_id, brand, vendor } = {}) => ({

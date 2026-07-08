@@ -33,7 +33,7 @@ const {
   generateThumbnailForStoredQcImage,
 } = require("../services/qcImageThumbnail.service");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
-const { getVendorName } = require("../helpers/vendorRef");
+const { normalizeVendorText } = require("../helpers/vendorRef");
 
 const ACTIVE_ORDER_MATCH = {
   $and: [{ archived: { $ne: true } }, { status: { $ne: "Cancelled" } }],
@@ -42,7 +42,7 @@ const ACTIVE_ORDER_MATCH = {
 let workers = [];
 const workerLogAt = new Map();
 
-const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
+const normalizeText = (value) => normalizeVendorText(value);
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ""), 10);

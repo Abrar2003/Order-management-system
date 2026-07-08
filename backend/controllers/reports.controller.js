@@ -20,10 +20,10 @@ const {
 } = require("../helpers/commonInspectionErrors");
 const {
   buildVendorFilter,
-  getVendorName,
+  normalizeVendorText,
 } = require("../helpers/vendorRef");
 
-const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
+const normalizeText = (value) => normalizeVendorText(value);
 const escapeRegex = (value = "") =>
   String(value)
     .trim()

@@ -18,8 +18,8 @@ const {
   normalizeSingleBoxSizeRemarks,
 } = require("./masterSizeRemarks");
 const {
-  getVendorName,
   normalizeVendorDisplayList,
+  normalizeVendorText,
 } = require("./vendorRef");
 
 const FINAL_PIS_CHECK_ITEM_SELECT = [
@@ -101,7 +101,7 @@ const BOX_REMARK_ORDER = Object.freeze([
   "box3",
   "box4",
 ]);
-const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
+const normalizeText = (value) => normalizeVendorText(value);
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
 
 const normalizeDistinctValues = (values = []) =>

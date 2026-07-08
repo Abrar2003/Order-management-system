@@ -102,9 +102,20 @@ const escapeRegex = (value = "") =>
     .trim()
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const INVALID_TEXT_VALUES = new Set([
+  "[object Object]",
+  "undefined",
+  "null",
+]);
+
+const normalizePrimitiveString = (value) => {
+  const text = String(value ?? "").trim();
+  return INVALID_TEXT_VALUES.has(text) ? "" : text;
+};
+
 const normalizeFilterValue = (value) => {
   if (value === undefined || value === null) return null;
-  const cleaned = String(value).trim();
+  const cleaned = normalizePrimitiveString(value);
   if (!cleaned) return null;
   const lowered = cleaned.toLowerCase();
   if (lowered === "all" || lowered === "undefined" || lowered === "null") {
@@ -143,12 +154,12 @@ const normalizeDistinctValues = (values = []) =>
     ...new Set(
       (Array.isArray(values) ? values : [values])
         .flatMap((value) => (Array.isArray(value) ? value : [value]))
-        .map((value) => getVendorName(value) || String(value ?? "").trim())
+        .map((value) => getVendorName(value) || normalizePrimitiveString(value))
         .filter(Boolean),
     ),
   ].sort((a, b) => a.localeCompare(b));
 
-const normalizeLooseString = (value) => getVendorName(value) || String(value ?? "").trim();
+const normalizeLooseString = (value) => getVendorName(value) || normalizePrimitiveString(value);
 const normalizeFilterValues = (value) => {
   const rawValues = Array.isArray(value)
     ? value
@@ -8959,16 +8970,9 @@ exports.getOrderSummary = async (req, res) => {
       Order.distinct("brand", scopedActiveMatch),
     ]);
 
-    const normalizeList = (values) =>
-      values
-        .filter((value) => value !== undefined && value !== null)
-        .map((value) => String(value).trim())
-        .filter((value) => value.length > 0)
-        .sort((a, b) => a.localeCompare(b));
-
     return res.status(200).json({
-      vendors: normalizeList(vendors),
-      brands: normalizeList(brands),
+      vendors: normalizeVendorDisplayList(vendors),
+      brands: normalizeDistinctValues(brands),
     });
   } catch (error) {
     console.error("Get Order Summary Error:", error);

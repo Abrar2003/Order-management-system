@@ -118,8 +118,8 @@ const {
 const {
   buildVendorsArrayFilter,
   getVendorId,
-  getVendorName,
   normalizeVendorDisplayList,
+  normalizeVendorText,
 } = require("../helpers/vendorRef");
 
 const escapeRegex = (value = "") =>
@@ -147,8 +147,7 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key
 
 const normalizeTextField = (value) => String(value ?? "").trim();
 
-const normalizeVendorTextField = (value) =>
-  getVendorName(value) || normalizeTextField(value);
+const normalizeVendorTextField = (value) => normalizeVendorText(value);
 
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -180,7 +179,7 @@ const normalizeVendorPayloadList = (payload = {}) => {
       return splitVendorText(entry);
     })
     .map((entry) => {
-      const key = String(getVendorId(entry) || getVendorName(entry) || entry || "")
+      const key = normalizeTextField(getVendorId(entry) || normalizeVendorText(entry))
         .trim()
         .toLowerCase();
       if (!key || seen.has(key)) return null;

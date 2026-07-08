@@ -24,6 +24,7 @@ import {
   CONTAINER_FORMAT_ERROR_MESSAGE,
   isValidContainerNumber,
 } from "../utils/container";
+import { normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const toSafeNumber = (value) => {
@@ -106,7 +107,7 @@ const Container = () => {
     try {
       setLoadingVendors(true);
       const res = await api.get("/orders/brands-and-vendors");
-      setVendors(Array.isArray(res?.data?.vendors) ? res.data.vendors : []);
+      setVendors(normalizeTextOptions(res?.data?.vendors));
     } catch (err) {
       setVendors([]);
       setError(toErrorMessage(err, "Failed to load vendors."));

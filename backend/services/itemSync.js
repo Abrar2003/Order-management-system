@@ -8,10 +8,9 @@ const {
   detectBoxPackagingMode,
 } = require("../helpers/boxMeasurement");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
-const { getVendorName } = require("../helpers/vendorRef");
+const { normalizeVendorText } = require("../helpers/vendorRef");
 
 const normalizeText = (value) => String(value ?? "").trim();
-const normalizeVendorText = (value) => getVendorName(value) || normalizeText(value);
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
 const toSafeNumber = (value, fallback = 0) => {

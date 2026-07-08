@@ -6,8 +6,8 @@ const {
 } = require("./boxMeasurement");
 const { formatEan13BarcodeDisplay } = require("./barcodeFormat");
 const {
-  getVendorName,
   normalizeVendorDisplayList,
+  normalizeVendorText,
 } = require("./vendorRef");
 
 const AUDIT_SCOPES = Object.freeze({
@@ -18,7 +18,7 @@ const AUDIT_SCOPES = Object.freeze({
 });
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
-const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
+const normalizeText = (value) => normalizeVendorText(value);
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
 const normalizeId = (value) => normalizeText(value?._id || value?.id || value);
 

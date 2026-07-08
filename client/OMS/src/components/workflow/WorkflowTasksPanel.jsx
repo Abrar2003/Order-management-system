@@ -25,6 +25,7 @@ import {
 import { useRememberSearchParams } from "../../hooks/useRememberSearchParams";
 import useWorkflowRealtime from "../../hooks/useWorkflowRealtime";
 import { formatDateOnlyIST, formatDateTimeIST } from "../../utils/date";
+import { getOptionText } from "../../utils/optionText";
 import { areSearchParamsEquivalent } from "../../utils/searchParams";
 import HoverPortal from "../HoverPortal";
 import WorkflowBatchBulkActionsModal from "./WorkflowBatchBulkActionsModal";
@@ -45,7 +46,7 @@ const normalizeText = (value) => String(value ?? "").trim();
 const normalizeDistinctValues = (values = []) =>
   [
     ...new Set(
-      values.map((value) => String(value ?? "").trim()).filter(Boolean),
+      values.map(getOptionText).filter(Boolean),
     ),
   ].sort((left, right) => left.localeCompare(right));
 

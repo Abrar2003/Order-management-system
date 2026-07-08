@@ -122,7 +122,7 @@ router.get(
 );
 
 // List order's brands and vendors
-router.get("/brands-and-vendors", authenticate, requirePermission("orders", "view"), cacheRoute("options", MEDIUM_CACHE_TTL), getOrderSummary);
+router.get("/brands-and-vendors", authenticate, requirePermission("orders", "view"), cacheRoute("options-v2", MEDIUM_CACHE_TTL), getOrderSummary);
 router.get("/packed-goods", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getPackedGoods);
 router.get(
   "/packed-goods/export",

@@ -13,11 +13,11 @@ const {
 } = require("../services/wasabiStorage.service");
 const {
   buildVendorsArrayFilter,
-  getVendorName,
   normalizeVendorDisplayList,
+  normalizeVendorText,
 } = require("../helpers/vendorRef");
 
-const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
+const normalizeText = (value) => normalizeVendorText(value);
 
 const normalizeCode = (value) =>
   String(value ?? "")

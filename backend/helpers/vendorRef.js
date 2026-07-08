@@ -6,7 +6,16 @@ const normalizeVendorName = (value = "") =>
     .toLowerCase()
     .replace(/\s+/g, " ");
 
-const normalizeText = (value = "") => String(value ?? "").trim();
+const INVALID_VENDOR_TEXT_VALUES = new Set([
+  "[object Object]",
+  "undefined",
+  "null",
+]);
+
+const normalizeText = (value = "") => {
+  const text = String(value ?? "").trim();
+  return INVALID_VENDOR_TEXT_VALUES.has(text) ? "" : text;
+};
 
 // Vendor refs are intentionally stored as plain mixed values at the Mongoose
 // layer. Older production documents may still contain vendor strings, and
@@ -23,13 +32,16 @@ const getVendorModel = () => require("../models/vendor.model");
 const getVendorName = (vendor) => {
   if (typeof vendor === "string") return normalizeText(vendor);
   if (!isObject(vendor)) return "";
-  return normalizeText(
+  const directName = normalizeText(
     vendor.name ||
       vendor.vendor_name ||
       vendor.vendorName ||
       vendor.label ||
       vendor.value,
   );
+  if (directName) return directName;
+  if (vendor.vendor && vendor.vendor !== vendor) return getVendorName(vendor.vendor);
+  return "";
 };
 
 const getVendorId = (vendor) => {
@@ -299,6 +311,8 @@ const buildVendorAccessCondition = (fields = [], vendors = []) => {
 
 const vendorToDisplayName = (vendor) => getVendorName(vendor);
 
+const normalizeVendorText = (value) => getVendorName(value) || normalizeText(value);
+
 const normalizeVendorDisplayList = (vendors = []) =>
   [
     ...new Set(
@@ -343,6 +357,7 @@ module.exports = {
   isEmbeddedVendor,
   normalizeVendorDisplayList,
   normalizeVendorName,
+  normalizeVendorText,
   resolveDocumentVendorFields,
   resolveVendorFromInput,
   resolveVendorsFromInput,
