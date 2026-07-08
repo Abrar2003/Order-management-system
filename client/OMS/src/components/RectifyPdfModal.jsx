@@ -3,6 +3,7 @@ import { applyRectifiedRows, rectifyPdfOrders } from "../services/orders.service
 import PreviousOrderCheckModal from "./PreviousOrderCheckModal";
 import { formatDateDDMMYYYY } from "../utils/date";
 import useBrandOptions from "../hooks/useBrandOptions";
+import { normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const decodeBase64ToBlob = (base64String, mimeType) => {
@@ -65,14 +66,7 @@ const RectifyPdfModal = ({
   } = useBrandOptions([brand]);
 
   const availableVendorOptions = useMemo(
-    () =>
-      [
-        ...new Set(
-          [...(Array.isArray(vendorOptions) ? vendorOptions : []), vendor]
-            .map((value) => String(value || "").trim())
-            .filter(Boolean),
-        ),
-      ].sort((left, right) => left.localeCompare(right)),
+    () => normalizeTextOptions([...(Array.isArray(vendorOptions) ? vendorOptions : []), vendor]),
     [vendorOptions, vendor],
   );
 

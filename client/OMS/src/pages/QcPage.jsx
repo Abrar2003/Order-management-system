@@ -21,6 +21,7 @@ import {
 } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
 import { canTransferLatestRequestToday } from "../utils/qcRequests";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const toSafeNumber = (value) => {
@@ -328,7 +329,7 @@ const QCPage = () => {
       setTotalPages(res.data?.pagination?.totalPages || 1);
 
       const backendFilters = res.data?.filters || {};
-      setVendors(Array.isArray(backendFilters.vendors) ? backendFilters.vendors : []);
+      setVendors(normalizeTextOptions(backendFilters.vendors));
       setOrders(Array.isArray(backendFilters.orders) ? backendFilters.orders : []);
       setItemCodes(Array.isArray(backendFilters.item_codes) ? backendFilters.item_codes : []);
     } catch (err) {
@@ -1057,7 +1058,7 @@ const QCPage = () => {
                               "N/A"}
                           </td>
                           <td>
-                            {qc?.order_meta?.vendor || qc?.order?.vendor || "N/A"}
+                            {getOptionText(qc?.order_meta?.vendor || qc?.order?.vendor) || "N/A"}
                           </td>
                           <td>{qc?.item?.item_code || "N/A"}</td>
                           <td>{formatDateDDMMYYYY(qc?.request_date)}</td>

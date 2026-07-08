@@ -17,6 +17,7 @@ import {
 } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { getOptionText } from "../utils/optionText";
 import "../App.css";
 
 const DEFAULT_ENTITY_FILTER = "all";
@@ -213,11 +214,14 @@ const DailySummary = () => {
   const visibleVendors = useMemo(
     () =>
       (Array.isArray(report?.vendors) ? report.vendors : [])
-        .map((vendorEntry, index) => ({
-          vendorKey: String(vendorEntry?.vendor || "").trim() || `vendor-${index}`,
-          vendor: vendorEntry?.vendor || "N/A",
-          items: Array.isArray(vendorEntry?.items) ? vendorEntry.items : [],
-        }))
+        .map((vendorEntry, index) => {
+          const vendorName = getOptionText(vendorEntry?.vendor) || "N/A";
+          return {
+            vendorKey: vendorName !== "N/A" ? vendorName : `vendor-${index}`,
+            vendor: vendorName,
+            items: Array.isArray(vendorEntry?.items) ? vendorEntry.items : [],
+          };
+        })
         .filter((vendorEntry) => vendorEntry.items.length > 0),
     [report?.vendors],
   );

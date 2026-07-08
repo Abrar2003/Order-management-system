@@ -7,6 +7,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { getOptionText } from "../utils/optionText";
 import "../App.css";
 
 const DEFAULT_TODAY_ETD_SORT_BY = "ETD";
@@ -27,6 +28,7 @@ const parseTodayEtdSortOrder = (value, sortBy = DEFAULT_TODAY_ETD_SORT_BY) => {
 const getBrandName = (brandObj) =>
   String(brandObj?.name || brandObj?.brand || "").trim();
 const getBrandKey = (value) => String(value || "").trim().toLowerCase();
+const getVendorSummaryName = (summary = {}) => getOptionText(summary?.vendor) || "N/A";
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -131,7 +133,7 @@ const Home = () => {
   const sortedVendorSummary = useMemo(
     () =>
       [...vendorSummary].sort((a, b) =>
-        String(a?.vendor || "").localeCompare(String(b?.vendor || ""), undefined, {
+        getVendorSummaryName(a).localeCompare(getVendorSummaryName(b), undefined, {
           sensitivity: "base",
           numeric: true,
         }),
@@ -414,47 +416,52 @@ const Home = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedVendorSummary.map((summary) => (
-                      <tr key={summary.vendor}>
-                        <td>{summary.vendor}</td>
+                    {sortedVendorSummary.map((summary) => {
+                      const vendorName = getVendorSummaryName(summary);
+                      const brandPath = encodeURIComponent(selectedBrand);
+                      const vendorPath = encodeURIComponent(vendorName);
+                      return (
+                      <tr key={vendorName}>
+                        <td>{vendorName}</td>
                         <td
                           className="table-clickable"
-                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/all`)}
+                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/all`)}
                         >
                           {summary.totalOrders}
                         </td>
                         <td
                           className="table-clickable"
-                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Pending`)}
+                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/Pending`)}
                         >
                           {toNumber(summary.totalPending)}
                         </td>
                         <td
                           className="table-clickable"
-                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/on-time`)}
+                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/on-time`)}
                         >
                           {summary.totalOnTime ?? 0}
                         </td>
                         <td
                           className="table-clickable"
-                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/delayed`)}
+                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/delayed`)}
                         >
                           {summary.totalDelayedOrders}
                         </td>
                         <td
                           className="table-clickable"
-                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Partial Shipped`)}
+                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/Partial%20Shipped`)}
                         >
                           {summary.totalPartialShipped ?? 0}
                         </td>
                         <td
                           className="table-clickable"
-                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Shipped`)}
+                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/Shipped`)}
                         >
                           {summary.totalShipped ?? 0}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
 
                     {vendorSummary.length === 0 && (
                       <tr>
@@ -568,7 +575,7 @@ const Home = () => {
                               <span className="small fw-semibold">{order?.brand || "N/A"}</span>
                             )}
                           </td>
-                          <td>{order?.vendor || "N/A"}</td>
+                          <td>{getOptionText(order?.vendor) || "N/A"}</td>
                           <td>{order?.order_id || "N/A"}</td>
                           <td>
                             <OrderEtdWithHistory

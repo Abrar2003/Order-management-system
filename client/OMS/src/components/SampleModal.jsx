@@ -29,6 +29,7 @@ import {
   CONTAINER_FORMAT_ERROR_MESSAGE,
   isValidContainerNumber,
 } from "../utils/container";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const createInitialSampleForm = () => ({
@@ -154,6 +155,10 @@ const SampleModal = ({
     brandOptions: availableBrandOptions,
     loadingBrands,
   } = useBrandOptions(brandOptions);
+  const availableVendorOptions = useMemo(
+    () => normalizeTextOptions(vendorOptions),
+    [vendorOptions],
+  );
   const {
     inspectors,
     inspectorById,
@@ -360,7 +365,7 @@ const SampleModal = ({
       name: String(sampleForm.name || "").trim(),
       description: String(sampleForm.description || "").trim(),
       brand: String(sampleForm.brand || "").trim(),
-      vendor: String(sampleForm.vendor || "").trim(),
+      vendor: getOptionText(sampleForm.vendor),
       box_mode: sampleForm.box_mode,
       item_sizes: itemSizesPayload.value,
       box_sizes: boxSizesPayload.value,
@@ -627,7 +632,7 @@ const SampleModal = ({
                       disabled={saving}
                     />
                     <datalist id="sample-vendor-options">
-                      {vendorOptions.map((option) => (
+                      {availableVendorOptions.map((option) => (
                         <option key={option} value={option} />
                       ))}
                     </datalist>

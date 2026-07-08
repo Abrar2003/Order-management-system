@@ -27,7 +27,7 @@ import {
 } from "../utils/clientSort";
 import { formatCbm } from "../utils/cbm";
 import { formatFixedNumber } from "../utils/measurementDisplay";
-import { normalizeTextOptions } from "../utils/optionText";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -224,10 +224,12 @@ const hasItemQcRecord = (item = {}) =>
     ).trim(),
   );
 
-const getVendorNames = (item = {}) =>
-  Array.isArray(item?.vendors) && item.vendors.length > 0
-    ? item.vendors.filter(Boolean).join(", ")
-    : "N/A";
+const getVendorNames = (item = {}) => {
+  const vendors = normalizeTextOptions(
+    Array.isArray(item?.vendors) ? item.vendors : [item?.vendor],
+  );
+  return vendors.length > 0 ? vendors.join(", ") : "N/A";
+};
 
 const getPrimaryBrand = (item = {}) =>
   String(
@@ -238,7 +240,7 @@ const getPrimaryBrand = (item = {}) =>
   ).trim();
 
 const getPrimaryVendor = (item = {}) =>
-  String(Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors[0] : "").trim();
+  getOptionText(Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors[0] : "");
 
 const formatClaimPercentage = (value) => {
   const parsed = Number(value);
@@ -432,9 +434,7 @@ const Items = () => {
         brands: Array.isArray(res?.data?.filters?.brands)
           ? res.data.filters.brands
           : [],
-        vendors: Array.isArray(res?.data?.filters?.vendors)
-          ? res.data.filters.vendors
-          : [],
+        vendors: normalizeTextOptions(res?.data?.filters?.vendors),
         item_codes: Array.isArray(res?.data?.filters?.item_codes)
           ? res.data.filters.item_codes
           : [],

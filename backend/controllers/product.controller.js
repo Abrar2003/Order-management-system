@@ -1,5 +1,6 @@
 const Order = require("../models/order.model");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const { getVendorName } = require("../helpers/vendorRef");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -147,7 +148,7 @@ const processOrderAnalyticsRow = (order = {}) => {
     itemCode: normalizeText(order.itemCode),
     itemName: normalizeText(order.itemName),
     brand: normalizeText(order.brand),
-    vendor: normalizeText(order.vendor),
+    vendor: getVendorName(order.vendor) || normalizeText(order.vendor),
     orderDate: toIsoDateOnly(order.order_date),
     shippingDate: latestShipmentDate ? toIsoDateOnly(latestShipmentDate) : "",
     shippingTimeDays: shippingTimeDays === null ? null : toRoundedNumber(shippingTimeDays, 1),

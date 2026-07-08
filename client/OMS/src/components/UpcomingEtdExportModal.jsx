@@ -5,6 +5,7 @@ import {
 } from "../services/orders.service";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { exportHtmlToPdf } from "../services/pdfExport.service";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const normalizeBrands = (value) => {
@@ -21,12 +22,15 @@ const normalizeBrands = (value) => {
 
 const isAllBrands = (values) => !Array.isArray(values) || values.includes("all");
 
-const buildInitialForm = (defaultFilters = {}) => ({
-  brand: normalizeBrands(defaultFilters?.brand),
-  vendor: String(defaultFilters?.vendor || "").trim() === "all" ? "all" : String(defaultFilters?.vendor || "").trim(),
-  to_date: defaultFilters?.to_date || "",
-  format: "xlsx",
-});
+const buildInitialForm = (defaultFilters = {}) => {
+  const vendor = getOptionText(defaultFilters?.vendor);
+  return {
+    brand: normalizeBrands(defaultFilters?.brand),
+    vendor: !vendor || vendor === "all" ? "all" : vendor,
+    to_date: defaultFilters?.to_date || "",
+    format: "xlsx",
+  };
+};
 
 const parseFileNameFromDisposition = (disposition, fallbackName) => {
   const source = String(disposition || "");
@@ -63,7 +67,7 @@ const exportDatasetAsPdf = async (dataset) => {
     (vendorEntry) =>
       (Array.isArray(vendorEntry?.rows) ? vendorEntry.rows : []).map((row) => ({
         ...row,
-        vendor: vendorEntry?.vendor || "",
+        vendor: getOptionText(vendorEntry?.vendor),
       })),
   );
   const metadata = `Window: ${formatDateDDMMYYYY(filters.report_start_date, "-")} - ${formatDateDDMMYYYY(filters.report_end_date, "-")} · POs: ${summary.upcoming_po_count || 0} · Vendors: ${summary.vendors_count || 0} · Pending: ${summary.pending_count || 0} · Inspected: ${summary.inspection_done_count || 0}`;
@@ -140,11 +144,11 @@ const UpcomingEtdExportModal = ({
     : Array.isArray(filterOptions?.brands)
       ? filterOptions.brands
       : [];
-  const vendors = Array.isArray(filterOptions?.vendor_options)
-    ? filterOptions.vendor_options
-    : Array.isArray(filterOptions?.vendors)
-      ? filterOptions.vendors
-      : [];
+  const vendors = normalizeTextOptions(
+    Array.isArray(filterOptions?.vendor_options)
+      ? filterOptions.vendor_options
+      : filterOptions?.vendors,
+  );
 
   const handleExport = async () => {
     try {

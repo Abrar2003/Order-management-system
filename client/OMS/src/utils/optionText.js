@@ -1,3 +1,13 @@
+const OPTION_TEXT_KEYS = [
+  "name",
+  "vendor_name",
+  "vendorName",
+  "brand",
+  "vendor",
+  "label",
+  "value",
+];
+
 export const getOptionText = (value) => {
   if (typeof value === "string" || typeof value === "number") {
     return String(value).trim();
@@ -7,16 +17,14 @@ export const getOptionText = (value) => {
     return "";
   }
 
-  return String(
-    value.name ||
-      value.vendor_name ||
-      value.vendorName ||
-      value.brand ||
-      value.vendor ||
-      value.label ||
-      value.value ||
-      "",
-  ).trim();
+  for (const key of OPTION_TEXT_KEYS) {
+    const candidate = value[key];
+    if (candidate === value) continue;
+    const text = getOptionText(candidate);
+    if (text) return text;
+  }
+
+  return "";
 };
 
 export const normalizeTextOptions = (values = []) =>

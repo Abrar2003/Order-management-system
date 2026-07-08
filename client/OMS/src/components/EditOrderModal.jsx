@@ -15,7 +15,7 @@ import {
   SHIPPED_BY_VENDOR_OPTION,
   useShippingInspectors,
 } from "../hooks/useShippingInspectors";
-import { normalizeTextOptions } from "../utils/optionText";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import { normalizeShipmentCheckedDraft } from "../utils/shipmentRows";
 import "../App.css";
 
@@ -105,7 +105,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
 
   const [form, setForm] = useState({
     brand: String(order?.brand ?? ""),
-    vendor: String(order?.vendor ?? ""),
+    vendor: getOptionText(order?.vendor),
     quantity: String(order?.quantity ?? ""),
     item_code: String(order?.item?.item_code ?? ""),
     description: String(order?.item?.description ?? ""),
@@ -232,7 +232,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
 
   const validateForm = () => {
     const brand = String(form.brand || "").trim();
-    const vendor = String(form.vendor || "").trim();
+    const vendor = getOptionText(form.vendor);
     const itemCode = String(form.item_code || "").trim();
 
     if (!brand) return "brand is required";
@@ -318,7 +318,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
 
     const payload = {
       brand: String(form.brand || "").trim(),
-      vendor: String(form.vendor || "").trim(),
+      vendor: getOptionText(form.vendor),
       item_code: String(form.item_code || "").trim(),
       description: String(form.description ?? "").trim(),
       edit_remark: String(form.edit_remark ?? "").trim(),

@@ -8,6 +8,7 @@ import { formatCbm } from "../utils/cbm";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { getOptionText } from "../utils/optionText";
 import "../App.css";
 import { exportElementToPdf } from "../services/pdfExport.service";
 
@@ -565,9 +566,10 @@ const WeeklySummary = () => {
             return null;
           }
 
+          const vendorName = getOptionText(vendorEntry?.vendor) || "N/A";
           return {
-            vendorKey: String(vendorEntry?.vendor || "").trim() || `vendor-${index}`,
-            vendor: vendorEntry?.vendor || "N/A",
+            vendorKey: vendorName !== "N/A" ? vendorName : `vendor-${index}`,
+            vendor: vendorName,
             vendorDisplayRows,
           };
         })

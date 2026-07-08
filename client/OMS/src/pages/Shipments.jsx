@@ -16,6 +16,7 @@ import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { hasShipmentRecords } from "../utils/orderStatus";
 import { formatCbm } from "../utils/cbm";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import {
   getShipmentItemDisplay,
   getShipmentPoDisplay,
@@ -212,9 +213,7 @@ const Shipments = () => {
       );
       setTotalRecords(Number(res?.data?.pagination?.totalRecords || 0));
       setFilterOptions({
-        vendors: Array.isArray(res?.data?.filters?.vendors)
-          ? res.data.filters.vendors
-          : [],
+        vendors: normalizeTextOptions(res?.data?.filters?.vendors),
         order_ids: Array.isArray(res?.data?.filters?.order_ids)
           ? res.data.filters.order_ids
           : [],
@@ -543,7 +542,9 @@ const Shipments = () => {
         name: row?.sample_name || "",
         description: row?.description || "",
         brand: row?.brand || "",
-        vendor: row?.vendor ? String(row.vendor).split(",").map((entry) => entry.trim()).filter(Boolean) : [],
+        vendor: normalizeTextOptions(
+          Array.isArray(row?.vendor) ? row.vendor : [row?.vendor],
+        ),
         shipment: Array.isArray(row?.shipment) ? row.shipment : [],
       });
       return;
@@ -553,7 +554,7 @@ const Shipments = () => {
       _id: row?._id,
       order_id: row?.order_id || "",
       brand: row?.brand || "",
-      vendor: row?.vendor || "",
+      vendor: getOptionText(row?.vendor),
       item: {
         item_code: row?.item?.item_code || row?.item_code || "",
         description: row?.item?.description || row?.description || "",
@@ -1087,7 +1088,7 @@ const Shipments = () => {
                         )}
                         <td className="shipments-col-po">{getShipmentPoDisplay(row)}</td>
                         <td className="shipments-col-item">{getShipmentItemDisplay(row)}</td>
-                        <td className="shipments-col-vendor">{row?.vendor || "N/A"}</td>
+                        <td className="shipments-col-vendor">{getOptionText(row?.vendor) || "N/A"}</td>
                         <td className="shipments-col-description">{row?.description || "N/A"}</td>
                         <td className="shipments-col-order-qty">
                           {getShipmentPrimaryQuantityDisplay(row)}

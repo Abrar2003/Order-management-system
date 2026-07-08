@@ -13,6 +13,7 @@ import {
 } from "../hooks/useShippingInspectors";
 import useBrandOptions from "../hooks/useBrandOptions";
 import { normalizeShipmentCheckedDraft } from "../utils/shipmentRows";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 import MeasuredSizeSection from "./MeasuredSizeSection";
 import {
@@ -79,9 +80,9 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
     name: String(sample?.name ?? ""),
     description: String(sample?.description ?? ""),
     brand: String(sample?.brand ?? ""),
-    vendor: Array.isArray(sample?.vendor)
-      ? sample.vendor.join(", ")
-      : String(sample?.vendor ?? ""),
+    vendor: normalizeTextOptions(
+      Array.isArray(sample?.vendor) ? sample.vendor : [sample?.vendor],
+    ).join(", "),
     shipment: makeInitialShipmentRows(sample?.shipment),
     box_mode: sample?.box_mode || BOX_PACKAGING_MODES.INDIVIDUAL,
     item_count: String(Math.max(1, sample?.item_sizes?.length || 1)),
@@ -367,7 +368,7 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
       name: String(form.name || "").trim(),
       description: String(form.description || "").trim(),
       brand: String(form.brand || "").trim(),
-      vendor: String(form.vendor || "").trim(),
+      vendor: getOptionText(form.vendor),
       shipment: form.shipment.map((entry) => ({
         _id: String(entry?._id || "").trim(),
         stuffed_by: {

@@ -8,27 +8,12 @@ const normalizeVendorName = (value = "") =>
 
 const normalizeText = (value = "") => String(value ?? "").trim();
 
-const embeddedVendorSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    vendor_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Vendor",
-      required: true,
-      index: true,
-    },
-    country: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-  },
-  { _id: false },
-);
+// Vendor refs are intentionally stored as plain mixed values at the Mongoose
+// layer. Older production documents may still contain vendor strings, and
+// nested schemas reject those during hydration before pre-validate hooks can
+// resolve them. The model hooks below normalize every saved value to
+// { name, vendor_id, country } while still allowing legacy reads/saves.
+const embeddedVendorSchema = mongoose.Schema.Types.Mixed;
 
 const isObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);

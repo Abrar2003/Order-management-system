@@ -38,6 +38,7 @@ import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatEan13BarcodeDisplay, toEan13BarcodeValue } from "../utils/barcode";
 import { formatPositiveCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
+import { getOptionText } from "../utils/optionText";
 import {
   canTransferLatestRequestToday,
   getQcUserUpdateRequestAvailability,
@@ -1054,7 +1055,7 @@ const QcDetails = () => {
       .map((entry, index) => ({
         key: String(entry?.finish_id || entry?.unique_code || `finish-${index}`),
         uniqueCode: String(entry?.unique_code || "").trim() || "N/A",
-        vendor: String(entry?.vendor || "").trim() || "N/A",
+        vendor: getOptionText(entry?.vendor) || "N/A",
         vendorCode: String(entry?.vendor_code || "").trim() || "N/A",
         color: String(entry?.color || "").trim() || "N/A",
         colorCode: String(entry?.color_code || "").trim() || "N/A",
@@ -1235,7 +1236,7 @@ const QcDetails = () => {
           record?.last_inspected_date
             ? `Last inspected ${formatDateDDMMYYYY(record.last_inspected_date)}`
             : "",
-          String(record?.vendor || "").trim(),
+          getOptionText(record?.vendor),
         ].filter(Boolean).join(" | ");
         const decoratePreviousImage = (image, field, label) => ({
           ...image,
@@ -2873,7 +2874,7 @@ const QcDetails = () => {
           </div>
           <div className="card-body d-grid gap-4">
             <section>
-              <h3 className="h6 mb-3 qc-details-section-title">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
+              <h3 className="h6 mb-3 qc-details-section-title">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${getOptionText(qc?.order?.vendor || qc?.order_meta?.vendor) || "N/A"} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
               <h3 className="h6 mb-3 qc-details-section-title">{`Status: ${derivedOrderStatus} | Inspector: ${qc?.inspector?.name}`}</h3>
               <div className="qc-order-inline-grid">
                 <InfoBox compact label="Item Code" value={qc.item.item_code} />

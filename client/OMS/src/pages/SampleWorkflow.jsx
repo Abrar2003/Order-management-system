@@ -7,6 +7,7 @@ import { getUserFromToken } from "../auth/auth.service";
 import { usePermissions } from "../auth/PermissionContext";
 import { normalizeUserRole } from "../auth/permissions";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { normalizeTextOptions } from "../utils/optionText";
 import {
   getWorkflowTasks,
   startWorkflowTask,
@@ -21,6 +22,13 @@ const DEFAULT_LIMIT = 10;
 const LIMIT_OPTIONS = [5, 10, 20, 50];
 
 const clean = (value) => String(value || "").trim();
+const getWorkflowVendorText = (workflow = {}) => {
+  const vendors = normalizeTextOptions([
+    ...(Array.isArray(workflow?.vendors) ? workflow.vendors : []),
+    ...(Array.isArray(workflow?.vendor) ? workflow.vendor : [workflow?.vendor]),
+  ]);
+  return vendors.join(", ");
+};
 const positiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -121,7 +129,11 @@ const SampleWorkflowPage = () => {
 
       const list = Array.isArray(response?.data?.data) ? response.data.data : [];
       setWorkflows(list);
-      setFilters((prev) => ({ ...prev, ...(response?.data?.filters || {}) }));
+      setFilters((prev) => ({
+        ...prev,
+        ...(response?.data?.filters || {}),
+        vendors: normalizeTextOptions(response?.data?.filters?.vendors),
+      }));
       setPage(Math.max(1, Number(response?.data?.pagination?.page || 1)));
       setTotalPages(Math.max(1, Number(response?.data?.pagination?.totalPages || 1)));
       setTotalRecords(Number(response?.data?.pagination?.totalRecords || 0));
@@ -393,7 +405,7 @@ const SampleWorkflowPage = () => {
                         </div>
                         <div className="small text-secondary text-truncate mb-2">{wf.name || wf.description || "No description"}</div>
                         <div className="d-flex justify-content-between align-items-center small text-muted">
-                          <span>Vendors: {wf.vendors?.join(", ") || wf.vendor?.join(", ") || "None"}</span>
+                          <span>Vendors: {getWorkflowVendorText(wf) || "None"}</span>
                           <span>{formatDateDDMMYYYY(wf.updatedAt)}</span>
                         </div>
                       </button>
@@ -454,7 +466,7 @@ const SampleWorkflowPage = () => {
                     <div className="col-sm-4">
                       <div className="small text-secondary">Vendor List</div>
                       <div className="fw-semibold">
-                        {selectedWorkflow.vendors?.join(", ") || selectedWorkflow.vendor?.join(", ") || "N/A"}
+                        {getWorkflowVendorText(selectedWorkflow) || "N/A"}
                       </div>
                     </div>
                     <div className="col-sm-4">

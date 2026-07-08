@@ -8,6 +8,7 @@ import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { formatCbm } from "../utils/cbm";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const DEFAULT_LIMIT = 20;
@@ -95,9 +96,7 @@ const ShippedSamples = () => {
       setTotalRecords(Number(response?.data?.pagination?.totalRecords || 0));
       setSummary(response?.data?.summary || { total: 0, total_quantity: 0, checked: 0 });
       setFilters({
-        vendors: Array.isArray(response?.data?.filters?.vendors)
-          ? response.data.filters.vendors
-          : [],
+        vendors: normalizeTextOptions(response?.data?.filters?.vendors),
         containers: Array.isArray(response?.data?.filters?.containers)
           ? response.data.filters.containers
           : [],
@@ -405,7 +404,7 @@ const ShippedSamples = () => {
                       sortedRows.map((row) => (
                         <tr key={row.shipment_id || `${row._id}-${row.container}`}>
                           <td>{row.sample_code || row.item_code || "N/A"}</td>
-                          <td>{row.vendor || "N/A"}</td>
+                          <td>{getOptionText(row.vendor) || "N/A"}</td>
                           <td>{row.brand || "N/A"}</td>
                           <td>{row.description || row.sample_name || "N/A"}</td>
                           <td>{row.quantity ?? 0}</td>
@@ -475,7 +474,7 @@ const columnValue = (row = {}, sortBy = "") => {
     case "sample":
       return row?.sample_code || row?.item_code || "";
     case "vendor":
-      return row?.vendor || "";
+      return getOptionText(row?.vendor);
     case "brand":
       return row?.brand || "";
     case "quantity":

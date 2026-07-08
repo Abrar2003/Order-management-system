@@ -11,6 +11,7 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 import { exportElementToPdf } from "../services/pdfExport.service";
 
@@ -439,7 +440,7 @@ const PoStatusReport = () => {
                 }
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Vendors</option>
-                {(Array.isArray(filters.vendor_options) ? filters.vendor_options : []).map((vendor) => (
+                {normalizeTextOptions(filters.vendor_options).map((vendor) => (
                   <option key={vendor} value={vendor}>
                     {vendor}
                   </option>
@@ -588,14 +589,15 @@ const PoStatusReport = () => {
                     return "";
                   },
                 });
-                const vendorKey = String(vendorEntry?.vendor || "").trim() || `vendor-${index}`;
+                const vendorName = getOptionText(vendorEntry?.vendor) || "N/A";
+                const vendorKey = vendorName !== "N/A" ? vendorName : `vendor-${index}`;
                 const vendorCounts = normalizeStatusCounts(vendorEntry?.status_counts);
 
                 return (
                   <div key={vendorKey} className="card om-card">
                     <div className="card-body p-0">
                       <div className="px-3 py-2 border-bottom d-flex flex-wrap gap-2">
-                        <span className="fw-semibold">Vendor: {vendorEntry.vendor}</span>
+                        <span className="fw-semibold">Vendor: {vendorName}</span>
                         <span className="om-summary-chip">
                           POs: {vendorEntry.po_count ?? pos.length}
                         </span>

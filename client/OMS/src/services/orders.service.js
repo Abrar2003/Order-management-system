@@ -1,4 +1,5 @@
 import axios from "../api/axios";
+import { getOptionText } from "../utils/optionText";
 
 export const uploadOrders = async (file) => {
 
@@ -91,7 +92,7 @@ export const rectifyPdfOrders = async ({
   }
 
   const normalizedBrand = String(brand || "").trim();
-  const normalizedVendor = String(vendor || "").trim();
+  const normalizedVendor = getOptionText(vendor);
 
   if (!normalizedBrand) {
     throw new Error("Brand is required");
@@ -125,7 +126,7 @@ export const applyRectifiedRows = async ({
     "/orders/rectify-pdf",
     {
       brand: String(brand || "").trim(),
-      vendor: String(vendor || "").trim(),
+      vendor: getOptionText(vendor),
       apply_changes: true,
       selected_rows: selectedRows,
       source_filename: String(sourceFileName || "").trim(),

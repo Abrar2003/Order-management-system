@@ -2,6 +2,7 @@ const Inspector = require("../models/inspector.model");
 const User = require("../models/user.model");
 const Inspection = require("../models/inspection.model");
 const mongoose = require("mongoose");
+const { getVendorName } = require("../helpers/vendorRef");
 const parsePositiveInteger = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
@@ -98,7 +99,7 @@ const buildLabelUsedHistoryFromInspectionRecords = (records = []) =>
         qc_meta: {
           order_id: String(qcDoc?.order_meta?.order_id || ""),
           brand: String(qcDoc?.order_meta?.brand || ""),
-          vendor: String(qcDoc?.order_meta?.vendor || ""),
+          vendor: getVendorName(qcDoc?.order_meta?.vendor),
           item_code: String(qcDoc?.item?.item_code || ""),
           description: String(qcDoc?.item?.description || ""),
         },

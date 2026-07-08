@@ -1200,7 +1200,7 @@ const recalculateInspectorUsedLabels = async (inspectorIds = []) => {
           qc_meta: {
             order_id: String(qcDoc?.order_meta?.order_id || ""),
             brand: String(qcDoc?.order_meta?.brand || ""),
-            vendor: String(qcDoc?.order_meta?.vendor || ""),
+            vendor: normalizeText(qcDoc?.order_meta?.vendor),
             item_code: String(qcDoc?.item?.item_code || ""),
             description: String(qcDoc?.item?.description || ""),
           },
@@ -7520,7 +7520,7 @@ exports.getVendorReports = async (req, res) => {
 
     for (const row of orderRows) {
       const orderId = String(row?.order_id || "").trim() || "N/A";
-      const vendor = String(row?.vendor || "").trim() || "N/A";
+      const vendor = normalizeText(row?.vendor) || "N/A";
       const brand = String(row?.brand || "").trim() || "N/A";
       const key = `${vendor.toLowerCase()}__${brand.toLowerCase()}__${orderId.toLowerCase()}`;
 
@@ -7630,7 +7630,7 @@ exports.getVendorReports = async (req, res) => {
           (latestShipmentUtc.getTime() - orderDateUtc.getTime()) / MS_PER_DAY,
         ),
       );
-      const vendorKey = String(orderEntry.vendor || "").toLowerCase();
+      const vendorKey = normalizeText(orderEntry.vendor).toLowerCase();
 
       if (!vendorShippingStatsMap.has(vendorKey)) {
         vendorShippingStatsMap.set(vendorKey, {
@@ -7696,7 +7696,7 @@ exports.getVendorReports = async (req, res) => {
         totalDelayDaysDelayedOnly += delayDays;
       }
 
-      const vendorKey = String(orderEntry.vendor || "").toLowerCase();
+      const vendorKey = normalizeText(orderEntry.vendor).toLowerCase();
       if (!vendorMap.has(vendorKey)) {
         vendorMap.set(vendorKey, {
           vendor: orderEntry.vendor,
@@ -7742,7 +7742,7 @@ exports.getVendorReports = async (req, res) => {
     const vendors = Array.from(vendorMap.values())
       .map((entry) => {
         const vendorShippingStats =
-          vendorShippingStatsMap.get(String(entry.vendor || "").toLowerCase())
+          vendorShippingStatsMap.get(normalizeText(entry.vendor).toLowerCase())
           || null;
         const shippedInRangeCount = Number(
           vendorShippingStats?.shipped_in_range_count || 0,
@@ -7788,7 +7788,7 @@ exports.getVendorReports = async (req, res) => {
           Number(b?.average_delay_days || 0) -
           Number(a?.average_delay_days || 0);
         if (avgDiff !== 0) return avgDiff;
-        return String(a?.vendor || "").localeCompare(String(b?.vendor || ""));
+        return normalizeText(a?.vendor).localeCompare(normalizeText(b?.vendor));
       });
 
     return res.status(200).json({
@@ -8162,7 +8162,7 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       });
       poKeys.add(poKey);
 
-      const vendorKey = String(row.vendor || "").toLowerCase();
+      const vendorKey = normalizeText(row.vendor).toLowerCase();
       if (!vendorMap.has(vendorKey)) {
         vendorMap.set(vendorKey, {
           vendor: row.vendor,
@@ -8204,7 +8204,7 @@ exports.getWeeklyOrderSummary = async (req, res) => {
         }),
       }))
       .sort((left, right) =>
-        String(left?.vendor || "").localeCompare(String(right?.vendor || "")),
+        normalizeText(left?.vendor).localeCompare(normalizeText(right?.vendor)),
       );
 
     return res.status(200).json({
@@ -8390,7 +8390,7 @@ exports.getDailyOrderSummary = async (req, res) => {
 
     const vendorMap = new Map();
     for (const row of filteredRows) {
-      const vendorKey = String(row.vendor || "").toLowerCase();
+      const vendorKey = normalizeText(row.vendor).toLowerCase();
       if (!vendorMap.has(vendorKey)) {
         vendorMap.set(vendorKey, {
           vendor: row.vendor,
@@ -8428,7 +8428,7 @@ exports.getDailyOrderSummary = async (req, res) => {
         }),
       }))
       .sort((left, right) =>
-        String(left?.vendor || "").localeCompare(String(right?.vendor || "")),
+        normalizeText(left?.vendor).localeCompare(normalizeText(right?.vendor)),
       );
 
     return res.status(200).json({
@@ -10434,7 +10434,9 @@ exports.getDailyReport = async (req, res) => {
               : requestDateKey,
             order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
             brand: qc?.order_meta?.brand || qc?.order?.brand || "N/A",
-            vendor: qc?.order_meta?.vendor || qc?.order?.vendor || "N/A",
+            vendor:
+              normalizeText(qc?.order_meta?.vendor || qc?.order?.vendor) ||
+              "N/A",
             item_code: qc?.item?.item_code || "N/A",
             description: qc?.item?.description || "N/A",
             inspector: toInspectorSummary(requestEntry?.inspector),
@@ -10506,7 +10508,9 @@ exports.getDailyReport = async (req, res) => {
           : inspection.inspection_date || null,
         order_id:
           qcRecord?.order_meta?.order_id || qcRecord?.order?.order_id || "N/A",
-        vendor: qcRecord?.order_meta?.vendor || qcRecord?.order?.vendor || "N/A",
+        vendor:
+          normalizeText(qcRecord?.order_meta?.vendor || qcRecord?.order?.vendor) ||
+          "N/A",
         brand: qcRecord?.order_meta?.brand || qcRecord?.order?.brand || "N/A",
         item_code: qcRecord?.item?.item_code || "N/A",
         description: qcRecord?.item?.description || "N/A",
@@ -10559,7 +10563,7 @@ exports.getDailyReport = async (req, res) => {
 
     const allFilterableRows = [...aligned_requests, ...inspection_rows];
     const brandOptionsBase = selectedVendor
-      ? allFilterableRows.filter((row) => String(row?.vendor || "") === selectedVendor)
+      ? allFilterableRows.filter((row) => normalizeText(row?.vendor) === selectedVendor)
       : allFilterableRows;
     const vendorOptionsBase = selectedBrand
       ? allFilterableRows.filter((row) => String(row?.brand || "") === selectedBrand)
@@ -10572,7 +10576,7 @@ exports.getDailyReport = async (req, res) => {
     );
     const matchesDailyReportFilters = (row = {}) => {
       if (selectedBrand && String(row?.brand || "") !== selectedBrand) return false;
-      if (selectedVendor && String(row?.vendor || "") !== selectedVendor) return false;
+      if (selectedVendor && normalizeText(row?.vendor) !== selectedVendor) return false;
       return true;
     };
 
@@ -12753,9 +12757,9 @@ exports.syncInspectionStatuses = async (req, res) => {
         const qcDoc = inspection?.qc;
         if (!qcDoc?.order) return false;
         const brand = qcDoc?.order_meta?.brand || qcDoc?.order?.brand || "";
-        const vendor = qcDoc?.order_meta?.vendor || qcDoc?.order?.vendor || "";
+        const vendor = normalizeText(qcDoc?.order_meta?.vendor || qcDoc?.order?.vendor);
         if (selectedBrand && String(brand || "") !== selectedBrand) return false;
-        if (selectedVendor && String(vendor || "") !== selectedVendor) return false;
+        if (selectedVendor && vendor !== selectedVendor) return false;
         return true;
       });
 

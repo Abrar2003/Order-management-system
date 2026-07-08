@@ -22,6 +22,7 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
+import { getOptionText } from "../utils/optionText";
 import "../App.css";
 import { exportElementToPdf } from "../services/pdfExport.service";
 
@@ -194,7 +195,11 @@ const formatStructuredLbhValue = ({
 };
 
 const toDisplayValue = (value, fallback = "N/A") => {
-  const normalized = String(value ?? "").trim();
+  const normalized =
+    getOptionText(value) ||
+    (value && typeof value === "object" && !(value instanceof Date)
+      ? ""
+      : String(value ?? "").trim());
   return normalized || fallback;
 };
 
@@ -976,7 +981,7 @@ const InspectionReport = () => {
       const uniqueCodeValue = String(
         entry?.unique_code || entry?.uniqueCode || "",
       ).trim();
-      const vendorValue = String(entry?.vendor || "").trim();
+      const vendorValue = getOptionText(entry?.vendor);
       const vendorCodeValue = String(
         entry?.vendor_code || entry?.vendorCode || "",
       ).trim();

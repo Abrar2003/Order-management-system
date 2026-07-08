@@ -3,13 +3,13 @@ import api from "../api/axios";
 import { editCompleteOrder } from "../services/orders.service";
 import OrderEtdWithHistory from "./OrderEtdWithHistory";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
-import { normalizeTextOptions } from "../utils/optionText";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const createInitialForm = (order) => ({
   order_id: String(order?.order_id || "").trim(),
   brand: String(order?.brand || "").trim(),
-  vendor: String(order?.vendor || "").trim(),
+  vendor: getOptionText(order?.vendor),
   order_date: toISODateString(order?.order_date) || "",
   ETD: toISODateString(order?.ETD) || "",
 });
@@ -67,7 +67,7 @@ const EditCompleteOrderModal = ({
   const validateForm = () => {
     if (!String(form.order_id || "").trim()) return "PO number is required.";
     if (!String(form.brand || "").trim()) return "Brand is required.";
-    if (!String(form.vendor || "").trim()) return "Vendor is required.";
+    if (!getOptionText(form.vendor)) return "Vendor is required.";
     if (!String(form.order_date || "").trim()) return "Order date is required.";
     if (!String(form.ETD || "").trim()) return "ETD is required.";
     return null;
@@ -86,7 +86,7 @@ const EditCompleteOrderModal = ({
     const payload = {
       order_id: String(form.order_id || "").trim(),
       brand: String(form.brand || "").trim(),
-      vendor: String(form.vendor || "").trim(),
+      vendor: getOptionText(form.vendor),
       order_date: String(form.order_date || "").trim(),
       ETD: String(form.ETD || "").trim(),
     };

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
+import { getOptionText } from "../utils/optionText";
 
 const normalizeLabels = (labels = []) => (
   [...new Set(
@@ -97,7 +98,7 @@ const getUsedHistoryMeta = (entry = {}) => {
   return {
     orderId: String(entry?.qc_meta?.order_id || qcDoc?.order_meta?.order_id || ""),
     brand: String(entry?.qc_meta?.brand || qcDoc?.order_meta?.brand || ""),
-    vendor: String(entry?.qc_meta?.vendor || qcDoc?.order_meta?.vendor || ""),
+    vendor: getOptionText(entry?.qc_meta?.vendor || qcDoc?.order_meta?.vendor),
     itemCode: String(entry?.qc_meta?.item_code || qcDoc?.item?.item_code || ""),
     description: String(entry?.qc_meta?.description || qcDoc?.item?.description || ""),
   };

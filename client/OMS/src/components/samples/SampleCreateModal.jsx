@@ -17,15 +17,16 @@ import {
   parseMeasuredSizeEntries,
   resolvePreferredMeasuredSizeCbm,
 } from "../../utils/measuredSizeForm";
+import { getOptionText, normalizeTextOptions } from "../../utils/optionText";
 
 const initialForm = (sample = null) => ({
   code: String(sample?.code || ""),
   name: String(sample?.name || ""),
   description: String(sample?.description || ""),
   brand: String(sample?.brand || ""),
-  vendor: Array.isArray(sample?.vendor)
-    ? sample.vendor.join(", ")
-    : String(sample?.vendor || ""),
+  vendor: normalizeTextOptions(
+    Array.isArray(sample?.vendor) ? sample.vendor : [sample?.vendor],
+  ).join(", "),
   box_mode: sample?.box_mode || BOX_PACKAGING_MODES.INDIVIDUAL,
   item_count: String(Math.max(1, sample?.item_sizes?.length || 1)),
   box_count: String(
@@ -190,7 +191,7 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved, isWorkflow = false
       name: form.name.trim(),
       description: form.description.trim(),
       brand: form.brand.trim(),
-      vendor: form.vendor.trim(),
+      vendor: getOptionText(form.vendor),
       item_sizes: itemPayload.value,
       box_sizes: boxPayload.value,
       box_mode: form.box_mode,

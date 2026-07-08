@@ -12,6 +12,7 @@ import {
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const DEFAULT_ENTITY_FILTER = "all";
@@ -333,7 +334,7 @@ const UpcomingEtdReports = () => {
                 }
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Vendors</option>
-                {(Array.isArray(filters.vendor_options) ? filters.vendor_options : []).map((vendor) => (
+                {normalizeTextOptions(filters.vendor_options).map((vendor) => (
                   <option key={vendor} value={vendor}>
                     {vendor}
                   </option>
@@ -456,9 +457,10 @@ const UpcomingEtdReports = () => {
                   return "";
                 },
               });
-              const vendorKey = String(vendorEntry?.vendor || "").trim() || `vendor-${index}`;
+              const vendorName = getOptionText(vendorEntry?.vendor) || "N/A";
+              const vendorKey = vendorName !== "N/A" ? vendorName : `vendor-${index}`;
               const isCollapsed = collapsedVendors.has(vendorKey);
-              const vendorInitial = String(vendorEntry?.vendor || "?")
+              const vendorInitial = String(vendorName || "?")
                 .trim()
                 .charAt(0)
                 .toUpperCase();
@@ -472,7 +474,7 @@ const UpcomingEtdReports = () => {
                       </span>
                       <div>
                         <span className="upcoming-etd-card-label">Vendor</span>
-                        <h2>{vendorEntry.vendor}</h2>
+                        <h2>{vendorName}</h2>
                         <p>
                           {(Array.isArray(vendorEntry?.brands) ? vendorEntry.brands : []).join(", ") || "No brand listed"}
                         </p>
@@ -501,7 +503,7 @@ const UpcomingEtdReports = () => {
                         className="upcoming-etd-collapse-button"
                         onClick={() => toggleVendor(vendorKey)}
                         aria-expanded={!isCollapsed}
-                        aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${vendorEntry.vendor}`}
+                        aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${vendorName}`}
                       >
                         <span aria-hidden="true">{isCollapsed ? "+" : "−"}</span>
                       </button>

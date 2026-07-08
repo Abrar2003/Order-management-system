@@ -8,8 +8,10 @@ const {
   detectBoxPackagingMode,
 } = require("../helpers/boxMeasurement");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
+const { getVendorName } = require("../helpers/vendorRef");
 
 const normalizeText = (value) => String(value ?? "").trim();
+const normalizeVendorText = (value) => getVendorName(value) || normalizeText(value);
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
 const toSafeNumber = (value, fallback = 0) => {
@@ -71,7 +73,7 @@ const buildMigratedCbmSnapshot = (value = {}) => {
 
 const normalizeUniqueList = (values = []) =>
   [...new Set((Array.isArray(values) ? values : [])
-    .map((value) => normalizeText(value))
+    .map((value) => normalizeVendorText(value))
     .filter(Boolean))]
     .sort((a, b) => a.localeCompare(b));
 
@@ -225,7 +227,7 @@ const applyOrderSnapshot = (item, orderLike) => {
     orderLike?.item?.description ?? orderLike?.description ?? "",
   );
   const brand = normalizeText(orderLike?.brand ?? "");
-  const vendor = normalizeText(orderLike?.vendor ?? "");
+  const vendor = normalizeVendorText(orderLike?.vendor ?? "");
 
   if (item.name !== description) {
     item.name = description;
@@ -267,7 +269,7 @@ const applyQcSnapshot = (item, qcLike) => {
 
   const description = normalizeText(qcLike?.item?.description ?? "");
   const brand = normalizeText(qcLike?.order_meta?.brand ?? qcLike?.brand ?? "");
-  const vendor = normalizeText(qcLike?.order_meta?.vendor ?? qcLike?.vendor ?? "");
+  const vendor = normalizeVendorText(qcLike?.order_meta?.vendor ?? qcLike?.vendor ?? "");
 
   if (description && item.name !== description) {
     item.name = description;

@@ -33,6 +33,7 @@ const {
   generateThumbnailForStoredQcImage,
 } = require("../services/qcImageThumbnail.service");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
+const { getVendorName } = require("../helpers/vendorRef");
 
 const ACTIVE_ORDER_MATCH = {
   $and: [{ archived: { $ne: true } }, { status: { $ne: "Cancelled" } }],
@@ -41,7 +42,7 @@ const ACTIVE_ORDER_MATCH = {
 let workers = [];
 const workerLogAt = new Map();
 
-const normalizeText = (value) => String(value ?? "").trim();
+const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ""), 10);
@@ -226,10 +227,11 @@ const processCalendarResync = async (job) => {
     const batchResults = await Promise.all(
       batch.map(async (group) => {
         try {
+          const vendorLabel = normalizeText(group.vendor);
           const result = await withTimeout(
             syncOrderGroup(group),
             timeoutMs,
-            `calendar resync ${group.order_id}/${group.brand}/${group.vendor}`,
+            `calendar resync ${group.order_id}/${group.brand}/${vendorLabel}`,
           );
           successCount += 1;
           return { group, ok: true, result };

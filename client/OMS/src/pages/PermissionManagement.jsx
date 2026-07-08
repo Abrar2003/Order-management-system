@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import { isAdminLikeRole, ROLE_LABELS } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
+import { getOptionText } from "../utils/optionText";
 
 const formatActionLabel = (value = "") =>
   String(value)
@@ -20,7 +21,7 @@ const cloneAccess = (access = {}) => ({
     : [],
   all_vendors: Boolean(access?.all_vendors ?? true),
   allowed_vendors: Array.isArray(access?.allowed_vendors)
-    ? access.allowed_vendors.map((vendor) => String(vendor))
+    ? access.allowed_vendors.map((vendor) => getOptionText(vendor)).filter(Boolean)
     : [ALL_VENDOR_TOKEN],
 });
 

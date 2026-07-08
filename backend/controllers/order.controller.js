@@ -2295,7 +2295,7 @@ const applyNewOrderRows = async ({
           vendor: previousOrder.vendor,
         };
         rowGroupsToSync.set(
-          `${previousGroup.order_id}__${previousGroup.brand}__${previousGroup.vendor}`,
+          `${previousGroup.order_id}__${previousGroup.brand}__${normalizeLooseString(previousGroup.vendor)}`,
           previousGroup,
         );
       }
@@ -2305,7 +2305,7 @@ const applyNewOrderRows = async ({
 
       postCommitNewOrder = newOrder.toObject();
       rowGroupsToSync.set(
-        `${newOrderGroup.order_id}__${newOrderGroup.brand}__${newOrderGroup.vendor}`,
+        `${newOrderGroup.order_id}__${newOrderGroup.brand}__${normalizeLooseString(newOrderGroup.vendor)}`,
         newOrderGroup,
       );
       rowOrderLogs.push({
@@ -2363,7 +2363,7 @@ const applyNewOrderRows = async ({
           await syncOrderGroup(group);
         } catch (syncErr) {
           warnings.push(
-            `Calendar sync failed for ${normalizeOrderKey(group?.order_id) || "UNKNOWN"} (${group?.brand || "N/A"} / ${group?.vendor || "N/A"}).`,
+            `Calendar sync failed for ${normalizeOrderKey(group?.order_id) || "UNKNOWN"} (${group?.brand || "N/A"} / ${normalizeLooseString(group?.vendor) || "N/A"}).`,
           );
           console.error("Google Calendar sync failed for order create group:", {
             group,
@@ -2503,11 +2503,11 @@ const applyRectifiedOrderRows = async ({
     };
 
     groupsToSync.set(
-      `${oldGroup.order_id}__${oldGroup.brand}__${oldGroup.vendor}`,
+      `${oldGroup.order_id}__${oldGroup.brand}__${normalizeLooseString(oldGroup.vendor)}`,
       oldGroup,
     );
     groupsToSync.set(
-      `${newGroup.order_id}__${newGroup.brand}__${newGroup.vendor}`,
+      `${newGroup.order_id}__${newGroup.brand}__${normalizeLooseString(newGroup.vendor)}`,
       newGroup,
     );
   }
@@ -3528,7 +3528,7 @@ const getShipmentSortValue = (row, sortBy) => {
     case "item_code":
       return String(row?.item_code || "");
     case "vendor":
-      return String(row?.vendor || "");
+      return normalizeLooseString(row?.vendor);
     case "brand":
       return String(row?.brand || "");
     case "status": {
@@ -3867,7 +3867,7 @@ const getContainerDataset = async ({
     };
 
     const brandValue = String(row?.brand || "").trim();
-    const vendorValue = String(row?.vendor || "").trim();
+    const vendorValue = normalizeLooseString(row?.vendor);
     const shippingDate = row?.stuffing_date || null;
     const itemKey = String(
       row?._id || `${row?.order_id || ""}::${row?.item_code || ""}`,
@@ -4984,7 +4984,7 @@ exports.createOrdersManually = async (req, res) => {
 
       const groups = new Map();
       for (const order of newOrders) {
-        const key = `${order.order_id}__${order.brand}__${order.vendor}`;
+        const key = `${order.order_id}__${order.brand}__${normalizeLooseString(order.vendor)}`;
         groups.set(key, {
           order_id: order.order_id,
           brand: order.brand,
@@ -6298,7 +6298,9 @@ exports.getVendorSummaryByBrand = async (req, res) => {
           Number(right?.totalDelayedOrders || 0) -
           Number(left?.totalDelayedOrders || 0);
         if (delayedCompare !== 0) return delayedCompare;
-        return String(left?.vendor || "").localeCompare(String(right?.vendor || ""));
+        return normalizeLooseString(left?.vendor).localeCompare(
+          normalizeLooseString(right?.vendor),
+        );
       });
 
     if (!result.length) {
@@ -7303,8 +7305,8 @@ const buildDelayedPoReportDataset = async ({
     })
     .filter(Boolean)
     .sort((left, right) => {
-      const vendorCompare = String(left?.vendor || "").localeCompare(
-        String(right?.vendor || ""),
+      const vendorCompare = normalizeLooseString(left?.vendor).localeCompare(
+        normalizeLooseString(right?.vendor),
       );
       if (vendorCompare !== 0) return vendorCompare;
 
@@ -7393,7 +7395,9 @@ const buildDelayedPoReportDataset = async ({
       rows: vendorEntry.rows,
     }))
     .sort((left, right) =>
-      String(left?.vendor || "").localeCompare(String(right?.vendor || "")),
+      normalizeLooseString(left?.vendor).localeCompare(
+        normalizeLooseString(right?.vendor),
+      ),
     );
 
   return {
@@ -7915,8 +7919,8 @@ const buildUpcomingEtdReportDataset = async ({
     })
     .filter(Boolean)
     .sort((left, right) => {
-      const vendorCompare = String(left?.vendor || "").localeCompare(
-        String(right?.vendor || ""),
+      const vendorCompare = normalizeLooseString(left?.vendor).localeCompare(
+        normalizeLooseString(right?.vendor),
       );
       if (vendorCompare !== 0) return vendorCompare;
 
@@ -8005,7 +8009,9 @@ const buildUpcomingEtdReportDataset = async ({
       rows: vendorEntry.rows,
     }))
     .sort((left, right) =>
-      String(left?.vendor || "").localeCompare(String(right?.vendor || "")),
+      normalizeLooseString(left?.vendor).localeCompare(
+        normalizeLooseString(right?.vendor),
+      ),
     );
 
   return {
@@ -8294,7 +8300,7 @@ exports.exportPendingPoReport = async (req, res) => {
     const exportRows = (Array.isArray(dataset?.rows) ? dataset.rows : []).map(
       (row) => ({
         order_id: String(row?.order_id || "").trim(),
-        vendor: String(row?.vendor || "").trim(),
+        vendor: normalizeLooseString(row?.vendor),
         item_code: String(row?.item_code || "").trim(),
         description: String(row?.description || "").trim(),
         order_quantity: Number(row?.order_quantity || 0),
@@ -8447,7 +8453,7 @@ exports.exportUpcomingEtdReport = async (req, res) => {
 
     if (Array.isArray(dataset?.vendors)) {
       dataset.vendors.forEach((vendorEntry) => {
-        const vendorName = String(vendorEntry?.vendor || "").trim();
+        const vendorName = normalizeLooseString(vendorEntry?.vendor);
         const rows = Array.isArray(vendorEntry?.rows) ? vendorEntry.rows : [];
 
         rows.forEach((row) => {
@@ -8596,7 +8602,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       .map((detail) => ({
         order_id: String(detail?.order_id || "").trim(),
         brand: String(detail?.brand || "").trim(),
-        vendor: String(detail?.vendor || "").trim(),
+        vendor: normalizeLooseString(detail?.vendor),
         item_code: String(detail?.item_code || "").trim(),
         item_description: String(detail?.item_description || "").trim(),
         order_status: String(detail?.order_status || "").trim(),
@@ -8644,8 +8650,8 @@ exports.exportDelayedPoReport = async (req, res) => {
         po_last_progress: String(detail?.po_last_progress || "").trim(),
       }))
       .sort((left, right) => {
-        const vendorCompare = String(left?.vendor || "").localeCompare(
-          String(right?.vendor || ""),
+        const vendorCompare = normalizeLooseString(left?.vendor).localeCompare(
+          normalizeLooseString(right?.vendor),
           undefined,
           { numeric: true, sensitivity: "base" },
         );
@@ -8668,7 +8674,7 @@ exports.exportDelayedPoReport = async (req, res) => {
     const summaryRows = (Array.isArray(dataset?.rows) ? dataset.rows : []).map((row) => ({
       order_id: String(row?.order_id || "").trim(),
       brand: String(row?.brand || "").trim(),
-      vendor: String(row?.vendor || "").trim(),
+      vendor: normalizeLooseString(row?.vendor),
       order_date: formatDateDDMMYYYY(row?.order_date, ""),
       etd: formatDateDDMMYYYY(row?.etd, ""),
       delay_days: Number(row?.delay_days || 0),
@@ -8787,7 +8793,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       order_id: String(row?.order_id || "").trim(),
       item_code: String(row?.item_code || "").trim(),
       brand: String(row?.brand || "").trim(),
-      vendor: String(row?.vendor || "").trim(),
+      vendor: normalizeLooseString(row?.vendor),
       order_date: formatDateDDMMYYYY(row?.order_date, ""),
       etd: formatDateDDMMYYYY(row?.etd || row?.po_etd, ""),
       delay_days: Number(row?.delay_days || 0),
@@ -8802,7 +8808,7 @@ exports.exportDelayedPoReport = async (req, res) => {
     ).map((row) => ({
       order_id: String(row?.order_id || "").trim(),
       brand: String(row?.brand || "").trim(),
-      vendor: String(row?.vendor || "").trim(),
+      vendor: normalizeLooseString(row?.vendor),
       order_date: formatDateDDMMYYYY(row?.order_date, ""),
       etd: formatDateDDMMYYYY(row?.etd, ""),
       delay_days: Number(row?.delay_days || 0),
@@ -9226,7 +9232,7 @@ exports.exportPackedGoods = async (req, res) => {
     const exportRows = dataset.rows.map((row) => ({
       order_id: String(row?.order_id || "").trim(),
       brand: String(row?.brand || "").trim(),
-      vendor: String(row?.vendor || "").trim(),
+      vendor: normalizeLooseString(row?.vendor),
       item_code: String(row?.item_code || "").trim(),
       order_quantity: Number(row?.order_quantity || 0),
       packed_quantity: Number(row?.packed_quantity || 0),
@@ -9568,7 +9574,7 @@ exports.exportShipmentsDb = async (req, res) => {
     const exportRows = shipmentData.rows.map((row) => ({
       order_id: String(row?.order_id || "").trim(),
       brand: String(row?.brand || "").trim(),
-      vendor: String(row?.vendor || "").trim(),
+      vendor: normalizeLooseString(row?.vendor),
       item_code: String(row?.item_code || "").trim(),
       description: String(row?.description || "").trim(),
       status: String(row?.status || "").trim(),
@@ -10424,7 +10430,7 @@ exports.editCompleteOrder = async (req, res) => {
         vendor: normalizeLooseString(orderDoc?.vendor),
       };
       oldGroupMap.set(
-        `${oldGroup.order_id}__${oldGroup.brand}__${oldGroup.vendor}`,
+        `${oldGroup.order_id}__${oldGroup.brand}__${normalizeLooseString(oldGroup.vendor)}`,
         oldGroup,
       );
 
@@ -10849,7 +10855,7 @@ exports.syncZeroQuantityOrdersArchive = async (req, res) => {
 
     const groupMap = new Map();
     for (const order of candidates) {
-      const key = `${order.order_id}__${order.brand}__${order.vendor}`;
+      const key = `${order.order_id}__${order.brand}__${normalizeLooseString(order.vendor)}`;
       if (!groupMap.has(key)) {
         groupMap.set(key, {
           order_id: order.order_id,
@@ -11224,7 +11230,7 @@ exports.reSync = async (req, res) => {
             const syncResult = await withTimeout(
               syncOrderGroup(group),
               timeoutMs,
-              `reSync group ${group.order_id}/${group.brand}/${group.vendor}`,
+              `reSync group ${group.order_id}/${group.brand}/${normalizeLooseString(group.vendor)}`,
             );
             successCount += 1;
             return { group, ok: true, result: syncResult };

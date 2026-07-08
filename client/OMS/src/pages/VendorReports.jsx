@@ -8,6 +8,7 @@ import SortHeaderButton from "../components/SortHeaderButton";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const DEFAULT_TIMELINE = "1m";
@@ -509,7 +510,7 @@ const VendorReports = () => {
                 onChange={(e) => setDraftVendorFilter(normalizeEntityFilter(e.target.value))}
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Vendors</option>
-                {(Array.isArray(filters.vendor_options) ? filters.vendor_options : []).map((vendor) => (
+                {normalizeTextOptions(filters.vendor_options).map((vendor) => (
                   <option key={vendor} value={vendor}>
                     {vendor}
                   </option>
@@ -576,7 +577,8 @@ const VendorReports = () => {
             </div>
           ) : (
             report.vendors.map((vendorEntry, index) => {
-              const vendorKey = String(vendorEntry?.vendor || "").trim() || `vendor-${index}`;
+              const vendorName = getOptionText(vendorEntry?.vendor) || "N/A";
+              const vendorKey = vendorName !== "N/A" ? vendorName : `vendor-${index}`;
               const vendorOrders = Array.isArray(vendorEntry?.orders) ? vendorEntry.orders : [];
               const tableBrandOptions = [...new Set(
                 vendorOrders
@@ -619,7 +621,7 @@ const VendorReports = () => {
                 <div key={vendorKey} className="card om-card">
                   <div className="card-body p-0">
                     <div className="px-3 py-2 border-bottom d-flex flex-wrap gap-2">
-                      <span className="fw-semibold">Vendor: {vendorEntry.vendor}</span>
+                      <span className="fw-semibold">Vendor: {vendorName}</span>
                       <span className="om-summary-chip">
                         Brands: {(Array.isArray(vendorEntry.brands) ? vendorEntry.brands : []).join(", ") || "N/A"}
                       </span>

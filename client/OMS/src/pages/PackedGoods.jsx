@@ -12,6 +12,7 @@ import {
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
+import { getOptionText } from "../utils/optionText";
 import "../App.css";
 import { exportElementToPdf } from "../services/pdfExport.service";
 
@@ -62,7 +63,7 @@ const areBrandFiltersEqual = (left, right) => {
 const normalizeDistinctValues = (values = []) =>
   [
     ...new Set(
-      values.map((value) => String(value || "").trim()).filter(Boolean),
+      values.map(getOptionText).filter(Boolean),
     ),
   ].sort((left, right) => left.localeCompare(right));
 
@@ -73,7 +74,7 @@ const matchesBrandFilter = (rowBrandValue, brands = DEFAULT_BRAND_FILTER) => {
 
 const matchesDraftFilters = (row = {}, brands = DEFAULT_BRAND_FILTER, vendor = "all") => {
   const rowBrand = String(row?.brand || "").trim();
-  const rowVendor = String(row?.vendor || "").trim();
+  const rowVendor = getOptionText(row?.vendor);
   if (!matchesBrandFilter(rowBrand, brands)) return false;
   if (vendor !== "all" && rowVendor !== vendor) return false;
   return true;
@@ -310,7 +311,7 @@ const PackedGoods = () => {
     () =>
       allRows.filter((row) => {
         const rowBrand = String(row?.brand || "").trim();
-        const rowVendor = String(row?.vendor || "").trim();
+        const rowVendor = getOptionText(row?.vendor);
         const rowPo = String(row?.order_id || "").trim();
 
         if (!matchesBrandFilter(rowBrand, appliedFilters.brand)) {
@@ -358,7 +359,7 @@ const PackedGoods = () => {
         getSortValue: (row, column) => {
           if (column === "po") return row?.order_id;
           if (column === "brand") return row?.brand;
-          if (column === "vendor") return row?.vendor;
+          if (column === "vendor") return getOptionText(row?.vendor);
           if (column === "itemCode") return row?.item_code;
           if (column === "orderQuantity") return Number(row?.order_quantity || 0);
           if (column === "packedQuantity") return Number(row?.packed_quantity || 0);
@@ -801,7 +802,7 @@ const PackedGoods = () => {
                           >
                             <td>{row?.order_id || "N/A"}</td>
                             <td>{row?.brand || "N/A"}</td>
-                            <td>{row?.vendor || "N/A"}</td>
+                            <td>{getOptionText(row?.vendor) || "N/A"}</td>
                             <td>{row?.item_code || "N/A"}</td>
                             <td>{Number(row?.order_quantity || 0)}</td>
                             <td>{Number(row?.packed_quantity || 0)}</td>
@@ -947,7 +948,7 @@ const PackedGoods = () => {
                         >
                           <td>{row?.order_id || "N/A"}</td>
                           <td>{row?.brand || "N/A"}</td>
-                          <td>{row?.vendor || "N/A"}</td>
+                          <td>{getOptionText(row?.vendor) || "N/A"}</td>
                           <td>{row?.item_code || "N/A"}</td>
                           <td>{Number(row?.order_quantity || 0)}</td>
                           <td>{Number(row?.packed_quantity || 0)}</td>

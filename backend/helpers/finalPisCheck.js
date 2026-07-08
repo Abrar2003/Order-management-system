@@ -18,6 +18,7 @@ const {
   normalizeSingleBoxSizeRemarks,
 } = require("./masterSizeRemarks");
 const {
+  getVendorName,
   normalizeVendorDisplayList,
 } = require("./vendorRef");
 
@@ -100,7 +101,7 @@ const BOX_REMARK_ORDER = Object.freeze([
   "box3",
   "box4",
 ]);
-const normalizeText = (value) => String(value ?? "").trim();
+const normalizeText = (value) => getVendorName(value) || String(value ?? "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
 
 const normalizeDistinctValues = (values = []) =>
