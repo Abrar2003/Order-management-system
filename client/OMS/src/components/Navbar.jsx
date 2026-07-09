@@ -117,6 +117,7 @@ const Navbar = () => {
   const canAccessAnalytics = hasPermission("reports", "view");
   const canManageProductDatabase = hasPermission("product_database", "view");
   const canUploadFinish = hasPermission("finishes", "upload");
+  const canViewFinishes = hasPermission("finishes", "view") || canUploadFinish;
   const canViewPis = hasPermission("pis", "view");
   const canViewWorkflow = hasPermission("workflow", "view");
   const canViewSamples = hasPermission("samples", "view");
@@ -421,6 +422,10 @@ const Navbar = () => {
       
     }
 
+    if (canViewFinishes) {
+      items.push(routeMenuItem("finishes", "Finishes", "/finishes"));
+    }
+
     if (hasPermission("containers", "edit") || hasPermission("containers", "manage")) {
       items.push(routeMenuItem("bulk-shipping", "Bulk Shipping", "/container"));
     }
@@ -431,7 +436,7 @@ const Navbar = () => {
 
 
     return items;
-  }, [canManageProductDatabase, canViewPis, isQcOnlyRole]);
+  }, [canManageProductDatabase, canViewFinishes, canViewPis, isQcOnlyRole]);
 
   const uploadAddMenuItems = useMemo(() => {
     if (isQcOnlyRole) return [];

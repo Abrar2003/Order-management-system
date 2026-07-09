@@ -14,6 +14,7 @@ const {
 } = require("../services/wasabiStorage.service");
 const {
   buildVendorsArrayFilter,
+  getVendorId,
   normalizeVendorDisplayList,
   normalizeVendorText,
 } = require("../helpers/vendorRef");
@@ -33,6 +34,15 @@ const normalizeVendorCodeEntries = (value = []) =>
       code: normalizeText(entry?.code || entry?.vendor_code || entry?.vendorCode),
     }))
     .filter((entry) => entry.brand && entry.code);
+
+const normalizeDistinctValues = (values = []) =>
+  [
+    ...new Set(
+      (Array.isArray(values) ? values : [])
+        .map((entry) => normalizeText(entry))
+        .filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -169,6 +179,106 @@ const buildVendorItemMatch = ({ vendor = "", search = "" } = {}) => {
       },
     ],
   };
+};
+
+const serializeFinishItem = (item = {}) => ({
+  _id: String(item?._id || ""),
+  code: normalizeText(item?.code),
+  name: normalizeText(item?.name),
+  description: normalizeText(item?.description),
+  brand: normalizeText(item?.brand_name || item?.brand),
+  vendors: normalizeVendorDisplayList(item?.vendors),
+});
+
+const serializeFinish = (finish = {}, itemsByCode = new Map()) => {
+  const itemCodes = normalizeDistinctValues(finish?.item_codes);
+  const items = itemCodes
+    .map((code) => itemsByCode.get(code))
+    .filter(Boolean)
+    .map(serializeFinishItem);
+  const storedImage = toStoredImage(finish?.image);
+  const uniqueCode = normalizeCode(finish?.unique_code);
+
+  return {
+    _id: String(finish?._id || ""),
+    unique_code: uniqueCode,
+    vendor_id: getVendorId(finish?.vendor),
+    vendor: normalizeText(finish?.vendor),
+    vendor_code: normalizeCode(finish?.vendor_code),
+    color: normalizeText(finish?.color),
+    color_code: normalizeCode(finish?.color_code),
+    item_codes: itemCodes,
+    items,
+    brands: normalizeDistinctValues(items.map((item) => item.brand)),
+    image: storedImage,
+    image_url:
+      uniqueCode && (storedImage.key || storedImage.link)
+        ? `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}`
+        : "",
+    created_at: finish?.createdAt || finish?.created_at || null,
+    updated_at: finish?.updatedAt || finish?.updated_at || null,
+  };
+};
+
+exports.getFinishes = async (req, res) => {
+  try {
+    const vendorFilter = normalizeText(req.query.vendor);
+    const brandFilter = normalizeText(req.query.brand);
+
+    const finishes = await Finish.find({})
+      .sort({ updatedAt: -1, unique_code: 1 })
+      .lean();
+    const itemCodes = normalizeDistinctValues(
+      finishes.flatMap((finish) => Array.isArray(finish?.item_codes) ? finish.item_codes : []),
+    );
+
+    const items = itemCodes.length > 0
+      ? await Item.find(
+          applyDataAccessMatch(
+            { code: { $in: itemCodes } },
+            req.user,
+            {
+              brandFields: ["brand", "brand_name", "brands"],
+              vendorFields: ["vendors"],
+            },
+          ),
+        )
+          .select("_id code name description brand brand_name vendors")
+          .lean()
+      : [];
+    const itemsByCode = new Map(
+      (Array.isArray(items) ? items : [])
+        .map((item) => [normalizeText(item?.code), item])
+        .filter(([code]) => Boolean(code)),
+    );
+
+    const allRows = finishes
+      .map((finish) => serializeFinish(finish, itemsByCode))
+      .filter((finish) => finish.item_codes.length === 0 || finish.items.length > 0);
+    const rows = allRows.filter((finish) => {
+      if (vendorFilter && finish.vendor !== vendorFilter) return false;
+      if (brandFilter && !finish.brands.includes(brandFilter)) return false;
+      return true;
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: rows,
+      filters: {
+        brands: normalizeDistinctValues(allRows.flatMap((finish) => finish.brands)),
+        vendors: normalizeDistinctValues(allRows.map((finish) => finish.vendor)),
+      },
+      summary: {
+        total_finishes: rows.length,
+      },
+    });
+  } catch (error) {
+    console.error("Get Finishes Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to load finishes",
+    });
+  }
 };
 
 exports.getFinishVendorOptions = async (_req, res) => {

@@ -23,6 +23,24 @@ const getVendorCodeForBrand = (vendor, brand) => {
   return normalizeText(match?.code);
 };
 
+const createInitialForm = (finish = {}) => ({
+  vendor_id: normalizeText(finish?.vendor_id || finish?.vendorId),
+  vendor: normalizeText(finish?.vendor),
+  vendor_code: normalizeCode(finish?.vendor_code || finish?.vendorCode),
+  color: normalizeText(finish?.color),
+  color_code: normalizeCode(finish?.color_code || finish?.colorCode),
+  image: null,
+});
+
+const getInitialItemCodes = (finish = {}) =>
+  [
+    ...new Set(
+      (Array.isArray(finish?.item_codes) ? finish.item_codes : [])
+        .map(normalizeText)
+        .filter(Boolean),
+    ),
+  ];
+
 const useDebouncedValue = (value, delay = 300) => {
   const [debounced, setDebounced] = useState(value);
 
@@ -34,15 +52,9 @@ const useDebouncedValue = (value, delay = 300) => {
   return debounced;
 };
 
-const UploadFinishModal = ({ onClose, onSaved }) => {
-  const [form, setForm] = useState({
-    vendor_id: "",
-    vendor: "",
-    vendor_code: "",
-    color: "",
-    color_code: "",
-    image: null,
-  });
+const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
+  const isEditing = Boolean(initialFinish?._id);
+  const [form, setForm] = useState(() => createInitialForm(initialFinish));
   const [saving, setSaving] = useState(false);
   const [loadingVendors, setLoadingVendors] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -52,7 +64,9 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
   const [itemSearch, setItemSearch] = useState("");
   const [vendorOptions, setVendorOptions] = useState([]);
   const [vendorItems, setVendorItems] = useState([]);
-  const [selectedItemCodes, setSelectedItemCodes] = useState([]);
+  const [selectedItemCodes, setSelectedItemCodes] = useState(() =>
+    getInitialItemCodes(initialFinish),
+  );
 
   const debouncedVendor = useDebouncedValue(form.vendor, 300);
   const uniqueCode = useMemo(
@@ -65,6 +79,14 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
       vendorOptions.find((vendor) => String(vendor?._id || "") === String(form.vendor_id || "")) || null,
     [form.vendor_id, vendorOptions],
   );
+
+  useEffect(() => {
+    setForm(createInitialForm(initialFinish));
+    setSelectedItemCodes(getInitialItemCodes(initialFinish));
+    setItemSearch("");
+    setVendorItems([]);
+    setItemError("");
+  }, [initialFinish]);
 
   useEffect(() => {
     let isMounted = true;
@@ -100,7 +122,6 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
     const normalizedVendor = normalizeText(debouncedVendor);
     let isMounted = true;
 
-    setSelectedItemCodes([]);
     setVendorItems([]);
     setItemError("");
 
@@ -176,15 +197,18 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
   const selectedBrand = selectedBrands.length === 1 ? selectedBrands[0] : "";
 
   useEffect(() => {
+    if (isEditing) return;
+
     const nextVendorCode = getVendorCodeForBrand(selectedVendor, selectedBrand);
     setForm((prev) =>
       prev.vendor_code === nextVendorCode
         ? prev
         : { ...prev, vendor_code: nextVendorCode },
     );
-  }, [selectedBrand, selectedVendor]);
+  }, [isEditing, selectedBrand, selectedVendor]);
 
   const vendorCodeHint = useMemo(() => {
+    if (isEditing) return "Code locked for this finish.";
     if (!form.vendor_id) return "Select a vendor.";
     if (selectedItemCodes.length === 0) return "Select items to fill vendor code.";
     if (selectedBrands.length > 1) return "Select items from one brand.";
@@ -192,7 +216,7 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
       return `No vendor code found for ${selectedBrand}.`;
     }
     return selectedBrand ? `Brand: ${selectedBrand}` : "";
-  }, [form.vendor_code, form.vendor_id, selectedBrand, selectedBrands.length, selectedItemCodes.length]);
+  }, [form.vendor_code, form.vendor_id, isEditing, selectedBrand, selectedBrands.length, selectedItemCodes.length]);
 
   const selectedItemCodeSet = useMemo(
     () => new Set(selectedItemCodes),
@@ -214,6 +238,8 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
   };
 
   const handleVendorChange = (vendorId) => {
+    if (isEditing) return;
+
     const vendor = vendorOptions.find((option) => String(option?._id || "") === String(vendorId || ""));
     setForm((prev) => ({
       ...prev,
@@ -294,7 +320,7 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
       <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
         <div className="modal-content">
           <div className="modal-header">
-            <h5 className="modal-title">Upload Finish</h5>
+            <h5 className="modal-title">{isEditing ? "Edit Finish" : "Upload Finish"}</h5>
             <button
               type="button"
               className="btn-close"
@@ -308,21 +334,31 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
             <div className="row g-3">
               <div className="col-md-6">
                 <label className="form-label">Vendor</label>
-                <select
-                  className="form-select"
-                  value={form.vendor_id}
-                  onChange={(event) => handleVendorChange(event.target.value)}
-                  disabled={saving || loadingVendors}
-                >
-                  <option value="">
-                    {loadingVendors ? "Loading vendors..." : "Select vendor"}
-                  </option>
-                  {vendorOptions.map((vendor) => (
-                    <option key={vendor._id} value={vendor._id}>
-                      {vendor.name}
+                {isEditing ? (
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={form.vendor}
+                    readOnly
+                    disabled={saving}
+                  />
+                ) : (
+                  <select
+                    className="form-select"
+                    value={form.vendor_id}
+                    onChange={(event) => handleVendorChange(event.target.value)}
+                    disabled={saving || loadingVendors}
+                  >
+                    <option value="">
+                      {loadingVendors ? "Loading vendors..." : "Select vendor"}
                     </option>
-                  ))}
-                </select>
+                    {vendorOptions.map((vendor) => (
+                      <option key={vendor._id} value={vendor._id}>
+                        {vendor.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {vendorError && (
                   <div className="text-danger small mt-1">{vendorError}</div>
                 )}
@@ -336,7 +372,7 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
                   value={form.vendor_code}
                   readOnly
                   placeholder="Auto-filled"
-                  disabled={saving || !form.vendor_id}
+                  disabled={saving || !normalizeText(form.vendor_id || form.vendor)}
                 />
                 {vendorCodeHint && (
                   <div className="text-secondary small mt-1">{vendorCodeHint}</div>
@@ -351,6 +387,7 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
                   value={form.color_code}
                   onChange={(event) => updateField("color_code", event.target.value)}
                   placeholder="e.g. BLK"
+                  readOnly={isEditing}
                   disabled={saving}
                 />
               </div>
@@ -363,6 +400,7 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
                   value={form.color}
                   onChange={(event) => updateField("color", event.target.value)}
                   placeholder="Enter finish color"
+                  readOnly={isEditing}
                   disabled={saving}
                 />
               </div>
@@ -512,7 +550,7 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
                 || selectedItemCodes.length === 0
               }
             >
-              {saving ? "Saving..." : "Save Finish"}
+              {saving ? "Saving..." : isEditing ? "Update Finish" : "Save Finish"}
             </button>
           </div>
         </div>

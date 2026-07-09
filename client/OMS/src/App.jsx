@@ -68,6 +68,7 @@ const WorkflowTaskTypes = lazy(() => import("./pages/WorkflowTaskTypes"));
 const WorkflowDepartments = lazy(() => import("./pages/WorkflowDepartments"));
 const PermissionManagement = lazy(() => import("./pages/PermissionManagement"));
 const PIS = lazy(() => import("./pages/PIS"));
+const Finishes = lazy(() => import("./pages/Finishes"));
 const PISDiffs = lazy(() => import("./pages/PISDiffs"));
 const FinalPISCheck = lazy(() => import("./pages/FinalPISCheck"));
 const PisUpdateLogs = lazy(() => import("./pages/PisUpdateLogs"));
@@ -578,6 +579,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <PIS />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/finishes"
+            element={
+              <ProtectedRoute>
+                <Finishes />
               </ProtectedRoute>
             }
           />

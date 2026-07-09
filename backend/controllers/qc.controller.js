@@ -1871,16 +1871,27 @@ const findPreviousInspectedQcRecordsForItem = async ({
     });
 };
 
-const buildFinishImagePublicUrl = (finishEntry = {}) => {
+const getRequestBaseUrl = (req = {}) => {
+  const protocol = String(req.get?.("x-forwarded-proto") || req.protocol || "http")
+    .split(",")[0]
+    .trim();
+  const host = String(req.get?.("x-forwarded-host") || req.get?.("host") || "")
+    .split(",")[0]
+    .trim();
+  return host ? `${protocol}://${host}` : "";
+};
+
+const buildFinishImagePublicUrl = (finishEntry = {}, baseUrl = "") => {
   const uniqueCode = String(finishEntry?.unique_code || "").trim().toUpperCase();
   if (!uniqueCode) return null;
+  const path = `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}`;
   
   return {
     key: "",
     originalName: "",
     contentType: "",
     size: 0,
-    url: `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}`,
+    url: `${String(baseUrl || "").replace(/\/$/, "")}${path}`,
   };
 };
 
@@ -11509,6 +11520,7 @@ exports.getQCById = async (req, res) => {
         finishDoc,
       ]),
     );
+    const requestBaseUrl = getRequestBaseUrl(req);
     const signedFinishEntries = await Promise.all(
       itemFinishEntries.map(async (entry) => {
         const finishId = String(entry?.finish_id || "").trim();
@@ -11517,12 +11529,16 @@ exports.getQCById = async (req, res) => {
           (finishId ? finishDocById.get(finishId) : null) ||
           (uniqueCode ? finishDocByUniqueCode.get(uniqueCode) : null) ||
           null;
+        const matchedImage = matchedFinish?.image || {};
+        const hasFinishImage = Boolean(
+          String(matchedImage?.key || matchedImage?.link || "").trim(),
+        );
 
         return {
           ...entry,
           finish_id: matchedFinish?._id || null,
-          image: matchedFinish?.image
-            ? buildFinishImagePublicUrl(entry)
+          image: hasFinishImage
+            ? buildFinishImagePublicUrl(entry, requestBaseUrl)
             : null,
         };
       }),

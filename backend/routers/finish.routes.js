@@ -14,6 +14,13 @@ router.get(
 );
 
 router.get(
+  "/",
+  auth,
+  requirePermission("finishes", "view"),
+  finishController.getFinishes,
+);
+
+router.get(
   "/vendor-options",
   auth,
   requirePermission("finishes", "view"),
