@@ -1,11 +1,16 @@
 const XLSX = require("xlsx");
 const Brand = require("../models/brand.model");
+const Finish = require("../models/finish.model");
+const Item = require("../models/item.model");
 const Vendor = require("../models/vendor.model");
+const { getVendorCountry, getVendorId, getVendorName } = require("../helpers/vendorRef");
 
 const normalizeText = (value = "") => String(value ?? "").trim();
 const normalizeEmail = (value = "") => normalizeText(value).toLowerCase();
 const escapeRegex = (value = "") => normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const CONTACT_PERSON_TYPES = new Set(["merchant", "shipment"]);
+const normalizeCode = (value = "") => normalizeText(value).toUpperCase().replace(/\s+/g, "");
+const normalizeKey = (value = "") => normalizeText(value).toLowerCase().replace(/\s+/g, " ");
 
 const createHttpError = (statusCode, message) => {
   const error = new Error(message);
@@ -148,6 +153,180 @@ const serializeVendor = (vendor = {}) => ({
   updated_at: vendor.updated_at || vendor.updatedAt || null,
   deleted_at: vendor.deleted_at || null,
 });
+
+const getVendorCodeForBrand = (vendorCodes = [], brand = "") => {
+  const brandKey = normalizeKey(brand);
+  if (!brandKey) return "";
+  const match = normalizeVendorCodeEntries(vendorCodes).find(
+    (entry) => normalizeKey(entry.brand) === brandKey,
+  );
+  return normalizeCode(match?.code);
+};
+
+const buildVendorSnapshot = (vendor = {}) => ({
+  name: normalizeText(vendor.name),
+  vendor_id: vendor._id,
+  country: normalizeText(vendor.country),
+});
+
+const getVendorCodeSignature = (vendorCodes = []) =>
+  normalizeVendorCodeEntries(vendorCodes)
+    .map((entry) => `${normalizeKey(entry.brand)}:${normalizeCode(entry.code)}`)
+    .sort()
+    .join("|");
+
+const shouldSyncVendorFinishes = (vendor = {}, previousVendor = {}) =>
+  normalizeText(vendor.name) !== normalizeText(previousVendor.name) ||
+  normalizeText(vendor.country) !== normalizeText(previousVendor.country) ||
+  getVendorCodeSignature(vendor.vendor_code) !== getVendorCodeSignature(previousVendor.vendor_code);
+
+const buildVendorFinishMatch = (vendor = {}, previousVendor = {}) => {
+  const names = [
+    normalizeText(vendor.name),
+    normalizeText(previousVendor.name),
+  ].filter(Boolean);
+  const seen = new Set();
+  const nameConditions = names.flatMap((name) => {
+    const key = name.toLowerCase();
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const regex = new RegExp(`^${escapeRegex(name)}$`, "i");
+    return [{ vendor: regex }, { "vendor.name": regex }];
+  });
+
+  return {
+    $or: [
+      { "vendor.vendor_id": vendor._id },
+      ...nameConditions,
+    ],
+  };
+};
+
+const buildVendorFinishSyncPlan = async (vendor = {}, previousVendor = {}) => {
+  const finishes = await Finish.find(buildVendorFinishMatch(vendor, previousVendor))
+    .select("_id unique_code vendor vendor_code color_code item_codes")
+    .lean();
+  if (finishes.length === 0) return [];
+
+  const itemCodes = [
+    ...new Set(
+      finishes
+        .flatMap((finish) => Array.isArray(finish.item_codes) ? finish.item_codes : [])
+        .map(normalizeText)
+        .filter(Boolean),
+    ),
+  ];
+  const items = await Item.find({ code: { $in: itemCodes } })
+    .select("code brand brand_name")
+    .lean();
+  const brandByItemCode = new Map(
+    items.map((item) => [normalizeText(item.code), normalizeText(item.brand_name || item.brand)]),
+  );
+  const vendorSnapshot = buildVendorSnapshot(vendor);
+  const updates = finishes.flatMap((finish) => {
+    const brands = [
+      ...new Set(
+        (Array.isArray(finish.item_codes) ? finish.item_codes : [])
+          .map((itemCode) => brandByItemCode.get(normalizeText(itemCode)))
+          .filter(Boolean),
+      ),
+    ];
+    const expectedCodes = [
+      ...new Set(
+        brands
+          .map((brand) => getVendorCodeForBrand(vendor.vendor_code, brand))
+          .filter(Boolean),
+      ),
+    ];
+    if (expectedCodes.length !== 1) return [];
+
+    const vendorCode = expectedCodes[0];
+    const uniqueCode = normalizeCode(`${vendorCode}-${finish.color_code}`);
+    if (!vendorCode || !uniqueCode) return [];
+    const vendorChanged =
+      String(getVendorId(finish.vendor) || "") !== String(vendor._id || "") ||
+      normalizeText(getVendorName(finish.vendor)) !== vendorSnapshot.name ||
+      normalizeText(getVendorCountry(finish.vendor)) !== vendorSnapshot.country;
+    if (
+      normalizeCode(finish.vendor_code) === vendorCode &&
+      normalizeCode(finish.unique_code) === uniqueCode &&
+      !vendorChanged
+    ) {
+      return [];
+    }
+    return [{
+      finishId: finish._id,
+      currentUniqueCode: normalizeCode(finish.unique_code),
+      vendorCode,
+      uniqueCode,
+      vendor: vendorSnapshot,
+    }];
+  });
+
+  const nextUniqueCodes = updates.map((update) => update.uniqueCode);
+  const duplicateUniqueCode = nextUniqueCodes.find(
+    (uniqueCode, index) => nextUniqueCodes.indexOf(uniqueCode) !== index,
+  );
+  if (duplicateUniqueCode) {
+    throw createHttpError(409, `Vendor code update would duplicate finish ${duplicateUniqueCode}`);
+  }
+
+  const conflicts = await Finish.find({
+    unique_code: { $in: nextUniqueCodes },
+    _id: { $nin: updates.map((update) => update.finishId) },
+  })
+    .select("unique_code")
+    .lean();
+  if (conflicts.length > 0) {
+    throw createHttpError(
+      409,
+      `Vendor code update conflicts with finish ${conflicts.map((finish) => finish.unique_code).join(", ")}`,
+    );
+  }
+
+  return updates;
+};
+
+const applyVendorFinishSyncPlan = async (updates = []) => {
+  for (const update of updates) {
+    await Finish.updateOne(
+      { _id: update.finishId },
+      {
+        $set: {
+          vendor: update.vendor,
+          vendor_code: update.vendorCode,
+          unique_code: update.uniqueCode,
+        },
+      },
+    );
+    await Item.updateMany(
+      { "finish.finish_id": update.finishId },
+      {
+        $set: {
+          "finish.$[entry].vendor": update.vendor,
+          "finish.$[entry].vendor_code": update.vendorCode,
+          "finish.$[entry].unique_code": update.uniqueCode,
+        },
+      },
+      { arrayFilters: [{ "entry.finish_id": update.finishId }] },
+    );
+    if (update.currentUniqueCode && update.currentUniqueCode !== update.uniqueCode) {
+      await Item.updateMany(
+        { "finish.unique_code": update.currentUniqueCode },
+        {
+          $set: {
+            "finish.$[entry].vendor": update.vendor,
+            "finish.$[entry].vendor_code": update.vendorCode,
+            "finish.$[entry].unique_code": update.uniqueCode,
+          },
+        },
+        { arrayFilters: [{ "entry.unique_code": update.currentUniqueCode }] },
+      );
+    }
+  }
+
+  return { updated_finishes: updates.length };
+};
 
 const getVendors = async (_req, res) => {
   try {
@@ -322,6 +501,18 @@ const updateVendor = async (req, res) => {
       });
     }
 
+    const previousVendor = existingVendor.toObject();
+    const nextVendor = {
+      ...previousVendor,
+      _id: existingVendor._id,
+      name,
+      country,
+      vendor_code,
+    };
+    const finishSyncPlan = shouldSyncVendorFinishes(nextVendor, previousVendor)
+      ? await buildVendorFinishSyncPlan(nextVendor, previousVendor)
+      : [];
+
     existingVendor.name = name;
     existingVendor.owner_name = owner_name;
     existingVendor.email = email;
@@ -334,11 +525,15 @@ const updateVendor = async (req, res) => {
     existingVendor.updated_at = new Date();
 
     await existingVendor.save();
+    const finishSync = await applyVendorFinishSyncPlan(finishSyncPlan);
 
     return res.status(200).json({
       success: true,
       message: "Vendor updated successfully",
-      data: serializeVendor(existingVendor.toObject()),
+      data: {
+        ...serializeVendor(existingVendor.toObject()),
+        finish_sync: finishSync,
+      },
     });
   } catch (error) {
     if (error?.statusCode) {
