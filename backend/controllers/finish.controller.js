@@ -198,6 +198,7 @@ const serializeFinish = (finish = {}, itemsByCode = new Map()) => {
     .map(serializeFinishItem);
   const storedImage = toStoredImage(finish?.image);
   const uniqueCode = normalizeCode(finish?.unique_code);
+  const imageVersion = normalizeText(storedImage.key || storedImage.public_id || storedImage.link);
 
   return {
     _id: String(finish?._id || ""),
@@ -213,7 +214,7 @@ const serializeFinish = (finish = {}, itemsByCode = new Map()) => {
     image: storedImage,
     image_url:
       uniqueCode && (storedImage.key || storedImage.link)
-        ? `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}`
+        ? `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}${imageVersion ? `&v=${encodeURIComponent(imageVersion)}` : ""}`
         : "",
     created_at: finish?.createdAt || finish?.created_at || null,
     updated_at: finish?.updatedAt || finish?.updated_at || null,

@@ -1881,10 +1881,11 @@ const getRequestBaseUrl = (req = {}) => {
   return host ? `${protocol}://${host}` : "";
 };
 
-const buildFinishImagePublicUrl = (finishEntry = {}, baseUrl = "") => {
+const buildFinishImagePublicUrl = (finishEntry = {}, baseUrl = "", image = {}) => {
   const uniqueCode = String(finishEntry?.unique_code || "").trim().toUpperCase();
   if (!uniqueCode) return null;
-  const path = `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}`;
+  const version = String(image?.key || image?.public_id || image?.link || "").trim();
+  const path = `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}${version ? `&v=${encodeURIComponent(version)}` : ""}`;
   
   return {
     key: "",
@@ -11538,7 +11539,7 @@ exports.getQCById = async (req, res) => {
           ...entry,
           finish_id: matchedFinish?._id || null,
           image: hasFinishImage
-            ? buildFinishImagePublicUrl(entry, requestBaseUrl)
+            ? buildFinishImagePublicUrl(entry, requestBaseUrl, matchedImage)
             : null,
         };
       }),
