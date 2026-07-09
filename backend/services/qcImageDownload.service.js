@@ -89,21 +89,6 @@ const createTempArchivePath = (archiveLabel = "") => {
   return path.join(os.tmpdir(), `${safeLabel || "qc-images"}-${suffix}.zip`);
 };
 
-const getQcImageDownloadMemorySnapshot = () => {
-  const usage = process.memoryUsage();
-  return {
-    rss: Number(usage?.rss || 0),
-    heapUsed: Number(usage?.heapUsed || 0),
-  };
-};
-
-const logQcImageDownloadEvent = (event, payload = {}) => {
-  console.info(`[qc-image-download] ${event}`, {
-    ...payload,
-    memory: getQcImageDownloadMemorySnapshot(),
-  });
-};
-
 const mapWithConcurrencyLimit = async (
   items = [],
   concurrencyLimit = 1,
@@ -159,40 +144,12 @@ const getLegacyUrlBuffer = async (url = "") => {
 const fetchQcImageContent = async (image = {}) => {
   const storageKey = normalizeText(image?.key || "");
   if (storageKey) {
-    console.log("[qc-image-download][storage] fetch:key:start", {
-      key: storageKey,
-      originalName: normalizeText(image?.originalName || ""),
-      imageId: normalizeText(image?._id || ""),
-    });
-    const objectData = await getObjectBuffer(storageKey);
-    console.log("[qc-image-download][storage] fetch:key:complete", {
-      key: storageKey,
-      contentType: normalizeText(objectData?.contentType || ""),
-      bufferLength: Buffer.isBuffer(objectData?.buffer)
-        ? objectData.buffer.length
-        : 0,
-      reportedSize: Number(objectData?.size || 0),
-    });
-    return objectData;
+    return getObjectBuffer(storageKey);
   }
 
   const legacyUrl = normalizeText(image?.url || image?.link || "");
   if (legacyUrl) {
-    console.log("[qc-image-download][storage] fetch:url:start", {
-      url: legacyUrl.slice(0, 160),
-      originalName: normalizeText(image?.originalName || ""),
-      imageId: normalizeText(image?._id || ""),
-    });
-    const objectData = await getLegacyUrlBuffer(legacyUrl);
-    console.log("[qc-image-download][storage] fetch:url:complete", {
-      url: legacyUrl.slice(0, 160),
-      contentType: normalizeText(objectData?.contentType || ""),
-      bufferLength: Buffer.isBuffer(objectData?.buffer)
-        ? objectData.buffer.length
-        : 0,
-      reportedSize: Number(objectData?.size || 0),
-    });
-    return objectData;
+    return getLegacyUrlBuffer(legacyUrl);
   }
 
   throw new Error("QC image storage reference is missing");
@@ -267,7 +224,6 @@ const streamQcImagesArchive = async ({
   );
   const failures = [];
   let downloadedCount = 0;
-  const startedAt = Date.now();
   const safeConcurrency = Math.max(1, Number(concurrency) || DOWNLOAD_CONCURRENCY);
   const archiveWriteCompletion = createArchiveWriteCompletion(
     archive,
@@ -275,13 +231,6 @@ const streamQcImagesArchive = async ({
   );
 
   archive.pipe(outputStream);
-
-  logQcImageDownloadEvent("start", {
-    requestedCount: safeImages.length,
-    archiveLabel: normalizeText(archiveLabel),
-    concurrency: safeConcurrency,
-    zipCompressionLevel: ZIP_COMPRESSION_LEVEL,
-  });
 
   await mapWithConcurrencyLimit(
     safeImages,
@@ -291,41 +240,12 @@ const streamQcImagesArchive = async ({
 
       try {
         const objectData = await fetchImageContent(image);
-        const bufferLength = Buffer.isBuffer(objectData?.buffer)
-          ? objectData.buffer.length
-          : 0;
-        console.log("[qc-image-download][archive] append:image", {
-          index,
-          archiveEntryName: uniqueArchiveEntryName,
-          key: normalizeText(image?.key || ""),
-          imageId: normalizeText(image?._id || ""),
-          contentType: normalizeText(objectData?.contentType || ""),
-          bufferLength,
-          reportedSize: Number(objectData?.size || 0),
-        });
         archive.append(objectData.buffer, {
           name: uniqueArchiveEntryName,
           store: true,
         });
         downloadedCount += 1;
-
-        if (downloadedCount === 1 || downloadedCount % 25 === 0) {
-          logQcImageDownloadEvent("progress", {
-            requestedCount: safeImages.length,
-            downloadedCount,
-            failedCount: failures.length,
-            durationMs: Date.now() - startedAt,
-            archiveBytes: archive.pointer(),
-          });
-        }
       } catch (error) {
-        console.log("[qc-image-download][archive] append:failed", {
-          index,
-          archiveEntryName: uniqueArchiveEntryName,
-          key: normalizeText(image?.key || ""),
-          imageId: normalizeText(image?._id || ""),
-          message: error?.message || String(error),
-        });
         failures.push(
           `${uniqueArchiveEntryName}: ${error?.message || "Failed to load image from storage"}`,
         );
@@ -355,14 +275,6 @@ const streamQcImagesArchive = async ({
   await archive.finalize();
   await archiveWriteCompletion;
 
-  logQcImageDownloadEvent("complete", {
-    requestedCount: safeImages.length,
-    downloadedCount,
-    failedCount: failures.length,
-    durationMs: Date.now() - startedAt,
-    archiveBytes: archive.pointer(),
-  });
-
   return {
     archiveFileName: buildArchiveFileName(archiveLabel),
     downloadedCount,
@@ -381,12 +293,6 @@ const createQcImagesArchiveFile = async ({
   const outputStream = fs.createWriteStream(archivePath);
 
   try {
-    console.log("[qc-image-download][file] create:start", {
-      archivePath,
-      archiveLabel: normalizeText(archiveLabel),
-      imageCount: Array.isArray(images) ? images.length : 0,
-      concurrency,
-    });
     const result = await streamQcImagesArchive({
       images,
       archiveLabel,
@@ -400,13 +306,6 @@ const createQcImagesArchiveFile = async ({
 
     const stats = await fsp.stat(archivePath);
     const archiveSize = Number(stats?.size || 0);
-    console.log("[qc-image-download][file] create:stat", {
-      archivePath,
-      archiveSize,
-      downloadedCount: result.downloadedCount,
-      failedCount: result.failedCount,
-      archiveBytes: result.archiveBytes,
-    });
 
     if (archiveSize < 22) {
       throw new Error("Generated QC image archive is empty or incomplete");
@@ -418,10 +317,6 @@ const createQcImagesArchiveFile = async ({
       archiveSize,
     };
   } catch (error) {
-    console.log("[qc-image-download][file] create:failed", {
-      archivePath,
-      message: error?.message || String(error),
-    });
     outputStream.destroy();
     await fsp.rm(archivePath, { force: true }).catch(() => {});
     throw error;

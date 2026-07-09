@@ -11198,31 +11198,9 @@ exports.downloadQcImageFile = async (req, res) => {
 };
 
 exports.downloadQcImages = async (req, res) => {
-  const debugId = `qc-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     const qcId = String(req.params.id || "").trim();
-    console.log("[qc-image-download][server] request:start", {
-      debugId,
-      qcId,
-      userId: String(req.user?._id || req.user?.id || ""),
-      role: String(req.user?.role || ""),
-      bodyImageIdsCount: Array.isArray(req.body?.image_ids)
-        ? req.body.image_ids.length
-        : Array.isArray(req.body?.imageIds)
-          ? req.body.imageIds.length
-          : 0,
-      bodyImageKeysCount: Array.isArray(req.body?.image_keys)
-        ? req.body.image_keys.length
-        : Array.isArray(req.body?.imageKeys)
-          ? req.body.imageKeys.length
-          : 0,
-    });
-
     if (!mongoose.Types.ObjectId.isValid(qcId)) {
-      console.log("[qc-image-download][server] request:invalid-qc-id", {
-        debugId,
-        qcId,
-      });
       return res.status(400).json({
         success: false,
         message: "Invalid QC id",
@@ -11240,11 +11218,6 @@ exports.downloadQcImages = async (req, res) => {
       });
 
     if (!qc || !qc.order) {
-      console.log("[qc-image-download][server] request:qc-not-found", {
-        debugId,
-        qcFound: Boolean(qc),
-        hasOrder: Boolean(qc?.order),
-      });
       return res.status(404).json({
         success: false,
         message: "QC record not found",
@@ -11265,11 +11238,6 @@ exports.downloadQcImages = async (req, res) => {
         !alignedInspectorId ||
         alignedInspectorId !== currentUserId
       ) {
-        console.log("[qc-image-download][server] request:forbidden-qc-user", {
-          debugId,
-          currentUserId,
-          alignedInspectorId,
-        });
         return res.status(403).json({
           success: false,
           message: "QC can only view records aligned to them",
@@ -11296,9 +11264,6 @@ exports.downloadQcImages = async (req, res) => {
     );
 
     if (requestedImageIds.length === 0 && requestedImageKeys.length === 0) {
-      console.log("[qc-image-download][server] request:no-selection", {
-        debugId,
-      });
       return res.status(400).json({
         success: false,
         message: "Select at least one QC image to download",
@@ -11364,31 +11329,7 @@ exports.downloadQcImages = async (req, res) => {
       );
     });
 
-    console.log("[qc-image-download][server] request:resolved-images", {
-      debugId,
-      requestedImageIdsCount: requestedImageIds.length,
-      requestedImageKeysCount: requestedImageKeys.length,
-      previousQcCount: previousInspectionRecords.length,
-      currentInspectionImageRecordCount: currentInspectionImageRecords.length,
-      previousInspectionImageRecordCount: previousInspectionImageRecords.length,
-      eligibleCount: eligibleImages.length,
-      dedupedEligibleCount: dedupedEligibleImages.length,
-      imagesToDownloadCount: imagesToDownload.length,
-      requestedImageIdSample: requestedImageIds.slice(0, 5),
-      requestedImageKeySample: requestedImageKeys.slice(0, 5),
-      imageSample: imagesToDownload.slice(0, 5).map((image) => ({
-        id: String(image?._id || ""),
-        key: normalizeText(image?.key || ""),
-        originalName: normalizeText(image?.originalName || ""),
-        contentType: normalizeText(image?.contentType || ""),
-        size: Number(image?.size || 0),
-      })),
-    });
-
     if (imagesToDownload.length === 0) {
-      console.log("[qc-image-download][server] request:no-matches", {
-        debugId,
-      });
       return res.status(404).json({
         success: false,
         message: "Selected QC images were not found",
@@ -11396,23 +11337,9 @@ exports.downloadQcImages = async (req, res) => {
     }
 
     const archiveLabel = normalizeText(qc?.order_id || qc?._id || "qc-images");
-    console.log("[qc-image-download][server] archive:create:start", {
-      debugId,
-      archiveLabel,
-      imageCount: imagesToDownload.length,
-    });
     const archiveResult = await createQcImagesArchiveFile({
       images: imagesToDownload,
       archiveLabel,
-    });
-    console.log("[qc-image-download][server] archive:create:complete", {
-      debugId,
-      archiveFileName: archiveResult.archiveFileName,
-      archivePath: archiveResult.archivePath,
-      archiveSize: archiveResult.archiveSize,
-      archiveBytes: archiveResult.archiveBytes,
-      downloadedCount: archiveResult.downloadedCount,
-      failedCount: archiveResult.failedCount,
     });
 
     res.setHeader("Content-Type", "application/zip");
@@ -11421,11 +11348,6 @@ exports.downloadQcImages = async (req, res) => {
 
     await new Promise((resolve, reject) => {
       try {
-        console.log("[qc-image-download][server] response:download:start", {
-          debugId,
-          fileName: archiveResult.archiveFileName,
-          archiveSize: archiveResult.archiveSize,
-        });
         res.download(
           archiveResult.archivePath,
           String(archiveResult.archiveFileName || "qc-images.zip").replace(/"/g, ""),
@@ -11433,19 +11355,11 @@ exports.downloadQcImages = async (req, res) => {
             fsp.rm(archiveResult.archivePath, { force: true }).catch(() => {});
 
             if (!downloadError) {
-              console.log("[qc-image-download][server] response:download:complete", {
-                debugId,
-                headersSent: res.headersSent,
-                statusCode: res.statusCode,
-              });
               resolve();
               return;
             }
 
             if (res.headersSent) {
-              console.warn("QC image archive download ended after headers were sent:", {
-                message: downloadError?.message || String(downloadError),
-              });
               resolve();
               return;
             }
@@ -11454,23 +11368,13 @@ exports.downloadQcImages = async (req, res) => {
           },
         );
       } catch (downloadError) {
-        console.log("[qc-image-download][server] response:download:throw", {
-          debugId,
-          message: downloadError?.message || String(downloadError),
-        });
         fsp.rm(archiveResult.archivePath, { force: true }).catch(() => {});
         reject(downloadError);
       }
     });
     return undefined;
   } catch (error) {
-    console.error("Download QC Images Error:", {
-      debugId,
-      message: error?.message || String(error),
-      stack: error?.stack,
-      headersSent: res.headersSent,
-      statusCode: res.statusCode,
-    });
+    console.error("Download QC Images Error:", error);
     if (res.headersSent) {
       return res.end();
     }
