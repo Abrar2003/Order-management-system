@@ -468,6 +468,7 @@ exports.upsertFinish = async (req, res) => {
   let cleanupUploadedImage = false;
 
   try {
+    const finishId = normalizeText(req.body?.finish_id ?? req.body?.finishId ?? req.body?._id);
     const vendorId = normalizeText(req.body?.vendor_id ?? req.body?.vendorId);
     const vendorName = normalizeText(req.body?.vendor);
     const vendor = vendorId || vendorName;
@@ -495,6 +496,9 @@ exports.upsertFinish = async (req, res) => {
     const uniqueCode = normalizeCode(`${vendorCode}-${colorCode}`);
     if (!uniqueCode) {
       return res.status(400).json({ success: false, message: "Unique code could not be generated" });
+    }
+    if (finishId && !mongoose.Types.ObjectId.isValid(finishId)) {
+      return res.status(400).json({ success: false, message: "Invalid finish id" });
     }
 
     const vendorMatch = buildVendorItemMatch({ vendor: vendorName || vendor });
@@ -529,7 +533,25 @@ exports.upsertFinish = async (req, res) => {
       });
     }
 
-    const existingFinish = await Finish.findOne({ unique_code: uniqueCode });
+    const existingFinish = finishId
+      ? await Finish.findById(finishId)
+      : await Finish.findOne({ unique_code: uniqueCode });
+    if (finishId && !existingFinish) {
+      return res.status(404).json({ success: false, message: "Finish not found" });
+    }
+    const duplicateFinish = await Finish.findOne({
+      unique_code: uniqueCode,
+      ...(existingFinish?._id ? { _id: { $ne: existingFinish._id } } : {}),
+    })
+      .select("_id")
+      .lean();
+    if (duplicateFinish) {
+      return res.status(409).json({
+        success: false,
+        message: "A finish with this unique code already exists",
+      });
+    }
+    const previousUniqueCode = normalizeCode(existingFinish?.unique_code);
     const previousImageKey = normalizeText(existingFinish?.image?.key || "");
 
     if (req.file) {
@@ -562,27 +584,18 @@ exports.upsertFinish = async (req, res) => {
     });
 
     await Item.updateMany(
-      {
-        code: { $nin: selectedItemCodes },
-        "finish.unique_code": uniqueCode,
-      },
-      {
-        $pull: {
-          finish: { unique_code: uniqueCode },
-        },
-      },
+      { "finish.finish_id": finishDoc._id },
+      { $pull: { finish: { finish_id: finishDoc._id } } },
     );
-
+    if (previousUniqueCode) {
+      await Item.updateMany(
+        { "finish.unique_code": previousUniqueCode },
+        { $pull: { finish: { unique_code: previousUniqueCode } } },
+      );
+    }
     await Item.updateMany(
-      {
-        code: { $in: selectedItemCodes },
-        "finish.unique_code": uniqueCode,
-      },
-      {
-        $pull: {
-          finish: { unique_code: uniqueCode },
-        },
-      },
+      { "finish.unique_code": uniqueCode },
+      { $pull: { finish: { unique_code: uniqueCode } } },
     );
 
     await Item.updateMany(
@@ -625,6 +638,49 @@ exports.upsertFinish = async (req, res) => {
       message: duplicateKeyError
         ? "A finish with this unique code already exists"
         : error?.message || "Failed to save finish",
+    });
+  }
+};
+
+exports.deleteFinish = async (req, res) => {
+  try {
+    const finishId = normalizeText(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(finishId)) {
+      return res.status(400).json({ success: false, message: "Invalid finish id" });
+    }
+
+    const finish = await Finish.findById(finishId);
+    if (!finish) {
+      return res.status(404).json({ success: false, message: "Finish not found" });
+    }
+
+    const uniqueCode = normalizeCode(finish.unique_code);
+    await Item.updateMany(
+      { "finish.finish_id": finish._id },
+      { $pull: { finish: { finish_id: finish._id } } },
+    );
+    if (uniqueCode) {
+      await Item.updateMany(
+        { "finish.unique_code": uniqueCode },
+        { $pull: { finish: { unique_code: uniqueCode } } },
+      );
+    }
+
+    await Finish.deleteOne({ _id: finish._id });
+    const imageKey = normalizeText(finish?.image?.key || "");
+    if (imageKey) {
+      await deleteObject(imageKey).catch(() => undefined);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Finish deleted",
+    });
+  } catch (error) {
+    console.error("Delete Finish Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to delete finish",
     });
   }
 };

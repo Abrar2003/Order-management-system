@@ -56,4 +56,11 @@ router.post(
   finishController.upsertFinish,
 );
 
+router.delete(
+  "/:id",
+  auth,
+  requirePermission("finishes", "delete"),
+  finishController.deleteFinish,
+);
+
 module.exports = router;

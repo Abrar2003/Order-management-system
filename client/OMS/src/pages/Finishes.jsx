@@ -34,6 +34,8 @@ const Finishes = () => {
   useRememberSearchParams(searchParams, setSearchParams, "finishes");
   const { hasPermission } = usePermissions();
   const canEditFinishes = hasPermission("finishes", "upload");
+  const canDeleteFinishes = hasPermission("finishes", "delete");
+  const canManageFinishes = canEditFinishes || canDeleteFinishes;
 
   const [rows, setRows] = useState([]);
   const [filters, setFilters] = useState({ brands: [], vendors: [] });
@@ -91,6 +93,27 @@ const Finishes = () => {
     setDraftVendorFilter(DEFAULT_FILTER);
     setBrandFilter(DEFAULT_FILTER);
     setVendorFilter(DEFAULT_FILTER);
+  };
+
+  const handleDeleteFinish = async (finish) => {
+    const finishId = normalizeText(finish?._id);
+    if (!finishId) return;
+    const uniqueCode = normalizeText(finish?.unique_code) || "this finish";
+    if (!window.confirm(`Delete ${uniqueCode}?`)) return;
+
+    try {
+      setError("");
+      setSuccess("");
+      await api.delete(`/finishes/${encodeURIComponent(finishId)}`);
+      setSuccess("Finish deleted.");
+      fetchFinishes();
+    } catch (deleteError) {
+      setError(
+        deleteError?.response?.data?.message
+          || deleteError?.message
+          || "Failed to delete finish.",
+      );
+    }
   };
 
   return (
@@ -170,13 +193,13 @@ const Finishes = () => {
                       <th>Brands</th>
                       <th>Items</th>
                       <th>Updated</th>
-                      {canEditFinishes && <th>Action</th>}
+                      {canManageFinishes && <th>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {rows.length === 0 && (
                       <tr className="responsive-card-table-empty-row">
-                        <td colSpan={canEditFinishes ? 10 : 9} className="text-center py-4">
+                        <td colSpan={canManageFinishes ? 10 : 9} className="text-center py-4">
                           No finishes found
                         </td>
                       </tr>
@@ -226,15 +249,28 @@ const Finishes = () => {
                           <td data-label="Updated">
                             {finish?.updated_at ? formatDateDDMMYYYY(finish.updated_at) : "N/A"}
                           </td>
-                          {canEditFinishes && (
+                          {canManageFinishes && (
                             <td data-label="Action">
-                              <button
-                                type="button"
-                                className="btn btn-outline-primary btn-sm"
-                                onClick={() => setEditingFinish(finish)}
-                              >
-                                Edit
-                              </button>
+                              <div className="d-flex flex-wrap gap-2">
+                                {canEditFinishes && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-primary btn-sm"
+                                    onClick={() => setEditingFinish(finish)}
+                                  >
+                                    Edit
+                                  </button>
+                                )}
+                                {canDeleteFinishes && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-danger btn-sm"
+                                    onClick={() => handleDeleteFinish(finish)}
+                                  >
+                                    Delete
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           )}
                         </tr>

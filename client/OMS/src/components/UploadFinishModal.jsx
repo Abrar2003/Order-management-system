@@ -208,7 +208,6 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
   }, [isEditing, selectedBrand, selectedVendor]);
 
   const vendorCodeHint = useMemo(() => {
-    if (isEditing) return "Code locked for this finish.";
     if (!form.vendor_id) return "Select a vendor.";
     if (selectedItemCodes.length === 0) return "Select items to fill vendor code.";
     if (selectedBrands.length > 1) return "Select items from one brand.";
@@ -216,7 +215,7 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
       return `No vendor code found for ${selectedBrand}.`;
     }
     return selectedBrand ? `Brand: ${selectedBrand}` : "";
-  }, [form.vendor_code, form.vendor_id, isEditing, selectedBrand, selectedBrands.length, selectedItemCodes.length]);
+  }, [form.vendor_code, form.vendor_id, selectedBrand, selectedBrands.length, selectedItemCodes.length]);
 
   const selectedItemCodeSet = useMemo(
     () => new Set(selectedItemCodes),
@@ -238,8 +237,6 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
   };
 
   const handleVendorChange = (vendorId) => {
-    if (isEditing) return;
-
     const vendor = vendorOptions.find((option) => String(option?._id || "") === String(vendorId || ""));
     setForm((prev) => ({
       ...prev,
@@ -289,6 +286,9 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
       setError("");
 
       const formData = new FormData();
+      if (isEditing) {
+        formData.append("finish_id", initialFinish._id);
+      }
       formData.append("vendor_id", normalizeText(form.vendor_id));
       formData.append("vendor", normalizeText(form.vendor));
       formData.append("vendor_code", normalizeCode(form.vendor_code));
@@ -334,31 +334,21 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
             <div className="row g-3">
               <div className="col-md-6">
                 <label className="form-label">Vendor</label>
-                {isEditing ? (
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={form.vendor}
-                    readOnly
-                    disabled={saving}
-                  />
-                ) : (
-                  <select
-                    className="form-select"
-                    value={form.vendor_id}
-                    onChange={(event) => handleVendorChange(event.target.value)}
-                    disabled={saving || loadingVendors}
-                  >
-                    <option value="">
-                      {loadingVendors ? "Loading vendors..." : "Select vendor"}
+                <select
+                  className="form-select"
+                  value={form.vendor_id}
+                  onChange={(event) => handleVendorChange(event.target.value)}
+                  disabled={saving || loadingVendors}
+                >
+                  <option value="">
+                    {loadingVendors ? "Loading vendors..." : "Select vendor"}
+                  </option>
+                  {vendorOptions.map((vendor) => (
+                    <option key={vendor._id} value={vendor._id}>
+                      {vendor.name}
                     </option>
-                    {vendorOptions.map((vendor) => (
-                      <option key={vendor._id} value={vendor._id}>
-                        {vendor.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
+                  ))}
+                </select>
                 {vendorError && (
                   <div className="text-danger small mt-1">{vendorError}</div>
                 )}
@@ -370,8 +360,8 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
                   type="text"
                   className="form-control"
                   value={form.vendor_code}
-                  readOnly
-                  placeholder="Auto-filled"
+                  onChange={(event) => updateField("vendor_code", event.target.value)}
+                  placeholder="Enter vendor code"
                   disabled={saving || !normalizeText(form.vendor_id || form.vendor)}
                 />
                 {vendorCodeHint && (
@@ -387,7 +377,6 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
                   value={form.color_code}
                   onChange={(event) => updateField("color_code", event.target.value)}
                   placeholder="e.g. BLK"
-                  readOnly={isEditing}
                   disabled={saving}
                 />
               </div>
@@ -400,7 +389,6 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
                   value={form.color}
                   onChange={(event) => updateField("color", event.target.value)}
                   placeholder="Enter finish color"
-                  readOnly={isEditing}
                   disabled={saving}
                 />
               </div>
