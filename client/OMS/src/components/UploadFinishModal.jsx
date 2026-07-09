@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
+import { getCompleteVendorCodes } from "../utils/vendorCodes";
 import "../App.css";
 
 const normalizeText = (value, fallback = "") => String(value ?? fallback).trim();
@@ -9,6 +10,18 @@ const normalizeCode = (value) =>
     .trim()
     .toUpperCase()
     .replace(/\s+/g, "");
+
+const normalizeKey = (value) => normalizeText(value).toLowerCase();
+
+const getVendorCodeForBrand = (vendor, brand) => {
+  const normalizedBrand = normalizeKey(brand);
+  if (!normalizedBrand) return "";
+
+  const match = getCompleteVendorCodes(vendor?.vendor_code).find(
+    (entry) => normalizeKey(entry.brand) === normalizedBrand,
+  );
+  return normalizeText(match?.code);
+};
 
 const useDebouncedValue = (value, delay = 300) => {
   const [debounced, setDebounced] = useState(value);
@@ -23,6 +36,7 @@ const useDebouncedValue = (value, delay = 300) => {
 
 const UploadFinishModal = ({ onClose, onSaved }) => {
   const [form, setForm] = useState({
+    vendor_id: "",
     vendor: "",
     vendor_code: "",
     color: "",
@@ -30,10 +44,13 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
     image: null,
   });
   const [saving, setSaving] = useState(false);
+  const [loadingVendors, setLoadingVendors] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
   const [error, setError] = useState("");
+  const [vendorError, setVendorError] = useState("");
   const [itemError, setItemError] = useState("");
   const [itemSearch, setItemSearch] = useState("");
+  const [vendorOptions, setVendorOptions] = useState([]);
   const [vendorItems, setVendorItems] = useState([]);
   const [selectedItemCodes, setSelectedItemCodes] = useState([]);
 
@@ -42,6 +59,42 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
     () => normalizeCode(`${form.vendor_code}-${form.color_code}`),
     [form.color_code, form.vendor_code],
   );
+
+  const selectedVendor = useMemo(
+    () =>
+      vendorOptions.find((vendor) => String(vendor?._id || "") === String(form.vendor_id || "")) || null,
+    [form.vendor_id, vendorOptions],
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchVendorOptions = async () => {
+      try {
+        setLoadingVendors(true);
+        setVendorError("");
+        const response = await api.get("/finishes/vendor-options");
+        if (!isMounted) return;
+        setVendorOptions(Array.isArray(response?.data?.data) ? response.data.data : []);
+      } catch (fetchError) {
+        if (!isMounted) return;
+        setVendorOptions([]);
+        setVendorError(
+          fetchError?.response?.data?.message
+            || "Failed to load vendors.",
+        );
+      } finally {
+        if (isMounted) {
+          setLoadingVendors(false);
+        }
+      }
+    };
+
+    fetchVendorOptions();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const normalizedVendor = normalizeText(debouncedVendor);
@@ -103,6 +156,44 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
     });
   }, [itemSearch, vendorItems]);
 
+  const selectedBrands = useMemo(() => {
+    const brandByCode = new Map(
+      vendorItems.map((item) => [
+        normalizeText(item?.code),
+        normalizeText(item?.brand),
+      ]),
+    );
+
+    return [
+      ...new Set(
+        selectedItemCodes
+          .map((code) => brandByCode.get(normalizeText(code)))
+          .filter(Boolean),
+      ),
+    ].sort((left, right) => left.localeCompare(right));
+  }, [selectedItemCodes, vendorItems]);
+
+  const selectedBrand = selectedBrands.length === 1 ? selectedBrands[0] : "";
+
+  useEffect(() => {
+    const nextVendorCode = getVendorCodeForBrand(selectedVendor, selectedBrand);
+    setForm((prev) =>
+      prev.vendor_code === nextVendorCode
+        ? prev
+        : { ...prev, vendor_code: nextVendorCode },
+    );
+  }, [selectedBrand, selectedVendor]);
+
+  const vendorCodeHint = useMemo(() => {
+    if (!form.vendor_id) return "Select a vendor.";
+    if (selectedItemCodes.length === 0) return "Select items to fill vendor code.";
+    if (selectedBrands.length > 1) return "Select items from one brand.";
+    if (selectedBrand && !normalizeCode(form.vendor_code)) {
+      return `No vendor code found for ${selectedBrand}.`;
+    }
+    return selectedBrand ? `Brand: ${selectedBrand}` : "";
+  }, [form.vendor_code, form.vendor_id, selectedBrand, selectedBrands.length, selectedItemCodes.length]);
+
   const selectedItemCodeSet = useMemo(
     () => new Set(selectedItemCodes),
     [selectedItemCodes],
@@ -120,6 +211,20 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handleVendorChange = (vendorId) => {
+    const vendor = vendorOptions.find((option) => String(option?._id || "") === String(vendorId || ""));
+    setForm((prev) => ({
+      ...prev,
+      vendor_id: vendor?._id || "",
+      vendor: vendor?.name || "",
+      vendor_code: "",
+    }));
+    setItemSearch("");
+    setSelectedItemCodes([]);
+    setVendorItems([]);
+    setItemError("");
   };
 
   const toggleItemSelection = (itemCode) => {
@@ -158,6 +263,7 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
       setError("");
 
       const formData = new FormData();
+      formData.append("vendor_id", normalizeText(form.vendor_id));
       formData.append("vendor", normalizeText(form.vendor));
       formData.append("vendor_code", normalizeCode(form.vendor_code));
       formData.append("color", normalizeText(form.color));
@@ -202,14 +308,24 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
             <div className="row g-3">
               <div className="col-md-6">
                 <label className="form-label">Vendor</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={form.vendor}
-                  onChange={(event) => updateField("vendor", event.target.value)}
-                  placeholder="Enter vendor name"
-                  disabled={saving}
-                />
+                <select
+                  className="form-select"
+                  value={form.vendor_id}
+                  onChange={(event) => handleVendorChange(event.target.value)}
+                  disabled={saving || loadingVendors}
+                >
+                  <option value="">
+                    {loadingVendors ? "Loading vendors..." : "Select vendor"}
+                  </option>
+                  {vendorOptions.map((vendor) => (
+                    <option key={vendor._id} value={vendor._id}>
+                      {vendor.name}
+                    </option>
+                  ))}
+                </select>
+                {vendorError && (
+                  <div className="text-danger small mt-1">{vendorError}</div>
+                )}
               </div>
 
               <div className="col-md-3">
@@ -218,10 +334,13 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
                   type="text"
                   className="form-control"
                   value={form.vendor_code}
-                  onChange={(event) => updateField("vendor_code", event.target.value)}
-                  placeholder="e.g. VEN01"
-                  disabled={saving}
+                  readOnly
+                  placeholder="Auto-filled"
+                  disabled={saving || !form.vendor_id}
                 />
+                {vendorCodeHint && (
+                  <div className="text-secondary small mt-1">{vendorCodeHint}</div>
+                )}
               </div>
 
               <div className="col-md-3">
@@ -295,7 +414,7 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
                   value={itemSearch}
                   onChange={(event) => setItemSearch(event.target.value)}
                   placeholder="Search code, name, description, brand"
-                  disabled={saving || loadingItems || !normalizeText(form.vendor)}
+                  disabled={saving || loadingItems || !normalizeText(form.vendor_id || form.vendor)}
                 />
               </div>
 
@@ -312,9 +431,9 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
 
               <div className="col-12">
                 <div className="finish-item-picker">
-                  {!normalizeText(form.vendor) ? (
+                  {!normalizeText(form.vendor_id || form.vendor) ? (
                     <div className="finish-item-picker-empty">
-                      Enter a vendor to load matching items.
+                      Select a vendor to load matching items.
                     </div>
                   ) : loadingItems ? (
                     <div className="finish-item-picker-empty">Loading items...</div>
@@ -386,7 +505,7 @@ const UploadFinishModal = ({ onClose, onSaved }) => {
               onClick={handleSubmit}
               disabled={
                 saving
-                || !normalizeText(form.vendor)
+                || !normalizeText(form.vendor_id || form.vendor)
                 || !normalizeCode(form.vendor_code)
                 || !normalizeText(form.color)
                 || !normalizeCode(form.color_code)

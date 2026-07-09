@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const Finish = require("../models/finish.model");
 const Item = require("../models/item.model");
+const Vendor = require("../models/vendor.model");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   isConfigured: isWasabiConfigured,
@@ -24,6 +25,14 @@ const normalizeCode = (value) =>
     .trim()
     .toUpperCase()
     .replace(/\s+/g, "");
+
+const normalizeVendorCodeEntries = (value = []) =>
+  (Array.isArray(value) ? value : [])
+    .map((entry = {}) => ({
+      brand: normalizeText(entry?.brand || entry?.brand_name || entry?.brandName),
+      code: normalizeText(entry?.code || entry?.vendor_code || entry?.vendorCode),
+    }))
+    .filter((entry) => entry.brand && entry.code);
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -160,6 +169,35 @@ const buildVendorItemMatch = ({ vendor = "", search = "" } = {}) => {
       },
     ],
   };
+};
+
+exports.getFinishVendorOptions = async (_req, res) => {
+  try {
+    const vendors = await Vendor.find({
+      $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
+    })
+      .select("_id name vendor_code is_active")
+      .sort({ name: 1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: (Array.isArray(vendors) ? vendors : [])
+        .map((vendor) => ({
+          _id: String(vendor?._id || ""),
+          name: normalizeText(vendor?.name),
+          vendor_code: normalizeVendorCodeEntries(vendor?.vendor_code),
+          is_active: vendor?.is_active !== false,
+        }))
+        .filter((vendor) => vendor._id && vendor.name),
+    });
+  } catch (error) {
+    console.error("Get Finish Vendor Options Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to load vendors for finish",
+    });
+  }
 };
 
 exports.getVendorItemsForFinish = async (req, res) => {
@@ -319,7 +357,9 @@ exports.upsertFinish = async (req, res) => {
   let cleanupUploadedImage = false;
 
   try {
-    const vendor = normalizeText(req.body?.vendor_id ?? req.body?.vendorId ?? req.body?.vendor);
+    const vendorId = normalizeText(req.body?.vendor_id ?? req.body?.vendorId);
+    const vendorName = normalizeText(req.body?.vendor);
+    const vendor = vendorId || vendorName;
     const vendorCode = normalizeCode(req.body?.vendor_code);
     const color = normalizeText(req.body?.color);
     const colorCode = normalizeCode(req.body?.color_code);
@@ -346,7 +386,7 @@ exports.upsertFinish = async (req, res) => {
       return res.status(400).json({ success: false, message: "Unique code could not be generated" });
     }
 
-    const vendorMatch = buildVendorItemMatch({ vendor });
+    const vendorMatch = buildVendorItemMatch({ vendor: vendorName || vendor });
     const selectedItems = await Item.find(
       applyDataAccessMatch(
         {
@@ -374,7 +414,7 @@ exports.upsertFinish = async (req, res) => {
       const invalidCodes = itemCodes.filter((code) => !foundCodeSet.has(code));
       return res.status(400).json({
         success: false,
-        message: `Some selected items do not belong to vendor ${vendor}: ${invalidCodes.join(", ")}`,
+        message: `Some selected items do not belong to vendor ${vendorName || vendor}: ${invalidCodes.join(", ")}`,
       });
     }
 
@@ -404,7 +444,7 @@ exports.upsertFinish = async (req, res) => {
     const finishSummary = normalizeFinishSummary({
       finishId: finishDoc._id,
       uniqueCode,
-      vendor,
+      vendor: finishDoc.vendor || vendorName || vendor,
       vendorCode,
       color,
       colorCode,
