@@ -5156,6 +5156,12 @@ small,
   overflow: hidden;
 }
 
+.inspection-report-finish-summary-panel {
+  flex-direction: column;
+  gap: 0.5rem;
+  text-align: center;
+}
+
 .inspection-report-brand-logo {
   display: block;
   flex: 0 0 auto;
@@ -5218,6 +5224,10 @@ small,
 .inspection-report-brand-logo--finish {
   max-width: 80%;
   max-height: 120px;
+}
+
+.inspection-report-summary-media--finish .inspection-report-brand-logo--finish {
+  max-height: 10rem;
 }
 
 .inspection-report-finish-banner-meta {
@@ -8202,7 +8212,8 @@ small,
 
   .inspection-report-brand-logo,
   .inspection-report-brand-logo--brand,
-  .inspection-report-brand-logo--product {
+  .inspection-report-brand-logo--product,
+  .inspection-report-brand-logo--finish {
     max-width: 100%;
     max-height: 12rem;
   }

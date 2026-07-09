@@ -3,6 +3,7 @@ const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
 const User = require("../models/user.model");
+const Finish = require("../models/finish.model");
 const ProductTypeTemplate = require("../models/productTypeTemplate.model");
 const PisUpdateLog = require("../models/pisUpdateLog.model");
 const mongoose = require("mongoose");
@@ -5473,6 +5474,72 @@ const buildItemDetailFilePayloads = async (item = {}) => {
   return result;
 };
 
+const getRequestBaseUrl = (req = {}) => {
+  const protocol = String(req.get?.("x-forwarded-proto") || req.protocol || "http")
+    .split(",")[0]
+    .trim();
+  const host = String(req.get?.("x-forwarded-host") || req.get?.("host") || "")
+    .split(",")[0]
+    .trim();
+  return host ? `${protocol}://${host}` : "";
+};
+
+const buildFinishImagePublicUrl = (finish = {}, req = {}) => {
+  const uniqueCode = normalizeTextField(finish?.unique_code).toUpperCase();
+  if (!uniqueCode) return "";
+  const image = finish?.image || {};
+  const version = normalizeTextField(image?.key || image?.public_id || image?.link);
+  if (!version) return "";
+  const baseUrl = getRequestBaseUrl(req).replace(/\/$/, "");
+  return `${baseUrl}/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}&v=${encodeURIComponent(version)}`;
+};
+
+const enrichItemDetailFinishes = async (item = {}, req = {}) => {
+  const entries = Array.isArray(item?.finish) ? item.finish : [];
+  if (entries.length === 0) return entries;
+
+  const finishIds = [
+    ...new Set(
+      entries
+        .map((entry) => normalizeTextField(entry?.finish_id))
+        .filter((value) => mongoose.Types.ObjectId.isValid(value)),
+    ),
+  ];
+  const uniqueCodes = [
+    ...new Set(
+      entries
+        .map((entry) => normalizeTextField(entry?.unique_code).toUpperCase())
+        .filter(Boolean),
+    ),
+  ];
+  if (finishIds.length === 0 && uniqueCodes.length === 0) return entries;
+
+  const finishDocs = await Finish.find({
+    $or: [
+      ...(finishIds.length > 0 ? [{ _id: { $in: finishIds } }] : []),
+      ...(uniqueCodes.length > 0 ? [{ unique_code: { $in: uniqueCodes } }] : []),
+    ],
+  })
+    .select("_id unique_code image")
+    .lean();
+  const byId = new Map(finishDocs.map((finish) => [String(finish?._id || ""), finish]));
+  const byCode = new Map(
+    finishDocs.map((finish) => [normalizeTextField(finish?.unique_code).toUpperCase(), finish]),
+  );
+
+  return entries.map((entry) => {
+    const matched =
+      byId.get(normalizeTextField(entry?.finish_id)) ||
+      byCode.get(normalizeTextField(entry?.unique_code).toUpperCase());
+    const imageUrl = matched ? buildFinishImagePublicUrl(matched, req) : "";
+    return {
+      ...entry,
+      finish_id: matched?._id || entry?.finish_id || null,
+      image: imageUrl ? { ...(matched?.image || {}), url: imageUrl } : entry?.image || null,
+    };
+  });
+};
+
 exports.getItemDetails = async (req, res) => {
   try {
     const itemCodeInput = String(req.params.itemCode || "").trim();
@@ -5544,7 +5611,10 @@ exports.getItemDetails = async (req, res) => {
       };
     });
 
-    const files = await buildItemDetailFilePayloads(item);
+    const [files, finish] = await Promise.all([
+      buildItemDetailFilePayloads(item),
+      enrichItemDetailFinishes(item, req),
+    ]);
     const productDatabaseRow = buildProductDatabaseRow(item, req.user);
 
     return res.status(200).json({
@@ -5552,6 +5622,7 @@ exports.getItemDetails = async (req, res) => {
       data: {
         item: {
           ...item,
+          finish,
           ...files,
         },
         product_database: productDatabaseRow,

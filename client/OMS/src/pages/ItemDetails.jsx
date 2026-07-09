@@ -652,13 +652,28 @@ const ItemDetails = () => {
           vendorCode: toDisplay(entry?.vendor_code, "N/A"),
           color: toDisplay(entry?.color, "N/A"),
           colorCode: toDisplay(entry?.color_code, "N/A"),
+          imageUrl: getStoredItemFileUrl(entry?.image),
         }))
         .filter((entry) =>
+          Boolean(entry.imageUrl) ||
           [entry.uniqueCode, entry.vendor, entry.vendorCode, entry.color, entry.colorCode]
             .some((value) => value !== "N/A"),
         ),
     [item?.finish],
   );
+
+  const featuredFinish = useMemo(
+    () => finishRows.find((row) => row.imageUrl) || finishRows[0] || null,
+    [finishRows],
+  );
+
+  const featuredFinishName = useMemo(() => {
+    if (!featuredFinish) return "";
+    if (featuredFinish.color !== "N/A" && featuredFinish.colorCode !== "N/A") {
+      return `${featuredFinish.color} (${featuredFinish.colorCode})`;
+    }
+    return featuredFinish.color !== "N/A" ? featuredFinish.color : featuredFinish.vendor;
+  }, [featuredFinish]);
 
   const handlePoSort = (column, defaultDirection = "asc") => {
     const next = getNextClientSortState(poSortBy, poSortOrder, column, defaultDirection);
@@ -973,6 +988,27 @@ const ItemDetails = () => {
                           <img src={productImageUrl} alt={`${item?.description || item?.code || "Item"} product`} className="inspection-report-brand-logo inspection-report-brand-logo--product" />
                         ) : (
                           <div className="inspection-report-image-skeleton"><span>Product Image not available yet</span></div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="inspection-report-summary-column inspection-report-summary-media inspection-report-summary-media--finish">
+                      <div className="inspection-report-brand-panel inspection-report-finish-summary-panel">
+                        {featuredFinish ? (
+                          <>
+                            {featuredFinish.imageUrl ? (
+                              <img src={featuredFinish.imageUrl} alt={`${featuredFinish.uniqueCode} finish`} className="inspection-report-brand-logo inspection-report-brand-logo--finish" />
+                            ) : (
+                              <div className="inspection-report-media-empty">Finish image not available</div>
+                            )}
+                            <div className="inspection-report-finish-banner-meta">
+                              <div className="fw-semibold">{featuredFinish.uniqueCode}</div>
+                              {featuredFinishName && featuredFinishName !== "N/A" && (
+                                <div className="text-secondary small">{featuredFinishName}</div>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="inspection-report-media-empty">Finish not mapped</div>
                         )}
                       </div>
                     </div>
