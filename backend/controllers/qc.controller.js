@@ -12245,6 +12245,35 @@ exports.editInspectionRecords = async (req, res) => {
         }
       }
 
+      if (
+        (!cbmInput || (!hasExplicitBoxUpdate && !hasExplicitTotalUpdate)) &&
+        (parsedInspectedBoxSizes.hasInput || parsedInspectedItemSizes.hasInput || hasOwn(row, "inspected_box_mode"))
+      ) {
+        const itemSizes = effectiveInspectedItemSizes;
+        const boxSizes = effectiveInspectedBoxSizes;
+        const boxMode = parsedInspectedBoxMode;
+
+        const boxSummary = buildBoxMeasurementCbmSummary({
+          sizes: boxSizes,
+          mode: boxMode,
+        });
+
+        const calculatedItemCbm = calculateSizeEntriesCbmTotal(itemSizes);
+        const calculatedCbm =
+          toNonNegativeNumber(boxSummary.total, 0) > 0
+            ? boxSummary.total
+            : calculatedItemCbm > 0
+            ? toNormalizedCbmString(calculatedItemCbm)
+            : "0";
+
+        nextCbmSnapshot = buildNormalizedCbmSnapshot({
+          box1: boxSummary.first,
+          box2: boxSummary.second,
+          box3: boxSummary.third,
+          total: calculatedCbm,
+        });
+      }
+
       const hasLabelRangesField = Array.isArray(row?.label_ranges);
       const labelsFieldInput = Array.isArray(row?.labels_added)
         ? row.labels_added
@@ -12404,7 +12433,7 @@ exports.editInspectionRecords = async (req, res) => {
 
 	    const refreshedInspections = await Inspection.find({ qc: qc._id })
 	      .select(
-	        "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered pending_after labels_added label_ranges goods_not_ready status createdAt barcode master_barcode inner_barcode packed_size finishing branding kd inspected_item_sizes inspected_box_sizes inspected_box_mode",
+	        "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered pending_after labels_added label_ranges goods_not_ready status createdAt barcode master_barcode inner_barcode packed_size finishing branding kd inspected_item_sizes inspected_box_sizes inspected_box_mode cbm",
 	      )
 	      .lean();
 
@@ -12447,6 +12476,33 @@ exports.editInspectionRecords = async (req, res) => {
       qc.last_inspected_date = String(
         qc.request_date || qc.last_inspected_date || "",
       );
+    }
+
+    if (latestRecord) {
+      if (latestRecord.barcode !== undefined) {
+        qc.barcode = latestRecord.barcode;
+      }
+      if (latestRecord.master_barcode !== undefined) {
+        qc.master_barcode = latestRecord.master_barcode || latestRecord.barcode;
+      }
+      if (latestRecord.inner_barcode !== undefined) {
+        qc.inner_barcode = latestRecord.inner_barcode;
+      }
+      if (latestRecord.packed_size !== undefined) {
+        qc.packed_size = latestRecord.packed_size;
+      }
+      if (latestRecord.finishing !== undefined) {
+        qc.finishing = latestRecord.finishing;
+      }
+      if (latestRecord.branding !== undefined) {
+        qc.branding = latestRecord.branding;
+      }
+      if (latestRecord.remarks !== undefined) {
+        qc.remarks = latestRecord.remarks;
+      }
+      if (latestRecord.cbm) {
+        qc.cbm = latestRecord.cbm;
+      }
     }
 
     qc.updated_by = buildAuditActor(req.user);
@@ -12588,7 +12644,7 @@ exports.deleteInspectionRecord = async (req, res) => {
       _id: { $ne: inspection._id },
     })
       .select(
-        "inspection_date requested_date createdAt inspector labels_added request_history_id checked passed vendor_requested vendor_offered label_ranges goods_not_ready status",
+        "inspection_date requested_date createdAt inspector labels_added request_history_id checked passed vendor_requested vendor_offered label_ranges goods_not_ready status barcode master_barcode inner_barcode packed_size finishing branding remarks cbm",
       )
       .lean();
 
@@ -12633,6 +12689,33 @@ exports.deleteInspectionRecord = async (req, res) => {
           qc.last_inspected_date ||
           "",
       );
+
+      if (latestRecord) {
+        if (latestRecord.barcode !== undefined) {
+          qc.barcode = latestRecord.barcode;
+        }
+        if (latestRecord.master_barcode !== undefined) {
+          qc.master_barcode = latestRecord.master_barcode || latestRecord.barcode;
+        }
+        if (latestRecord.inner_barcode !== undefined) {
+          qc.inner_barcode = latestRecord.inner_barcode;
+        }
+        if (latestRecord.packed_size !== undefined) {
+          qc.packed_size = latestRecord.packed_size;
+        }
+        if (latestRecord.finishing !== undefined) {
+          qc.finishing = latestRecord.finishing;
+        }
+        if (latestRecord.branding !== undefined) {
+          qc.branding = latestRecord.branding;
+        }
+        if (latestRecord.remarks !== undefined) {
+          qc.remarks = latestRecord.remarks;
+        }
+        if (latestRecord.cbm) {
+          qc.cbm = latestRecord.cbm;
+        }
+      }
 
       qc.updated_by = buildAuditActor(req.user);
       await qc.save();

@@ -3123,8 +3123,6 @@ const UpdateQcModal = ({
       try {
         pauseDraftSaves();
         setSaving(true);
-        const qcResponse = await api.patch(`/qc/update-qc/${qc._id}`, qcPayload);
-        const updatedQc = qcResponse?.data?.data || qc;
         await api.patch(`/qc/${qc._id}/inspection-records`, {
           records: [
             {
@@ -3141,12 +3139,7 @@ const UpdateQcModal = ({
               checked: qcChecked,
               passed: qcPassed,
               pending_after: effectivePendingAfterRewrite,
-              cbm: {
-                box1: Number(updatedQc?.cbm?.box1 ?? updatedQc?.cbm?.top ?? 0) || 0,
-                box2: Number(updatedQc?.cbm?.box2 ?? updatedQc?.cbm?.bottom ?? 0) || 0,
-                box3: Number(updatedQc?.cbm?.box3 ?? 0) || 0,
-                total: Number(updatedQc?.cbm?.total ?? 0) || 0,
-              },
+              cbm: rewriteTargetRecord?.cbm || { total: 0 },
               label_ranges: normalizedLabelRanges,
               labels_added: labelsForUpdate,
               remarks: normalizedRemarks,
