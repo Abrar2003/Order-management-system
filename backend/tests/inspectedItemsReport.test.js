@@ -94,6 +94,19 @@ test("order-only item inspection state uses QC records and latest date", () => {
   assert.equal(group.last_inspected_date, "2026-03-10");
 });
 
+test("source and size snapshots alone do not mark an item inspected", () => {
+  const row = buildInspectedItemsReportRow({
+    _id: "item-1",
+    code: "DL-2299",
+    source: { from_qc: true },
+    inspected_item_sizes: [{ L: 1, B: 1, H: 1 }],
+    inspected_box_sizes: [{ L: 1, B: 1, H: 1 }],
+    qc: { last_inspected_date: "", quantities: { checked: 0, passed: 0 } },
+  });
+
+  assert.equal(row.flags.inspected, false);
+});
+
 test("cancelled-only order items are excluded while archived non-cancelled shapes remain valid", () => {
   const groups = buildOrderItemReportGroups([
     order({ code: "CANCELLED", status: "Cancelled" }),

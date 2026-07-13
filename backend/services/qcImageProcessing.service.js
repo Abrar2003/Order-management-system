@@ -719,13 +719,13 @@ const scanAndEnqueuePendingQcImages = async ({
       for (const image of images) {
         if (legacyOnly && normalizeText(image?.storage?.source_key || "")) continue;
         if (!shouldEnqueueImage(image)) continue;
-        await enqueueQcImageDerivativeProcessing({
+        const job = await enqueueQcImageDerivativeProcessing({
           qcId: String(doc._id),
           imageField: field,
           imageId: String(image._id),
           ownerModel: OWNER_MODEL_QC,
         });
-        enqueued += 1;
+        if (job) enqueued += 1;
       }
     }
   }
@@ -736,14 +736,14 @@ const scanAndEnqueuePendingQcImages = async ({
       for (const image of images) {
         if (legacyOnly && normalizeText(image?.storage?.source_key || "")) continue;
         if (!shouldEnqueueImage(image)) continue;
-        await enqueueQcImageDerivativeProcessing({
+        const job = await enqueueQcImageDerivativeProcessing({
           qcId: String(inspection.qc || ""),
           inspectionId: String(inspection._id),
           imageField: field,
           imageId: String(image._id),
           ownerModel: OWNER_MODEL_INSPECTION,
         });
-        enqueued += 1;
+        if (job) enqueued += 1;
       }
     }
   }

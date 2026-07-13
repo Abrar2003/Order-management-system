@@ -357,10 +357,7 @@ const hasItemBeenInspected = (item = {}) =>
   Boolean(
     normalizeText(item?.qc?.last_inspected_date) ||
       Number(item?.qc?.quantities?.checked || 0) > 0 ||
-      Number(item?.qc?.quantities?.passed || 0) > 0 ||
-      item?.source?.from_qc === true ||
-      (Array.isArray(item?.inspected_item_sizes) && item.inspected_item_sizes.length > 0) ||
-      (Array.isArray(item?.inspected_box_sizes) && item.inspected_box_sizes.length > 0),
+      Number(item?.qc?.quantities?.passed || 0) > 0,
   );
 
 const hasEanUploaded = (item = {}) => {

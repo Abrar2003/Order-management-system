@@ -68,12 +68,15 @@ const getRedisConnectionOptions = ({ forBullMq = false, connectionName = "" } = 
     port: parseInteger(baseOptions.port, 6379),
     db: parseInteger(baseOptions.db, 0),
     connectTimeout: parseInteger(process.env.REDIS_CONNECT_TIMEOUT_MS, 10000),
-    commandTimeout: parseInteger(process.env.REDIS_COMMAND_TIMEOUT_MS, 5000),
     enableReadyCheck: true,
     enableOfflineQueue: forBullMq,
     maxRetriesPerRequest: forBullMq ? null : 2,
     retryStrategy: (times) => Math.min(times * 500, 5000),
   };
+
+  if (!forBullMq) {
+    options.commandTimeout = parseInteger(process.env.REDIS_COMMAND_TIMEOUT_MS, 5000);
+  }
 
   const username = normalizeText(baseOptions.username);
   const password = normalizeText(baseOptions.password || process.env.REDIS_PASSWORD);

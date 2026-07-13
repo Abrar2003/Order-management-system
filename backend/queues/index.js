@@ -36,9 +36,11 @@ const normalizeText = (value) => String(value ?? "").trim();
 const sanitizeJobIdPart = (value = "") =>
   normalizeText(value)
     .toLowerCase()
-    .replace(/[^a-z0-9:_-]+/g, "-")
+    .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "") || "unknown";
+
+const buildJobId = (...parts) => parts.map(sanitizeJobIdPart).join("--");
 
 const logThrottled = (key, level, message, payload = {}, intervalMs = 60000) => {
   const now = Date.now();
@@ -168,7 +170,7 @@ const enqueueOrderCbmRecalc = ({ orderId } = {}) => {
     QUEUE_NAMES.cbmRecalcQueue,
     JOB_NAMES.RECALCULATE_ORDER_CBM,
     { orderId },
-    { jobId: `cbm:order:${safeOrderId}` },
+    { jobId: buildJobId("cbm", "order", safeOrderId) },
   );
 };
 
@@ -183,7 +185,7 @@ const enqueueAllOrderCbmRecalc = ({
     QUEUE_NAMES.cbmRecalcQueue,
     JOB_NAMES.RECALCULATE_ALL_ORDER_CBM,
     { batchSize, dryRun, forceUpdate, requireCalculatedCbm, eligibleOnly },
-    { jobId: `cbm:all:${dryRun ? "dry-run" : "live"}:${Date.now()}` },
+    { jobId: buildJobId("cbm", "all", dryRun ? "dry-run" : "live", Date.now()) },
   );
 
 const enqueueOrderGroupCalendarSync = ({ order_id, brand, vendor } = {}) =>
@@ -192,12 +194,7 @@ const enqueueOrderGroupCalendarSync = ({ order_id, brand, vendor } = {}) =>
     JOB_NAMES.SYNC_ORDER_GROUP_CALENDAR,
     { order_id, brand, vendor },
     {
-      jobId: [
-        "calendar:group",
-        sanitizeJobIdPart(order_id),
-        sanitizeJobIdPart(brand),
-        sanitizeJobIdPart(vendor),
-      ].join(":"),
+      jobId: buildJobId("calendar", "group", order_id, brand, vendor),
     },
   );
 
@@ -210,7 +207,7 @@ const enqueueBrandCalendarResync = ({
     QUEUE_NAMES.calendarSyncQueue,
     JOB_NAMES.RESYNC_BRAND_CALENDAR,
     { brand, batchSize, timeoutMs },
-    { jobId: `calendar:resync:${sanitizeJobIdPart(brand || "all")}` },
+    { jobId: buildJobId("calendar", "resync", brand || "all") },
   );
 
 const enqueuePisFileProcessing = ({
@@ -234,11 +231,7 @@ const enqueuePisFileProcessing = ({
       user,
     },
     {
-      jobId: [
-        "pis",
-        sanitizeJobIdPart(itemId),
-        sanitizeJobIdPart(checksum || originalName || "file"),
-      ].join(":"),
+      jobId: buildJobId("pis", itemId, checksum || originalName || "file"),
     },
   );
 
@@ -272,14 +265,14 @@ const enqueueQcImageThumbnailGeneration = ({
       ownerModel,
     },
     {
-      jobId: [
+      jobId: buildJobId(
         "qc-thumbnail",
         safeOwnerModel,
         safeQcId,
         safeInspectionId,
         safeImageField,
         safeImageRef,
-      ].join(":"),
+      ),
       attempts: 3,
       backoff: {
         type: "exponential",
@@ -313,14 +306,14 @@ const enqueueQcImageDerivativeProcessing = ({
       ownerModel,
     },
     {
-      jobId: [
+      jobId: buildJobId(
         "qc-image",
         safeOwnerModel,
         safeQcId,
         safeInspectionId,
         safeImageField,
         safeImageId,
-      ].join(":"),
+      ),
       attempts: 3,
       backoff: {
         type: "exponential",
@@ -359,4 +352,8 @@ module.exports = {
   enqueueQcImageThumbnailGeneration,
   enqueueQcImageDerivativeProcessing,
   closeQueues,
+  __test__: {
+    buildJobId,
+    sanitizeJobIdPart,
+  },
 };
