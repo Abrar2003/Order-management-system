@@ -21,6 +21,7 @@ import {
   getItemFileValues,
   isItemFileOptionAvailableForItem,
 } from "../constants/itemFiles";
+import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import {
   getNextClientSortState,
   sortClientRows,
@@ -32,6 +33,7 @@ import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const DEFAULT_LIMIT = 20;
+const DEFAULT_COUNTRY_FILTER = "India";
 const LIMIT_OPTIONS = [10, 20, 50, 100];
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(value, 10);
@@ -389,6 +391,12 @@ const Items = () => {
   const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
+  const [countryFilter, setCountryFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("country"), DEFAULT_COUNTRY_FILTER),
+  );
+  const [draftCountryFilter, setDraftCountryFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("country"), DEFAULT_COUNTRY_FILTER),
+  );
   const [page, setPage] = useState(() =>
     parsePositiveInt(searchParams.get("page"), 1),
   );
@@ -421,6 +429,7 @@ const Items = () => {
           search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
+          country: countryFilter,
           include_product_image_thumbnail: true,
           page,
           limit,
@@ -452,7 +461,7 @@ const Items = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, limit, page, searchInput, vendorFilter]);
+  }, [brandFilter, countryFilter, limit, page, searchInput, vendorFilter]);
 
   useEffect(() => {
     fetchItems();
@@ -492,6 +501,10 @@ const Items = () => {
     const nextSearchInput = normalizeSearchParam(searchParams.get("search"));
     const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
+    const nextCountryFilter = normalizeFilterParam(
+      searchParams.get("country"),
+      DEFAULT_COUNTRY_FILTER,
+    );
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
     const nextLimit = parseLimit(searchParams.get("limit"));
 
@@ -501,6 +514,8 @@ const Items = () => {
     setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setCountryFilter((prev) => (prev === nextCountryFilter ? prev : nextCountryFilter));
+    setDraftCountryFilter((prev) => (prev === nextCountryFilter ? prev : nextCountryFilter));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -513,6 +528,7 @@ const Items = () => {
     const next = new URLSearchParams();
     const searchValue = normalizeSearchParam(searchInput);
 
+    next.set("country", countryFilter);
     if (searchValue) next.set("search", searchValue);
     if (brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
     if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
@@ -524,6 +540,7 @@ const Items = () => {
     }
   }, [
     brandFilter,
+    countryFilter,
     limit,
     page,
     searchInput,
@@ -568,23 +585,32 @@ const Items = () => {
     setSearchInput(normalizeSearchParam(draftSearchInput));
     setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
     setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
+    setCountryFilter(normalizeFilterParam(draftCountryFilter, DEFAULT_COUNTRY_FILTER));
     setSuccess("");
-  }, [draftBrandFilter, draftSearchInput, draftVendorFilter]);
+  }, [draftBrandFilter, draftCountryFilter, draftSearchInput, draftVendorFilter]);
 
   const handleClearFilters = useCallback(() => {
     setPage(1);
     setDraftSearchInput("");
     setDraftBrandFilter("all");
     setDraftVendorFilter("all");
+    setDraftCountryFilter(DEFAULT_COUNTRY_FILTER);
     setSearchInput("");
     setBrandFilter("all");
     setVendorFilter("all");
+    setCountryFilter(DEFAULT_COUNTRY_FILTER);
     setSuccess("");
   }, []);
 
   const itemCodeOptions = useMemo(
     () => (Array.isArray(filters.item_codes) ? filters.item_codes : []),
     [filters.item_codes],
+  );
+  const countryOptions = useMemo(
+    () => getCountryOfOriginOptions(
+      draftCountryFilter === "all" ? "" : draftCountryFilter,
+    ),
+    [draftCountryFilter],
   );
 
   const handleSortColumn = useCallback(
@@ -897,7 +923,7 @@ const Items = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">Search (Code / Name / Description)</label>
                 <input
                   type="text"
@@ -913,7 +939,7 @@ const Items = () => {
                   ))}
                 </datalist>
               </div>
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
@@ -928,7 +954,7 @@ const Items = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
@@ -943,7 +969,22 @@ const Items = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-2 d-grid gap-2">
+              <div className="col-md-2">
+                <label className="form-label">Country of Origin</label>
+                <select
+                  className="form-select"
+                  value={draftCountryFilter}
+                  onChange={(e) => setDraftCountryFilter(e.target.value)}
+                >
+                  <option value="all">All Countries</option>
+                  {countryOptions.map((country) => (
+                    <option key={country.value} value={country.value}>
+                      {country.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-md-3 d-grid gap-2">
                 <button type="submit" className="btn btn-primary" disabled={loading}>
                   Apply
                 </button>

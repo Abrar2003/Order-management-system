@@ -1396,6 +1396,7 @@ const buildFinalPisCheckReportPayload = ({
   brand = "",
   vendor = "",
   diffField = "",
+  country = "",
 } = {}) => ({
   generated_at: new Date().toISOString(),
   filters: {
@@ -1403,6 +1404,7 @@ const buildFinalPisCheckReportPayload = ({
     brand: normalizeText(brand) || "All",
     vendor: normalizeText(vendor) || "All",
     diff_field: normalizeFinalPisCheckDiffField(diffField) || "All",
+    country: normalizeText(country) || "All",
   },
   summary: buildFinalPisCheckSummary(rows),
   rows: Array.isArray(rows) ? rows : [],

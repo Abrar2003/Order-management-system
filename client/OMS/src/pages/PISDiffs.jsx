@@ -262,7 +262,7 @@ const PisDiffPdfReport = ({ report, reportRef = null }) => {
         </div>
       </header>
 
-      <section className="pis-diff-report-filter-grid">
+      <section className="pis-diff-report-filter-grid pis-diff-report-grid-4">
         <div>
           <span>Search</span>
           <strong>{filters.search || "All"}</strong>
@@ -274,6 +274,10 @@ const PisDiffPdfReport = ({ report, reportRef = null }) => {
         <div>
           <span>Vendor</span>
           <strong>{filters.vendor || "All"}</strong>
+        </div>
+        <div>
+          <span>Country of Origin</span>
+          <strong>{filters.country || "All"}</strong>
         </div>
       </section>
 
@@ -460,6 +464,12 @@ const PISDiffs = () => {
   const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
+  const [countryFilter, setCountryFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("country"), "India"),
+  );
+  const [draftCountryFilter, setDraftCountryFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("country"), "India"),
+  );
   const [page, setPage] = useState(() =>
     parsePositiveInt(searchParams.get("page"), 1),
   );
@@ -485,6 +495,7 @@ const PISDiffs = () => {
           search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
+          country: countryFilter,
           page,
           limit,
           include_product_image_thumbnail: true,
@@ -522,7 +533,7 @@ const PISDiffs = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, limit, page, searchInput, vendorFilter]);
+  }, [brandFilter, limit, page, searchInput, vendorFilter, countryFilter]);
 
   useEffect(() => {
     fetchDiffItems();
@@ -553,6 +564,7 @@ const PISDiffs = () => {
     const nextSearchInput = normalizeSearchParam(searchParams.get("search"));
     const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
+    const nextCountryFilter = normalizeFilterParam(searchParams.get("country"), "India");
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
     const nextLimit = parseLimit(searchParams.get("limit"));
 
@@ -562,6 +574,8 @@ const PISDiffs = () => {
     setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setCountryFilter((prev) => (prev === nextCountryFilter ? prev : nextCountryFilter));
+    setDraftCountryFilter((prev) => (prev === nextCountryFilter ? prev : nextCountryFilter));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -577,6 +591,7 @@ const PISDiffs = () => {
     if (searchValue) next.set("search", searchValue);
     if (brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
     if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
+    if (countryFilter) next.set("country", countryFilter);
     if (page > 1) next.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
 
@@ -592,6 +607,7 @@ const PISDiffs = () => {
     setSearchParams,
     syncedQuery,
     vendorFilter,
+    countryFilter,
   ]);
 
   const itemCodeOptions = useMemo(
@@ -626,16 +642,19 @@ const PISDiffs = () => {
     setSearchInput(normalizeSearchParam(draftSearchInput));
     setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
     setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
-  }, [draftBrandFilter, draftSearchInput, draftVendorFilter]);
+    setCountryFilter(normalizeFilterParam(draftCountryFilter, "India"));
+  }, [draftBrandFilter, draftSearchInput, draftVendorFilter, draftCountryFilter]);
 
   const handleClearFilters = useCallback(() => {
     setPage(1);
     setDraftSearchInput("");
     setDraftBrandFilter("all");
     setDraftVendorFilter("all");
+    setDraftCountryFilter("India");
     setSearchInput("");
     setBrandFilter("all");
     setVendorFilter("all");
+    setCountryFilter("India");
   }, []);
 
   const sortedRows = useMemo(
@@ -703,6 +722,7 @@ const PISDiffs = () => {
           search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
+          country: countryFilter,
         },
       });
 
@@ -748,7 +768,7 @@ const PISDiffs = () => {
     } finally {
       setExporting(false);
     }
-  }, [brandFilter, searchInput, vendorFilter]);
+  }, [brandFilter, searchInput, vendorFilter, countryFilter]);
 
   const handlePreviewPdfReport = useCallback(async () => {
     try {
@@ -763,6 +783,7 @@ const PISDiffs = () => {
           search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
+          country: countryFilter,
         },
       });
 
@@ -775,7 +796,7 @@ const PISDiffs = () => {
     } finally {
       setPdfPreviewLoading(false);
     }
-  }, [brandFilter, searchInput, vendorFilter]);
+  }, [brandFilter, searchInput, vendorFilter, countryFilter]);
 
   const handleClosePdfPreview = useCallback(() => {
     if (exportingPdf) return;
@@ -790,7 +811,7 @@ const PISDiffs = () => {
       await waitForFontsReady();
       const fileDate = new Date().toISOString().slice(0, 10);
       const filterName = toFilenameSegment(
-        [brandFilter, vendorFilter, searchInput].filter(Boolean).join("_"),
+        [brandFilter, vendorFilter, countryFilter, searchInput].filter(Boolean).join("_"),
         "checked",
       );
       await exportElementToPdf({
@@ -801,7 +822,7 @@ const PISDiffs = () => {
         landscape: false,
         repeatHeader: {
           title: "PIS vs Inspected Difference Report",
-          subtitle: `Brand: ${brandFilter} · Vendor: ${vendorFilter} · Search: ${searchInput || "All"}`,
+          subtitle: `Brand: ${brandFilter} · Vendor: ${vendorFilter} · Country: ${countryFilter} · Search: ${searchInput || "All"}`,
         },
       });
     } catch (pdfError) {
@@ -810,7 +831,7 @@ const PISDiffs = () => {
     } finally {
       setExportingPdf(false);
     }
-  }, [brandFilter, exportingPdf, pdfPreviewData, searchInput, vendorFilter]);
+  }, [brandFilter, exportingPdf, pdfPreviewData, searchInput, vendorFilter, countryFilter]);
 
   return (
     <>
@@ -853,7 +874,7 @@ const PISDiffs = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">Search (Code / Name / Description)</label>
                 <input
                   type="text"
@@ -870,7 +891,7 @@ const PISDiffs = () => {
                 </datalist>
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
@@ -899,6 +920,20 @@ const PISDiffs = () => {
                       {vendor}
                     </option>
                   ))}
+                </select>
+              </div>
+
+              <div className="col-md-2">
+                <label className="form-label">Country of Origin</label>
+                <select
+                  className="form-select"
+                  value={draftCountryFilter}
+                  onChange={(event) => setDraftCountryFilter(event.target.value)}
+                >
+                  <option value="all">All Countries</option>
+                  <option value="India">India</option>
+                  <option value="China">China</option>
+                  <option value="Vietnam">Vietnam</option>
                 </select>
               </div>
 

@@ -186,7 +186,7 @@ const FinalPisCheckReport = ({
 
       {showOverviewGrids && (
         <>
-          <section className="pis-diff-report-filter-grid pis-diff-report-grid-4">
+          <section className="pis-diff-report-filter-grid pis-diff-report-grid-5">
             <div>
               <span>Search</span>
               <strong>{filters.search || "All"}</strong>
@@ -198,6 +198,10 @@ const FinalPisCheckReport = ({
             <div>
               <span>Vendor</span>
               <strong>{filters.vendor || "All"}</strong>
+            </div>
+            <div>
+              <span>Country of Origin</span>
+              <strong>{filters.country || "All"}</strong>
             </div>
             <div>
               <span>Difference Field</span>
@@ -594,6 +598,12 @@ const FinalPISCheck = () => {
   const [draftSortOrder, setDraftSortOrder] = useState(() =>
     normalizeSortOrder(searchParams.get("sortOrder")),
   );
+  const [countryFilter, setCountryFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("country"), "India"),
+  );
+  const [draftCountryFilter, setDraftCountryFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("country"), "India"),
+  );
   const [syncedQuery, setSyncedQuery] = useState(null);
   const currentUser = getUserFromToken();
   const currentUserId = String(currentUser?._id || currentUser?.id || "").trim();
@@ -606,7 +616,14 @@ const FinalPISCheck = () => {
   const fetchOptions = useCallback(async () => {
     try {
       setOptionsLoading(true);
-      const response = await api.get("/items/final-pis-check/options");
+      const response = await api.get("/items/final-pis-check/options", {
+        params: {
+          search: searchInput,
+          brand: brandFilter,
+          vendor: vendorFilter,
+          country: countryFilter,
+        },
+      });
       setOptions({
         brands: Array.isArray(response?.data?.data?.brands)
           ? response.data.data.brands
@@ -628,7 +645,7 @@ const FinalPISCheck = () => {
     } finally {
       setOptionsLoading(false);
     }
-  }, []);
+  }, [brandFilter, countryFilter, searchInput, vendorFilter]);
 
   const fetchFinalPisCheckRows = useCallback(async () => {
     try {
@@ -641,6 +658,7 @@ const FinalPISCheck = () => {
           brand: brandFilter,
           vendor: vendorFilter,
           diff_field: diffFieldFilter,
+          country: countryFilter,
           page,
           limit,
           sortBy,
@@ -663,7 +681,7 @@ const FinalPISCheck = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, diffFieldFilter, limit, page, searchInput, sortBy, sortOrder, vendorFilter]);
+  }, [brandFilter, diffFieldFilter, limit, page, searchInput, sortBy, sortOrder, vendorFilter, countryFilter]);
 
   useEffect(() => {
     fetchOptions();
@@ -699,6 +717,7 @@ const FinalPISCheck = () => {
     const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
     const nextDiffFieldFilter = normalizeFilterParam(searchParams.get("diff_field"), "all");
+    const nextCountryFilter = normalizeFilterParam(searchParams.get("country"), "India");
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
     const nextLimit = parseLimit(searchParams.get("limit"));
     const nextSortBy = normalizeSortBy(searchParams.get("sortBy"));
@@ -714,6 +733,8 @@ const FinalPISCheck = () => {
     setDraftDiffFieldFilter((prev) =>
       prev === nextDiffFieldFilter ? prev : nextDiffFieldFilter,
     );
+    setCountryFilter((prev) => (prev === nextCountryFilter ? prev : nextCountryFilter));
+    setDraftCountryFilter((prev) => (prev === nextCountryFilter ? prev : nextCountryFilter));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
@@ -736,6 +757,7 @@ const FinalPISCheck = () => {
     if (diffFieldFilter && diffFieldFilter !== "all") {
       next.set("diff_field", diffFieldFilter);
     }
+    if (countryFilter) next.set("country", countryFilter);
     if (page > 1) next.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
     if (sortBy !== DEFAULT_SORT_BY) next.set("sortBy", sortBy);
@@ -756,6 +778,7 @@ const FinalPISCheck = () => {
     sortOrder,
     syncedQuery,
     vendorFilter,
+    countryFilter,
   ]);
 
   const handleApplyFilters = useCallback((event) => {
@@ -767,6 +790,7 @@ const FinalPISCheck = () => {
     setDiffFieldFilter(normalizeFilterParam(draftDiffFieldFilter, "all"));
     setSortBy(normalizeSortBy(draftSortBy));
     setSortOrder(normalizeSortOrder(draftSortOrder));
+    setCountryFilter(normalizeFilterParam(draftCountryFilter, "India"));
   }, [
     draftBrandFilter,
     draftDiffFieldFilter,
@@ -774,6 +798,7 @@ const FinalPISCheck = () => {
     draftSortBy,
     draftSortOrder,
     draftVendorFilter,
+    draftCountryFilter,
   ]);
 
   const handleClearFilters = useCallback(() => {
@@ -790,6 +815,8 @@ const FinalPISCheck = () => {
     setDraftSortBy(DEFAULT_SORT_BY);
     setSortOrder(DEFAULT_SORT_ORDER);
     setDraftSortOrder(DEFAULT_SORT_ORDER);
+    setCountryFilter("India");
+    setDraftCountryFilter("India");
   }, []);
 
   const handlePisUpdated = useCallback(() => {
@@ -1013,6 +1040,7 @@ const FinalPISCheck = () => {
           brand: brandFilter,
           vendor: vendorFilter,
           diff_field: diffFieldFilter,
+          country: countryFilter,
           sortBy,
           sortOrder,
         },
@@ -1056,7 +1084,7 @@ const FinalPISCheck = () => {
     } finally {
       setExporting(false);
     }
-  }, [brandFilter, diffFieldFilter, searchInput, sortBy, sortOrder, vendorFilter]);
+  }, [brandFilter, diffFieldFilter, searchInput, sortBy, sortOrder, vendorFilter, countryFilter]);
 
   const handlePreviewPdfReport = useCallback(async () => {
     try {
@@ -1072,6 +1100,7 @@ const FinalPISCheck = () => {
           brand: brandFilter,
           vendor: vendorFilter,
           diff_field: diffFieldFilter,
+          country: countryFilter,
           sortBy,
           sortOrder,
         },
@@ -1086,7 +1115,7 @@ const FinalPISCheck = () => {
     } finally {
       setPdfPreviewLoading(false);
     }
-  }, [brandFilter, diffFieldFilter, searchInput, sortBy, sortOrder, vendorFilter]);
+  }, [brandFilter, diffFieldFilter, searchInput, sortBy, sortOrder, vendorFilter, countryFilter]);
 
   const handleClosePdfPreview = useCallback(() => {
     if (exportingPdf) return;
@@ -1101,7 +1130,7 @@ const FinalPISCheck = () => {
       await waitForFontsReady();
       const fileDate = new Date().toISOString().slice(0, 10);
       const filterName = toFilenameSegment(
-        [brandFilter, vendorFilter, diffFieldFilter, searchInput]
+        [brandFilter, vendorFilter, countryFilter, diffFieldFilter, searchInput]
           .filter(Boolean)
           .join("_"),
         "final-pis-check",
@@ -1114,7 +1143,7 @@ const FinalPISCheck = () => {
         landscape: false,
         repeatHeader: {
           title: "Final PIS Check",
-          subtitle: `Brand: ${brandFilter} · Vendor: ${vendorFilter} · Difference: ${diffFieldFilter}`,
+          subtitle: `Brand: ${brandFilter} · Vendor: ${vendorFilter} · Country: ${countryFilter} · Difference: ${diffFieldFilter}`,
         },
       });
     } catch (pdfError) {
@@ -1123,7 +1152,7 @@ const FinalPISCheck = () => {
     } finally {
       setExportingPdf(false);
     }
-  }, [brandFilter, diffFieldFilter, exportingPdf, pdfPreviewData, searchInput, vendorFilter]);
+  }, [brandFilter, diffFieldFilter, exportingPdf, pdfPreviewData, searchInput, vendorFilter, countryFilter]);
 
   const totalPages = Number(reportData?.pagination?.totalPages || 1);
   const totalRecords = Number(reportData?.pagination?.total || 0);
@@ -1147,7 +1176,7 @@ const FinalPISCheck = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
-              <div className="col-lg-3 col-md-6">
+              <div className="col-lg-2 col-md-6">
                 <label className="form-label">Search</label>
                 <input
                   type="text"
@@ -1210,6 +1239,20 @@ const FinalPISCheck = () => {
               </div>
 
               <div className="col-lg-2 col-md-6">
+                <label className="form-label">Country of Origin</label>
+                <select
+                  className="form-select"
+                  value={draftCountryFilter}
+                  onChange={(event) => setDraftCountryFilter(event.target.value)}
+                >
+                  <option value="all">All Countries</option>
+                  <option value="India">India</option>
+                  <option value="China">China</option>
+                  <option value="Vietnam">Vietnam</option>
+                </select>
+              </div>
+
+              <div className="col-lg-1 col-md-6">
                 <label className="form-label">Sort</label>
                 <select
                   className="form-select"

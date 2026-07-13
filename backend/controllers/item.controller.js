@@ -1526,11 +1526,12 @@ const resolveInspectorName = (inspectorValue) => {
   ).trim();
 };
 
-const buildItemMatch = ({ search, brand, vendor } = {}) => {
+const buildItemMatch = ({ search, brand, vendor, country } = {}) => {
   const conditions = [];
   const normalizedSearch = normalizeFilterValue(search);
   const normalizedBrand = normalizeFilterValue(brand);
   const normalizedVendor = normalizeFilterValue(vendor);
+  const normalizedCountry = normalizeFilterValue(country);
 
   if (normalizedSearch) {
     const escaped = escapeRegex(normalizedSearch);
@@ -1557,6 +1558,15 @@ const buildItemMatch = ({ search, brand, vendor } = {}) => {
 
   if (normalizedVendor) {
     conditions.push(buildVendorsArrayFilter({ field: "vendors", vendorId: normalizedVendor, vendorName: normalizedVendor }));
+  }
+
+  if (normalizedCountry) {
+    conditions.push({
+      country_of_origin: {
+        $regex: `^${escapeRegex(normalizedCountry)}$`,
+        $options: "i",
+      },
+    });
   }
 
   if (conditions.length === 0) return {};
@@ -2618,6 +2628,7 @@ const buildPisDiffReportPayload = ({
   search = "",
   brand = "",
   vendor = "",
+  country = "",
 } = {}) => {
   const rows = checkedDiffRows.map((item) => buildPisDiffReportPreviewRow(item));
   const uniqueBrands = normalizeDistinctValues(
@@ -2633,6 +2644,7 @@ const buildPisDiffReportPayload = ({
       search: normalizeTextField(search) || "All",
       brand: normalizeTextField(brand) || "All",
       vendor: normalizeTextField(vendor) || "All",
+      country: normalizeTextField(country) || "All",
     },
     summary: {
       checked_diff_items: rows.length,
@@ -2647,10 +2659,11 @@ const buildPisDiffReportPayload = ({
   };
 };
 
-const getCheckedPisDiffRowsForReport = async ({ search, brand, vendor } = {}) => {
+const getCheckedPisDiffRowsForReport = async ({ search, brand, vendor, country } = {}) => {
   const match = {
-    ...buildItemMatch({ search, brand, vendor }),
+    ...buildItemMatch({ search, brand, vendor, country }),
     pis_checked_flag: true,
+    is_rectify_imported: { $ne: true },
   };
 
   const checkedItems = await Item.find(match)
@@ -2673,9 +2686,10 @@ const getCheckedPisDiffRowsForReport = async ({ search, brand, vendor } = {}) =>
     });
 };
 
-const buildFinalPisCheckMatch = ({ search, brand, vendor } = {}) => {
+const buildFinalPisCheckMatch = ({ search, brand, vendor, country } = {}) => {
   const conditions = [
     { pis_checked_flag: true },
+    { is_rectify_imported: { $ne: true } },
     {
       $or: [
         { "master_item_sizes.0": { $exists: true } },
@@ -2689,6 +2703,7 @@ const buildFinalPisCheckMatch = ({ search, brand, vendor } = {}) => {
   const normalizedSearch = normalizeFilterValue(search);
   const normalizedBrand = normalizeFilterValue(brand);
   const normalizedVendor = normalizeFilterValue(vendor);
+  const normalizedCountry = normalizeFilterValue(country);
 
   if (normalizedSearch) {
     const escaped = escapeRegex(normalizedSearch);
@@ -2715,18 +2730,30 @@ const buildFinalPisCheckMatch = ({ search, brand, vendor } = {}) => {
     conditions.push(buildVendorsArrayFilter({ field: "vendors", vendorId: normalizedVendor, vendorName: normalizedVendor }));
   }
 
+  if (normalizedCountry) {
+    conditions.push({
+      country_of_origin: {
+        $regex: `^${escapeRegex(normalizedCountry)}$`,
+        $options: "i",
+      },
+    });
+  }
+
   return { $and: conditions };
 };
+
+exports.__test__ = { buildItemMatch, buildFinalPisCheckMatch };
 
 const getFinalPisCheckRowsForQuery = async ({
   search,
   brand,
   vendor,
+  country,
   diffField,
   sortBy,
   sortOrder,
 } = {}) => {
-  const match = buildFinalPisCheckMatch({ search, brand, vendor });
+  const match = buildFinalPisCheckMatch({ search, brand, vendor, country });
   const items = await Item.find(match)
     .select(FINAL_PIS_CHECK_ITEM_SELECT)
     .sort({ updatedAt: -1, code: 1 })
@@ -4239,25 +4266,29 @@ exports.getPisDiffItems = async (req, res) => {
     const search = req.query.search;
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const country = req.query.country;
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
 
-    const uncheckedPisMatch = { pis_checked_flag: { $ne: true } };
+    const uncheckedPisMatch = {
+      pis_checked_flag: { $ne: true },
+      is_rectify_imported: { $ne: true },
+    };
     const match = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, brand, vendor }), req.user),
+      applyItemDataAccess(buildItemMatch({ search, brand, vendor, country }), req.user),
       uncheckedPisMatch,
     );
     const brandOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, vendor }), req.user),
+      applyItemDataAccess(buildItemMatch({ search, vendor, country }), req.user),
       uncheckedPisMatch,
     );
     const vendorOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, brand }), req.user),
+      applyItemDataAccess(buildItemMatch({ search, brand, country }), req.user),
       uncheckedPisMatch,
     );
     const codeOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ brand, vendor }), req.user),
+      applyItemDataAccess(buildItemMatch({ brand, vendor, country }), req.user),
       uncheckedPisMatch,
     );
 
@@ -4330,11 +4361,13 @@ exports.getPisDiffCheckedReportPreview = async (req, res) => {
     const search = req.query.search;
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const country = req.query.country;
 
     const checkedDiffRows = await getCheckedPisDiffRowsForReport({
       search,
       brand,
       vendor,
+      country,
     });
 
     if (checkedDiffRows.length === 0) {
@@ -4351,6 +4384,7 @@ exports.getPisDiffCheckedReportPreview = async (req, res) => {
         search,
         brand,
         vendor,
+        country,
       }),
     });
   } catch (error) {
@@ -4368,11 +4402,13 @@ exports.exportPisDiffCheckedReport = async (req, res) => {
     const search = req.query.search;
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const country = req.query.country;
 
     const checkedDiffRows = await getCheckedPisDiffRowsForReport({
       search,
       brand,
       vendor,
+      country,
     });
 
     if (checkedDiffRows.length === 0) {

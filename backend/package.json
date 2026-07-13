@@ -21,6 +21,7 @@
     "compare:by-boo-collection": "node scripts/createByBooDbComparisonSheet.js",
     "upload:pis:folder": "node scripts/uploadPisFolderViaApi.js",
     "upload:shipping-marks:folder": "node scripts/uploadShippingMarksFolderViaApi.js",
+    "import:rectify-items": "node scripts/importRectifyItems.js",
     "test": "node --test tests/*.test.js",
     "test:pdf": "node --test tests/pdfArchitecture.test.js tests/pdfRenderer.test.js",
     "serve": "npm run dev"

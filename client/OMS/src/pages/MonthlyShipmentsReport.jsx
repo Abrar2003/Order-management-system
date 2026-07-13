@@ -5,7 +5,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   Tooltip,
   XAxis,
   YAxis,
@@ -15,6 +14,7 @@ import Navbar from "../components/Navbar";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatCbm } from "../utils/cbm";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { packMonthlySeries } from "../utils/monthlyShipmentChart";
 import "../App.css";
 
 const DEFAULT_TAB = "overall";
@@ -43,21 +43,6 @@ const MONTH_OPTIONS = Object.freeze([
   "November",
   "December",
 ].map((label, index) => ({ label, value: String(index + 1) })));
-
-const BRAND_COLORS = Object.freeze([
-  "#2563eb",
-  "#16a34a",
-  "#dc2626",
-  "#ca8a04",
-  "#7c3aed",
-  "#0891b2",
-  "#db2777",
-  "#4d7c0f",
-  "#ea580c",
-  "#0f766e",
-  "#9333ea",
-  "#475569",
-]);
 
 const emptyReport = {
   period: {
@@ -137,66 +122,12 @@ const buildYearOptions = () => {
   return years;
 };
 
-const getBrandColor = (brand, index = 0) =>
-  BRAND_COLORS[index % BRAND_COLORS.length] || BRAND_COLORS[0];
-
-const normalizeKey = (value) => String(value ?? "").trim().toLowerCase();
-
 const formatNumber = (value) => {
   const parsed = Number(value || 0);
   if (!Number.isFinite(parsed)) return "0";
   return parsed.toLocaleString(undefined, {
     maximumFractionDigits: 0,
   });
-};
-
-const getBarPayload = (entry) => entry?.payload || entry || {};
-
-const getSeriesMeta = (row, seriesEntry = {}) => {
-  const meta = row?.__meta || {};
-  if (seriesEntry.key && meta[seriesEntry.key]) return meta[seriesEntry.key];
-  const seriesKey = normalizeKey(
-    seriesEntry.brand || seriesEntry.vendor || seriesEntry.label,
-  );
-  return Object.values(meta).find((entry) =>
-    normalizeKey(entry?.brand || entry?.vendor || entry?.label) === seriesKey,
-  ) || {};
-};
-
-const getTooltipSeriesMeta = (item, rowOverride = null) => {
-  const row = rowOverride || getBarPayload(item);
-  const meta = row?.__meta || {};
-  if (item?.dataKey && meta[item.dataKey]) return meta[item.dataKey];
-  const seriesKey = normalizeKey(item?.name);
-  return Object.values(meta).find((entry) =>
-    normalizeKey(entry?.brand || entry?.vendor || entry?.label) === seriesKey,
-  ) || {};
-};
-
-const getTooltipAxisValue = ({ row, label, xKey } = {}) =>
-  label || row?.[xKey] || "N/A";
-
-const resolveGroupedTooltipRow = ({ item, rows = [], label, xKey } = {}) => {
-  const fallbackRow = getBarPayload(item);
-  const chartRows = Array.isArray(rows) ? rows : [];
-  const normalizedLabel = normalizeKey(label);
-
-  if (normalizedLabel) {
-    const rowByAxisLabel = chartRows.find(
-      (row) => normalizeKey(row?.[xKey]) === normalizedLabel,
-    );
-    if (rowByAxisLabel) return rowByAxisLabel;
-  }
-
-  const fallbackMonth = normalizeKey(fallbackRow?.month);
-  if (fallbackMonth) {
-    const rowByMonth = chartRows.find(
-      (row) => normalizeKey(row?.month) === fallbackMonth,
-    );
-    if (rowByMonth) return rowByMonth;
-  }
-
-  return fallbackRow;
 };
 
 const clampNumber = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -304,63 +235,95 @@ const OverallMonthlyTooltip = ({ active, payload }) => {
   );
 };
 
-const GroupedTooltip = ({ active, payload, label, periodLabel, xLabel, xKey, rows }) => {
-  if (!active || !payload?.length) return null;
-  const item = payload.find((entry) => Number(entry?.value || 0) > 0) || payload[0];
-  const row = resolveGroupedTooltipRow({ item, rows, label, xKey });
-  const meta = getTooltipSeriesMeta(item, row);
-  const seriesLabel =
-    meta.brand || meta.vendor || meta.label || String(item?.name || item?.dataKey || "");
-  const axisValue = getTooltipAxisValue({ row, label, xKey });
+const PACKED_BAR_GAP = 2;
+
+const PackedBarShape = ({
+  dataKey,
+  height,
+  onActivate,
+  onHideTooltip,
+  onShowTooltip,
+  payload,
+  slotCount,
+  width,
+  x,
+  y,
+}) => {
+  const meta = payload?.__meta?.[dataKey];
+  if (!meta || Number(meta.unique_container_count || 0) <= 0) return null;
+  const activeCount = Math.max(1, Number(payload?.__active_count || 1));
+  const adjustedX = Number(x || 0)
+    + ((Math.max(activeCount, Number(slotCount || 1)) - activeCount)
+      * (Number(width || 0) + PACKED_BAR_GAP)) / 2;
+  const showTooltip = (event) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    onShowTooltip(meta, payload, {
+      clientX: event.clientX || bounds.right,
+      clientY: event.clientY || bounds.top,
+    });
+  };
+  const activate = () => onActivate(meta, payload);
+
   return (
-    <TooltipBox
-      title={seriesLabel || axisValue || "Series"}
-      rows={[
-        { label: xLabel, value: axisValue },
-        { label: "Containers", value: formatNumber(meta.unique_container_count ?? item?.value) },
-        { label: "Allocated CBM", value: formatCbm(meta.total_allocated_cbm) },
-        { label: "Period", value: periodLabel || "N/A" },
-      ]}
+    <rect
+      x={adjustedX}
+      y={y}
+      width={width}
+      height={height}
+      fill={meta.color}
+      cursor="pointer"
+      role="button"
+      tabIndex="0"
+      aria-label={`${meta.label}, ${payload.month_label}: ${formatNumber(meta.unique_container_count)} containers`}
+      onBlur={onHideTooltip}
+      onClick={activate}
+      onFocus={showTooltip}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        activate();
+      }}
+      onMouseEnter={showTooltip}
+      onMouseLeave={onHideTooltip}
     />
   );
 };
 
-const toBrandSeries = (brands = []) =>
-  (Array.isArray(brands) ? brands : []).map((brand, index) => ({
-    brand,
-    label: brand,
-    key: `brand_${index}`,
-  }));
+const PackedSeriesLegend = ({ series }) => (
+  <div className="d-flex flex-wrap justify-content-center gap-3 mt-2 small">
+    {series.map(({ color, label }) => (
+      <span key={label} className="d-inline-flex align-items-center gap-1">
+        <span
+          aria-hidden="true"
+          style={{ width: 10, height: 10, backgroundColor: color }}
+        />
+        {label}
+      </span>
+    ))}
+  </div>
+);
 
-const toVendorSeries = (vendors = []) =>
-  (Array.isArray(vendors) ? vendors : []).map((vendor, index) => ({
-    vendor,
-    label: vendor,
-    key: `vendor_${index}`,
-  }));
-
-const toMonthlyRows = ({ rows = [], series = [], seriesField = "brand" } = {}) =>
-  rows.map((entry) => {
-    const chartRow = {
-      month: entry?.month || "",
-      month_label: entry?.month_label || entry?.month || "N/A",
-      __meta: {},
-    };
-    series.forEach((seriesEntry) => {
-      const seriesValue = seriesEntry?.[seriesField] || seriesEntry?.label || "";
-      const total = (entry?.totals || []).find(
-        (item) => normalizeKey(item?.[seriesField]) === normalizeKey(seriesValue),
-      );
-      chartRow[seriesEntry.key] = Number(total?.unique_container_count || 0);
-      chartRow.__meta[seriesEntry.key] = {
-        [seriesField]: seriesValue,
-        label: seriesValue,
-        unique_container_count: Number(total?.unique_container_count || 0),
-        total_allocated_cbm: Number(total?.total_allocated_cbm || 0),
-      };
-    });
-    return chartRow;
-  });
+const PackedTooltip = ({ periodLabel, tooltip }) => tooltip ? (
+  <div
+    style={{
+      left: tooltip.left,
+      pointerEvents: "none",
+      position: "fixed",
+      top: tooltip.top,
+      zIndex: 1080,
+    }}
+  >
+    <TooltipBox
+      title={tooltip.meta.label}
+      rows={[
+        { label: "Month", value: tooltip.row.month_label },
+        { label: "Containers", value: formatNumber(tooltip.meta.unique_container_count) },
+        { label: "Allocated CBM", value: formatCbm(tooltip.meta.total_allocated_cbm) },
+        { label: "Period", value: periodLabel || "N/A" },
+      ]}
+    />
+  </div>
+) : null;
 
 const toOverallMonthlyRows = (rows = [], totalsField = "vendor") =>
   (Array.isArray(rows) ? rows : []).map((entry) => ({
@@ -525,6 +488,7 @@ const MonthlyShipmentsReport = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [collapsedBrands, setCollapsedBrands] = useState(() => new Set());
+  const [barTooltip, setBarTooltip] = useState(null);
   const [detail, setDetail] = useState({
     open: false,
     loading: false,
@@ -705,15 +669,28 @@ const MonthlyShipmentsReport = () => {
   );
   const monthlyTrend = report?.by_vendor?.monthly_trend || emptyReport.by_vendor.monthly_trend;
   const monthlyBrands = monthlyTrend?.brands || [];
-  const monthlySeries = useMemo(
-    () => toBrandSeries(monthlyBrands),
-    [monthlyBrands],
-  );
-  const monthlyRows = useMemo(
-    () => toMonthlyRows({ rows: monthlyTrend?.rows || [], series: monthlySeries }),
-    [monthlyTrend?.rows, monthlySeries],
+  const monthlyChart = useMemo(
+    () => packMonthlySeries({
+      rows: monthlyTrend?.rows || [],
+      series: monthlyBrands,
+      seriesField: "brand",
+    }),
+    [monthlyBrands, monthlyTrend?.rows],
   );
   const selectedVendorValue = selectedVendor || report?.filters?.selected_vendor || "";
+
+  const showBarTooltip = useCallback((meta, row, point) => {
+    const viewportWidth = window.innerWidth || 0;
+    const viewportHeight = window.innerHeight || 0;
+    const left = point.clientX + 12 + 300 > viewportWidth
+      ? Math.max(8, point.clientX - 300)
+      : point.clientX + 12;
+    const top = point.clientY + 12 + 150 > viewportHeight
+      ? Math.max(8, point.clientY - 150)
+      : point.clientY + 12;
+    setBarTooltip({ left, meta, row, top });
+  }, []);
+  const hideBarTooltip = useCallback(() => setBarTooltip(null), []);
 
   useEffect(() => {
     if (brandSections.length <= 5) {
@@ -1087,10 +1064,9 @@ const MonthlyShipmentsReport = () => {
   const renderBrandSection = (section) => {
     const brand = section?.brand || "N/A";
     const isCollapsed = collapsedBrands.has(brand);
-    const vendorSeries = toVendorSeries(section?.vendors || []);
-    const rows = toMonthlyRows({
+    const chart = packMonthlySeries({
       rows: section?.rows || [],
-      series: vendorSeries,
+      series: section?.vendors || [],
       seriesField: "vendor",
     });
 
@@ -1119,17 +1095,19 @@ const MonthlyShipmentsReport = () => {
           </div>
 
           {!isCollapsed && (
-            rows.length === 0 || vendorSeries.length === 0 ? (
+            chart.slots.length === 0 ? (
               <div className="text-secondary">No vendor shipments found.</div>
             ) : (
-            <ChartFrame height={360}>
+              <>
+              <ChartFrame height={330}>
                 {({ width, height }) => (
                   <BarChart
                     width={width}
                     height={height}
-                    data={rows}
+                    data={chart.rows}
                     margin={{ top: 24, right: 24, left: 0, bottom: 12 }}
                     barCategoryGap="18%"
+                    barGap={PACKED_BAR_GAP}
                   >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis
@@ -1139,59 +1117,42 @@ const MonthlyShipmentsReport = () => {
                       tick={{ fontSize: 12 }}
                     />
                     <YAxis allowDecimals={false} />
-                    <Tooltip
-                      shared={false}
-                      content={(
-                        <GroupedTooltip
-                          periodLabel={periodLabel}
-                          xLabel="Month"
-                          xKey="month_label"
-                          rows={rows}
-                        />
-                      )}
-                      cursor={{ fill: "rgba(71, 85, 105, 0.08)" }}
-                    />
-                    <Legend />
-                    {vendorSeries.map((seriesEntry, index) => (
+                    {chart.slots.map((slot) => (
                       <Bar
-                        key={seriesEntry.key}
-                        dataKey={seriesEntry.key}
-                        name={seriesEntry.vendor}
-                        fill={getBrandColor(seriesEntry.vendor, index)}
+                        key={slot}
+                        dataKey={slot}
+                        isAnimationActive={false}
                         barSize={getAdaptiveBarSize({
                           chartWidth: width,
-                          itemCount: rows.length,
-                          seriesCount: vendorSeries.length,
+                          itemCount: chart.rows.length,
+                          seriesCount: chart.slots.length,
                           minSize: 4,
                           maxSize: 24,
                         })}
-                      >
-                        {rows.map((row) => {
-                          const meta = getSeriesMeta(row, seriesEntry);
-                          const vendor = meta.vendor || seriesEntry.vendor;
-                          return (
-                            <Cell
-                              key={`${brand}-${seriesEntry.key}-${row.month}`}
-                              cursor={Number(meta.unique_container_count || 0) > 0 ? "pointer" : "default"}
-                              onClick={() => {
-                                if (Number(meta.unique_container_count || 0) <= 0) return;
-                                fetchDetail(
-                                  {
-                                    detail_brand: brand,
-                                    detail_vendor: vendor,
-                                    month: row.month,
-                                  },
-                                  `Containers - ${brand} / ${vendor || "Vendor"} / ${row.month_label || "Month"}`,
-                                );
-                              }}
-                            />
-                          );
-                        })}
-                      </Bar>
+                        shape={(props) => (
+                          <PackedBarShape
+                            {...props}
+                            dataKey={slot}
+                            slotCount={chart.slots.length}
+                            onShowTooltip={showBarTooltip}
+                            onHideTooltip={hideBarTooltip}
+                            onActivate={(meta, row) => fetchDetail(
+                              {
+                                detail_brand: brand,
+                                detail_vendor: meta.vendor,
+                                month: row.month,
+                              },
+                              `Containers - ${brand} / ${meta.vendor} / ${row.month_label}`,
+                            )}
+                          />
+                        )}
+                      />
                     ))}
                   </BarChart>
                 )}
               </ChartFrame>
+              <PackedSeriesLegend series={chart.series} />
+              </>
             )
           )}
         </div>
@@ -1222,75 +1183,59 @@ const MonthlyShipmentsReport = () => {
 
         {!selectedVendorValue ? (
           <div className="text-secondary">Select a vendor to load the monthly trend.</div>
-        ) : monthlyRows.length === 0 || monthlyBrands.length === 0 ? (
+        ) : monthlyChart.slots.length === 0 ? (
           <div className="text-secondary">No monthly shipment trend found for this vendor.</div>
         ) : (
-          <ChartFrame height={380}>
+          <>
+          <ChartFrame height={350}>
             {({ width, height }) => (
               <BarChart
                 width={width}
                 height={height}
-                data={monthlyRows}
+                data={monthlyChart.rows}
                 margin={{ top: 24, right: 24, left: 0, bottom: 10 }}
                 barCategoryGap="18%"
-                barGap={2}
+                barGap={PACKED_BAR_GAP}
               >
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="month_label" interval={0} height={64} tick={{ fontSize: 12 }} />
                 <YAxis allowDecimals={false} />
-                <Tooltip
-                  shared={false}
-                  content={(
-                    <GroupedTooltip
-                      periodLabel={periodLabel}
-                      xLabel="Month"
-                      xKey="month_label"
-                      rows={monthlyRows}
-                    />
-                  )}
-                  cursor={{ fill: "rgba(71, 85, 105, 0.08)" }}
-                />
-                <Legend />
-                {monthlySeries.map((seriesEntry, index) => (
+                {monthlyChart.slots.map((slot) => (
                   <Bar
-                    key={seriesEntry.key}
-                    dataKey={seriesEntry.key}
-                    name={seriesEntry.brand}
-                    fill={getBrandColor(seriesEntry.brand, index)}
+                    key={slot}
+                    dataKey={slot}
+                    isAnimationActive={false}
                     barSize={getAdaptiveBarSize({
                       chartWidth: width,
-                      itemCount: monthlyRows.length,
-                      seriesCount: monthlySeries.length,
+                      itemCount: monthlyChart.rows.length,
+                      seriesCount: monthlyChart.slots.length,
                       minSize: 4,
                       maxSize: 24,
                     })}
-                  >
-                    {monthlyRows.map((row) => {
-                      const meta = getSeriesMeta(row, seriesEntry);
-                      const brand = meta.brand || seriesEntry.brand;
-                      return (
-                        <Cell
-                          key={`${seriesEntry.key}-${row.month}`}
-                          cursor={Number(meta.unique_container_count || 0) > 0 ? "pointer" : "default"}
-                          onClick={() => {
-                            if (Number(meta.unique_container_count || 0) <= 0) return;
-                            fetchDetail(
-                              {
-                                detail_vendor: selectedVendorValue,
-                                detail_brand: brand,
-                                month: row.month,
-                              },
-                              `Containers - ${selectedVendorValue} / ${brand} / ${row.month_label || "Month"}`,
-                            );
-                          }}
-                        />
-                      );
-                    })}
-                  </Bar>
+                    shape={(props) => (
+                      <PackedBarShape
+                        {...props}
+                        dataKey={slot}
+                        slotCount={monthlyChart.slots.length}
+                        onShowTooltip={showBarTooltip}
+                        onHideTooltip={hideBarTooltip}
+                        onActivate={(meta, row) => fetchDetail(
+                          {
+                            detail_vendor: selectedVendorValue,
+                            detail_brand: meta.brand,
+                            month: row.month,
+                          },
+                          `Containers - ${selectedVendorValue} / ${meta.brand} / ${row.month_label}`,
+                        )}
+                      />
+                    )}
+                  />
                 ))}
               </BarChart>
             )}
           </ChartFrame>
+          <PackedSeriesLegend series={monthlyChart.series} />
+          </>
         )}
       </div>
     </div>
@@ -1378,6 +1323,7 @@ const MonthlyShipmentsReport = () => {
         onClose={closeDetail}
         onOpenContainer={openShipmentsForContainer}
       />
+      <PackedTooltip periodLabel={periodLabel} tooltip={barTooltip} />
     </>
   );
 };

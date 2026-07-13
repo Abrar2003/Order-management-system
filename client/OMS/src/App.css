@@ -5490,6 +5490,10 @@ small,
   margin-top: 0.65rem;
 }
 
+.pis-diff-report-grid-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .pis-diff-report-grid-4 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }

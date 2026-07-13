@@ -21,6 +21,7 @@ const {
   normalizeSingleMasterBoxSizeRemarks,
 } = require("../helpers/masterSizeRemarks");
 
+const item_type_enum = ["table", "cabinet", "soft_items", "other"];
 const ITEM_SIZE_ENTRY_LIMIT = 5;
 const BOX_SIZE_ENTRY_LIMIT = 4;
 
@@ -191,7 +192,11 @@ const pisUpdateCommentSchema = new mongoose.Schema(
   {
     comment: { type: String, required: true, trim: true },
     item_code: { type: String, default: "", trim: true },
-    created_by: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
+    created_by: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      default: null,
+    },
     created_by_name: { type: String, default: "", trim: true },
     created_by_role: { type: String, default: "", trim: true },
     created_at: { type: Date, default: Date.now },
@@ -202,7 +207,11 @@ const qcMismatchCommentSchema = new mongoose.Schema(
   {
     comment: { type: String, required: true, trim: true },
     item_code: { type: String, default: "", trim: true },
-    created_by: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
+    created_by: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      default: null,
+    },
     created_by_name: { type: String, default: "", trim: true },
     created_by_role: { type: String, default: "", trim: true },
     created_at: { type: Date, default: Date.now },
@@ -230,7 +239,12 @@ const productSpecFieldValueSchema = new mongoose.Schema(
     group_key: { type: String, default: "", trim: true, lowercase: true },
     group_label: { type: String, default: "", trim: true },
     input_type: { type: String, default: "text", trim: true, lowercase: true },
-    value_type: { type: String, default: "string", trim: true, lowercase: true },
+    value_type: {
+      type: String,
+      default: "string",
+      trim: true,
+      lowercase: true,
+    },
     unit: { type: String, default: "", trim: true },
     value_text: { type: String, default: "", trim: true },
     value_number: { type: Number, default: null },
@@ -312,6 +326,7 @@ const itemSchema = new mongoose.Schema(
     brand: { type: String, default: "", trim: true },
     brand_name: { type: String, default: "", trim: true },
     brands: { type: [String], default: [] },
+    type: { type: String, enum: item_type_enum, default: "other", trim: true },
     vendors: {
       type: [embeddedVendorSchema],
       default: [],
@@ -485,7 +500,10 @@ const itemSchema = new mongoose.Schema(
     pd_created_by: { type: productDatabaseActorSchema, default: undefined },
     pd_checked_by: { type: productDatabaseActorSchema, default: undefined },
     pd_approved_by: { type: productDatabaseActorSchema, default: undefined },
-    pd_last_changed_by: { type: productDatabaseActorSchema, default: undefined },
+    pd_last_changed_by: {
+      type: productDatabaseActorSchema,
+      default: undefined,
+    },
     pd_barcode: { type: String, default: "", trim: true },
     pd_master_barcode: { type: String, default: "", trim: true },
     pd_inner_barcode: { type: String, default: "", trim: true },
@@ -499,7 +517,10 @@ const itemSchema = new mongoose.Schema(
     pis_master_barcode: { type: String, default: "", trim: true },
     pis_inner_barcode: { type: String, default: "", trim: true },
     pis_product_database_synced_at: { type: Date, default: undefined },
-    pis_product_database_synced_by: { type: productDatabaseActorSchema, default: undefined },
+    pis_product_database_synced_by: {
+      type: productDatabaseActorSchema,
+      default: undefined,
+    },
     qc: {
       packed_size: { type: Boolean, default: false },
       finishing: { type: Boolean, default: false },
@@ -568,6 +589,7 @@ const itemSchema = new mongoose.Schema(
       public_id: { type: String, default: "", trim: true },
     },
     pis_checked_flag: { type: Boolean, default: false },
+    is_rectify_imported: { type: Boolean, default: false },
     barcode_exempted: { type: Boolean, default: false },
     finish: {
       type: [finishAssignmentSchema],
@@ -610,7 +632,9 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
   this.master_master_barcode = normalizedMasterBarcode;
   this.master_barcode = normalizedMasterBarcode;
   this.master_inner_barcode = String(this.master_inner_barcode || "").trim();
-  this.master_country_of_origin = String(this.master_country_of_origin || "").trim();
+  this.master_country_of_origin = String(
+    this.master_country_of_origin || "",
+  ).trim();
 
   if (!this.qc || typeof this.qc !== "object") {
     this.qc = {};
@@ -625,7 +649,9 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
   this.qc.inner_barcode = String(this.qc.inner_barcode || "").trim();
 
   if (this.product_type && typeof this.product_type === "object") {
-    this.product_type.key = String(this.product_type.key || "").trim().toLowerCase();
+    this.product_type.key = String(this.product_type.key || "")
+      .trim()
+      .toLowerCase();
     this.product_type.label = String(this.product_type.label || "").trim();
     this.product_type.version = Math.max(
       1,
@@ -634,20 +660,29 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
   }
 
   if (this.product_specs && typeof this.product_specs === "object") {
-    this.product_specs.box_mode =
-      Object.values(BOX_PACKAGING_MODES).includes(this.product_specs.box_mode)
-        ? this.product_specs.box_mode
-        : BOX_PACKAGING_MODES.INDIVIDUAL;
+    this.product_specs.box_mode = Object.values(BOX_PACKAGING_MODES).includes(
+      this.product_specs.box_mode,
+    )
+      ? this.product_specs.box_mode
+      : BOX_PACKAGING_MODES.INDIVIDUAL;
 
     if (Array.isArray(this.product_specs.fields)) {
       this.product_specs.fields = this.product_specs.fields.map((entry) => ({
         ...entry,
-        key: String(entry?.key || "").trim().toLowerCase(),
+        key: String(entry?.key || "")
+          .trim()
+          .toLowerCase(),
         label: String(entry?.label || "").trim(),
-        group_key: String(entry?.group_key || "").trim().toLowerCase(),
+        group_key: String(entry?.group_key || "")
+          .trim()
+          .toLowerCase(),
         group_label: String(entry?.group_label || "").trim(),
-        input_type: String(entry?.input_type || "text").trim().toLowerCase(),
-        value_type: String(entry?.value_type || "string").trim().toLowerCase(),
+        input_type: String(entry?.input_type || "text")
+          .trim()
+          .toLowerCase(),
+        value_type: String(entry?.value_type || "string")
+          .trim()
+          .toLowerCase(),
         unit: String(entry?.unit || "").trim(),
         value_text: String(entry?.value_text || "").trim(),
         source_header: String(entry?.source_header || "").trim(),
@@ -669,11 +704,15 @@ itemSchema.pre("validate", async function resolveVendorReferences() {
 
 itemSchema.pre("validate", function normalizeSingleMasterSizeRemarksForSave() {
   if (Array.isArray(this.master_item_sizes)) {
-    this.master_item_sizes = normalizeSingleMasterItemSizeRemarks(this.master_item_sizes);
+    this.master_item_sizes = normalizeSingleMasterItemSizeRemarks(
+      this.master_item_sizes,
+    );
   }
 
   if (Array.isArray(this.master_box_sizes)) {
-    this.master_box_sizes = normalizeSingleMasterBoxSizeRemarks(this.master_box_sizes);
+    this.master_box_sizes = normalizeSingleMasterBoxSizeRemarks(
+      this.master_box_sizes,
+    );
   }
 });
 
