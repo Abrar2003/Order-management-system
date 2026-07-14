@@ -4099,6 +4099,7 @@ exports.getItems = async (req, res) => {
     const search = req.query.search;
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const country = req.query.country;
     const fileType = req.query.file_type ?? req.query.fileType;
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
@@ -4106,19 +4107,19 @@ exports.getItems = async (req, res) => {
 
     const fileViewMatch = buildItemFileViewMatch(fileType);
     const match = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, brand, vendor }), req.user),
+      applyItemDataAccess(buildItemMatch({ search, brand, vendor, country }), req.user),
       fileViewMatch,
     );
     const brandOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, vendor }), req.user),
+      applyItemDataAccess(buildItemMatch({ search, vendor, country }), req.user),
       fileViewMatch,
     );
     const vendorOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, brand }), req.user),
+      applyItemDataAccess(buildItemMatch({ search, brand, country }), req.user),
       fileViewMatch,
     );
     const codeOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ brand, vendor }), req.user),
+      applyItemDataAccess(buildItemMatch({ brand, vendor, country }), req.user),
       fileViewMatch,
     );
 
@@ -4604,6 +4605,7 @@ exports.getFinalPisCheckItems = async (req, res) => {
     const search = req.query.search;
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const country = req.query.country;
     const diffField = req.query.diff_field;
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
@@ -4614,6 +4616,7 @@ exports.getFinalPisCheckItems = async (req, res) => {
       search,
       brand,
       vendor,
+      country,
       diffField,
       sortBy,
       sortOrder,
@@ -4625,6 +4628,7 @@ exports.getFinalPisCheckItems = async (req, res) => {
         search,
         brand,
         vendor,
+        country,
         diffField,
         page,
         limit,
@@ -4646,6 +4650,7 @@ exports.getFinalPisCheckOptions = async (req, res) => {
       search: req.query.search,
       brand: req.query.brand,
       vendor: req.query.vendor,
+      country: req.query.country,
       sortBy: "code",
       sortOrder: "asc",
     });
@@ -5063,6 +5068,7 @@ exports.getFinalPisCheckReportPreview = async (req, res) => {
     const search = req.query.search;
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const country = req.query.country;
     const diffField = req.query.diff_field;
     const sortBy = req.query.sortBy;
     const sortOrder = req.query.sortOrder;
@@ -5071,6 +5077,7 @@ exports.getFinalPisCheckReportPreview = async (req, res) => {
       search,
       brand,
       vendor,
+      country,
       diffField,
       sortBy,
       sortOrder,
@@ -5090,6 +5097,7 @@ exports.getFinalPisCheckReportPreview = async (req, res) => {
         search,
         brand,
         vendor,
+        country,
         diffField,
       }),
     });
@@ -5108,6 +5116,7 @@ exports.exportFinalPisCheckReport = async (req, res) => {
     const search = req.query.search;
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const country = req.query.country;
     const diffField = req.query.diff_field;
     const sortBy = req.query.sortBy;
     const sortOrder = req.query.sortOrder;
@@ -5116,6 +5125,7 @@ exports.exportFinalPisCheckReport = async (req, res) => {
       search,
       brand,
       vendor,
+      country,
       diffField,
       sortBy,
       sortOrder,
@@ -5133,6 +5143,7 @@ exports.exportFinalPisCheckReport = async (req, res) => {
       search,
       brand,
       vendor,
+      country,
       diffField,
     });
     const detailColumns = [

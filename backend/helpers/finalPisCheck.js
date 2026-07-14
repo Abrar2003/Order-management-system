@@ -1360,6 +1360,7 @@ const buildFinalPisCheckPayload = ({
   search = "",
   brand = "",
   vendor = "",
+  country = "",
   diffField = "",
   page = 1,
   limit = 20,
@@ -1378,6 +1379,7 @@ const buildFinalPisCheckPayload = ({
       search: normalizeText(search),
       brand: normalizeText(brand),
       vendor: normalizeText(vendor),
+      country: normalizeText(country),
       diff_field: normalizeFinalPisCheckDiffField(diffField),
     },
     pagination: {

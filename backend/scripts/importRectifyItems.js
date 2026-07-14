@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
+const dns = require("dns");
 const mongoose = require("mongoose");
 const connectDB = require("../config/connectDB");
 const Vendor = require("../models/vendor.model");
@@ -8,6 +9,8 @@ const Brand = require("../models/brand.model");
 const Item = require("../models/item.model");
 const { extractTableRowsFromPdfBuffer } = require("../services/pdfRectifyParser.service");
 const { processRectifyRows } = require("../helpers/rectifyImporterHelper");
+
+dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 function askQuestion(query) {
   const rl = readline.createInterface({
@@ -47,7 +50,9 @@ async function run() {
 
   // Connect to DB
   console.log("Connecting to database...");
-  await connectDB();
+  await connectDB({
+    mongoUri: process.env.MONGO_URI_SCRIPT || process.env.MONGO_URI,
+  });
 
   // Load Active Vendors
   console.log("Loading active vendors...");

@@ -263,8 +263,8 @@ test("month and custom date modes resolve inclusive business-date ranges", () =>
 test("country filter uses item master country values and supports Not Set", () => {
   const rows = [
     row({ country: "India", allocatedCbm: 5 }),
-    row({ container: "MSCU-444444-4", country: "China", allocatedCbm: 6 }),
-    row({ container: "MSCU-555555-5", country: "", allocatedCbm: 7 }),
+    row({ container: "MSCU-444444-4", country: "China", vendor: "Vendor B", allocatedCbm: 6 }),
+    row({ container: "MSCU-555555-5", country: "", vendor: "Vendor C", allocatedCbm: 7 }),
   ];
   const indiaReport = buildMonthlyShipmentsReportFromRows({
     rows,
@@ -279,6 +279,7 @@ test("country filter uses item master country values and supports Not Set", () =
 
   assert.equal(indiaReport.summary.total_unique_containers, 1);
   assert.equal(indiaReport.summary.total_allocated_cbm, 5);
+  assert.deepEqual(indiaReport.filters.options.vendors, ["Vendor A"]);
   assert.equal(notSetReport.summary.total_unique_containers, 1);
   assert.equal(notSetReport.summary.total_allocated_cbm, 7);
 });

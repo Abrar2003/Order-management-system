@@ -7284,7 +7284,7 @@ exports.getInspectorReports = async (req, res) => {
       const itemCodeKey = normalizeItemCodeKey(inspection?.qc?.item?.item_code || "");
       const itemDoc = itemDocByCodeKey.get(itemCodeKey) || null;
       const cbmPerUnit = resolveItemReportCbmPerUnit(itemDoc, inspection);
-      const inspectedCbm = cbmPerUnit * inspectedQty;
+      const inspectedCbm = cbmPerUnit * passedQty;
       const inspectionDateIso = resolveInspectionReportDateIso(inspection);
       const weekStartIso = getWeekStartIsoDate(
         inspectionDateIso || inspection?.createdAt,

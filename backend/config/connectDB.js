@@ -3,8 +3,8 @@ require("dotenv").config();
 
 mongoose.set("transactionAsyncLocalStorage", true);
 
-const connectDB = async () => {
-  const mongoUri = String(process.env.MONGO_URI || "").trim();
+const connectDB = async ({ mongoUri: uriOverride } = {}) => {
+  const mongoUri = String(uriOverride || process.env.MONGO_URI || "").trim();
   if (!mongoUri) {
     throw new Error("MONGO_URI is not configured");
   }

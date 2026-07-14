@@ -37,8 +37,57 @@ function extractStreamText(objectBody) {
   return objectBody.slice(startIndex, endIndex);
 }
 
-function inflatePdfStream(streamText) {
-  const rawBuffer = Buffer.from(streamText, "latin1");
+function decodeAscii85(streamText) {
+  const encoded = streamText
+    .replace(/\s+/g, "")
+    .replace(/^<~/, "")
+    .replace(/~>[\s\S]*$/, "");
+  const bytes = [];
+  let group = [];
+
+  const writeGroup = (values, byteCount = 4) => {
+    let value = 0;
+    for (const digit of values) value = value * 85 + digit;
+    for (let shift = 3; shift >= 0; shift -= 1) {
+      bytes.push((value >> (shift * 8)) & 0xff);
+    }
+    bytes.length -= 4 - byteCount;
+  };
+
+  for (const character of encoded) {
+    if (character === "z" && group.length === 0) {
+      bytes.push(0, 0, 0, 0);
+      continue;
+    }
+    const digit = character.charCodeAt(0) - 33;
+    if (digit < 0 || digit > 84) continue;
+    group.push(digit);
+    if (group.length === 5) {
+      writeGroup(group);
+      group = [];
+    }
+  }
+
+  if (group.length > 1) {
+    const byteCount = group.length - 1;
+    while (group.length < 5) group.push(84);
+    writeGroup(group, byteCount);
+  }
+
+  return Buffer.from(bytes);
+}
+
+function getPdfFilters(objectBody = "") {
+  const filterMatch = objectBody.match(/\/Filter\s+(\[[^\]]+\]|\/\w+)/s);
+  if (!filterMatch) return [];
+  return [...filterMatch[1].matchAll(/\/(\w+)/g)].map((match) => match[1]);
+}
+
+function inflatePdfStream(streamText, objectBody = "") {
+  const filters = getPdfFilters(objectBody);
+  const rawBuffer = filters.includes("ASCII85Decode")
+    ? decodeAscii85(streamText)
+    : Buffer.from(streamText, "latin1");
   try {
     return zlib.inflateSync(rawBuffer).toString("latin1");
   } catch {
@@ -151,7 +200,7 @@ function buildToUnicodeFontMap(objectMap) {
     const cmapStream = extractStreamText(cmapObject.body);
     if (!cmapStream) continue;
 
-    const cmapText = inflatePdfStream(cmapStream);
+    const cmapText = inflatePdfStream(cmapStream, cmapObject.body);
     const parsed = parseToUnicodeMap(cmapText);
     toUnicodeByFontObject.set(objectNumber, parsed);
   }
@@ -220,7 +269,7 @@ function extractPageFragments(pageObject, pageIndex, objectMap, toUnicodeByFontO
     const rawStream = extractStreamText(contentObject.body);
     if (!rawStream) continue;
 
-    const content = inflatePdfStream(rawStream);
+    const content = inflatePdfStream(rawStream, contentObject.body);
     const textBlocks = content.matchAll(/BT([\s\S]*?)ET/g);
     for (const blockMatch of textBlocks) {
       const block = blockMatch[1];
@@ -287,14 +336,14 @@ function extractPageFragments(pageObject, pageIndex, objectMap, toUnicodeByFontO
 }
 
 function columnForX(xValue) {
-  if (xValue < 100) return "orderNumber";
-  if (xValue < 175) return "refer";
-  if (xValue < 234) return "orderDate";
-  if (xValue < 294) return "etd";
-  if (xValue < 336) return "daysTillEtd";
-  if (xValue < 421) return "ourItemCode";
-  if (xValue < 505) return "yourItemCode";
-  if (xValue < 759) return "description";
+  if (xValue < 90) return "orderNumber";
+  if (xValue < 160) return "refer";
+  if (xValue < 220) return "orderDate";
+  if (xValue < 280) return "etd";
+  if (xValue < 310) return "daysTillEtd";
+  if (xValue < 390) return "ourItemCode";
+  if (xValue < 478) return "yourItemCode";
+  if (xValue < 700) return "description";
   return "quantity";
 }
 
@@ -358,6 +407,8 @@ function isLikelyHeaderLine(cells, yValue) {
     || lineText.includes("supplier")
     || lineText.includes("notification letter")
     || lineText.includes("shippingdate")
+    || lineText.includes("we kindly ask")
+    || lineText.includes("page 1/")
   );
 }
 

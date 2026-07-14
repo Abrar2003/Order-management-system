@@ -408,10 +408,24 @@ const uniqueSorted = (values = []) =>
     ).values(),
   ].sort(sortText);
 
-const buildFilterOptions = (rows = []) => ({
-  countries: uniqueSorted(rows.map((row) => row.country)),
-  brands: uniqueSorted(rows.map((row) => row.brand).filter((value) => value !== "N/A")),
-  vendors: uniqueSorted(rows.map((row) => row.vendor).filter((value) => value !== "N/A")),
+const buildFilterOptions = (rows = [], filters = {}) => ({
+  countries: uniqueSorted(
+    rows
+      .filter((row) => matchesReportFilters(row, { brand: filters.brand, vendor: filters.vendor }))
+      .map((row) => row.country),
+  ),
+  brands: uniqueSorted(
+    rows
+      .filter((row) => matchesReportFilters(row, { country: filters.country, vendor: filters.vendor }))
+      .map((row) => row.brand)
+      .filter((value) => value !== "N/A"),
+  ),
+  vendors: uniqueSorted(
+    rows
+      .filter((row) => matchesReportFilters(row, { country: filters.country, brand: filters.brand }))
+      .map((row) => row.vendor)
+      .filter((value) => value !== "N/A"),
+  ),
 });
 
 const createMetric = () => ({
@@ -840,7 +854,7 @@ const buildMonthlyShipmentsReportFromRows = ({
       brand: filters.brand,
       vendor: filters.vendor,
       selected_vendor: selectedVendor,
-      options: buildFilterOptions(normalizedRows),
+      options: buildFilterOptions(normalizedRows, filters),
     },
     summary: {
       total_unique_containers: physicalContainerKeys.size,
