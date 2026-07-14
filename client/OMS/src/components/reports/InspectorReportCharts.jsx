@@ -105,7 +105,7 @@ const createDailyCbmMap = (dailyRows = []) => {
   for (const row of Array.isArray(dailyRows) ? dailyRows : []) {
     const isoDate = toISODateString(row?.date);
     if (!isoDate) continue;
-    dateMap.set(isoDate, Number(row?.inspected_cbm || 0));
+    dateMap.set(isoDate, Number(row?.approved_goods_cbm || 0));
   }
 
   return dateMap;
@@ -267,7 +267,7 @@ const InspectorCbmTooltip = ({ active, payload }) => {
   return (
     <div className="inspector-report-chart-tooltip">
       <div className="fw-semibold">{point.tooltipLabel || point.label}</div>
-      <div>CBM: {formatCbm(point.cbm)}</div>
+      <div>Approved Goods CBM: {formatCbm(point.cbm)}</div>
     </div>
   );
 };
@@ -422,7 +422,7 @@ const InspectorReportChartsComponent = ({
               <Line
                 type="linear"
                 dataKey={CHART_CBM_DATA_KEY}
-                name="CBM"
+                name="Approved Goods CBM"
                 stroke={chartPalette.line}
                 strokeWidth={2}
                 dot={false}
@@ -453,7 +453,7 @@ const InspectorReportChartsComponent = ({
               <Tooltip content={InspectorCbmTooltip} />
               <Bar
                 dataKey={CHART_CBM_DATA_KEY}
-                name="CBM"
+                name="Approved Goods CBM"
                 fill={chartPalette.bar}
                 isAnimationActive={false}
               />

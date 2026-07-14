@@ -41,7 +41,10 @@ const InspectorCardComponent = ({
             Inspections: {entry?.total_inspections ?? 0}
           </span>
           <span className="om-summary-chip">
-            CBM: {formatCbm(entry?.total_inspected_cbm)}
+            Passed CBM: {formatCbm(entry?.total_inspected_cbm)}
+          </span>
+          <span className="om-summary-chip">
+            Approved Goods CBM: {formatCbm(entry?.total_approved_goods_cbm)}
           </span>
         </div>
 
@@ -51,7 +54,7 @@ const InspectorCardComponent = ({
               <table className="table table-sm table-striped align-middle mb-0">
                 <thead>
                   <tr>
-                    <th colSpan="5" className="bg-body-tertiary">
+                    <th colSpan="6" className="bg-body-tertiary">
                       Daily
                     </th>
                   </tr>
@@ -60,13 +63,14 @@ const InspectorCardComponent = ({
                     <th>Requested</th>
                     <th>Passed</th>
                     <th>Inspections</th>
-                    <th>CBM</th>
+                    <th>Passed CBM</th>
+                    <th>Approved CBM</th>
                   </tr>
                 </thead>
                 <tbody>
                   {dailyRows.length === 0 && (
                     <tr>
-                      <td colSpan="5" className="text-center py-3">
+                      <td colSpan="6" className="text-center py-3">
                         No daily data.
                       </td>
                     </tr>
@@ -78,6 +82,7 @@ const InspectorCardComponent = ({
                       <td>{row.passed_quantity ?? 0}</td>
                       <td>{row.inspections_count ?? 0}</td>
                       <td>{formatCbm(row.inspected_cbm)}</td>
+                      <td>{formatCbm(row.approved_goods_cbm)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -89,6 +94,7 @@ const InspectorCardComponent = ({
                       <th>{entry?.total_passed ?? 0}</th>
                       <th>{entry?.total_inspections ?? 0}</th>
                       <th>{formatCbm(entry?.total_inspected_cbm)}</th>
+                      <th>{formatCbm(entry?.total_approved_goods_cbm)}</th>
                     </tr>
                   </tfoot>
                 )}
@@ -101,7 +107,7 @@ const InspectorCardComponent = ({
               <table className="table table-sm table-striped align-middle mb-0">
                 <thead>
                   <tr>
-                    <th colSpan="6" className="bg-body-tertiary">
+                    <th colSpan="7" className="bg-body-tertiary">
                       Weekly
                     </th>
                   </tr>
@@ -111,13 +117,14 @@ const InspectorCardComponent = ({
                     <th>Requested</th>
                     <th>Passed</th>
                     <th>Inspections</th>
-                    <th>CBM</th>
+                    <th>Passed CBM</th>
+                    <th>Approved CBM</th>
                   </tr>
                 </thead>
                 <tbody>
                   {weeklyRows.length === 0 && (
                     <tr>
-                      <td colSpan="6" className="text-center py-3">
+                      <td colSpan="7" className="text-center py-3">
                         No weekly data.
                       </td>
                     </tr>
@@ -130,6 +137,7 @@ const InspectorCardComponent = ({
                       <td>{row.passed_quantity ?? 0}</td>
                       <td>{row.inspections_count ?? 0}</td>
                       <td>{formatCbm(row.inspected_cbm)}</td>
+                      <td>{formatCbm(row.approved_goods_cbm)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -141,6 +149,7 @@ const InspectorCardComponent = ({
                       <th>{entry?.total_passed ?? 0}</th>
                       <th>{entry?.total_inspections ?? 0}</th>
                       <th>{formatCbm(entry?.total_inspected_cbm)}</th>
+                      <th>{formatCbm(entry?.total_approved_goods_cbm)}</th>
                     </tr>
                   </tfoot>
                 )}
@@ -151,7 +160,7 @@ const InspectorCardComponent = ({
 
         <div className="border-top px-3 py-3">
           <div className="d-flex flex-wrap gap-2 align-items-center mb-3">
-            <span className="fw-semibold">CBM Trend</span>
+            <span className="fw-semibold">Approved Goods CBM Trend</span>
             <span className="om-summary-chip">
               Step: {chartStep}
             </span>

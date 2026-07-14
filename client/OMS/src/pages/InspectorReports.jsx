@@ -132,6 +132,7 @@ const defaultReport = {
     total_checked: 0,
     total_passed: 0,
     total_inspected_cbm: 0,
+    total_approved_goods_cbm: 0,
   },
   inspectors: [],
 };
@@ -441,7 +442,7 @@ const InspectorReports = () => {
 
         <ReportInfoBanner
           description="Evaluates the output, efficiency, and metrics of individual inspectors over a selected timeline."
-          dataShown="Inspectors list, counts of inspections, items checked/passed, total inspected volume (CBM), and activity charts over time."
+          dataShown="Inspectors list, counts of inspections, items checked/passed, passed inspection CBM, approved goods CBM, and activity charts over time."
           howItWorks="Analyzes inspector metrics across a timeline. Filterable by timeline, date range, specific inspector, and chart grouping (daily/weekly/monthly)."
         />
 
@@ -590,7 +591,10 @@ const InspectorReports = () => {
               Total Passed: {summary.total_passed ?? 0}
             </span>
             <span className="om-summary-chip">
-              Total CBM: {formatCbm(summary.total_inspected_cbm)}
+              Passed CBM: {formatCbm(summary.total_inspected_cbm)}
+            </span>
+            <span className="om-summary-chip">
+              Approved Goods CBM: {formatCbm(summary.total_approved_goods_cbm)}
             </span>
           </div>
         </div>

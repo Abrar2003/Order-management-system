@@ -29,6 +29,9 @@ const {
   applyTotalPoCbmToOrder,
   syncTotalPoCbmForItem,
 } = require("../services/orderCbm.service");
+const {
+  resolveShipmentRowCbm,
+} = require("../services/shipmentCbmAllocation.service");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   getSignedObjectUrl,
@@ -3301,6 +3304,93 @@ const resolveInspectionReportDateIso = (inspection = {}) =>
   toISODateString(inspection?.inspection_date) ||
   toISODateString(inspection?.createdAt) ||
   "";
+
+const buildApprovedGoodsQuantityByInspectionId = (inspectionRecords = []) => {
+  const requestGroups = new Map();
+
+  (Array.isArray(inspectionRecords) ? inspectionRecords : []).forEach(
+    (inspection, index) => {
+      if (
+        normalizeInspectionStatus(inspection?.status) ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
+      ) {
+        return;
+      }
+
+      const inspectionId = String(inspection?._id || "").trim();
+      const qcDoc = inspection?.qc;
+      const qcId = String(qcDoc?._id || qcDoc || "").trim();
+      if (!inspectionId || !qcId) return;
+
+      const requestHistoryId = String(
+        inspection?.request_history_id || "",
+      ).trim();
+      const requestHistoryEntry = requestHistoryId
+        ? (Array.isArray(qcDoc?.request_history) ? qcDoc.request_history : [])
+            .find(
+              (entry) => String(entry?._id || "").trim() === requestHistoryId,
+            )
+        : null;
+      const groupKey = `${qcId}:${resolveInspectionRequestGroupKey(
+        inspection,
+        `fallback:${index}`,
+      )}`;
+      const group = requestGroups.get(groupKey) || {
+        requestType: requestHistoryEntry?.request_type || qcDoc?.request_type,
+        requestedQuantity: 0,
+        fallbackRequestedQuantity: resolveRequestedQuantityFromQc(qcDoc),
+        samplePassed: 0,
+        ownerId: "",
+        ownerTime: 0,
+      };
+
+      group.requestedQuantity = Math.max(
+        group.requestedQuantity,
+        toNonNegativeNumber(inspection?.vendor_requested, 0),
+        toNonNegativeNumber(requestHistoryEntry?.quantity_requested, 0),
+      );
+      const passedQuantity = toNonNegativeNumber(inspection?.passed, 0);
+      group.samplePassed += passedQuantity;
+
+      if (passedQuantity > 0) {
+        const ownerTime = toSortableTimestamp(
+          resolveInspectionReportDateIso(inspection),
+        );
+        if (
+          !group.ownerId ||
+          ownerTime > group.ownerTime ||
+          (ownerTime === group.ownerTime && inspectionId > group.ownerId)
+        ) {
+          group.ownerId = inspectionId;
+          group.ownerTime = ownerTime;
+        }
+      }
+
+      requestGroups.set(groupKey, group);
+    },
+  );
+
+  const approvedQuantityByInspectionId = new Map();
+  for (const group of requestGroups.values()) {
+    const approvedQuantity = getEffectiveRequestPassedQuantity({
+      requestType: group.requestType,
+      samplePassed: group.samplePassed,
+      requestedQuantity:
+        group.requestedQuantity > 0
+          ? group.requestedQuantity
+          : group.fallbackRequestedQuantity,
+    });
+    if (group.ownerId && approvedQuantity > 0) {
+      approvedQuantityByInspectionId.set(group.ownerId, approvedQuantity);
+    }
+  }
+
+  return approvedQuantityByInspectionId;
+};
+
+exports.__test__ = {
+  buildApprovedGoodsQuantityByInspectionId,
+};
 
 const isIsoDateWithinInclusiveRange = (
   isoDate = "",
@@ -7149,47 +7239,25 @@ exports.getInspectorReports = async (req, res) => {
         },
       ],
     };
-    const inspectionMatch = selectedInspector
-      ? {
-          ...baseInspectionMatch,
-          inspector: new mongoose.Types.ObjectId(selectedInspector),
-        }
-      : baseInspectionMatch;
-
-    const [inspectorOptionsRaw, inspectionsRaw] = await Promise.all([
-      Inspection.find(baseInspectionMatch)
-        .select("inspector inspection_date createdAt qc")
-        .populate("inspector", "name email")
-        .populate({
-          path: "qc",
-          select: "order",
-          populate: {
-            path: "order",
-            select: "_id",
-            match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
-          },
-        })
-        .lean(),
-      Inspection.find(inspectionMatch)
-        .select(
-          "inspector inspection_date createdAt checked passed vendor_requested cbm qc",
-        )
+    const inspectionsRaw = await Inspection.find(baseInspectionMatch)
+      .select(
+        "inspector inspection_date requested_date request_history_id createdAt status checked passed vendor_requested cbm qc",
+      )
       .populate("inspector", "name email")
-        .populate({
-          path: "qc",
-          select: "order_meta item order",
-          populate: {
-            path: "order",
-            select: "order_id brand vendor status quantity shipment archived",
-            match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
-          },
-        })
+      .populate({
+        path: "qc",
+        select: "order_meta item order request_type request_history quantities",
+        populate: {
+          path: "order",
+          select: "order_id brand vendor status quantity shipment archived total_po_cbm",
+          match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        },
+      })
       .sort({ createdAt: -1 })
-        .lean(),
-    ]);
+      .lean();
 
     const inspectorOptionsMap = new Map();
-    for (const optionEntry of inspectorOptionsRaw) {
+    for (const optionEntry of inspectionsRaw) {
       if (!optionEntry?.qc?.order) continue;
 
       const optionDateIso = resolveInspectionReportDateIso(optionEntry);
@@ -7217,7 +7285,7 @@ exports.getInspectorReports = async (req, res) => {
       }
     }
 
-    const inspections = inspectionsRaw.filter((entry) => {
+    const reportInspections = inspectionsRaw.filter((entry) => {
       if (!entry?.qc?.order) return false;
 
       const reportDateIso = resolveInspectionReportDateIso(entry);
@@ -7227,6 +7295,15 @@ exports.getInspectorReports = async (req, res) => {
         reportRange.to_date_iso,
       );
     });
+    const approvedQuantityByInspectionId =
+      buildApprovedGoodsQuantityByInspectionId(reportInspections);
+    const inspections = selectedInspector
+      ? reportInspections.filter(
+          (entry) =>
+            String(entry?.inspector?._id || entry?.inspector || "").trim() ===
+            selectedInspector,
+        )
+      : reportInspections;
     const uniqueItemCodes = [
       ...new Set(
         inspections
@@ -7252,7 +7329,7 @@ exports.getInspectorReports = async (req, res) => {
         ),
       )
           .select(
-            "code cbm inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH",
+            "code cbm inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH inspected_box_LBH inspected_box_sizes inspected_box_mode inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH pis_box_LBH pis_box_sizes pis_box_mode pis_box_top_LBH pis_box_bottom_LBH",
           )
           .lean()
       : [];
@@ -7276,6 +7353,7 @@ exports.getInspectorReports = async (req, res) => {
     let totalChecked = 0;
     let totalPassed = 0;
     let totalInspectedCbm = 0;
+    let totalApprovedGoodsCbm = 0;
 
     for (const inspection of inspections) {
       const requestedQty = toNonNegativeNumber(inspection?.vendor_requested, 0);
@@ -7285,6 +7363,15 @@ exports.getInspectorReports = async (req, res) => {
       const itemDoc = itemDocByCodeKey.get(itemCodeKey) || null;
       const cbmPerUnit = resolveItemReportCbmPerUnit(itemDoc, inspection);
       const inspectedCbm = cbmPerUnit * passedQty;
+      const approvedGoodsQuantity = Number(
+        approvedQuantityByInspectionId.get(String(inspection?._id || "")) || 0,
+      );
+      const approvedGoodsCbm = resolveShipmentRowCbm({
+        itemDoc,
+        orderQuantity: inspection?.qc?.order?.quantity,
+        storedPoCbm: inspection?.qc?.order?.total_po_cbm,
+        shipmentQuantity: approvedGoodsQuantity,
+      });
       const inspectionDateIso = resolveInspectionReportDateIso(inspection);
       const weekStartIso = getWeekStartIsoDate(
         inspectionDateIso || inspection?.createdAt,
@@ -7315,6 +7402,7 @@ exports.getInspectorReports = async (req, res) => {
         total_checked: 0,
         total_passed: 0,
         total_inspected_cbm: 0,
+        total_approved_goods_cbm: 0,
         order_keys: new Set(),
         daily: new Map(),
         weekly: new Map(),
@@ -7326,6 +7414,7 @@ exports.getInspectorReports = async (req, res) => {
       inspectorEntry.total_checked += inspectedQty;
       inspectorEntry.total_passed += passedQty;
       inspectorEntry.total_inspected_cbm += inspectedCbm;
+      inspectorEntry.total_approved_goods_cbm += approvedGoodsCbm;
       if (orderId) {
         inspectorEntry.order_keys.add(orderId);
       }
@@ -7334,6 +7423,7 @@ exports.getInspectorReports = async (req, res) => {
       totalChecked += inspectedQty;
       totalPassed += passedQty;
       totalInspectedCbm += inspectedCbm;
+      totalApprovedGoodsCbm += approvedGoodsCbm;
 
       if (inspectionDateIso) {
         const dailyBucket = upsertBucket(
@@ -7346,6 +7436,7 @@ exports.getInspectorReports = async (req, res) => {
             passed_quantity: 0,
             inspections_count: 0,
             inspected_cbm: 0,
+            approved_goods_cbm: 0,
           }),
         );
         if (dailyBucket) {
@@ -7354,6 +7445,7 @@ exports.getInspectorReports = async (req, res) => {
           dailyBucket.passed_quantity += passedQty;
           dailyBucket.inspections_count += 1;
           dailyBucket.inspected_cbm += inspectedCbm;
+          dailyBucket.approved_goods_cbm += approvedGoodsCbm;
         }
 
         const globalDaily = upsertBucket(
@@ -7366,6 +7458,7 @@ exports.getInspectorReports = async (req, res) => {
             passed_quantity: 0,
             inspections_count: 0,
             inspected_cbm: 0,
+            approved_goods_cbm: 0,
           }),
         );
         if (globalDaily) {
@@ -7374,6 +7467,7 @@ exports.getInspectorReports = async (req, res) => {
           globalDaily.passed_quantity += passedQty;
           globalDaily.inspections_count += 1;
           globalDaily.inspected_cbm += inspectedCbm;
+          globalDaily.approved_goods_cbm += approvedGoodsCbm;
         }
       }
 
@@ -7389,6 +7483,7 @@ exports.getInspectorReports = async (req, res) => {
             passed_quantity: 0,
             inspections_count: 0,
             inspected_cbm: 0,
+            approved_goods_cbm: 0,
           }),
         );
         if (weeklyBucket) {
@@ -7397,6 +7492,7 @@ exports.getInspectorReports = async (req, res) => {
           weeklyBucket.passed_quantity += passedQty;
           weeklyBucket.inspections_count += 1;
           weeklyBucket.inspected_cbm += inspectedCbm;
+          weeklyBucket.approved_goods_cbm += approvedGoodsCbm;
         }
 
         const globalWeekly = upsertBucket(
@@ -7410,6 +7506,7 @@ exports.getInspectorReports = async (req, res) => {
             passed_quantity: 0,
             inspections_count: 0,
             inspected_cbm: 0,
+            approved_goods_cbm: 0,
           }),
         );
         if (globalWeekly) {
@@ -7418,6 +7515,7 @@ exports.getInspectorReports = async (req, res) => {
           globalWeekly.passed_quantity += passedQty;
           globalWeekly.inspections_count += 1;
           globalWeekly.inspected_cbm += inspectedCbm;
+          globalWeekly.approved_goods_cbm += approvedGoodsCbm;
         }
       }
     }
@@ -7433,17 +7531,22 @@ exports.getInspectorReports = async (req, res) => {
         total_checked: entry.total_checked,
         total_passed: entry.total_passed,
         total_inspected_cbm: toRoundedNumber(entry.total_inspected_cbm),
+        total_approved_goods_cbm: toRoundedNumber(
+          entry.total_approved_goods_cbm,
+        ),
         orders_touched: entry.order_keys.size,
         daily: Array.from(entry.daily.values())
           .map((bucket) => ({
             ...bucket,
             inspected_cbm: toRoundedNumber(bucket.inspected_cbm),
+            approved_goods_cbm: toRoundedNumber(bucket.approved_goods_cbm),
           }))
           .sort((a, b) => sortByDateDesc(a, b, "date")),
         weekly: Array.from(entry.weekly.values())
           .map((bucket) => ({
             ...bucket,
             inspected_cbm: toRoundedNumber(bucket.inspected_cbm),
+            approved_goods_cbm: toRoundedNumber(bucket.approved_goods_cbm),
           }))
           .sort((a, b) => sortByDateDesc(a, b, "week_start")),
       }))
@@ -7457,12 +7560,14 @@ exports.getInspectorReports = async (req, res) => {
       .map((bucket) => ({
         ...bucket,
         inspected_cbm: toRoundedNumber(bucket.inspected_cbm),
+        approved_goods_cbm: toRoundedNumber(bucket.approved_goods_cbm),
       }))
       .sort((a, b) => sortByDateDesc(a, b, "date"));
     const weekly_totals = Array.from(weeklyTotalsMap.values())
       .map((bucket) => ({
         ...bucket,
         inspected_cbm: toRoundedNumber(bucket.inspected_cbm),
+        approved_goods_cbm: toRoundedNumber(bucket.approved_goods_cbm),
       }))
       .sort((a, b) => sortByDateDesc(a, b, "week_start"));
     const inspector_options = Array.from(inspectorOptionsMap.values()).sort(
@@ -7488,6 +7593,7 @@ exports.getInspectorReports = async (req, res) => {
         total_checked: totalChecked,
         total_passed: totalPassed,
         total_inspected_cbm: toRoundedNumber(totalInspectedCbm),
+        total_approved_goods_cbm: toRoundedNumber(totalApprovedGoodsCbm),
       },
       inspectors,
       daily_totals,
