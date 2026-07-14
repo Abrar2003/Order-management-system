@@ -401,7 +401,7 @@ const createVendor = async (req, res) => {
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
     const address = normalizeText(req.body?.address);
-    const vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code, req.user);
+    let vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code, req.user);
     const contact_person = normalizeContactPersons(req.body?.contact_person);
     const is_active = req.body?.is_active !== false;
 
@@ -504,6 +504,11 @@ const updateVendor = async (req, res) => {
       });
     }
 
+    const allowedBrandNames = await getBrandNameMap(req.user);
+    const preservedVendorCodes = normalizeVendorCodeEntries(existingVendor.vendor_code)
+      .filter((entry) => !allowedBrandNames.has(entry.brand.toLowerCase()));
+    vendor_code = [...preservedVendorCodes, ...vendor_code];
+
     const duplicateConditions = [
       { name: { $regex: `^${escapeRegex(name)}$`, $options: "i" } },
       ...buildVendorCodeDuplicateConditions(vendor_code),
@@ -556,7 +561,7 @@ const updateVendor = async (req, res) => {
       success: true,
       message: "Vendor updated successfully",
       data: {
-        ...serializeVendor(existingVendor.toObject()),
+        ...serializeVendor(existingVendor.toObject(), new Set(allowedBrandNames.keys())),
         finish_sync: finishSync,
       },
     });
