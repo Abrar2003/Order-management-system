@@ -8,6 +8,7 @@ const { normalizeUserRoleKey } = require("../helpers/userRole");
 const { calculateTotalPoCbm } = require("../services/orderCbm.service");
 const {
   applyDataAccessMatch,
+  assertBrandVendorAssociations,
   assertUserDataAccess,
 } = require("../services/userDataAccess.service");
 const {
@@ -457,6 +458,10 @@ exports.createSampleWorkflow = async (req, res) => {
       brands: [payload.brand],
       vendors: getVendorPayloadList(payload),
     });
+    await assertBrandVendorAssociations([{
+      brand: payload.brand,
+      vendors: getVendorPayloadList(payload),
+    }]);
 
     const existingWorkflow = await SampleWorkflow.findOne({
       code: { $regex: `^${escapeRegex(code)}$`, $options: "i" },

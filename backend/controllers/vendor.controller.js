@@ -401,7 +401,7 @@ const createVendor = async (req, res) => {
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
     const address = normalizeText(req.body?.address);
-    let vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code, req.user);
+    const vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code, req.user);
     const contact_person = normalizeContactPersons(req.body?.contact_person);
     const is_active = req.body?.is_active !== false;
 
@@ -474,7 +474,7 @@ const updateVendor = async (req, res) => {
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
     const address = normalizeText(req.body?.address);
-    const vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code, req.user);
+    let vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code, req.user);
     const contact_person = normalizeContactPersons(req.body?.contact_person);
     const is_active = req.body?.is_active !== false;
 

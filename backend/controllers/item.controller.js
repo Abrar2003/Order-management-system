@@ -28,6 +28,7 @@ const {
 const { convertExcelToPdf } = require("../services/convertXlsxToPDF.service");
 const {
   applyDataAccessMatch,
+  assertBrandVendorAssociations,
   assertUserDataAccess,
 } = require("../services/userDataAccess.service");
 const { notifyUsers } = require("../services/notificationService");
@@ -6244,6 +6245,7 @@ exports.createItem = async (req, res) => {
       brands: [brand],
       vendors: vendorEntries,
     });
+    await assertBrandVendorAssociations([{ brand, vendors: vendorEntries }]);
     if (!req.file) {
       return res.status(400).json({
         success: false,

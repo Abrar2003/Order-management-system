@@ -315,6 +315,50 @@ const assertVendorAccessSelection = async ({ brandIds = [], vendorNames = [] } =
   return selectedVendors;
 };
 
+const assertBrandVendorAssociations = async (pairs = []) => {
+  const normalizedPairs = toArray(pairs).flatMap((pair) => {
+    const brandKeys = toArray(pair?.brands ?? pair?.brand)
+      .map((brand) => normalizeText(brand).toLowerCase())
+      .filter(Boolean);
+    const vendorKeys = toArray(pair?.vendors ?? pair?.vendor)
+      .map((vendor) => ({
+        id: normalizeText(
+          typeof vendor === "object" && vendor !== null
+            ? vendor.vendor_id || vendor.vendorId || vendor._id || vendor.id
+            : mongoose.Types.ObjectId.isValid(normalizeText(vendor)) ? vendor : "",
+        ),
+        name: normalizeText(getVendorName(vendor) || vendor).toLowerCase(),
+      }))
+      .filter((vendor) => vendor.id || vendor.name);
+    return brandKeys.length > 0 && vendorKeys.length > 0
+      ? [{ brandKeys, vendorKeys }]
+      : [];
+  });
+  if (normalizedPairs.length === 0) return;
+
+  const options = await getVendorAccessOptions();
+  const optionById = new Map(options.map((option) => [option._id, option]));
+  const optionByName = new Map(
+    options.map((option) => [option.name.toLowerCase(), option]),
+  );
+
+  for (const pair of normalizedPairs) {
+    for (const vendor of pair.vendorKeys) {
+      const option = optionById.get(vendor.id) || optionByName.get(vendor.name);
+      if (
+        !option
+        || !option.brands.some((brand) => pair.brandKeys.includes(brand.toLowerCase()))
+      ) {
+        const error = new Error(
+          `${option?.name || vendor.name || vendor.id} is not associated with the selected brand`,
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+  }
+};
+
 const isPopulatedBrand = (entry) =>
   entry && typeof entry === "object" && (entry.name || entry._id || entry.id);
 
@@ -543,6 +587,7 @@ module.exports = {
   BRAND_SCOPE_GIGA,
   applyDataAccessMatch,
   applyBrandDocumentAccessMatch,
+  assertBrandVendorAssociations,
   assertBrandIdsExist,
   assertUserDataAccess,
   assertVendorAccessSelection,

@@ -17,6 +17,7 @@ const {
 } = require("../services/wasabiStorage.service");
 const {
   applyDataAccessMatch,
+  assertBrandVendorAssociations,
   assertUserDataAccess,
 } = require("../services/userDataAccess.service");
 const {
@@ -548,6 +549,7 @@ exports.createComplaint = async (req, res) => {
     }
 
     assertUserDataAccess(req.user, { brands: [brand], vendors: [vendor] });
+    await assertBrandVendorAssociations([{ brand, vendor }]);
 
     const existingItem = await findExistingItemByCode(itemCode, req.user);
     if (!existingItem) {
@@ -678,6 +680,7 @@ exports.updateComplaint = async (req, res) => {
     }
 
     assertUserDataAccess(req.user, { brands: [brand], vendors: [vendor] });
+    await assertBrandVendorAssociations([{ brand, vendor }]);
 
     const finalComments = hasCommentsPayload
       ? incomingComments
