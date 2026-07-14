@@ -436,7 +436,10 @@ const InspectedItemsReport = () => {
                       <tr key={row.id || row.code}>
                         <td className="fw-semibold">
                           {row.code ? (
-                            <Link to={`/items?search=${encodeURIComponent(row.code)}&country=all`}>
+                            <Link
+                              className="text-reset om-etd-history-label"
+                              to={`/items?search=${encodeURIComponent(row.code)}&country=all`}
+                            >
                               {row.code}
                             </Link>
                           ) : "N/A"}
