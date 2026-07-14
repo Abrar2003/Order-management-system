@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import ReportInfoBanner from "../components/ReportInfoBanner";
@@ -434,7 +434,13 @@ const InspectedItemsReport = () => {
                   <tbody>
                     {rows.map((row) => (
                       <tr key={row.id || row.code}>
-                        <td className="fw-semibold">{row.code || "N/A"}</td>
+                        <td className="fw-semibold">
+                          {row.code ? (
+                            <Link to={`/items?search=${encodeURIComponent(row.code)}&country=all`}>
+                              {row.code}
+                            </Link>
+                          ) : "N/A"}
+                        </td>
                         <td>{row.description || row.name || "N/A"}</td>
                         <td>{row.brand || (row.brands || []).join(", ") || "N/A"}</td>
                         <td>{(row.vendors || []).join(", ") || "N/A"}</td>
