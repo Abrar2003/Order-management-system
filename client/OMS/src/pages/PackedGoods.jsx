@@ -115,6 +115,8 @@ const buildFilterStateFromSearchParams = (params) => {
     brand: normalizeBrandFilter(brandParams.length > 0 ? brandParams : params.get("brand")),
     vendor: normalizeFilterValue(params.get("vendor")),
     po: normalizeFilterValue(params.get("po")),
+    fromDate: params.get("from_date") || "",
+    toDate: params.get("to_date") || "",
   };
 };
 
@@ -134,6 +136,8 @@ const buildPackedGoodsSearchParams = ({
 
   if (appliedFilters?.vendor !== "all") next.set("vendor", appliedFilters.vendor);
   if (appliedFilters?.po !== "all") next.set("po", appliedFilters.po);
+  if (appliedFilters?.fromDate) next.set("from_date", appliedFilters.fromDate);
+  if (appliedFilters?.toDate) next.set("to_date", appliedFilters.toDate);
   if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
   if (sortOrder !== DEFAULT_SORT_ORDER) next.set("sort_order", sortOrder);
   if (page > 1) next.set("page", String(page));
@@ -153,6 +157,8 @@ const buildPackedGoodsApiQuery = (filters = {}) => {
   if (filters?.po && filters.po !== "all") {
     params.set("order_id", filters.po);
   }
+  if (filters?.fromDate) params.set("from_date", filters.fromDate);
+  if (filters?.toDate) params.set("to_date", filters.toDate);
   return params;
 };
 
@@ -190,6 +196,8 @@ const PackedGoods = () => {
   const [draftBrand, setDraftBrand] = useState(initialFilters.brand);
   const [draftVendor, setDraftVendor] = useState(initialFilters.vendor);
   const [draftPo, setDraftPo] = useState(initialFilters.po);
+  const [draftFromDate, setDraftFromDate] = useState(initialFilters.fromDate);
+  const [draftToDate, setDraftToDate] = useState(initialFilters.toDate);
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
   const [sortBy, setSortBy] = useState(initialSortBy);
   const [sortOrder, setSortOrder] = useState(initialSortOrder);
@@ -240,6 +248,8 @@ const PackedGoods = () => {
     });
     setDraftVendor((prev) => (prev === nextFilters.vendor ? prev : nextFilters.vendor));
     setDraftPo((prev) => (prev === nextFilters.po ? prev : nextFilters.po));
+    setDraftFromDate((prev) => (prev === nextFilters.fromDate ? prev : nextFilters.fromDate));
+    setDraftToDate((prev) => (prev === nextFilters.toDate ? prev : nextFilters.toDate));
     setAppliedFilters((prev) => {
       return areBrandFiltersEqual(prev.brand, nextFilters.brand)
         && prev.vendor === nextFilters.vendor
@@ -323,6 +333,9 @@ const PackedGoods = () => {
         if (appliedFilters.po !== "all" && rowPo !== appliedFilters.po) {
           return false;
         }
+        const rowDate = String(row?.order_date || "").slice(0, 10);
+        if (appliedFilters.fromDate && rowDate < appliedFilters.fromDate) return false;
+        if (appliedFilters.toDate && rowDate > appliedFilters.toDate) return false;
         return true;
       }),
     [allRows, appliedFilters],
@@ -387,7 +400,9 @@ const PackedGoods = () => {
   const hasPendingFilterChanges =
     !areBrandFiltersEqual(draftBrand, appliedFilters.brand)
     || draftVendor !== appliedFilters.vendor
-    || draftPo !== appliedFilters.po;
+    || draftPo !== appliedFilters.po
+    || draftFromDate !== appliedFilters.fromDate
+    || draftToDate !== appliedFilters.toDate;
 
   const exportGeneratedAt = useMemo(
     () => new Date().toLocaleString(),
@@ -442,6 +457,11 @@ const PackedGoods = () => {
   }, []);
 
   const handleApplyFilters = useCallback(() => {
+    if (draftFromDate && draftToDate && draftFromDate > draftToDate) {
+      setError("From date cannot be later than To date.");
+      return;
+    }
+    setError("");
     setPage(1);
     setAppliedFilters({
       brand: normalizeBrandFilter(draftBrand),
@@ -453,15 +473,19 @@ const PackedGoods = () => {
         draftPo !== "all" && !availableDraftPos.includes(draftPo)
           ? "all"
           : draftPo,
+      fromDate: draftFromDate,
+      toDate: draftToDate,
     });
-  }, [availableDraftPos, availableDraftVendors, draftBrand, draftPo, draftVendor]);
+  }, [availableDraftPos, availableDraftVendors, draftBrand, draftFromDate, draftPo, draftToDate, draftVendor]);
 
   const handleClearFilters = useCallback(() => {
-    const clearedFilters = { brand: DEFAULT_BRAND_FILTER, vendor: "all", po: "all" };
+    const clearedFilters = { brand: DEFAULT_BRAND_FILTER, vendor: "all", po: "all", fromDate: "", toDate: "" };
     setPage(1);
     setDraftBrand(clearedFilters.brand);
     setDraftVendor(clearedFilters.vendor);
     setDraftPo(clearedFilters.po);
+    setDraftFromDate("");
+    setDraftToDate("");
     setAppliedFilters(clearedFilters);
   }, []);
 
@@ -655,6 +679,28 @@ const PackedGoods = () => {
                 </select>
               </div>
 
+              <div className="packed-goods-filter-field">
+                <label className="form-label small mb-1">From</label>
+                <input
+                  className="form-control form-control-sm"
+                  type="date"
+                  value={draftFromDate}
+                  max={draftToDate || undefined}
+                  onChange={(event) => setDraftFromDate(event.target.value)}
+                />
+              </div>
+
+              <div className="packed-goods-filter-field">
+                <label className="form-label small mb-1">To</label>
+                <input
+                  className="form-control form-control-sm"
+                  type="date"
+                  value={draftToDate}
+                  min={draftFromDate || undefined}
+                  onChange={(event) => setDraftToDate(event.target.value)}
+                />
+              </div>
+
               <div className="packed-goods-filter-field packed-goods-filter-field--limit">
                 <label className="form-label small mb-1">Rows</label>
                 <select
@@ -692,9 +738,13 @@ const PackedGoods = () => {
                     isAllBrandFilter(draftBrand)
                     && draftVendor === "all"
                     && draftPo === "all"
+                    && !draftFromDate
+                    && !draftToDate
                     && isAllBrandFilter(appliedFilters.brand)
                     && appliedFilters.vendor === "all"
                     && appliedFilters.po === "all"
+                    && !appliedFilters.fromDate
+                    && !appliedFilters.toDate
                   )
                 }
               >

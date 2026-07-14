@@ -8987,6 +8987,8 @@ const buildPackedGoodsDataset = async ({
   brands = [],
   vendor = "",
   orderId = "",
+  fromDate = "",
+  toDate = "",
   user = null,
 } = {}) => {
   const selectedBrands = normalizeFilterValues(brands);
@@ -8994,7 +8996,15 @@ const buildPackedGoodsDataset = async ({
   const selectedVendor = normalizeFilterValue(vendor);
   const selectedOrderId = normalizeFilterValue(orderId);
 
-  const orders = await Order.find(applyDataAccessMatch(ACTIVE_ORDER_MATCH, user))
+  const dateMatch = {};
+  const parsedFromDate = toUtcDayStart(fromDate);
+  const parsedToDate = toUtcDayStart(toDate);
+  if (parsedFromDate) dateMatch.$gte = parsedFromDate;
+  if (parsedToDate) dateMatch.$lt = new Date(parsedToDate.getTime() + MS_PER_DAY);
+  const orderMatch = Object.keys(dateMatch).length > 0
+    ? { ...ACTIVE_ORDER_MATCH, order_date: dateMatch }
+    : ACTIVE_ORDER_MATCH;
+  const orders = await Order.find(applyDataAccessMatch(orderMatch, user))
     .select(
       "order_id item brand vendor quantity shipment qc_record order_date updatedAt total_po_cbm",
     )
@@ -9123,7 +9133,8 @@ const buildPackedGoodsDataset = async ({
 
       return {
         id: String(orderEntry?._id || ""),
-        order_id: normalizedOrderId,
+      order_id: normalizedOrderId,
+        order_date: toISODateString(orderEntry?.order_date),
         item_code: itemCode || "N/A",
         brand: brand || "N/A",
         vendor: vendorValue || "N/A",
@@ -9186,6 +9197,8 @@ exports.getPackedGoods = async (req, res) => {
       brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
       vendor: req.query.vendor,
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+      fromDate: req.query.from_date ?? req.query.fromDate,
+      toDate: req.query.to_date ?? req.query.toDate,
       user: req.user,
     });
 
@@ -9218,6 +9231,8 @@ exports.exportPackedGoods = async (req, res) => {
       brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
       vendor: req.query.vendor,
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+      fromDate: req.query.from_date ?? req.query.fromDate,
+      toDate: req.query.to_date ?? req.query.toDate,
       user: req.user,
     });
 
