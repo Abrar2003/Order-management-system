@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import { isAdminLikeRole, ROLE_LABELS } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
-import { getOptionText } from "../utils/optionText";
+import {
+  filterVendorOptionsByBrandIds,
+  getOptionText,
+} from "../utils/optionText";
 
 const formatActionLabel = (value = "") =>
   String(value)
@@ -59,6 +62,14 @@ const PermissionManagement = () => {
   const selectedAccessUser = useMemo(
     () => accessUsers.find((user) => user._id === selectedAccessUserId) || null,
     [accessUsers, selectedAccessUserId],
+  );
+  const filteredVendorOptions = useMemo(
+    () => filterVendorOptionsByBrandIds(
+      vendorOptions,
+      accessDraft.allowed_brand_ids,
+      accessDraft.all_brands,
+    ),
+    [accessDraft.all_brands, accessDraft.allowed_brand_ids, vendorOptions],
   );
 
   const filteredModules = useMemo(() => {
@@ -252,10 +263,17 @@ const PermissionManagement = () => {
       const current = new Set(prev.allowed_brand_ids || []);
       if (current.has(brandId)) current.delete(brandId);
       else current.add(brandId);
+      const allowedVendorNames = new Set(
+        filterVendorOptionsByBrandIds(vendorOptions, Array.from(current), false)
+          .map((vendor) => vendor.name),
+      );
       return {
         ...prev,
         all_brands: false,
         allowed_brand_ids: Array.from(current),
+        allowed_vendors: prev.all_vendors
+          ? prev.allowed_vendors
+          : prev.allowed_vendors.filter((vendor) => allowedVendorNames.has(vendor)),
       };
     });
   };
@@ -598,10 +616,10 @@ const PermissionManagement = () => {
                       </label>
                     </div>
                     <div className="data-access-options">
-                      {vendorOptions.length === 0 ? (
+                      {filteredVendorOptions.length === 0 ? (
                         <div className="text-secondary small">No vendors found.</div>
                       ) : (
-                        vendorOptions.map((vendor) => (
+                        filteredVendorOptions.map((vendor) => (
                           <label key={vendor._id} className="form-check">
                             <input
                               type="checkbox"

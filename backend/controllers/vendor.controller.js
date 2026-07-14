@@ -4,6 +4,10 @@ const Finish = require("../models/finish.model");
 const Item = require("../models/item.model");
 const Vendor = require("../models/vendor.model");
 const { getVendorCountry, getVendorId, getVendorName } = require("../helpers/vendorRef");
+const {
+  applyBrandDocumentAccessMatch,
+  getVendorAccessOptions,
+} = require("../services/userDataAccess.service");
 
 const normalizeText = (value = "") => String(value ?? "").trim();
 const normalizeEmail = (value = "") => normalizeText(value).toLowerCase();
@@ -79,8 +83,11 @@ const formatVendorCodes = (value = []) => {
 const normalizeVendorCodeKey = (entry = {}) =>
   `${normalizeText(entry.brand).toLowerCase()}\u0000${normalizeText(entry.code).toLowerCase()}`;
 
-const getBrandNameMap = async () => {
-  const brands = await Brand.find({}, "name").sort({ name: 1 }).lean();
+const getBrandNameMap = async (user = {}) => {
+  const brands = await Brand.find(
+    applyBrandDocumentAccessMatch({}, user),
+    "name",
+  ).sort({ name: 1 }).lean();
   return new Map(
     brands
       .map((brand) => normalizeText(brand?.name))
@@ -89,7 +96,7 @@ const getBrandNameMap = async () => {
   );
 };
 
-const normalizeVendorCodesForSave = async (value = []) => {
+const normalizeVendorCodesForSave = async (value = [], user = {}) => {
   const entries = normalizeVendorCodeEntries(value);
   if (entries.length === 0) {
     throw createHttpError(400, "At least one brand and vendor code is required");
@@ -109,7 +116,7 @@ const normalizeVendorCodesForSave = async (value = []) => {
     seen.add(key);
   }
 
-  const brandNameMap = await getBrandNameMap();
+  const brandNameMap = await getBrandNameMap(user);
   const unknownBrands = [
     ...new Set(
       entries
@@ -137,7 +144,7 @@ const buildVendorCodeDuplicateConditions = (vendorCodes = []) =>
     },
   }));
 
-const serializeVendor = (vendor = {}) => ({
+const serializeVendor = (vendor = {}, allowedBrandNames = null) => ({
   _id: String(vendor._id || ""),
   name: normalizeText(vendor.name),
   owner_name: normalizeText(vendor.owner_name),
@@ -145,8 +152,14 @@ const serializeVendor = (vendor = {}) => ({
   phone: normalizeText(vendor.phone),
   country: normalizeText(vendor.country),
   address: normalizeText(vendor.address),
-  vendor_code: normalizeVendorCodeEntries(vendor.vendor_code),
-  vendor_code_label: formatVendorCodes(vendor.vendor_code),
+  vendor_code: normalizeVendorCodeEntries(vendor.vendor_code).filter((entry) =>
+    !allowedBrandNames || allowedBrandNames.has(entry.brand.toLowerCase()),
+  ),
+  vendor_code_label: formatVendorCodes(
+    normalizeVendorCodeEntries(vendor.vendor_code).filter((entry) =>
+      !allowedBrandNames || allowedBrandNames.has(entry.brand.toLowerCase()),
+    ),
+  ),
   contact_person: normalizeContactPersons(vendor.contact_person),
   is_active: vendor.is_active !== false,
   created_at: vendor.created_at || vendor.createdAt || null,
@@ -328,9 +341,14 @@ const applyVendorFinishSyncPlan = async (updates = []) => {
   return { updated_finishes: updates.length };
 };
 
-const getVendors = async (_req, res) => {
+const getVendors = async (req, res) => {
   try {
+    const [vendorOptions, brandNameMap] = await Promise.all([
+      getVendorAccessOptions({ user: req.user }),
+      getBrandNameMap(req.user),
+    ]);
     const vendors = await Vendor.find({
+      _id: { $in: vendorOptions.map((vendor) => vendor._id) },
       $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
     })
       .sort({ country: 1, name: 1 })
@@ -338,7 +356,7 @@ const getVendors = async (_req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: vendors.map(serializeVendor),
+      data: vendors.map((vendor) => serializeVendor(vendor, new Set(brandNameMap.keys()))),
     });
   } catch (error) {
     console.error("Get Vendors Error:", error);
@@ -349,9 +367,12 @@ const getVendors = async (_req, res) => {
   }
 };
 
-const getVendorBrandOptions = async (_req, res) => {
+const getVendorBrandOptions = async (req, res) => {
   try {
-    const brands = await Brand.find({}, "name").sort({ name: 1 }).lean();
+    const brands = await Brand.find(
+      applyBrandDocumentAccessMatch({}, req.user),
+      "name",
+    ).sort({ name: 1 }).lean();
 
     return res.status(200).json({
       success: true,
@@ -380,7 +401,7 @@ const createVendor = async (req, res) => {
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
     const address = normalizeText(req.body?.address);
-    const vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code);
+    const vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code, req.user);
     const contact_person = normalizeContactPersons(req.body?.contact_person);
     const is_active = req.body?.is_active !== false;
 
@@ -453,7 +474,7 @@ const updateVendor = async (req, res) => {
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
     const address = normalizeText(req.body?.address);
-    const vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code);
+    const vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code, req.user);
     const contact_person = normalizeContactPersons(req.body?.contact_person);
     const is_active = req.body?.is_active !== false;
 
@@ -471,7 +492,11 @@ const updateVendor = async (req, res) => {
       });
     }
 
-    const existingVendor = await Vendor.findById(id);
+    const accessibleVendorIds = (await getVendorAccessOptions({ user: req.user }))
+      .map((vendor) => vendor._id);
+    const existingVendor = accessibleVendorIds.includes(String(id))
+      ? await Vendor.findById(id)
+      : null;
     if (!existingVendor || existingVendor.deleted_at) {
       return res.status(404).json({
         success: false,
@@ -565,13 +590,19 @@ const exportVendors = async (req, res) => {
       }
     }
 
+    const [vendorOptions, brandNameMap] = await Promise.all([
+      getVendorAccessOptions({ user: req.user }),
+      getBrandNameMap(req.user),
+    ]);
     const rawVendors = await Vendor.find({
+      _id: { $in: vendorOptions.map((vendor) => vendor._id) },
       $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
     })
       .sort({ country: 1, name: 1 })
       .lean();
 
-    let vendors = rawVendors.map(serializeVendor);
+    const allowedBrandNames = new Set(brandNameMap.keys());
+    let vendors = rawVendors.map((vendor) => serializeVendor(vendor, allowedBrandNames));
 
     if (selectedCountries.length > 0) {
       const lowerCountries = selectedCountries.map((c) => c.toLowerCase());

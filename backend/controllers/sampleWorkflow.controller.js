@@ -6,7 +6,10 @@ const { createWorkflowTask } = require("../services/workflow/workflowStatusServi
 const { BOX_PACKAGING_MODES, BOX_ENTRY_TYPES } = require("../helpers/boxMeasurement");
 const { normalizeUserRoleKey } = require("../helpers/userRole");
 const { calculateTotalPoCbm } = require("../services/orderCbm.service");
-const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const {
+  applyDataAccessMatch,
+  assertUserDataAccess,
+} = require("../services/userDataAccess.service");
 const {
   buildVendorsArrayFilter,
   getVendorId,
@@ -450,6 +453,10 @@ exports.createSampleWorkflow = async (req, res) => {
     if (!normalizeText(payload.brand)) {
       return res.status(400).json({ success: false, message: "brand is required" });
     }
+    assertUserDataAccess(req.user, {
+      brands: [payload.brand],
+      vendors: getVendorPayloadList(payload),
+    });
 
     const existingWorkflow = await SampleWorkflow.findOne({
       code: { $regex: `^${escapeRegex(code)}$`, $options: "i" },
@@ -543,7 +550,7 @@ exports.createSampleWorkflow = async (req, res) => {
       triggered_task: task ? { _id: task._id, task_no: task.task_no } : null,
     });
   } catch (error) {
-    return res.status(isBadRequestError(error) ? 400 : 500).json({
+    return res.status(error?.statusCode || (isBadRequestError(error) ? 400 : 500)).json({
       success: false,
       message: error?.message || "Failed to create sample workflow",
       error: error.message,

@@ -2,7 +2,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const { __test__ } = require("../controllers/item.controller");
-const { buildItemMatch, buildFinalPisCheckMatch } = __test__;
+const {
+  buildItemMatch,
+  buildFinalPisCheckAccessMatch,
+  buildFinalPisCheckMatch,
+} = __test__;
 
 test("missing item country leaves the item query unfiltered", () => {
   assert.deepEqual(buildItemMatch(), {});
@@ -56,3 +60,14 @@ test("buildFinalPisCheckMatch ignores country filter if country is 'all'", () =>
   assert.equal(match.$and.length, 3); // no country filter added
 });
 
+test("Final PIS Check applies the user's brand and vendor access", () => {
+  const match = buildFinalPisCheckAccessMatch({}, {
+    allowed_brands: [{ _id: "69bcc477e6dcf6dd5be3c0d8", name: "Giga" }],
+    allowed_vendors: ["Jodhana"],
+  });
+  const serialized = JSON.stringify(match);
+
+  assert.match(serialized, /Giga/);
+  assert.match(serialized, /Jodhana/);
+  assert.doesNotMatch(serialized, /By Boo/);
+});

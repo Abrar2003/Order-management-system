@@ -17,6 +17,7 @@ const {
 } = require("../services/wasabiStorage.service");
 const {
   applyDataAccessMatch,
+  assertUserDataAccess,
 } = require("../services/userDataAccess.service");
 const {
   isManagerLikeRole,
@@ -546,6 +547,8 @@ exports.createComplaint = async (req, res) => {
       });
     }
 
+    assertUserDataAccess(req.user, { brands: [brand], vendors: [vendor] });
+
     const existingItem = await findExistingItemByCode(itemCode, req.user);
     if (!existingItem) {
       return res.status(404).json({
@@ -611,7 +614,7 @@ exports.createComplaint = async (req, res) => {
     });
   } catch (error) {
     console.error("Create Complain Error:", error);
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       success: false,
       message: error?.message || "Failed to create complain.",
     });
@@ -673,6 +676,8 @@ exports.updateComplaint = async (req, res) => {
         message: "Brand, vendor, item code, and first comment are required.",
       });
     }
+
+    assertUserDataAccess(req.user, { brands: [brand], vendors: [vendor] });
 
     const finalComments = hasCommentsPayload
       ? incomingComments
@@ -854,7 +859,7 @@ exports.updateComplaint = async (req, res) => {
     });
   } catch (error) {
     console.error("Update Complain Error:", error);
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       success: false,
       message: error?.message || "Failed to update complain.",
     });

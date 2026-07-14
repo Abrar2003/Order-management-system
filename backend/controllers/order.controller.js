@@ -47,7 +47,13 @@ const {
   toPositiveCbmNumber,
   toRoundedCbmValue,
 } = require("../services/shipmentCbmAllocation.service");
-const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const {
+  applyDataAccessMatch,
+  assertUserDataAccess,
+  getUserBrandScope,
+  hasDataAccessFilter,
+  isUserAllowedData,
+} = require("../services/userDataAccess.service");
 const {
   QUEUE_NAMES,
   enqueueAllOrderCbmRecalc,
@@ -1303,6 +1309,7 @@ const buildPreviousOrderResponse = ({ orderDoc = null, qcDoc = null } = {}) => {
 const resolvePreviousOrderReplacementPlan = async ({
   row = {},
   session = null,
+  user = null,
 } = {}) => {
   const previousOrderAction = normalizePreviousOrderActionInput(
     row?.previous_order_action || row?.previousOrderAction,
@@ -1341,18 +1348,22 @@ const resolvePreviousOrderReplacementPlan = async ({
 
   let previousOrder = null;
   if (previousOrderDbId) {
-    previousOrder = await Order.findOne({
-      _id: previousOrderDbId,
-      ...ACTIVE_ORDER_MATCH,
-    }).session(session);
+    previousOrder = await Order.findOne(
+      applyDataAccessMatch({
+        _id: previousOrderDbId,
+        ...ACTIVE_ORDER_MATCH,
+      }, user),
+    ).session(session);
   }
 
   if (!previousOrder && previousOrderOrderId) {
-    previousOrder = await Order.findOne({
-      ...ACTIVE_ORDER_MATCH,
-      order_id: buildExactTextQuery(previousOrderOrderId),
-      "item.item_code": buildExactTextQuery(itemCode),
-    })
+    previousOrder = await Order.findOne(
+      applyDataAccessMatch({
+        ...ACTIVE_ORDER_MATCH,
+        order_id: buildExactTextQuery(previousOrderOrderId),
+        "item.item_code": buildExactTextQuery(itemCode),
+      }, user),
+    )
       .sort({ updatedAt: -1, createdAt: -1 })
       .session(session);
   }
@@ -1510,7 +1521,7 @@ const buildBrandVendorPairsFromRows = (rows = []) => {
   return [...pairsByKey.values()];
 };
 
-const loadExistingOrdersForBrandVendorPairs = async (pairs = []) => {
+const loadExistingOrdersForBrandVendorPairs = async (pairs = [], user = null) => {
   const normalizedPairs = buildBrandVendorPairsFromRows(pairs);
   if (normalizedPairs.length === 0) {
     return {
@@ -1520,19 +1531,21 @@ const loadExistingOrdersForBrandVendorPairs = async (pairs = []) => {
     };
   }
 
-  const existingOrders = await Order.find({
-    ...ACTIVE_ORDER_MATCH,
-    $or: normalizedPairs.map((entry) => ({
-      $and: [
-        { brand: entry.brand },
-        buildVendorFilter({
-          field: "vendor",
-          vendorId: entry.vendor,
-          vendorName: entry.vendor,
-        }),
-      ],
-    })),
-  })
+  const existingOrders = await Order.find(
+    applyDataAccessMatch({
+      ...ACTIVE_ORDER_MATCH,
+      $or: normalizedPairs.map((entry) => ({
+        $and: [
+          { brand: entry.brand },
+          buildVendorFilter({
+            field: "vendor",
+            vendorId: entry.vendor,
+            vendorName: entry.vendor,
+          }),
+        ],
+      })),
+    }, user),
+  )
     .select(
       "_id order_id item brand vendor quantity ETD order_date status shipment qc_record",
     )
@@ -2164,8 +2177,13 @@ const applyNewOrderRows = async ({
     const rowOrderLogs = [];
 
     try {
+      assertUserDataAccess(reqUser, {
+        brands: [row?.brand],
+        vendors: [row?.vendor],
+      });
       const replacementPlan = await resolvePreviousOrderReplacementPlan({
         row,
+        user: reqUser,
       });
 
       rowWarnings = [...replacementPlan.warnings];
@@ -2414,6 +2432,11 @@ const applyRectifiedOrderRows = async ({
   const rowsToUpdate = [];
   const warnings = [];
 
+  safeRows.forEach((row) => assertUserDataAccess(reqUser, {
+    brands: [row?.brand],
+    vendors: [row?.vendor],
+  }));
+
   for (const row of safeRows) {
     const key = `${normalizeOrderKey(row?.order_id)}__${normalizeRectifyText(
       row?.item_code,
@@ -2454,7 +2477,9 @@ const applyRectifiedOrderRows = async ({
       continue;
     }
 
-    const orderDoc = await Order.findById(entry.existingId);
+    const orderDoc = await Order.findOne(
+      applyDataAccessMatch({ _id: entry.existingId }, reqUser),
+    );
     if (!orderDoc) continue;
 
     const oldGroup = {
@@ -4059,7 +4084,7 @@ const buildUploadPreviewSummary = ({
   };
 };
 
-const prepareUploadOrdersFromRows = async (rowsInput = []) => {
+const prepareUploadOrdersFromRows = async (rowsInput = [], user = null) => {
   const sourceRows = Array.isArray(rowsInput) ? rowsInput : [];
   const totalRowsReceived = sourceRows.length;
   const duplicateEntries = [];
@@ -4106,6 +4131,8 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
       continue;
     }
 
+    assertUserDataAccess(user, { brands: [brand], vendors: [vendor] });
+
     if (seenKeys.has(key)) {
       previewRow.change_type = "duplicate_in_file";
       previewRow.reason = "duplicate_in_file";
@@ -4130,7 +4157,7 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
 
   const comparisonPairs = buildBrandVendorPairsFromRows(candidateRows);
   const { existingByKey, openOrdersByKey } =
-    await loadExistingOrdersForBrandVendorPairs(comparisonPairs);
+    await loadExistingOrdersForBrandVendorPairs(comparisonPairs, user);
 
   const orders = candidateRows.map((row) => buildUploadedOrderDocument(row));
   const newOrders = [];
@@ -4342,7 +4369,7 @@ exports.uploadOrders = async (req, res) => {
       sourceRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
     }
 
-    const preparedUpload = await prepareUploadOrdersFromRows(sourceRows);
+    const preparedUpload = await prepareUploadOrdersFromRows(sourceRows, req.user);
     const orders = preparedUpload.orders;
     const newRowsToInsert = preparedUpload.previewRows.filter(
       (row) =>
@@ -4366,6 +4393,11 @@ exports.uploadOrders = async (req, res) => {
     }
 
     const normalizeValue = (value) => normalizeLooseString(value);
+
+    orders.forEach((order) => assertUserDataAccess(req.user, {
+      brands: [order?.brand],
+      vendors: [order?.vendor],
+    }));
 
     const brandVendorUploadMap = new Map();
 
@@ -4639,7 +4671,7 @@ exports.uploadOrders = async (req, res) => {
       });
     }
 
-    res.status(500).json({
+    res.status(error?.statusCode || 500).json({
       message: "Upload failed",
       error: error.message,
     });
@@ -4873,6 +4905,11 @@ exports.createOrdersManually = async (req, res) => {
       orders.map((order) => normalizeOrderKey(order.order_id)).filter(Boolean),
     ).size;
 
+    orders.forEach((order) => assertUserDataAccess(req.user, {
+      brands: [order?.brand],
+      vendors: [order?.vendor],
+    }));
+
     const brandVendorUploadMap = new Map();
     for (const order of orders) {
       const brand = normalizeValue(order.brand);
@@ -5091,7 +5128,7 @@ exports.createOrdersManually = async (req, res) => {
       });
     }
 
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       message: "Manual order add failed",
       error: error.message,
     });
@@ -5166,6 +5203,10 @@ exports.rectifyPdfOrders = async (req, res) => {
           });
           continue;
         }
+        assertUserDataAccess(req.user, {
+          brands: [normalizedRow.brand],
+          vendors: [normalizedRow.vendor],
+        });
         candidateRows.push(normalizedRow);
       }
 
@@ -5180,13 +5221,15 @@ exports.rectifyPdfOrders = async (req, res) => {
         });
       }
 
-      const existingOrders = await Order.find({
-        ...ACTIVE_ORDER_MATCH,
-        $or: dedupedRows.map((row) => ({
-          order_id: row.order_id,
-          "item.item_code": row.item_code,
-        })),
-      })
+      const existingOrders = await Order.find(
+        applyDataAccessMatch({
+          ...ACTIVE_ORDER_MATCH,
+          $or: dedupedRows.map((row) => ({
+            order_id: row.order_id,
+            "item.item_code": row.item_code,
+          })),
+        }, req.user),
+      )
         .select(
           "_id order_id item brand vendor quantity ETD order_date shipment qc_record",
         )
@@ -5305,6 +5348,10 @@ exports.rectifyPdfOrders = async (req, res) => {
     if (!vendorInput) {
       return res.status(400).json({ message: "vendor is required" });
     }
+    assertUserDataAccess(req.user, {
+      brands: [brandInput],
+      vendors: [vendorInput],
+    });
 
     const isPdfFile =
       String(req.file?.mimetype || "")
@@ -5370,7 +5417,7 @@ exports.rectifyPdfOrders = async (req, res) => {
     const { existingByKey, openOrdersByKey } =
       await loadExistingOrdersForBrandVendorPairs([
         { brand: brandInput, vendor: vendorInput },
-      ]);
+      ], req.user);
     dedupedRows = await hydrateRectifyRowsWithFallbackDescriptions({
       rows: dedupedRows,
       existingByKey,
@@ -5538,7 +5585,7 @@ exports.rectifyPdfOrders = async (req, res) => {
     });
   } catch (error) {
     console.error("Rectify PDF Error:", error);
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       success: false,
       message: "Failed to rectify PDF",
       error: error?.message || String(error),
@@ -5599,25 +5646,26 @@ exports.getUploadLogs = async (req, res) => {
       ];
     }
 
+    const scopedMatch = applyDataAccessMatch(match, req.user, {
+      brandFields: ["vendor_summaries.brand", "conflicts.brand", "uploaded_brands"],
+      vendorFields: ["vendor_summaries.vendor", "conflicts.vendor", "uploaded_vendors"],
+    });
+
     const [
       logs,
       totalRecords,
-      brandsRaw,
-      vendorsRaw,
       statusesRaw,
       statusCountsRaw,
     ] = await Promise.all([
-      UploadLog.find(match)
+      UploadLog.find(scopedMatch)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      UploadLog.countDocuments(match),
-      UploadLog.distinct("uploaded_brands"),
-      UploadLog.distinct("uploaded_vendors"),
-      UploadLog.distinct("status"),
+      UploadLog.countDocuments(scopedMatch),
+      UploadLog.distinct("status", scopedMatch),
       UploadLog.aggregate([
-        { $match: match },
+        { $match: scopedMatch },
         {
           $group: {
             _id: "$status",
@@ -5642,20 +5690,51 @@ exports.getUploadLogs = async (req, res) => {
       }
     });
 
+    const restrictLogDetails = hasDataAccessFilter(req.user)
+      || getUserBrandScope(req.user) !== "all";
+    const serializedLogs = logs.map((log) => {
+      const vendorSummaries = (Array.isArray(log?.vendor_summaries) ? log.vendor_summaries : [])
+        .filter((entry) => isUserAllowedData(req.user, {
+          brands: [entry?.brand],
+          vendors: [entry?.vendor],
+        }))
+        .map((entry) => ({
+          ...entry,
+          vendor: normalizeLooseString(entry?.vendor),
+        }));
+      const conflicts = (Array.isArray(log?.conflicts) ? log.conflicts : [])
+        .filter((entry) => isUserAllowedData(req.user, {
+          brands: [entry?.brand],
+          vendors: [entry?.vendor],
+        }))
+        .map((entry) => ({
+          ...entry,
+          vendor: normalizeLooseString(entry?.vendor),
+        }));
+
+      return {
+        ...log,
+        uploaded_brands: restrictLogDetails
+          ? normalizeDistinctValues([
+              ...vendorSummaries.map((entry) => entry.brand),
+              ...conflicts.map((entry) => entry.brand),
+            ])
+          : normalizeDistinctValues(log?.uploaded_brands),
+        uploaded_vendors: restrictLogDetails
+          ? normalizeVendorDisplayList([
+              ...vendorSummaries.map((entry) => entry.vendor),
+              ...conflicts.map((entry) => entry.vendor),
+            ])
+          : normalizeVendorDisplayList(log?.uploaded_vendors),
+        vendor_summaries: vendorSummaries,
+        conflicts,
+        duplicate_entries: restrictLogDetails ? [] : log?.duplicate_entries,
+      };
+    });
+
     return res.status(200).json({
       success: true,
-      data: logs.map((log) => ({
-        ...log,
-        uploaded_vendors: normalizeVendorDisplayList(log?.uploaded_vendors),
-        vendor_summaries: (Array.isArray(log?.vendor_summaries) ? log.vendor_summaries : []).map((entry) => ({
-          ...entry,
-          vendor: normalizeLooseString(entry?.vendor),
-        })),
-        conflicts: (Array.isArray(log?.conflicts) ? log.conflicts : []).map((entry) => ({
-          ...entry,
-          vendor: normalizeLooseString(entry?.vendor),
-        })),
-      })),
+      data: serializedLogs,
       pagination: {
         page,
         limit,
@@ -5663,8 +5742,8 @@ exports.getUploadLogs = async (req, res) => {
         totalRecords,
       },
       filters: {
-        brands: normalizeDistinctValues(brandsRaw),
-        vendors: normalizeVendorDisplayList(vendorsRaw),
+        brands: normalizeDistinctValues(serializedLogs.flatMap((log) => log.uploaded_brands)),
+        vendors: normalizeVendorDisplayList(serializedLogs.flatMap((log) => log.uploaded_vendors)),
         statuses: normalizeDistinctValues(statusesRaw),
       },
       summary,
@@ -5716,6 +5795,11 @@ exports.getOrderEditLogs = async (req, res) => {
       match.operation_type = operationType;
     }
 
+    const scopedMatch = applyDataAccessMatch(match, req.user, {
+      brandFields: ["brand"],
+      vendorFields: ["vendor"],
+    });
+
     const [
       logs,
       totalRecords,
@@ -5724,17 +5808,17 @@ exports.getOrderEditLogs = async (req, res) => {
       operationsRaw,
       totalsRaw,
     ] = await Promise.all([
-      OrderEditLog.find(match)
+      OrderEditLog.find(scopedMatch)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      OrderEditLog.countDocuments(match),
-      OrderEditLog.distinct("brand", match),
-      OrderEditLog.distinct("vendor", match),
-      OrderEditLog.distinct("operation_type", match),
+      OrderEditLog.countDocuments(scopedMatch),
+      OrderEditLog.distinct("brand", scopedMatch),
+      OrderEditLog.distinct("vendor", scopedMatch),
+      OrderEditLog.distinct("operation_type", scopedMatch),
       OrderEditLog.aggregate([
-        { $match: match },
+        { $match: scopedMatch },
         {
           $group: {
             _id: null,
@@ -8965,14 +9049,26 @@ exports.getOrdersByFilters = async (req, res) => {
 exports.getOrderSummary = async (req, res) => {
   try {
     const scopedActiveMatch = applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user);
-    const [vendors, brands] = await Promise.all([
-      Order.distinct("vendor", scopedActiveMatch),
-      Order.distinct("brand", scopedActiveMatch),
-    ]);
+    const orders = await Order.find(scopedActiveMatch)
+      .select("brand vendor")
+      .lean();
+    const brands = normalizeDistinctValues(orders.map((order) => order?.brand));
+    const vendors = normalizeVendorDisplayList(orders.map((order) => order?.vendor));
+    const brandVendors = Object.fromEntries(
+      brands.map((brand) => [
+        brand,
+        normalizeVendorDisplayList(
+          orders
+            .filter((order) => normalizeLooseString(order?.brand) === brand)
+            .map((order) => order?.vendor),
+        ),
+      ]),
+    );
 
     return res.status(200).json({
-      vendors: normalizeVendorDisplayList(vendors),
-      brands: normalizeDistinctValues(brands),
+      vendors,
+      brands,
+      brand_vendors: brandVendors,
     });
   } catch (error) {
     console.error("Get Order Summary Error:", error);
@@ -9898,6 +9994,11 @@ exports.editOrder = async (req, res) => {
       return res.status(400).json({ message: "vendor is required" });
     }
 
+    assertUserDataAccess(req.user, {
+      brands: [nextBrand],
+      vendors: [nextVendor],
+    });
+
     if (!nextItemCode) {
       return res.status(400).json({ message: "item_code is required" });
     }
@@ -10188,7 +10289,7 @@ exports.editOrder = async (req, res) => {
     });
   } catch (error) {
     console.error("Edit Order Error:", error);
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       message: "Failed to update order",
       error: error.message,
     });
@@ -10359,6 +10460,11 @@ exports.editCompleteOrder = async (req, res) => {
     if (!normalizeLooseString(nextVendor)) {
       return res.status(400).json({ message: "vendor is required" });
     }
+
+    assertUserDataAccess(req.user, {
+      brands: [nextBrand],
+      vendors: [nextVendor],
+    });
 
     let nextOrderDate = anchorOrder.order_date || null;
     if (hasOrderDate) {
@@ -10535,7 +10641,7 @@ exports.editCompleteOrder = async (req, res) => {
     });
   } catch (error) {
     console.error("Edit Complete Order Error:", error);
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       message: "Failed to update complete order",
       error: error.message,
     });

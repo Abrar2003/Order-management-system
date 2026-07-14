@@ -2,8 +2,10 @@ const mongoose = require("mongoose");
 
 const Finish = require("../models/finish.model");
 const Item = require("../models/item.model");
-const Vendor = require("../models/vendor.model");
-const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const {
+  applyDataAccessMatch,
+  getVendorAccessOptions,
+} = require("../services/userDataAccess.service");
 const {
   isConfigured: isWasabiConfigured,
   createStorageKey,
@@ -226,9 +228,13 @@ exports.getFinishes = async (req, res) => {
     const vendorFilter = normalizeText(req.query.vendor);
     const brandFilter = normalizeText(req.query.brand);
 
-    const finishes = await Finish.find({})
-      .sort({ updatedAt: -1, unique_code: 1 })
-      .lean();
+    const [finishes, vendorOptions] = await Promise.all([
+      Finish.find({}).sort({ updatedAt: -1, unique_code: 1 }).lean(),
+      getVendorAccessOptions({ user: req.user }),
+    ]);
+    const accessibleVendorKeys = new Set(
+      vendorOptions.flatMap((vendor) => [vendor._id, vendor.name.toLowerCase()]),
+    );
     const itemCodes = normalizeDistinctValues(
       finishes.flatMap((finish) => Array.isArray(finish?.item_codes) ? finish.item_codes : []),
     );
@@ -255,7 +261,11 @@ exports.getFinishes = async (req, res) => {
 
     const allRows = finishes
       .map((finish) => serializeFinish(finish, itemsByCode))
-      .filter((finish) => finish.item_codes.length === 0 || finish.items.length > 0);
+      .filter((finish) => {
+        if (finish.item_codes.length > 0) return finish.items.length > 0;
+        return accessibleVendorKeys.has(finish.vendor_id)
+          || accessibleVendorKeys.has(finish.vendor.toLowerCase());
+      });
     const rows = allRows.filter((finish) => {
       if (vendorFilter && finish.vendor !== vendorFilter) return false;
       if (brandFilter && !finish.brands.includes(brandFilter)) return false;
@@ -282,14 +292,9 @@ exports.getFinishes = async (req, res) => {
   }
 };
 
-exports.getFinishVendorOptions = async (_req, res) => {
+exports.getFinishVendorOptions = async (req, res) => {
   try {
-    const vendors = await Vendor.find({
-      $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
-    })
-      .select("_id name vendor_code is_active")
-      .sort({ name: 1 })
-      .lean();
+    const vendors = await getVendorAccessOptions({ user: req.user });
 
     return res.status(200).json({
       success: true,
@@ -297,7 +302,9 @@ exports.getFinishVendorOptions = async (_req, res) => {
         .map((vendor) => ({
           _id: String(vendor?._id || ""),
           name: normalizeText(vendor?.name),
-          vendor_code: normalizeVendorCodeEntries(vendor?.vendor_code),
+          vendor_code: normalizeVendorCodeEntries(vendor?.vendor_code).filter((entry) =>
+            vendor.brands.some((brand) => brand.toLowerCase() === entry.brand.toLowerCase()),
+          ),
           is_active: vendor?.is_active !== false,
         }))
         .filter((vendor) => vendor._id && vendor.name),

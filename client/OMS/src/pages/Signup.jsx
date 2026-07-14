@@ -4,6 +4,7 @@ import api from "../api/axios";
 import { USER_ROLE_OPTIONS } from "../auth/permissions";
 import Navbar from "../components/Navbar";
 import { usePermissions } from "../auth/PermissionContext";
+import { filterVendorOptionsByBrandIds } from "../utils/optionText";
 import "../App.css";
 
 const ALL_VENDOR_TOKEN = "all";
@@ -35,6 +36,14 @@ const Signup = () => {
     all_vendors: true,
     allowed_vendors: [ALL_VENDOR_TOKEN],
   });
+  const filteredVendorOptions = useMemo(
+    () => filterVendorOptionsByBrandIds(
+      vendorOptions,
+      access.allowed_brand_ids,
+      access.all_brands,
+    ),
+    [access.all_brands, access.allowed_brand_ids, vendorOptions],
+  );
 
   useEffect(() => {
     if (!canCreateUsers) return;
@@ -138,10 +147,17 @@ const Signup = () => {
       const current = new Set(prev.allowed_brand_ids);
       if (current.has(brandId)) current.delete(brandId);
       else current.add(brandId);
+      const allowedVendorNames = new Set(
+        filterVendorOptionsByBrandIds(vendorOptions, Array.from(current), false)
+          .map((vendor) => vendor.name),
+      );
       return {
         ...prev,
         all_brands: false,
         allowed_brand_ids: Array.from(current),
+        allowed_vendors: prev.all_vendors
+          ? prev.allowed_vendors
+          : prev.allowed_vendors.filter((vendor) => allowedVendorNames.has(vendor)),
       };
     });
   };
@@ -336,10 +352,10 @@ const Signup = () => {
                       <div className="data-access-options">
                         {optionsLoading ? (
                           <div className="text-secondary small">Loading vendors...</div>
-                        ) : vendorOptions.length === 0 ? (
+                        ) : filteredVendorOptions.length === 0 ? (
                           <div className="text-secondary small">No vendors found.</div>
                         ) : (
-                          vendorOptions.map((vendor) => (
+                          filteredVendorOptions.map((vendor) => (
                             <label key={vendor._id} className="form-check">
                               <input
                                 type="checkbox"

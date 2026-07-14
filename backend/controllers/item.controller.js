@@ -26,7 +26,10 @@ const {
   deleteObject,
 } = require("../services/wasabiStorage.service");
 const { convertExcelToPdf } = require("../services/convertXlsxToPDF.service");
-const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const {
+  applyDataAccessMatch,
+  assertUserDataAccess,
+} = require("../services/userDataAccess.service");
 const { notifyUsers } = require("../services/notificationService");
 const {
   deriveOrderProgress,
@@ -2659,12 +2662,12 @@ const buildPisDiffReportPayload = ({
   };
 };
 
-const getCheckedPisDiffRowsForReport = async ({ search, brand, vendor, country } = {}) => {
-  const match = {
+const getCheckedPisDiffRowsForReport = async ({ search, brand, vendor, country, user } = {}) => {
+  const match = applyItemDataAccess({
     ...buildItemMatch({ search, brand, vendor, country }),
     pis_checked_flag: true,
     is_rectify_imported: { $ne: true },
-  };
+  }, user);
 
   const checkedItems = await Item.find(match)
     .select(PIS_DIFF_ITEM_SELECT)
@@ -2742,7 +2745,14 @@ const buildFinalPisCheckMatch = ({ search, brand, vendor, country } = {}) => {
   return { $and: conditions };
 };
 
-exports.__test__ = { buildItemMatch, buildFinalPisCheckMatch };
+const buildFinalPisCheckAccessMatch = (filters = {}, user = {}) =>
+  applyItemDataAccess(buildFinalPisCheckMatch(filters), user);
+
+exports.__test__ = {
+  buildItemMatch,
+  buildFinalPisCheckAccessMatch,
+  buildFinalPisCheckMatch,
+};
 
 const getFinalPisCheckRowsForQuery = async ({
   search,
@@ -2752,8 +2762,12 @@ const getFinalPisCheckRowsForQuery = async ({
   diffField,
   sortBy,
   sortOrder,
+  user,
 } = {}) => {
-  const match = buildFinalPisCheckMatch({ search, brand, vendor, country });
+  const match = buildFinalPisCheckAccessMatch(
+    { search, brand, vendor, country },
+    user,
+  );
   const items = await Item.find(match)
     .select(FINAL_PIS_CHECK_ITEM_SELECT)
     .sort({ updatedAt: -1, code: 1 })
@@ -3830,20 +3844,25 @@ exports.getPisUpdateLogs = async (req, res) => {
       match.missing_fields_count = { $gt: 0 };
     }
 
+    const scopedMatch = applyDataAccessMatch(match, req.user, {
+      brandFields: ["brand"],
+      vendorFields: ["vendors"],
+    });
+
     const [logs, totalRecords, brandsRaw, vendorsRaw, scopesRaw, operationsRaw, totalsRaw] =
       await Promise.all([
-        PisUpdateLog.find(match)
+        PisUpdateLog.find(scopedMatch)
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limit)
           .lean(),
-        PisUpdateLog.countDocuments(match),
-        PisUpdateLog.distinct("brand", match),
-        PisUpdateLog.distinct("vendors", match),
-        PisUpdateLog.distinct("data_scope", match),
-        PisUpdateLog.distinct("operation_type", match),
+        PisUpdateLog.countDocuments(scopedMatch),
+        PisUpdateLog.distinct("brand", scopedMatch),
+        PisUpdateLog.distinct("vendors", scopedMatch),
+        PisUpdateLog.distinct("data_scope", scopedMatch),
+        PisUpdateLog.distinct("operation_type", scopedMatch),
         PisUpdateLog.aggregate([
-          { $match: match },
+          { $match: scopedMatch },
           {
             $group: {
               _id: null,
@@ -4369,6 +4388,7 @@ exports.getPisDiffCheckedReportPreview = async (req, res) => {
       brand,
       vendor,
       country,
+      user: req.user,
     });
 
     if (checkedDiffRows.length === 0) {
@@ -4410,6 +4430,7 @@ exports.exportPisDiffCheckedReport = async (req, res) => {
       brand,
       vendor,
       country,
+      user: req.user,
     });
 
     if (checkedDiffRows.length === 0) {
@@ -4620,6 +4641,7 @@ exports.getFinalPisCheckItems = async (req, res) => {
       diffField,
       sortBy,
       sortOrder,
+      user: req.user,
     });
 
     return res.status(200).json(
@@ -4653,6 +4675,7 @@ exports.getFinalPisCheckOptions = async (req, res) => {
       country: req.query.country,
       sortBy: "code",
       sortOrder: "asc",
+      user: req.user,
     });
 
     return res.status(200).json({
@@ -5081,6 +5104,7 @@ exports.getFinalPisCheckReportPreview = async (req, res) => {
       diffField,
       sortBy,
       sortOrder,
+      user: req.user,
     });
 
     if (rows.length === 0) {
@@ -5129,6 +5153,7 @@ exports.exportFinalPisCheckReport = async (req, res) => {
       diffField,
       sortBy,
       sortOrder,
+      user: req.user,
     });
 
     if (rows.length === 0) {
@@ -6215,6 +6240,10 @@ exports.createItem = async (req, res) => {
         message: "vendor is required",
       });
     }
+    assertUserDataAccess(req.user, {
+      brands: [brand],
+      vendors: vendorEntries,
+    });
     if (!req.file) {
       return res.status(400).json({
         success: false,

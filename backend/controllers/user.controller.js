@@ -4,6 +4,7 @@ const Inspector = require("../models/inspector.model");
 const { USER_ROLES, normalizeUserRole } = require("../helpers/userRole");
 const {
   assertBrandIdsExist,
+  assertVendorAccessSelection,
   buildUserAccessUpdate,
 } = require("../services/userDataAccess.service");
 
@@ -57,6 +58,10 @@ exports.createUser = async (req, res) => {
 
     const accessUpdate = buildUserAccessUpdate(req.body);
     await assertBrandIdsExist(accessUpdate.allowed_brands);
+    await assertVendorAccessSelection({
+      brandIds: accessUpdate.allowed_brands,
+      vendorNames: accessUpdate.allowed_vendors,
+    });
 
     const hashedPassword = await bcrypt.hash(password, 10);
 

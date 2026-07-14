@@ -11,7 +11,10 @@ const {
 const { normalizeUserRoleKey } = require("../helpers/userRole");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const { calculateTotalPoCbm } = require("../services/orderCbm.service");
-const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const {
+  applyDataAccessMatch,
+  assertUserDataAccess,
+} = require("../services/userDataAccess.service");
 const wasabiStorage = require("../services/wasabiStorage.service");
 const {
   buildVendorsArrayFilter,
@@ -692,6 +695,10 @@ exports.createSample = async (req, res) => {
     if (!normalizeText(payload.brand)) {
       return res.status(400).json({ success: false, message: "brand is required" });
     }
+    assertUserDataAccess(req.user, {
+      brands: [payload.brand],
+      vendors: getVendorPayloadList(payload),
+    });
 
     const existingSample = await Sample.findOne({
       code: { $regex: `^${escapeRegex(code)}$`, $options: "i" },
@@ -729,7 +736,7 @@ exports.createSample = async (req, res) => {
       data: serializeSample(sample),
     });
   } catch (error) {
-    return res.status(isBadRequestError(error) ? 400 : 500).json({
+    return res.status(error?.statusCode || (isBadRequestError(error) ? 400 : 500)).json({
       success: false,
       message: error?.message || "Failed to create sample",
       error: error.message,
@@ -792,6 +799,10 @@ exports.updateSample = async (req, res) => {
     if (payload.shipment !== undefined) {
       sample.shipment = normalizeShipmentEntries(parseJsonBodyField(payload.shipment, "shipment"), actor);
     }
+    assertUserDataAccess(req.user, {
+      brands: [sample.brand],
+      vendors: sample.vendor,
+    });
     sample.updated_by = actor;
     await sample.save();
     return res.status(200).json({
@@ -800,7 +811,7 @@ exports.updateSample = async (req, res) => {
       data: serializeSample(sample),
     });
   } catch (error) {
-    return res.status(isBadRequestError(error) ? 400 : 500).json({
+    return res.status(error?.statusCode || (isBadRequestError(error) ? 400 : 500)).json({
       success: false,
       message: error?.message || "Failed to update sample",
       error: error.message,

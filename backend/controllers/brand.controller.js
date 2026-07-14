@@ -14,13 +14,13 @@ const {
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const findBrandByName = async (brandName = "", selectFields = "") => {
+const findBrandByName = async (brandName = "", selectFields = "", user = {}) => {
   const normalizedName = String(brandName || "").trim();
   const projection = String(selectFields || "").trim();
-  const queryByName = { name: normalizedName };
-  const queryByNameCaseInsensitive = {
+  const queryByName = applyBrandDocumentAccessMatch({ name: normalizedName }, user);
+  const queryByNameCaseInsensitive = applyBrandDocumentAccessMatch({
     name: { $regex: `^${escapeRegex(normalizedName)}$`, $options: "i" },
-  };
+  }, user);
 
   const findOne = (query) =>
     projection
@@ -204,6 +204,7 @@ exports.getBrandLogo = async (req, res) => {
     const brandDoc = await findBrandByName(
       brandName,
       "name logo logo_file logo_url logo_storage_key logo_content_type logo_size",
+      req.user,
     );
 
     if (!brandDoc) {
@@ -304,7 +305,7 @@ exports.getBrandCalendar = async (req, res) => {
       return res.status(400).json({ message: "brand is required" });
     }
 
-    const brandDoc = await findBrandByName(brandName, "name calendar");
+    const brandDoc = await findBrandByName(brandName, "name calendar", req.user);
 
     if (!brandDoc) {
       return res.status(404).json({ message: "Brand not found" });

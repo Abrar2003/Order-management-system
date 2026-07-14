@@ -7,10 +7,11 @@ const {
 const { ROLE_KEYS, normalizeRoleKey } = require("../helpers/permissions");
 const User = require("../models/user.model");
 const Brand = require("../models/brand.model");
-const Vendor = require("../models/vendor.model");
 const {
   assertBrandIdsExist,
+  assertVendorAccessSelection,
   buildUserAccessUpdate,
+  getVendorAccessOptions,
   serializeUserDataAccess,
 } = require("../services/userDataAccess.service");
 
@@ -68,7 +69,7 @@ const getUserDataAccessSettings = async (_req, res) => {
         .sort({ name: 1, username: 1 })
         .lean(),
       Brand.find({}).select("_id name").sort({ name: 1 }).lean(),
-      Vendor.find({}).select("_id name").sort({ name: 1 }).lean(),
+      getVendorAccessOptions(),
     ]);
 
     return res.json({
@@ -77,10 +78,7 @@ const getUserDataAccessSettings = async (_req, res) => {
         _id: String(brand._id),
         name: brand.name,
       })),
-      vendors: vendors.map((vendor) => ({
-        _id: String(vendor._id),
-        name: vendor.name,
-      })),
+      vendors,
       users: users.map((user) => ({
         _id: String(user._id),
         name: user.name,
@@ -100,6 +98,10 @@ const updateUserDataAccessSettings = async (req, res) => {
   try {
     const accessUpdate = buildUserAccessUpdate(req.body);
     await assertBrandIdsExist(accessUpdate.allowed_brands);
+    await assertVendorAccessSelection({
+      brandIds: accessUpdate.allowed_brands,
+      vendorNames: accessUpdate.allowed_vendors,
+    });
 
     const updatedUser = await User.findByIdAndUpdate(
       req.params.userId,

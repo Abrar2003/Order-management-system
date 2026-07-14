@@ -24,7 +24,7 @@ const connectDB = async ({ mongoUri: uriOverride } = {}) => {
     const hello = await conn.connection.db.admin().command({ hello: 1 });
     const supportsTransactions = Boolean(
       hello?.logicalSessionTimeoutMinutes != null &&
-        (hello?.setName || hello?.msg === "isdbgrid"),
+      (hello?.setName || hello?.msg === "isdbgrid"),
     );
     conn.connection.$supportsTransactions = supportsTransactions;
     console.log(
