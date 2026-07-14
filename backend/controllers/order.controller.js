@@ -49,6 +49,7 @@ const {
 } = require("../services/shipmentCbmAllocation.service");
 const {
   applyDataAccessMatch,
+  assertBrandVendorAssociations,
   assertUserDataAccess,
   getUserBrandScope,
   hasDataAccessFilter,
@@ -4155,6 +4156,10 @@ const prepareUploadOrdersFromRows = async (rowsInput = [], user = null) => {
     candidateRows.map((row) => normalizeOrderKey(row.order_id)).filter(Boolean),
   ).size;
 
+  await assertBrandVendorAssociations(
+    candidateRows.map((row) => ({ brand: row.brand, vendor: row.vendor })),
+  );
+
   const comparisonPairs = buildBrandVendorPairsFromRows(candidateRows);
   const { existingByKey, openOrdersByKey } =
     await loadExistingOrdersForBrandVendorPairs(comparisonPairs, user);
@@ -4393,11 +4398,6 @@ exports.uploadOrders = async (req, res) => {
     }
 
     const normalizeValue = (value) => normalizeLooseString(value);
-
-    orders.forEach((order) => assertUserDataAccess(req.user, {
-      brands: [order?.brand],
-      vendors: [order?.vendor],
-    }));
 
     const brandVendorUploadMap = new Map();
 
@@ -4909,6 +4909,9 @@ exports.createOrdersManually = async (req, res) => {
       brands: [order?.brand],
       vendors: [order?.vendor],
     }));
+    await assertBrandVendorAssociations(
+      orders.map((order) => ({ brand: order?.brand, vendor: order?.vendor })),
+    );
 
     const brandVendorUploadMap = new Map();
     for (const order of orders) {
@@ -5211,6 +5214,9 @@ exports.rectifyPdfOrders = async (req, res) => {
       }
 
       const mergedSelection = mergeRectifyDuplicateRows(candidateRows);
+      await assertBrandVendorAssociations(
+        candidateRows.map((row) => ({ brand: row.brand, vendor: row.vendor })),
+      );
       let dedupedRows = mergedSelection.rows;
       const duplicateInSelectionCount = mergedSelection.merged_input_rows;
 
@@ -5352,6 +5358,7 @@ exports.rectifyPdfOrders = async (req, res) => {
       brands: [brandInput],
       vendors: [vendorInput],
     });
+    await assertBrandVendorAssociations([{ brand: brandInput, vendor: vendorInput }]);
 
     const isPdfFile =
       String(req.file?.mimetype || "")
@@ -9998,6 +10005,7 @@ exports.editOrder = async (req, res) => {
       brands: [nextBrand],
       vendors: [nextVendor],
     });
+    await assertBrandVendorAssociations([{ brand: nextBrand, vendor: nextVendor }]);
 
     if (!nextItemCode) {
       return res.status(400).json({ message: "item_code is required" });
@@ -10465,6 +10473,7 @@ exports.editCompleteOrder = async (req, res) => {
       brands: [nextBrand],
       vendors: [nextVendor],
     });
+    await assertBrandVendorAssociations([{ brand: nextBrand, vendor: nextVendor }]);
 
     let nextOrderDate = anchorOrder.order_date || null;
     if (hasOrderDate) {
