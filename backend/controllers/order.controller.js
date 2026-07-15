@@ -3126,6 +3126,7 @@ const buildPoBucketDataset = async ({
         total_inspected_unshipped_quantity: 0,
         total_pending_inspection_quantity: 0,
         total_cbm: 0,
+        total_pending_cbm: 0,
         item_codes: new Set(),
       });
     }
@@ -3148,6 +3149,21 @@ const buildPoBucketDataset = async ({
       storedTotalCbm: storedPoCbm,
     });
     groupedEntry.total_cbm += Number(cbmSummary?.total || 0);
+    const shippedCbm = (Array.isArray(orderEntry?.shipment) ? orderEntry.shipment : [])
+      .reduce(
+        (sum, shipmentEntry) =>
+          sum + resolveShipmentRowCbm({
+            itemDoc,
+            orderQuantity: lineProgress.order_quantity,
+            storedPoCbm,
+            shipmentQuantity: shipmentEntry?.quantity,
+          }),
+        0,
+      );
+    groupedEntry.total_pending_cbm += Math.max(
+      0,
+      Number(cbmSummary?.total || 0) - shippedCbm,
+    );
     groupedEntry.order_date = resolveEarlierDate(
       groupedEntry.order_date,
       orderEntry?.order_date,
@@ -3208,6 +3224,7 @@ const buildPoBucketDataset = async ({
         groupedEntry.total_pending_inspection_quantity,
       total_cbm: resolvedTotalCbm,
       total_po_cbm: resolvedTotalCbm,
+      total_pending_cbm: toRoundedCbmValue(groupedEntry.total_pending_cbm),
       item_codes: [...groupedEntry.item_codes].sort((left, right) =>
         left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" })),
     };
@@ -6294,14 +6311,29 @@ exports.getOrderById = async (req, res) => {
       const itemCodeKey = normalizeLooseString(orderRow?.item?.item_code).toLowerCase();
       const itemDoc = itemMap.get(itemCodeKey) || null;
       const storedPoCbm = toPositiveCbmNumber(orderRow?.total_po_cbm);
+      const cbmSummary = resolveOrderRowCbmSummaryWithStoredFallback({
+        itemDoc,
+        quantity: orderRow?.quantity,
+        storedTotalCbm: storedPoCbm,
+      });
+      const shippedCbm = (Array.isArray(orderRow?.shipment) ? orderRow.shipment : [])
+        .reduce(
+          (sum, shipmentEntry) =>
+            sum + resolveShipmentRowCbm({
+              itemDoc,
+              orderQuantity: orderRow?.quantity,
+              storedPoCbm,
+              shipmentQuantity: shipmentEntry?.quantity,
+            }),
+          0,
+        );
       return {
         ...orderRow,
         status: deriveOrderStatus({ orderEntry: orderRow }),
-        cbm_summary: resolveOrderRowCbmSummaryWithStoredFallback({
-          itemDoc,
-          quantity: orderRow?.quantity,
-          storedTotalCbm: storedPoCbm,
-        }),
+        cbm_summary: cbmSummary,
+        pending_cbm: toRoundedCbmValue(
+          Math.max(0, Number(cbmSummary?.total || 0) - shippedCbm),
+        ),
       };
     });
 

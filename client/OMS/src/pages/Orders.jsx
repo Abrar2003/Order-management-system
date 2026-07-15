@@ -512,6 +512,7 @@ const Orders = () => {
                       <th>Open Quantity</th>
                       <th>Packed</th>
                       <th className="orders-cbm-col">CBM</th>
+                      <th className="orders-cbm-col">Pending CBM</th>
                       <th>Status</th>
                       <th>ETD</th>
                       <th>Revised ETD</th>
@@ -562,6 +563,9 @@ const Orders = () => {
                         <td>{getPendingDisplayQuantity(order)}</td>
                         <td className="orders-cbm-col">
                           {renderOrderCbmCell(order)}
+                        </td>
+                        <td className="orders-cbm-col">
+                          {formatResolvedCbm(order?.pending_cbm)}
                         </td>
                         <td>{getDisplayedOrderStatus(order)}</td>
                         <td>{formatDateDDMMYYYY(order?.ETD)}</td>

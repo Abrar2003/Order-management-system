@@ -198,6 +198,7 @@ const OrdersByBrand = () => {
                           onClick={() => handleSortColumn("totalCbm", "desc")}
                         />
                       </th>
+                      <th>Pending CBM</th>
                       <th>
                         <SortHeaderButton
                           label="Order Date"
@@ -244,6 +245,7 @@ const OrdersByBrand = () => {
                             ),
                           )}
                         </td>
+                        <td>{formatCbm(order?.total_pending_cbm)}</td>
                         <td>{formatDateDDMMYYYY(order.order_date)}</td>
                         <td>{formatDateDDMMYYYY(order?.ETD)}</td>
                         <td>
