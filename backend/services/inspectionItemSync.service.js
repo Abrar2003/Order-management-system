@@ -428,11 +428,9 @@ const syncItemInspectedDataFromInspection = async ({
     return { matched: false, updated: false, skipped_reason: "missing_item" };
   }
 
-  const formattedInspection = await saveFormattedInspectionIfNeeded({
-    inspectionRecord,
-    itemDoc: resolvedItem,
-    save,
-  });
+  // Inspection measurements are user-entered and are the source of truth.
+  // Formatting them against a possibly stale item master can silently swap B/H.
+  const formattedInspection = false;
   if (isNonMeasurementInspectionStatus(inspectionRecord?.status)) {
     return {
       matched: true,
