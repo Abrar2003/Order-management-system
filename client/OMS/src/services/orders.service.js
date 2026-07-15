@@ -45,14 +45,13 @@ export const applyUploadedRows = async ({
   return res.data;
 };
 
-export const createManualOrders = async (orders = []) => {
+export const getManualOrderOptions = async () => {
+  const res = await axios.get("/orders/manual-options");
+  return res.data;
+};
 
-  const res = await axios.post(
-    "/orders/manual-orders",
-    { orders },
-    {
-    },
-  );
+export const createManualOrders = async ({ po = {}, items = [] } = {}) => {
+  const res = await axios.post("/orders/manual-orders", { po, items });
 
   return res.data;
 };

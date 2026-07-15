@@ -21,6 +21,7 @@ const {
 } = require("../middlewares/securityActivityLogger");
 const {
   uploadOrders,
+  getManualOrderOptions,
   createOrdersManually,
   rectifyPdfOrders,
   getUploadLogs,
@@ -78,6 +79,13 @@ router.post(
   requirePermission("orders", "create"),
   invalidateOrdersOnSuccess,
   createOrdersManually,
+);
+
+router.get(
+  "/manual-options",
+  authenticate,
+  requirePermission("orders", "create"),
+  getManualOrderOptions,
 );
 
 router.post(

@@ -4,6 +4,7 @@ import PreviousOrderCheckModal from "./PreviousOrderCheckModal";
 import {
   applyUploadedRows,
   createManualOrders,
+  getManualOrderOptions,
   previewUploadOrders,
 } from "../services/orders.service";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -11,12 +12,15 @@ import "../App.css";
 
 const createEmptyManualRow = (id) => ({
   id,
-  order_id: "",
   item_code: "",
   description: "",
+  quantity: "",
+});
+
+const createEmptyManualPo = () => ({
+  order_id: "",
   brand: "",
   vendor: "",
-  quantity: "",
   ETD: "",
   order_date: "",
 });
@@ -32,28 +36,20 @@ const sortUniqueStrings = (values = []) =>
 const getItemMasterDescription = (itemDoc = {}) =>
   toTrimmedString(itemDoc?.description || itemDoc?.name || "");
 
-const getItemMasterBrand = (itemDoc = {}) =>
-  toTrimmedString(
-    itemDoc?.brand
-    || itemDoc?.brand_name
-    || (Array.isArray(itemDoc?.brands) && itemDoc.brands.length > 0 ? itemDoc.brands[0] : ""),
-  );
-
-const getItemMasterVendors = (itemDoc = {}) =>
-  sortUniqueStrings(Array.isArray(itemDoc?.vendors) ? itemDoc.vendors : []);
-
-const getItemPreferredVendor = (itemDoc = {}) => {
-  const vendors = getItemMasterVendors(itemDoc);
-  return vendors.length > 0 ? vendors[0] : "";
+const getMissingManualPoFields = (po = {}) => {
+  const missingFields = [];
+  if (!toTrimmedString(po?.order_id)) missingFields.push("PO");
+  if (!toTrimmedString(po?.brand)) missingFields.push("Brand");
+  if (!toTrimmedString(po?.vendor)) missingFields.push("Vendor");
+  if (!toTrimmedString(po?.order_date)) missingFields.push("Order Date");
+  if (!toTrimmedString(po?.ETD)) missingFields.push("ETD");
+  return missingFields;
 };
 
-const getMissingManualOrderFields = (row = {}) => {
+const getMissingManualItemFields = (row = {}) => {
   const missingFields = [];
-  if (!toTrimmedString(row?.order_id)) missingFields.push("PO");
   if (!toTrimmedString(row?.item_code)) missingFields.push("Item Code");
   if (!toTrimmedString(row?.description)) missingFields.push("Description");
-  if (!toTrimmedString(row?.brand)) missingFields.push("Brand");
-  if (!toTrimmedString(row?.vendor)) missingFields.push("Vendor");
   if (!Number.isFinite(Number(row?.quantity)) || Number(row.quantity) <= 0) {
     missingFields.push("Quantity (> 0)");
   }
@@ -71,20 +67,14 @@ const formatMissingManualOrderFields = (entries = []) => [
 const buildItemMeta = ({
   itemCode = "",
   existingDescription = "",
-  existingBrand = "",
-  existingVendor = "",
 } = {}) => {
   const normalizedCode = toTrimmedString(itemCode);
   const normalizedDescription = toTrimmedString(existingDescription);
-  const normalizedBrand = toTrimmedString(existingBrand);
-  const normalizedVendor = toTrimmedString(existingVendor);
 
   return {
     hasExistingDescription: Boolean(normalizedDescription),
     requiresDescription: Boolean(normalizedCode) && !normalizedDescription,
     autoDescription: normalizedDescription,
-    autoBrand: normalizedBrand,
-    autoVendor: normalizedVendor,
   };
 };
 
@@ -143,6 +133,7 @@ const UploadOrdersModal = ({
   const [error, setError] = useState("");
   const [mode, setMode] = useState(resolvedInitialMode);
   const [nextRowId, setNextRowId] = useState(2);
+  const [manualPo, setManualPo] = useState(createEmptyManualPo);
   const [manualRows, setManualRows] = useState([createEmptyManualRow(1)]);
   const [brandOptions, setBrandOptions] = useState([]);
   const [vendorOptions, setVendorOptions] = useState([]);
@@ -169,12 +160,20 @@ const UploadOrdersModal = ({
     && selectedUploadCount === selectableUploadRows.length;
 
   const mergedBrandOptions = useMemo(
-    () => sortUniqueStrings([...brandOptions, ...manualRows.map((row) => row?.brand)]),
-    [brandOptions, manualRows],
+    () => sortUniqueStrings([...brandOptions, manualPo.brand]),
+    [brandOptions, manualPo.brand],
   );
-  const mergedVendorOptions = useMemo(
-    () => sortUniqueStrings([...vendorOptions, ...manualRows.map((row) => row?.vendor)]),
-    [manualRows, vendorOptions],
+  const availableVendorOptions = useMemo(
+    () => sortUniqueStrings(
+      vendorOptions
+        .filter((vendor) =>
+          (Array.isArray(vendor?.brands) ? vendor.brands : []).some(
+            (brand) => normalizeCodeKey(brand) === normalizeCodeKey(manualPo.brand),
+          ),
+        )
+        .map((vendor) => vendor?.name),
+    ),
+    [manualPo.brand, vendorOptions],
   );
   const mergedItemCodeOptions = useMemo(
     () => sortUniqueStrings([...itemCodeOptions, ...manualRows.map((row) => row?.item_code)]),
@@ -195,25 +194,20 @@ const UploadOrdersModal = ({
       try {
         setLoadingReferenceData(true);
 
-        const itemsRes = await api.get("/items", {
-          params: {
-            page: 1,
-            limit: 1,
-          },
-        });
+        const [manualOptions, itemsRes] = await Promise.all([
+          getManualOrderOptions(),
+          api.get("/items", {
+            params: {
+              page: 1,
+              limit: 1,
+            },
+          }),
+        ]);
 
         if (cancelled) return;
 
         const nextBrandOptions = sortUniqueStrings(
-          Array.isArray(itemsRes?.data?.filters?.brands)
-            ? itemsRes.data.filters.brands
-            : [],
-        );
-
-        const nextVendorOptions = sortUniqueStrings(
-          Array.isArray(itemsRes?.data?.filters?.vendors)
-            ? itemsRes.data.filters.vendors
-            : [],
+          Array.isArray(manualOptions?.brands) ? manualOptions.brands : [],
         );
 
         const nextItemCodeOptions = sortUniqueStrings(
@@ -223,7 +217,9 @@ const UploadOrdersModal = ({
         );
 
         setBrandOptions(nextBrandOptions);
-        setVendorOptions(nextVendorOptions);
+        setVendorOptions(
+          Array.isArray(manualOptions?.vendors) ? manualOptions.vendors : [],
+        );
         setItemCodeOptions(nextItemCodeOptions);
       } catch (referenceError) {
         console.error("Failed to fetch manual order reference data:", referenceError);
@@ -346,6 +342,14 @@ const UploadOrdersModal = ({
     setActivePreviousOrderRow(null);
   };
 
+  const handleManualPoChange = (field, value) => {
+    setManualPo((previousPo) => ({
+      ...previousPo,
+      [field]: value,
+      ...(field === "brand" ? { vendor: "" } : {}),
+    }));
+  };
+
   const handleManualRowChange = (rowId, field, value) => {
     setManualRows((prevRows) =>
       prevRows.map((row) =>
@@ -361,24 +365,14 @@ const UploadOrdersModal = ({
 
             const previousMeta = itemMetaByRow[rowId] || buildItemMeta({ itemCode: row.item_code });
             const previousAutoDescription = toTrimmedString(previousMeta?.autoDescription);
-            const previousAutoBrand = toTrimmedString(previousMeta?.autoBrand);
-            const previousAutoVendor = toTrimmedString(previousMeta?.autoVendor);
             const currentDescription = toTrimmedString(row.description);
-            const currentBrand = toTrimmedString(row.brand);
-            const currentVendor = toTrimmedString(row.vendor);
             const shouldClearDescription =
               Boolean(previousAutoDescription) && currentDescription === previousAutoDescription;
-            const shouldClearBrand =
-              Boolean(previousAutoBrand) && currentBrand === previousAutoBrand;
-            const shouldClearVendor =
-              Boolean(previousAutoVendor) && currentVendor === previousAutoVendor;
 
             return {
               ...row,
               item_code: value,
               description: shouldClearDescription ? "" : row.description,
-              brand: shouldClearBrand ? "" : row.brand,
-              vendor: shouldClearVendor ? "" : row.vendor,
             };
           })(),
       ),
@@ -436,9 +430,6 @@ const UploadOrdersModal = ({
       ? {
         code: toTrimmedString(exactMatch.code),
         description: getItemMasterDescription(exactMatch),
-        brand: getItemMasterBrand(exactMatch),
-        vendors: getItemMasterVendors(exactMatch),
-        vendor: getItemPreferredVendor(exactMatch),
       }
       : null;
 
@@ -463,34 +454,24 @@ const UploadOrdersModal = ({
         }
 
         let existingDescription = "";
-        let existingBrand = "";
-        let existingVendor = "";
         try {
           const matchedItem = await lookupItemByCode(itemCode);
           existingDescription = toTrimmedString(matchedItem?.description);
-          existingBrand = toTrimmedString(matchedItem?.brand);
-          existingVendor = toTrimmedString(matchedItem?.vendor);
         } catch (lookupError) {
           console.error("Item lookup failed:", lookupError);
         }
 
         const fallbackDescription = toTrimmedString(row?.description);
-        const fallbackBrand = toTrimmedString(row?.brand);
-        const fallbackVendor = toTrimmedString(row?.vendor);
 
         return {
           row: {
             ...row,
             item_code: itemCode,
             description: existingDescription || fallbackDescription,
-            brand: fallbackBrand || existingBrand,
-            vendor: fallbackVendor || existingVendor,
           },
           meta: buildItemMeta({
             itemCode,
             existingDescription,
-            existingBrand,
-            existingVendor,
           }),
         };
       }),
@@ -534,8 +515,6 @@ const UploadOrdersModal = ({
           ...row,
           item_code: resolvedRow.item_code,
           description: resolvedRow.description,
-          brand: resolvedRow.brand,
-          vendor: resolvedRow.vendor,
         };
       }),
     );
@@ -546,18 +525,13 @@ const UploadOrdersModal = ({
     }));
   };
 
-  const getManualPayloadRows = (rowsInput = manualRows) =>
+  const getManualPayloadItems = (rowsInput = manualRows) =>
     (Array.isArray(rowsInput) ? rowsInput : [])
       .map((row, index) => ({
         row_number: index + 1,
-        order_id: toTrimmedString(row.order_id),
         item_code: toTrimmedString(row.item_code),
         description: toTrimmedString(row.description),
-        brand: toTrimmedString(row.brand),
-        vendor: toTrimmedString(row.vendor),
         quantity: row.quantity === "" ? null : Number(row.quantity),
-        ETD: toTrimmedString(row.ETD),
-        order_date: toTrimmedString(row.order_date),
       }))
       .filter((row) =>
         Object.entries(row).some(([key, value]) => {
@@ -566,14 +540,15 @@ const UploadOrdersModal = ({
           if (typeof value === "number") return Number.isFinite(value) && value !== 0;
           return String(value).trim() !== "";
         }),
-      )
-      .map((row) => ({
-        ...row,
-        ETD: row.ETD || undefined,
-        order_date: row.order_date || undefined,
-      }));
+      );
 
   const handleManualAdd = async () => {
+    const missingPoFields = getMissingManualPoFields(manualPo);
+    if (missingPoFields.length > 0) {
+      setError(`Complete the required PO fields: ${missingPoFields.join(", ")}`);
+      return;
+    }
+
     const { rows: resolvedRows, metaByRow } =
       await resolveRowsWithItemDescriptions(manualRows);
     setManualRows(resolvedRows);
@@ -582,17 +557,17 @@ const UploadOrdersModal = ({
       ...metaByRow,
     }));
 
-    const payloadRows = getManualPayloadRows(resolvedRows);
+    const payloadItems = getManualPayloadItems(resolvedRows);
 
-    if (payloadRows.length === 0) {
-      setError("Please add at least one order row.");
+    if (payloadItems.length === 0) {
+      setError("Please add at least one item row.");
       return;
     }
 
-    const missingRequiredEntries = payloadRows
+    const missingRequiredEntries = payloadItems
       .map((row) => ({
         row_number: row.row_number,
-        missing_fields: getMissingManualOrderFields(row),
+        missing_fields: getMissingManualItemFields(row),
       }))
       .filter((entry) => entry.missing_fields.length > 0);
     if (missingRequiredEntries.length > 0) {
@@ -603,7 +578,16 @@ const UploadOrdersModal = ({
     try {
       setLoading(true);
       setError("");
-      await createManualOrders(payloadRows);
+      await createManualOrders({
+        po: {
+          order_id: toTrimmedString(manualPo.order_id),
+          brand: toTrimmedString(manualPo.brand),
+          vendor: toTrimmedString(manualPo.vendor),
+          order_date: toTrimmedString(manualPo.order_date),
+          ETD: toTrimmedString(manualPo.ETD),
+        },
+        items: payloadItems,
+      });
       onSuccess?.();
       onClose?.();
     } catch (err) {
@@ -799,10 +783,94 @@ const UploadOrdersModal = ({
               </div>
             ) : (
               <div className="d-grid gap-2">
+                <div className="card">
+                  <div className="card-header">
+                    <strong>PO Details</strong>
+                  </div>
+                  <div className="card-body">
+                    <div className="row g-2">
+                      <div className="col-lg col-md-6">
+                        <label className="form-label">PO Number</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={manualPo.order_id}
+                          required
+                          onChange={(event) =>
+                            handleManualPoChange("order_id", event.target.value)
+                          }
+                        />
+                      </div>
+                      <div className="col-lg col-md-6">
+                        <label className="form-label">Brand</label>
+                        <select
+                          className="form-select"
+                          value={manualPo.brand}
+                          required
+                          onChange={(event) =>
+                            handleManualPoChange("brand", event.target.value)
+                          }
+                        >
+                          <option value="">Select brand</option>
+                          {mergedBrandOptions.map((brand) => (
+                            <option key={brand} value={brand}>
+                              {brand}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="col-lg col-md-6">
+                        <label className="form-label">Vendor</label>
+                        <select
+                          className="form-select"
+                          value={manualPo.vendor}
+                          required
+                          disabled={!manualPo.brand || loadingReferenceData}
+                          onChange={(event) =>
+                            handleManualPoChange("vendor", event.target.value)
+                          }
+                        >
+                          <option value="">
+                            {manualPo.brand ? "Select vendor" : "Select brand first"}
+                          </option>
+                          {availableVendorOptions.map((vendor) => (
+                            <option key={vendor} value={vendor}>
+                              {vendor}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="col-lg col-md-6">
+                        <label className="form-label">Order Date</label>
+                        <input
+                          type="date"
+                          className="form-control"
+                          value={manualPo.order_date}
+                          required
+                          onChange={(event) =>
+                            handleManualPoChange("order_date", event.target.value)
+                          }
+                        />
+                      </div>
+                      <div className="col-lg col-md-6">
+                        <label className="form-label">ETD</label>
+                        <input
+                          type="date"
+                          className="form-control"
+                          value={manualPo.ETD}
+                          required
+                          onChange={(event) =>
+                            handleManualPoChange("ETD", event.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <div className="d-flex justify-content-between align-items-center">
                   <small className="text-muted">
-                    Add one or more order rows manually. Existing item codes auto-fill description
-                    and may auto-fill brand/vendor. New item codes require description.
+                    Add the items for this PO. Existing item codes auto-fill description;
+                    new item codes require description.
                   </small>
                   <button
                     type="button"
@@ -817,14 +885,9 @@ const UploadOrdersModal = ({
                     <thead className="table-light">
                       <tr>
                         <th>#</th>
-                        <th>PO</th>
                         <th>Item Code</th>
                         <th>Description</th>
-                        <th>Brand</th>
-                        <th>Vendor</th>
                         <th>Qty</th>
-                        <th>ETD</th>
-                        <th>Order Date</th>
                         <th>Action</th>
                       </tr>
                     </thead>
@@ -836,14 +899,6 @@ const UploadOrdersModal = ({
                         return (
                           <tr key={row.id}>
                             <td>{index + 1}</td>
-                            <td>
-                              <input
-                                type="text"
-                                className="form-control form-control-sm"
-                                value={row.order_id}
-                                onChange={(e) => handleManualRowChange(row.id, "order_id", e.target.value)}
-                              />
-                            </td>
                             <td>
                               <input
                                 type="text"
@@ -882,30 +937,6 @@ const UploadOrdersModal = ({
                               )}
                             </td>
                             <td>
-                              <select
-                                className="form-select form-select-sm"
-                                value={row.brand}
-                                onChange={(e) => handleManualRowChange(row.id, "brand", e.target.value)}
-                              >
-                                <option value="">Select brand</option>
-                                {mergedBrandOptions.map((brand) => (
-                                  <option key={brand} value={brand}>
-                                    {brand}
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-                            <td>
-                              <input
-                                type="text"
-                                className="form-control form-control-sm"
-                                value={row.vendor}
-                                list="manual-vendor-options"
-                                placeholder="Select or type vendor"
-                                onChange={(e) => handleManualRowChange(row.id, "vendor", e.target.value)}
-                              />
-                            </td>
-                            <td>
                               <input
                                 type="number"
                                 min="1"
@@ -913,22 +944,6 @@ const UploadOrdersModal = ({
                                 className="form-control form-control-sm"
                                 value={row.quantity}
                                 onChange={(e) => handleManualRowChange(row.id, "quantity", e.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                type="date"
-                                className="form-control form-control-sm"
-                                value={row.ETD}
-                                onChange={(e) => handleManualRowChange(row.id, "ETD", e.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                type="date"
-                                className="form-control form-control-sm"
-                                value={row.order_date}
-                                onChange={(e) => handleManualRowChange(row.id, "order_date", e.target.value)}
                               />
                             </td>
                             <td>
@@ -952,13 +967,8 @@ const UploadOrdersModal = ({
                     <option key={itemCode} value={itemCode} />
                   ))}
                 </datalist>
-                <datalist id="manual-vendor-options">
-                  {mergedVendorOptions.map((vendor) => (
-                    <option key={vendor} value={vendor} />
-                  ))}
-                </datalist>
                 {loadingReferenceData && (
-                  <small className="text-muted">Loading brands, vendors, and item codes...</small>
+                  <small className="text-muted">Loading PO and item options...</small>
                 )}
               </div>
             )}

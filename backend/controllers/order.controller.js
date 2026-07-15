@@ -7,6 +7,7 @@ const Item = require("../models/item.model");
 const Sample = require("../models/sample.model");
 const UploadLog = require("../models/uploadLog.model");
 const {
+  buildManualOrderRows,
   formatManualOrderValidationMessage,
   getMissingManualOrderFields,
 } = require("../helpers/manualOrderValidation");
@@ -52,6 +53,7 @@ const {
   assertBrandVendorAssociations,
   assertUserDataAccess,
   getUserBrandScope,
+  getVendorAccessOptions,
   hasDataAccessFilter,
   isUserAllowedData,
 } = require("../services/userDataAccess.service");
@@ -4686,6 +4688,28 @@ exports.uploadOrders = async (req, res) => {
   }
 };
 
+exports.getManualOrderOptions = async (req, res) => {
+  try {
+    const vendors = await getVendorAccessOptions({ user: req.user });
+    return res.status(200).json({
+      brands: normalizeDistinctValues(
+        vendors.flatMap((vendor) => vendor?.brands || []),
+      ),
+      vendors: vendors.map((vendor) => ({
+        _id: vendor._id,
+        name: vendor.name,
+        brand_ids: vendor.brand_ids,
+        brands: vendor.brands,
+      })),
+    });
+  } catch (error) {
+    console.error("Get Manual Order Options Error:", error);
+    return res.status(500).json({
+      message: "Failed to load manual order options",
+    });
+  }
+};
+
 exports.createOrdersManually = async (req, res) => {
   const uploadedById =
     req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)
@@ -4710,9 +4734,12 @@ exports.createOrdersManually = async (req, res) => {
   let vendorSummaries = [];
 
   try {
-    const rows = Array.isArray(req.body?.orders) ? req.body.orders : [];
+    const isGroupedManualPayload = Array.isArray(req.body?.items);
+    const rows = buildManualOrderRows(req.body || {});
     if (!rows.length) {
-      return res.status(400).json({ message: "orders array is required" });
+      return res.status(400).json({
+        message: "At least one manual order item is required",
+      });
     }
 
     totalRowsReceived = rows.length;
@@ -4824,8 +4851,12 @@ exports.createOrdersManually = async (req, res) => {
             ? existingItemDetails.vendors[0]
             : "",
         );
-        const resolvedBrand = brand || existingBrand;
-        const resolvedVendor = vendor || existingVendor;
+        const resolvedBrand = isGroupedManualPayload
+          ? brand
+          : brand || existingBrand;
+        const resolvedVendor = isGroupedManualPayload
+          ? vendor
+          : vendor || existingVendor;
         const resolvedDescription = existingDescription || description;
 
         const missingFields = getMissingManualOrderFields({
@@ -4835,6 +4866,8 @@ exports.createOrdersManually = async (req, res) => {
           brand: resolvedBrand,
           vendor: resolvedVendor,
           quantity,
+          orderDate: draftRow.orderDateInput,
+          etd: draftRow.etdInput,
         });
         if (missingFields.length > 0) {
           missingRequiredEntries.push({
@@ -4905,6 +4938,16 @@ exports.createOrdersManually = async (req, res) => {
       return res.status(400).json({
         message,
         missing_required_fields: missingRequiredEntries,
+      });
+    }
+
+    const invalidDateEntries = duplicateEntries.filter((entry) =>
+      ["invalid_etd", "invalid_order_date"].includes(entry.reason),
+    );
+    if (invalidDateEntries.length > 0) {
+      return res.status(400).json({
+        message: "Order Date and ETD must be valid dates",
+        invalid_entries: invalidDateEntries,
       });
     }
 

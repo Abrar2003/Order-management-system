@@ -9,6 +9,8 @@ const getMissingManualOrderFields = ({
   brand = "",
   vendor = "",
   quantity = null,
+  orderDate = "",
+  etd = "",
 } = {}) => {
   const missingFields = [];
 
@@ -17,6 +19,8 @@ const getMissingManualOrderFields = ({
   if (!normalizeText(description)) missingFields.push("Description");
   if (!normalizeText(brand)) missingFields.push("Brand");
   if (!normalizeText(vendor)) missingFields.push("Vendor");
+  if (!normalizeText(orderDate)) missingFields.push("Order Date");
+  if (!normalizeText(etd)) missingFields.push("ETD");
 
   const parsedQuantity = Number(quantity);
   if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
@@ -24,6 +28,23 @@ const getMissingManualOrderFields = ({
   }
 
   return missingFields;
+};
+
+const buildManualOrderRows = (body = {}) => {
+  if (!Array.isArray(body?.items)) {
+    return Array.isArray(body?.orders) ? body.orders : [];
+  }
+
+  const po = body?.po && typeof body.po === "object" ? body.po : {};
+  return body.items.map((item, index) => ({
+    ...(item && typeof item === "object" ? item : {}),
+    row_number: Number(item?.row_number) > 0 ? Number(item.row_number) : index + 1,
+    order_id: po.order_id ?? po.orderId ?? po.PO,
+    brand: po.brand,
+    vendor: po.vendor,
+    order_date: po.order_date ?? po.orderDate,
+    ETD: po.ETD ?? po.etd,
+  }));
 };
 
 const formatManualOrderValidationMessage = (entries = []) => {
@@ -43,6 +64,7 @@ const formatManualOrderValidationMessage = (entries = []) => {
 };
 
 module.exports = {
+  buildManualOrderRows,
   formatManualOrderValidationMessage,
   getMissingManualOrderFields,
 };
