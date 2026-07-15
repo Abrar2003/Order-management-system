@@ -34,7 +34,10 @@ const {
   isPrivilegedWorkflowReader,
   isTaskCreatedByUser,
 } = require("./workflowPermissionService");
-const { applyDataAccessMatch } = require("../userDataAccess.service");
+const {
+  applyDataAccessMatch,
+  assertUserDataAccess,
+} = require("../userDataAccess.service");
 const { validateAssigneeUsers } = require("./workflowTaskGenerationService");
 const {
   recalculateWorkflowBatchFromTasks,
@@ -1587,13 +1590,18 @@ const getTaskByIdForUser = async (id, user = {}) => {
   return task ? serializeTask(task) : null;
 };
 
-const getMutableTaskById = async (id) => {
+const getMutableTaskById = async (id, user = {}) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new Error("Invalid task id");
   }
 
-  const task = await Task.findById(id);
-  if (!task || task.is_deleted) {
+  const task = await Task.findOne(
+    applyDataAccessMatch(
+      { _id: id, is_deleted: false },
+      user,
+    ),
+  );
+  if (!task) {
     throw new Error("Workflow task not found");
   }
   return task;
@@ -1674,9 +1682,11 @@ const createWorkflowTask = async ({
   realtimeSource = null,
 } = {}) => {
   const title = normalizeText(payload?.title || payload?.name);
+  const brand = normalizeText(payload?.brand);
   if (!title) {
     throw new Error("Task name is required");
   }
+  assertUserDataAccess(actor, { brands: brand ? [brand] : [], vendors: [] });
 
   const taskType = await findActiveTaskTypeForManualTask(payload?.task_type_key);
 
@@ -1745,7 +1755,7 @@ const createWorkflowTask = async ({
     task_type_key: taskType.key,
     task_type_name: taskType.name,
     department,
-    brand: normalizeText(payload?.brand),
+    brand,
     source_folder_name: "",
     source_folder_path: "",
     source_files: [],
@@ -2550,7 +2560,7 @@ const assignWorkflowTask = async ({
   note = "",
   realtimeSource = null,
 }) => {
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   if (!canEditWorkflowTaskDetails(actor, task)) {
     throw new Error("Only admins, task creators, or assigned users can reassign this workflow task");
   }
@@ -2667,7 +2677,7 @@ const startWorkflowTask = async ({
   note = "",
   realtimeSource = null,
 } = {}) => {
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   assertTransitionPermission({ task, actor, toStatus: "started" });
   return applyTaskTransition({
     task,
@@ -2686,7 +2696,7 @@ const completeWorkflowTask = async ({
   note = "",
   realtimeSource = null,
 } = {}) => {
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   assertTransitionPermission({ task, actor, toStatus: "complete" });
   return applyTaskTransition({
     task,
@@ -2706,7 +2716,7 @@ const uploadWorkflowTask = async ({
   uploadUserId = "",
   realtimeSource = null,
 } = {}) => {
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   assertTransitionPermission({ task, actor, toStatus: "uploaded" });
 
   const fromStatus = normalizeWorkflowTaskStatus(task.status, {
@@ -2826,7 +2836,7 @@ const approveWorkflowTask = async ({
   note = "",
   realtimeSource = null,
 } = {}) => {
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   assertTransitionPermission({ task, actor, toStatus: "approved" });
   return applyTaskTransition({
     task,
@@ -2850,7 +2860,7 @@ const reworkWorkflowTask = async ({
     throw new Error("A rework reason is required");
   }
 
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   const fromStatus = normalizeWorkflowTaskStatus(task.status, {
     fallback: "assigned",
   }) || "assigned";
@@ -3064,7 +3074,7 @@ const requestWorkflowTaskHold = async ({
     throw new Error("A hold comment is required");
   }
 
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   const privilegedHold = isAdmin(actor) || isTaskCreatedByUser(task, actor?._id || actor?.id);
   if (!privilegedHold && !canCompleteWorkflowTask(actor, task)) {
     throw new Error("Only admins, task creators, or assigned users can put workflow tasks on hold");
@@ -3151,7 +3161,7 @@ const approveWorkflowTaskHold = async ({
   note = "",
   realtimeSource = null,
 } = {}) => {
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   if (!isTaskHoldApprover(actor, task)) {
     throw new Error("Only the task creator or admin can approve hold");
   }
@@ -3232,7 +3242,7 @@ const rejectWorkflowTaskHold = async ({
   note = "",
   realtimeSource = null,
 } = {}) => {
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   if (!isTaskHoldApprover(actor, task)) {
     throw new Error("Only the task creator or admin can reject hold");
   }
@@ -3302,7 +3312,7 @@ const resumeWorkflowTask = async ({
   dueDate = "",
   realtimeSource = null,
 } = {}) => {
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   if (!isTaskHoldApprover(actor, task)) {
     throw new Error("Only the task creator or admin can resume this task");
   }
@@ -3420,7 +3430,7 @@ const updateWorkflowTaskStatus = async ({
     });
   }
 
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   assertTransitionPermission({ task, actor, toStatus: normalizedStatus });
 
   return applyTaskTransition({
@@ -3453,7 +3463,7 @@ const updateWorkflowTaskDetails = async ({
   actor = {},
   realtimeSource = null,
 } = {}) => {
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   if (!canEditWorkflowTaskDetails(actor, task)) {
     throw new Error("Only admins, task creators, or assigned users can edit this workflow task");
   }
@@ -3484,6 +3494,7 @@ const updateWorkflowTaskDetails = async ({
 
   if (hasOwn(payload, "brand")) {
     const brand = normalizeText(payload.brand);
+    assertUserDataAccess(actor, { brands: brand ? [brand] : [], vendors: [] });
     if (task.brand !== brand) {
       task.brand = brand;
       changedFields.push("brand");
@@ -3681,7 +3692,7 @@ const addWorkflowTaskComment = async ({
     throw new Error("Comment is required");
   }
 
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   if (!canReadWorkflowTask(actor, task)) {
     throw new Error("You do not have access to comment on this task");
   }
@@ -3724,7 +3735,7 @@ const deleteWorkflowTask = async ({
   note = "",
   realtimeSource = null,
 }) => {
-  const task = await getMutableTaskById(taskId);
+  const task = await getMutableTaskById(taskId, actor);
   if (!canDeleteWorkflowTask(actor, task)) {
     throw new Error("Only admins or the task creator can delete workflow tasks");
   }

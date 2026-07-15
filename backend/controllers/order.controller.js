@@ -1808,6 +1808,7 @@ const mergeRectifyDuplicateRows = (rows = []) => {
 const hydrateRectifyRowsWithFallbackDescriptions = async ({
   rows = [],
   existingByKey = new Map(),
+  user = null,
 } = {}) => {
   const safeRows = Array.isArray(rows) ? rows : [];
   const missingDescriptionCodes = [
@@ -1821,9 +1822,16 @@ const hydrateRectifyRowsWithFallbackDescriptions = async ({
 
   const itemDescriptionByCode = new Map();
   if (missingDescriptionCodes.length > 0) {
-    const itemDocs = await Item.find({
-      code: { $in: missingDescriptionCodes },
-    })
+    const itemDocs = await Item.find(
+      applyDataAccessMatch(
+        { code: { $in: missingDescriptionCodes } },
+        user,
+        {
+          brandFields: ["brand", "brand_name", "brands"],
+          vendorFields: ["vendors"],
+        },
+      ),
+    )
       .select("code description name")
       .lean();
 
@@ -5255,6 +5263,7 @@ exports.rectifyPdfOrders = async (req, res) => {
       dedupedRows = await hydrateRectifyRowsWithFallbackDescriptions({
         rows: dedupedRows,
         existingByKey,
+        user: req.user,
       });
 
       const rowsEligibleForApply = dedupedRows.filter(
@@ -5428,6 +5437,7 @@ exports.rectifyPdfOrders = async (req, res) => {
     dedupedRows = await hydrateRectifyRowsWithFallbackDescriptions({
       rows: dedupedRows,
       existingByKey,
+      user: req.user,
     });
 
     const changedRows = [];

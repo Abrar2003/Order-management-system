@@ -33,6 +33,10 @@ const {
 const {
   notifyWorkflowBatchEvent,
 } = require("../notificationService");
+const {
+  applyDataAccessMatch,
+  assertUserDataAccess,
+} = require("../userDataAccess.service");
 
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
@@ -194,16 +198,27 @@ const getAccessibleBatchIdsForUser = async (user = {}) => {
 };
 
 const buildBatchVisibilityMatch = async (user = {}) => {
+  let match;
   if (isPrivilegedWorkflowReader(user)) {
-    return { is_deleted: false };
+    match = { is_deleted: false };
+  } else {
+    const accessibleBatchIds = await getAccessibleBatchIdsForUser(user);
+    match = {
+      is_deleted: false,
+      _id: { $in: accessibleBatchIds },
+    };
   }
 
-  const accessibleBatchIds = await getAccessibleBatchIdsForUser(user);
-  return {
-    is_deleted: false,
-    _id: { $in: accessibleBatchIds },
-  };
+  return applyDataAccessMatch(match, user);
 };
+
+const getMutableBatchByIdForUser = (id, user = {}) =>
+  Batch.findOne(
+    applyDataAccessMatch(
+      { _id: id, is_deleted: false },
+      user,
+    ),
+  );
 
 const populateBatchQuery = (query) =>
   query
@@ -233,9 +248,11 @@ const createWorkflowBatchFromFolderManifest = async (
 
   const startCode = normalizeText(payload?.start_code);
   const name = normalizeText(payload?.name || startCode || payload?.source_folder_name);
+  const brand = normalizeText(payload?.brand);
   if (!name) {
     throw new Error("Batch name is required");
   }
+  assertUserDataAccess(actor, { brands: brand ? [brand] : [], vendors: [] });
 
   if (!Array.isArray(payload?.assignee_ids) || payload.assignee_ids.length === 0) {
     throw new Error("At least one assignee is required");
@@ -302,7 +319,7 @@ const createWorkflowBatchFromFolderManifest = async (
       start_code: startCode,
       source_folder_name: sourceFolderName,
       description: normalizeText(payload?.description),
-      brand: normalizeText(payload?.brand),
+      brand,
     },
     taskType,
     manifestEntries,
@@ -333,7 +350,7 @@ const createWorkflowBatchFromFolderManifest = async (
     source_folder_name: sourceFolderName,
     source_folder_key: sourceFolderKey,
     description: normalizeText(payload?.description),
-    brand: normalizeText(payload?.brand),
+    brand,
     selected_task_type: {
       key: taskType.key,
       name: taskType.name,
@@ -483,7 +500,7 @@ const updateWorkflowBatch = async (
     throw new Error("Invalid batch id");
   }
 
-  const batch = await Batch.findById(id);
+  const batch = await getMutableBatchByIdForUser(id, actor);
   if (!batch || batch.is_deleted) {
     throw new Error("Workflow batch not found");
   }
@@ -499,7 +516,9 @@ const updateWorkflowBatch = async (
     batch.description = normalizeText(payload.description);
   }
   if (payload?.brand !== undefined) {
-    batch.brand = normalizeText(payload.brand);
+    const brand = normalizeText(payload.brand);
+    assertUserDataAccess(actor, { brands: brand ? [brand] : [], vendors: [] });
+    batch.brand = brand;
   }
   if (payload?.assignment_mode !== undefined) {
     batch.assignment_mode = normalizeText(payload.assignment_mode).toLowerCase() || batch.assignment_mode;
@@ -812,7 +831,7 @@ const bulkUpdateWorkflowBatchTasks = async (
     throw new Error("Invalid batch id");
   }
 
-  const batch = await Batch.findById(id);
+  const batch = await getMutableBatchByIdForUser(id, actor);
   if (!batch || batch.is_deleted) {
     throw new Error("Workflow batch not found");
   }
@@ -1082,7 +1101,7 @@ const deleteWorkflowBatch = async (
     throw new Error("Only admins can delete workflow batches");
   }
 
-  const batch = await Batch.findById(id);
+  const batch = await getMutableBatchByIdForUser(id, actor);
   if (!batch || batch.is_deleted) {
     throw new Error("Workflow batch not found");
   }
@@ -1188,7 +1207,7 @@ const cancelWorkflowBatch = async (
     throw new Error("Invalid batch id");
   }
 
-  const batch = await Batch.findById(id);
+  const batch = await getMutableBatchByIdForUser(id, actor);
   if (!batch || batch.is_deleted) {
     throw new Error("Workflow batch not found");
   }

@@ -3,6 +3,7 @@ const User = require("../models/user.model");
 const Inspection = require("../models/inspection.model");
 const mongoose = require("mongoose");
 const { getVendorName } = require("../helpers/vendorRef");
+const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const parsePositiveInteger = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
@@ -170,7 +171,7 @@ const syncInspectorUsedLabelsFromInspectionRecords = async (inspector) => {
   return inspector;
 };
 
-const attachUsedLabelHistoryToInspectorRows = async (inspectors = []) => {
+const attachUsedLabelHistoryToInspectorRows = async (inspectors = [], user = {}) => {
   const rows = Array.isArray(inspectors) ? inspectors : [];
   const userIds = [
     ...new Set(
@@ -186,7 +187,14 @@ const attachUsedLabelHistoryToInspectorRows = async (inspectors = []) => {
     inspector: { $in: userIds },
   })
     .select("qc request_history_id inspection_date inspector labels_added createdAt updatedAt")
-    .populate("qc", "order_meta item request_date last_inspected_date")
+    .populate({
+      path: "qc",
+      select: "order_meta item request_date last_inspected_date",
+      match: applyDataAccessMatch({}, user, {
+        brandFields: ["order_meta.brand"],
+        vendorFields: ["order_meta.vendor"],
+      }),
+    })
     .lean();
   const recordsByInspectorId = new Map();
 
@@ -208,7 +216,9 @@ const attachUsedLabelHistoryToInspectorRows = async (inspectors = []) => {
       ),
     );
     inspector.label_used_history =
-      buildLabelUsedHistoryFromInspectionRecords(records);
+      buildLabelUsedHistoryFromInspectionRecords(
+        records.filter((entry) => entry?.qc),
+      );
   });
 
   return rows;
@@ -439,7 +449,7 @@ exports.getAllInspectors = async (req, res) => {
     const mergedInspectors = Array.from(inspectorByUser.values());
     const totalRecords = mergedInspectors.length;
     const data = mergedInspectors.slice(skip, skip + limit);
-    await attachUsedLabelHistoryToInspectorRows(data);
+    await attachUsedLabelHistoryToInspectorRows(data, req.user);
 
     res.json({
       data,
@@ -488,13 +498,17 @@ exports.getInspectorById = async (req, res) => {
     const inspector = await Inspector.findById(req.params.id)
       .populate("user", "name email role")
       .populate("labels_allotted_by", "name email role")
-      .populate("assignedOrders");
+      .populate({
+        path: "assignedOrders",
+        match: applyDataAccessMatch({}, req.user),
+      });
 
     if (!inspector) {
       return res.status(404).json({ message: "Inspector not found" });
     }
 
     await syncInspectorUsedLabelsFromInspectionRecords(inspector);
+    await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     res.json({ data: inspector });
   } catch (err) {
@@ -605,6 +619,7 @@ exports.allocateLabels = async (req, res) => {
     });
 
     await inspector.save();
+    await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     res.json({
       message: `${newLabels.length} label(s) allocated successfully`,
@@ -790,6 +805,10 @@ exports.transferLabels = async (req, res) => {
     });
 
     await Promise.all([sourceInspector.save(), targetInspector.save()]);
+    await attachUsedLabelHistoryToInspectorRows(
+      [sourceInspector, targetInspector],
+      req.user,
+    );
 
     return res.json({
       message: `${normalizedLabels.length} label(s) transferred successfully`,
@@ -885,6 +904,7 @@ exports.rejectLabels = async (req, res) => {
     });
 
     await inspector.save();
+    await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     return res.json({
       message: `${normalizedLabels.length} label(s) rejected successfully`,
@@ -977,6 +997,7 @@ exports.replaceLabels = async (req, res) => {
     });
 
     await inspector.save();
+    await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     res.json({
       message: "Labels replaced successfully",
@@ -1038,6 +1059,7 @@ exports.removeLabels = async (req, res) => {
     });
 
     await inspector.save();
+    await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     res.json({
       message: `${removedLabels.length} label(s) removed successfully`,
@@ -1118,6 +1140,7 @@ exports.getLabelUsageStats = async (req, res) => {
     }
 
     await syncInspectorUsedLabelsFromInspectionRecords(inspector);
+    await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     const {
       allocated: allocatedLabels,
