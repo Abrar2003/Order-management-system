@@ -3,6 +3,7 @@ const {
   coerceVendorArrayForSchema,
   coerceVendorValueForSchema,
   embeddedVendorSchema,
+  getVendorCountry,
   isEmbeddedVendor,
   resolveVendorFromInput,
   resolveDocumentVendorFields,
@@ -693,6 +694,9 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
 
 itemSchema.pre("validate", async function resolveVendorReferences() {
   await resolveDocumentVendorFields(this, { array: ["vendors"] });
+
+  const countries = [...new Set((this.vendors || []).map(getVendorCountry).filter(Boolean))];
+  if (countries.length === 1) this.country_of_origin = countries[0];
 
   if (Array.isArray(this.finish)) {
     for (const entry of this.finish) {
