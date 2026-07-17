@@ -2966,7 +2966,7 @@ const buildPoBucketDataset = async ({
     .lean();
 
   const normalizedItemFilter = normalizeFilterValue(itemCode);
-  const fullOrderItemCounts = new Map();
+  let groupingOrders = sourceOrders;
 
   if (normalizedItemFilter && sourceOrders.length > 0) {
     const visibleOrderIds = normalizeDistinctValues(
@@ -2993,26 +2993,22 @@ const buildPoBucketDataset = async ({
         fullOrderMatch.ETD = etdRange;
       }
 
-      const fullOrderRows = await Order.find(fullOrderMatch)
-        .select("order_id")
+      groupingOrders = await Order.find(fullOrderMatch)
+        .select(
+          "_id order_id brand vendor ETD revised_ETD order_date quantity item shipment qc_record total_po_cbm",
+        )
+        .populate({
+          path: "qc_record",
+          select: "order quantities request_history last_inspected_date inspection_dates",
+        })
+        .sort({ order_date: -1, order_id: 1 })
         .lean();
-
-      fullOrderRows.forEach((orderEntry) => {
-        const fullOrderKey =
-          normalizeOrderKey(orderEntry?.order_id) ||
-          normalizeLooseString(orderEntry?.order_id);
-        if (!fullOrderKey) return;
-        fullOrderItemCounts.set(
-          fullOrderKey,
-          (fullOrderItemCounts.get(fullOrderKey) || 0) + 1,
-        );
-      });
     }
   }
 
   const orderObjectIds = [
     ...new Set(
-      sourceOrders
+      groupingOrders
         .map((orderEntry) => String(orderEntry?._id || "").trim())
         .filter((value) => mongoose.Types.ObjectId.isValid(value)),
     ),
@@ -3026,7 +3022,7 @@ const buildPoBucketDataset = async ({
 
   const itemCodes = [
     ...new Set(
-      sourceOrders
+      groupingOrders
         .map((orderEntry) => normalizeLooseString(orderEntry?.item?.item_code))
         .filter(Boolean),
     ),
@@ -3089,7 +3085,7 @@ const buildPoBucketDataset = async ({
 
   const groupedOrders = new Map();
 
-  for (const orderEntry of sourceOrders) {
+  for (const orderEntry of groupingOrders) {
     const orderKey =
       normalizeOrderKey(orderEntry?.order_id) ||
       normalizeLooseString(orderEntry?.order_id) ||
@@ -3198,12 +3194,9 @@ const buildPoBucketDataset = async ({
     groupedEntry.statuses.forEach((statusValue) =>
       incrementPoStatusCounts(statusCounts, statusValue));
     const resolvedTotalCbm = toRoundedCbmValue(groupedEntry.total_cbm);
-    const groupedOrderKey =
-      normalizeOrderKey(groupedEntry.order_id) ||
-      normalizeLooseString(groupedEntry.order_id);
     return {
       order_id: groupedEntry.order_id,
-      items: fullOrderItemCounts.get(groupedOrderKey) || groupedEntry.items,
+      items: groupedEntry.items,
       brand: groupedEntry.brand,
       vendor: groupedEntry.vendor,
       ETD: groupedEntry.ETD,

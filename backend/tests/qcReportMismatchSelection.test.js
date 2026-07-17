@@ -5,6 +5,7 @@ const {
   __test__: {
     limitRecentInspectionsByItem,
     selectLatestInspectionPerLatestPo,
+    canCreateQcMismatchComment,
   },
 } = require("../controllers/reports.controller");
 
@@ -57,6 +58,21 @@ test("QC mismatch selection excludes an item when fewer than 3 distinct POs exis
   ]);
 
   assert.deepEqual(ids(selected), []);
+});
+
+test("QC mismatch comments allow every manager role and QC", () => {
+  for (const role of [
+    "admin",
+    "super admin",
+    "manager",
+    "product manager",
+    "inspection manager",
+    "operation manager",
+    "QC",
+  ]) {
+    assert.equal(canCreateQcMismatchComment({ role }), true, role);
+  }
+  assert.equal(canCreateQcMismatchComment({ role: "user" }), false);
 });
 
 test("QC mismatch selection places missing order dates after dated POs", () => {

@@ -7,6 +7,7 @@ import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { getUserFromToken } from "../auth/auth.utils";
+import { isManagerLikeRole, normalizeUserRole } from "../auth/permissions";
 import "../App.css";
 
 const DEFAULT_TIMELINE = "1m";
@@ -445,8 +446,8 @@ const QcReportMismatch = () => {
   const [selectedRow, setSelectedRow] = useState(null);
 
   const currentUser = useMemo(() => getUserFromToken(), []);
-  const currentUserRole = currentUser?.role ? String(currentUser.role).trim().toLowerCase() : "";
-  const isAllowedToComment = ["admin", "manager", "qc"].includes(currentUserRole);
+  const currentUserRole = normalizeUserRole(currentUser?.role);
+  const isAllowedToComment = currentUserRole === "qc" || isManagerLikeRole(currentUserRole);
 
   const [commentsList, setCommentsList] = useState([]);
   const [newCommentText, setNewCommentText] = useState("");

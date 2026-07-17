@@ -22,6 +22,7 @@ const {
   buildVendorFilter,
   normalizeVendorText,
 } = require("../helpers/vendorRef");
+const { isManagerLikeRole, normalizeUserRoleKey } = require("../helpers/userRole");
 
 const normalizeText = (value) => normalizeVendorText(value);
 const escapeRegex = (value = "") =>
@@ -2793,6 +2794,9 @@ const getActorDisplayName = (user = {}) => {
   return "Unknown";
 };
 
+const canCreateQcMismatchComment = (user = {}) =>
+  isManagerLikeRole(user?.role) || normalizeUserRoleKey(user?.role) === "qc";
+
 exports.getQcMismatchComments = async (req, res) => {
   try {
     const itemCodeInput = String(req.params.code || "").trim();
@@ -2823,6 +2827,12 @@ exports.getQcMismatchComments = async (req, res) => {
 
 exports.createQcMismatchComment = async (req, res) => {
   try {
+    if (!canCreateQcMismatchComment(req.user)) {
+      return res.status(403).json({
+        message: "Only QC and manager roles can add comments.",
+      });
+    }
+
     const itemCodeInput = String(req.params.code || "").trim();
     const commentText = String(req.body?.comment || "").trim();
 
@@ -3031,6 +3041,7 @@ exports.getMonthlyShipmentsDrilldown = async (req, res) => {
 exports.__test__ = {
   buildInspectedItemsReportRow,
   buildOrderItemReportGroups,
+  canCreateQcMismatchComment,
   matchesInspectedItemsReportFilters,
   matchesInspectedItemsDateRange,
   mergeInspectedItemsSources,
