@@ -60,30 +60,12 @@ const sendDeferredResult = (res, result) => {
   return res.status(result.statusCode).json(result.body);
 };
 
-const runWithoutTransaction = async ({ handler, req, res }) => {
-  const maxAttempts = 2;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const { response, getResult } = createDeferredResponse(res);
-    try {
-      await handler(req, response);
-      return sendDeferredResult(res, getResult());
-    } catch (error) {
-      if (error?.name === "VersionError" && attempt < maxAttempts) {
-        continue;
-      }
-
-      console.error("Non-transactional controller failed:", {
-        method: req.method,
-        path: req.originalUrl || req.url,
-        error: error?.message || String(error),
-      });
-      return res.status(500).json({
-        message: "The QC update could not be completed.",
-      });
-    }
-  }
-};
+const sendTransactionsRequired = (res) =>
+  res.status(503).json({
+    code: "MONGODB_TRANSACTIONS_REQUIRED",
+    message:
+      "QC updates are temporarily unavailable because atomic database writes are not configured.",
+  });
 
 const runTransactionalController = async ({
   connection,
@@ -92,7 +74,14 @@ const runTransactionalController = async ({
   res,
 }) => {
   if (connection?.$supportsTransactions === false) {
-    return runWithoutTransaction({ handler, req, res });
+    console.error(
+      "Atomic controller refused to run without MongoDB transaction support.",
+      {
+        method: req.method,
+        path: req.originalUrl || req.url,
+      },
+    );
+    return sendTransactionsRequired(res);
   }
 
   const maxAttempts = 2;
@@ -116,10 +105,14 @@ const runTransactionalController = async ({
 
       if (isTransactionUnsupportedError(error)) {
         connection.$supportsTransactions = false;
-        console.warn(
-          "MongoDB transactions are unavailable; retrying QC update without a transaction.",
+        console.error(
+          "Atomic controller detected missing MongoDB transaction support.",
+          {
+            method: req.method,
+            path: req.originalUrl || req.url,
+          },
         );
-        return runWithoutTransaction({ handler, req, res });
+        return sendTransactionsRequired(res);
       }
 
       if (error?.name === "VersionError" && attempt < maxAttempts) {
@@ -145,6 +138,5 @@ module.exports = {
   DeferredHttpResponseError,
   createDeferredResponse,
   isTransactionUnsupportedError,
-  runWithoutTransaction,
   runTransactionalController,
 };

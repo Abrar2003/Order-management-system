@@ -2860,10 +2860,6 @@ const upsertInspectionRecordForRequest = async ({
       qcDoc.inspection_record.push(inspectionRecord._id);
     }
 
-    if (labelsToAppend.length > 0) {
-      await recalculateInspectorUsedLabels([resolvedInspectorId]);
-    }
-
     return inspectionRecord;
   }
 
@@ -2961,10 +2957,6 @@ const upsertInspectionRecordForRequest = async ({
     )
   ) {
     qcDoc.inspection_record.push(inspectionRecord._id);
-  }
-
-  if (labelsToAppend.length > 0) {
-    await recalculateInspectorUsedLabels([resolvedInspectorId]);
   }
 
   return inspectionRecord;
@@ -6435,7 +6427,6 @@ const updateQC = async (req, res) => {
     let labelsAddedThisVisit = [];
     let labelRangesUsedThisVisit = [];
     let nextLabels = existingNormalizedLabels;
-    let inspectorToSave = null;
     if (allowAdminRewrite && hasExplicitLabelsPayload) {
       const directLabels = Array.isArray(labels) ? labels : [];
       const parsedDirectLabels = directLabels.map(Number);
@@ -6542,12 +6533,6 @@ const updateQC = async (req, res) => {
       }
 
       nextLabels = normalizeLabels([...existingNormalizedLabels, ...incomingNew]);
-
-      inspector.used_labels = [
-        ...new Set([...(inspector.used_labels || []), ...incomingNew]),
-      ];
-
-      inspectorToSave = inspector;
       labelsAddedThisVisit = incomingNew;
     }
 
@@ -6593,10 +6578,6 @@ const updateQC = async (req, res) => {
     }
 
     qc.labels = nextLabels;
-
-    if (inspectorToSave) {
-      await inspectorToSave.save();
-    }
 
     if (remarks !== undefined) {
       qc.remarks = String(remarks || "");

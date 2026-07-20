@@ -153,7 +153,8 @@ test("retries the whole transaction once after a version conflict", async () => 
   assert.deepEqual(state.body, { ok: true });
 });
 
-test("runs without a transaction when the connection is known to be standalone", async () => {
+test("refuses to run when the connection is known to be standalone", async () => {
+  let handlerCalls = 0;
   let transactionCalls = 0;
   const connection = {
     $supportsTransactions: false,
@@ -167,17 +168,22 @@ test("runs without a transaction when the connection is known to be standalone",
     connection,
     req: { method: "PATCH", originalUrl: "/qc/update-qc/1" },
     res,
-    handler: async (_req, deferredRes) => {
-      deferredRes.json({ ok: true });
+    handler: async () => {
+      handlerCalls += 1;
     },
   });
 
   assert.equal(transactionCalls, 0);
-  assert.equal(state.statusCode, 200);
-  assert.deepEqual(state.body, { ok: true });
+  assert.equal(handlerCalls, 0);
+  assert.equal(state.statusCode, 503);
+  assert.deepEqual(state.body, {
+    code: "MONGODB_TRANSACTIONS_REQUIRED",
+    message:
+      "QC updates are temporarily unavailable because atomic database writes are not configured.",
+  });
 });
 
-test("detects standalone transaction errors and retries without a transaction", async () => {
+test("detects standalone transaction errors without retrying outside the transaction", async () => {
   let transactionCalls = 0;
   let handlerCalls = 0;
   const connection = {
@@ -206,8 +212,12 @@ test("detects standalone transaction errors and retries without a transaction", 
 
   assert.equal(isTransactionUnsupportedError({ code: 20 }), true);
   assert.equal(transactionCalls, 1);
-  assert.equal(handlerCalls, 2);
+  assert.equal(handlerCalls, 1);
   assert.equal(connection.$supportsTransactions, false);
-  assert.equal(state.statusCode, 200);
-  assert.deepEqual(state.body, { ok: true });
+  assert.equal(state.statusCode, 503);
+  assert.deepEqual(state.body, {
+    code: "MONGODB_TRANSACTIONS_REQUIRED",
+    message:
+      "QC updates are temporarily unavailable because atomic database writes are not configured.",
+  });
 });
