@@ -1180,6 +1180,8 @@ const QcDetails = () => {
               ? "hardware_inspection"
               : field === "goods_not_ready_images"
               ? "goods_not_ready"
+              : field === "rejected_image"
+              ? "rejected"
               : "qc",
           gallery_source_label: label,
           gallery_parent_qc_id: String(qc?._id || id || "").trim(),
@@ -1192,7 +1194,8 @@ const QcDetails = () => {
             : "Current QC Images",
           gallery_group_subtitle: subtitleParts.join(" | "),
           gallery_inspection_record_id: recordId,
-          gallery_can_delete: field !== "goods_not_ready_images",
+          gallery_can_delete:
+            field !== "goods_not_ready_images" && field !== "rejected_image",
         };
       };
       const currentInspectionImages = inspectionRecords.flatMap((record) => [
@@ -1226,23 +1229,40 @@ const QcDetails = () => {
               ),
             )
           : []),
+        ...(hasStoredFile(record?.rejected_image)
+          ? [
+              decorateCurrentInspectionImage(
+                record,
+                record.rejected_image,
+                "rejected_image",
+                "Rejected",
+              ),
+            ]
+          : []),
       ]);
       const previousPoImages = (Array.isArray(qc?.previous_inspected_po_images)
         ? qc.previous_inspected_po_images
         : []
       ).flatMap((record) => {
         const previousOrderId = String(record?.order_id || "").trim() || "Previous PO";
-        const previousOrderGroupKey =
-          previousOrderId === "Previous PO"
-            ? String(record?.qc_id || previousOrderId)
-            : previousOrderId;
-        const groupKey = `previous-po-${previousOrderGroupKey}`;
-        const groupTitle = `Previous PO ${previousOrderId}`;
+        const historySource = String(record?.history_source || "qc").trim();
+        const inspectionId = String(record?.inspection_id || "").trim();
+        const historyDate =
+          record?.inspection_date || record?.last_inspected_date || "";
+        const groupKey =
+          historySource === "inspection" && inspectionId
+            ? `previous-inspection-${inspectionId}`
+            : `previous-qc-${String(record?.qc_id || previousOrderId)}`;
+        const groupTitle =
+          historySource === "inspection"
+            ? `Previous PO ${previousOrderId} | Inspection ${historyDate ? formatDateDDMMYYYY(historyDate) : "Date Not Set"}`
+            : `Previous PO ${previousOrderId}`;
         const groupSubtitle = [
-          record?.last_inspected_date
-            ? `Last inspected ${formatDateDDMMYYYY(record.last_inspected_date)}`
+          historySource === "qc" && historyDate
+            ? `Last inspected ${formatDateDDMMYYYY(historyDate)}`
             : "",
           getOptionText(record?.vendor),
+          getInspectionRecordInspectorName(record),
         ].filter(Boolean).join(" | ");
         const decoratePreviousImage = (image, field, label) => ({
           ...image,
@@ -1251,6 +1271,8 @@ const QcDetails = () => {
               ? "previous_hardware_inspection"
               : field === "goods_not_ready_images"
               ? "previous_goods_not_ready"
+              : field === "rejected_image"
+              ? "previous_rejected"
               : "previous_qc",
           gallery_source_label: label,
           gallery_parent_qc_id: String(record?.qc_id || "").trim(),
@@ -1258,6 +1280,7 @@ const QcDetails = () => {
           gallery_group_key: groupKey,
           gallery_group_title: groupTitle,
           gallery_group_subtitle: groupSubtitle,
+          gallery_group_sort_time: toTimestamp(historyDate),
           gallery_is_previous: true,
           gallery_can_delete: false,
         });
@@ -1285,6 +1308,15 @@ const QcDetails = () => {
                   "Previous Goods Not Ready",
                 ),
               )
+            : []),
+          ...(hasStoredFile(record?.rejected_image)
+            ? [
+                decoratePreviousImage(
+                  record.rejected_image,
+                  "rejected_image",
+                  "Previous Rejected",
+                ),
+              ]
             : []),
         ];
       });
@@ -1345,6 +1377,9 @@ const QcDetails = () => {
 
     visibleQcImages.forEach((entry) => {
       const groupKey = getQcImageGroupKey(entry.image);
+      const entrySortTime =
+        Number(entry.image?.gallery_group_sort_time || 0) ||
+        toTimestamp(entry.image?.uploadedAt || entry.image?.createdAt);
       const group = groups.get(groupKey) || {
         key: groupKey,
         title:
@@ -1355,8 +1390,10 @@ const QcDetails = () => {
           getQcImageUploaderName(entry.image),
         images: [],
         selectableIds: [],
+        sortTime: entrySortTime,
       };
 
+      group.sortTime = Math.max(group.sortTime, entrySortTime);
       group.images.push(entry);
       const selectionValue = getQcImageSelectionValue(entry.image);
       if (selectionValue) {
@@ -1365,7 +1402,9 @@ const QcDetails = () => {
       groups.set(groupKey, group);
     });
 
-    return [...groups.values()];
+    return [...groups.values()].sort(
+      (left, right) => right.sortTime - left.sortTime,
+    );
   }, [visibleQcImages]);
   const commentedQcImageCount = useMemo(
     () => qcImages.filter(hasQcImageComment).length,
@@ -2241,7 +2280,7 @@ const QcDetails = () => {
     if (deletingQcImages || selectedQcImages.length === 0) return;
 
     if (selectedHasNonDeletableQcImages) {
-      alert("Previous PO images cannot be deleted from this QC record.");
+      alert("One or more selected images cannot be deleted from this gallery.");
       return;
     }
 
@@ -3692,7 +3731,7 @@ const QcDetails = () => {
                     }
                     title={
                       selectedHasNonDeletableQcImages
-                        ? "Previous PO images cannot be deleted from this QC record."
+                        ? "One or more selected images cannot be deleted from this gallery."
                         : undefined
                     }
                   >

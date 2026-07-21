@@ -1789,27 +1789,164 @@ const normalizeUploadIdempotencyKeys = (body = {}, expectedCount = 0) => {
   ];
 };
 
-const findPreviousInspectedQcRecordsForItem = async ({
+const PREVIOUS_PO_IMAGE_LOOKBACK_MS = 60 * 24 * 60 * 60 * 1000;
+
+const getPreviousPoOrderKey = (record = {}) => {
+  const orderReference = record?.order;
+  const orderId =
+    orderReference && typeof orderReference === "object"
+      ? orderReference?._id
+      : orderReference;
+
+  return (
+    normalizeText(orderId) ||
+    normalizeKey(
+      record?.order_meta?.order_id ||
+        record?.order?.order_id ||
+        record?.order_id ||
+        "",
+    )
+  );
+};
+
+const getPreviousPoHistoryOwner = (entry = {}) =>
+  entry?.history_source === "inspection"
+    ? entry?.inspection_record
+    : entry?.qc_record;
+
+const getPreviousPoHistoryImages = (entry = {}) => {
+  const owner = getPreviousPoHistoryOwner(entry);
+  return [
+    ...INSPECTION_IMAGE_ARRAY_FIELDS.flatMap((field) =>
+      getImageListFromQc(owner, field).filter(hasStoredImageReference),
+    ),
+    ...getSingleImageAsList(owner?.rejected_image),
+  ];
+};
+
+const hasPreviousPoHistoryImages = (owner = {}) =>
+  INSPECTION_IMAGE_ARRAY_FIELDS.some((field) =>
+    getImageListFromQc(owner, field).some(hasStoredImageReference),
+  ) || getSingleImageAsList(owner?.rejected_image).length > 0;
+
+const getInspectionHistoryTime = (record = {}) =>
+  toSortableTimestamp(record?.inspection_date) ||
+  toSortableTimestamp(record?.createdAt);
+
+const getQcHistoryTime = (record = {}) =>
+  toSortableTimestamp(record?.last_inspected_date) ||
+  toSortableTimestamp(record?.request_date) ||
+  toSortableTimestamp(record?.createdAt);
+
+const sortPreviousPoHistoryLatestFirst = (left = {}, right = {}) =>
+  right.history_time - left.history_time ||
+  String(right?.inspection_record?._id || right?.qc_record?._id || "").localeCompare(
+    String(left?.inspection_record?._id || left?.qc_record?._id || ""),
+  );
+
+const selectPreviousPoImageHistory = ({
+  qcRecords = [],
+  inspectionRecords = [],
+  referenceTime = 0,
+} = {}) => {
+  const normalizedReferenceTime = Number(referenceTime) || 0;
+  if (normalizedReferenceTime <= 0) return [];
+
+  const cutoffTime = normalizedReferenceTime - PREVIOUS_PO_IMAGE_LOOKBACK_MS;
+  const qcById = new Map(
+    (Array.isArray(qcRecords) ? qcRecords : []).map((record) => [
+      String(record?._id || ""),
+      record,
+    ]),
+  );
+  const inspectionEntries = (Array.isArray(inspectionRecords)
+    ? inspectionRecords
+    : [])
+    .map((record) => {
+      const qcRecord = qcById.get(String(record?.qc?._id || record?.qc || ""));
+      return {
+        history_source: "inspection",
+        history_time: getInspectionHistoryTime(record),
+        order_key: getPreviousPoOrderKey(qcRecord),
+        qc_record: qcRecord,
+        inspection_record: record,
+      };
+    })
+    .filter(
+      (entry) =>
+        entry.qc_record &&
+        entry.order_key &&
+        entry.history_time > 0 &&
+        entry.history_time <= normalizedReferenceTime &&
+        hasPreviousPoHistoryImages(entry.inspection_record),
+    )
+    .sort(sortPreviousPoHistoryLatestFirst);
+  const qcEntries = [...qcById.values()]
+    .map((record) => ({
+      history_source: "qc",
+      history_time: getQcHistoryTime(record),
+      order_key: getPreviousPoOrderKey(record),
+      qc_record: record,
+      inspection_record: null,
+    }))
+    .filter(
+      (entry) =>
+        entry.order_key &&
+        entry.history_time > 0 &&
+        entry.history_time <= normalizedReferenceTime &&
+        hasPreviousPoHistoryImages(entry.qc_record),
+    )
+    .sort(sortPreviousPoHistoryLatestFirst);
+
+  const recentInspectionEntries = inspectionEntries.filter(
+    (entry) => entry.history_time >= cutoffTime,
+  );
+  if (recentInspectionEntries.length > 0) return recentInspectionEntries;
+
+  const recentQcEntries = qcEntries.filter(
+    (entry) => entry.history_time >= cutoffTime,
+  );
+  if (recentQcEntries.length > 0) return recentQcEntries;
+
+  const latestOlderInspection = inspectionEntries.find(
+    (entry) => entry.history_time < cutoffTime,
+  );
+  if (latestOlderInspection) {
+    return inspectionEntries.filter(
+      (entry) =>
+        entry.history_time < cutoffTime &&
+        entry.order_key === latestOlderInspection.order_key,
+    );
+  }
+
+  const latestOlderQc = qcEntries.find(
+    (entry) => entry.history_time < cutoffTime,
+  );
+  if (latestOlderQc) {
+    return qcEntries.filter(
+      (entry) =>
+        entry.history_time < cutoffTime &&
+        entry.order_key === latestOlderQc.order_key,
+    );
+  }
+
+  return [];
+};
+
+const findPreviousPoImageHistoryForItem = async ({
   qcDoc = {},
   user = null,
 } = {}) => {
   const itemCode = normalizeText(
     qcDoc?.item?.item_code || qcDoc?.order?.item?.item_code || "",
   );
-  const currentInspectionTime = toSortableTimestamp(qcDoc?.last_inspected_date);
-  const getOrderKey = (record = {}) =>
-    normalizeText(record?.order?._id) ||
-    normalizeKey(
-      record?.order_meta?.order_id ||
-        record?.order?.order_id ||
-        record?.order_id ||
-        "",
-    );
+  const referenceTime =
+    toSortableTimestamp(qcDoc?.last_inspected_date) ||
+    toSortableTimestamp(qcDoc?.request_date);
 
-  if (!itemCode || currentInspectionTime <= 0) {
-    return [];
-  }
+  if (!itemCode || referenceTime <= 0) return [];
 
+  const currentOrderKey = getPreviousPoOrderKey(qcDoc);
   const candidateRecords = await QC.find({
     _id: { $ne: qcDoc?._id },
     "item.item_code": {
@@ -1818,60 +1955,40 @@ const findPreviousInspectedQcRecordsForItem = async ({
     },
   })
     .select(
-      "_id order order_id order_meta item last_inspected_date qc_images hardware_inspection goods_not_ready_images rejected_image",
+      "_id order order_id order_meta item inspector request_date last_inspected_date createdAt qc_images hardware_inspection goods_not_ready_images rejected_image",
     )
     .populate({
       path: "order",
       match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, user),
       select: "_id order_id brand vendor",
     })
+    .populate("inspector", "name")
+    .lean();
+  const accessiblePreviousQcs = (Array.isArray(candidateRecords)
+    ? candidateRecords
+    : []
+  ).filter(
+    (record) =>
+      record?.order &&
+      (!currentOrderKey || getPreviousPoOrderKey(record) !== currentOrderKey),
+  );
+
+  if (accessiblePreviousQcs.length === 0) return [];
+
+  const inspectionRecords = await Inspection.find({
+    qc: { $in: accessiblePreviousQcs.map((record) => record._id) },
+  })
+    .select(
+      "_id qc inspector inspection_date createdAt qc_images hardware_inspection goods_not_ready_images rejected_image",
+    )
+    .populate("inspector", "name")
     .lean();
 
-  const eligibleRecords = (Array.isArray(candidateRecords) ? candidateRecords : [])
-    .map((record) => ({
-      ...record,
-      __lastInspectedTime: toSortableTimestamp(record?.last_inspected_date),
-    }))
-    .filter(
-      (record) =>
-        record?.order &&
-        record.__lastInspectedTime > 0 &&
-        record.__lastInspectedTime < currentInspectionTime,
-    );
-
-  const previousInspectionTime = Math.max(
-    0,
-    ...eligibleRecords.map((record) => record.__lastInspectedTime),
-  );
-
-  if (previousInspectionTime <= 0) {
-    return [];
-  }
-
-  const previousOrderKeys = new Set(
-    eligibleRecords
-      .filter((record) => record.__lastInspectedTime === previousInspectionTime)
-      .map(getOrderKey)
-      .filter(Boolean),
-  );
-
-  if (previousOrderKeys.size === 0) {
-    return [];
-  }
-
-  return eligibleRecords
-    .filter((record) => previousOrderKeys.has(getOrderKey(record)))
-    .sort((a, b) => {
-      const orderSort = normalizeText(
-        a?.order_meta?.order_id || a?.order?.order_id || "",
-      ).localeCompare(
-        normalizeText(b?.order_meta?.order_id || b?.order?.order_id || ""),
-        undefined,
-        { numeric: true, sensitivity: "base" },
-      );
-      if (orderSort !== 0) return orderSort;
-      return b.__lastInspectedTime - a.__lastInspectedTime;
-    });
+  return selectPreviousPoImageHistory({
+    qcRecords: accessiblePreviousQcs,
+    inspectionRecords,
+    referenceTime,
+  });
 };
 
 const getRequestBaseUrl = (req = {}) => {
@@ -3382,6 +3499,7 @@ const buildApprovedGoodsQuantityByInspectionId = (inspectionRecords = []) => {
 
 exports.__test__ = {
   buildApprovedGoodsQuantityByInspectionId,
+  selectPreviousPoImageHistory,
 };
 
 const isIsoDateWithinInclusiveRange = (
@@ -11308,7 +11426,7 @@ exports.downloadQcImages = async (req, res) => {
 
     const qc = await QC.findById(qcId)
       .select(
-        "order order_id order_meta item last_inspected_date inspector qc_images hardware_inspection goods_not_ready_images rejected_image",
+        "order order_id order_meta item request_date last_inspected_date inspector qc_images hardware_inspection goods_not_ready_images rejected_image",
       )
       .populate({
         path: "order",
@@ -11369,8 +11487,8 @@ exports.downloadQcImages = async (req, res) => {
       });
     }
 
-    const previousInspectionRecords =
-      await findPreviousInspectedQcRecordsForItem({
+    const previousImageHistory =
+      await findPreviousPoImageHistoryForItem({
         qcDoc: qc,
         user: req.user,
       });
@@ -11379,16 +11497,6 @@ exports.downloadQcImages = async (req, res) => {
         "_id qc qc_images hardware_inspection goods_not_ready_images rejected_image",
       )
       .lean();
-    const previousQcIds = previousInspectionRecords
-      .map((record) => record?._id)
-      .filter(Boolean);
-    const previousInspectionImageRecords = previousQcIds.length > 0
-      ? await Inspection.find({ qc: { $in: previousQcIds } })
-          .select(
-            "_id qc qc_images hardware_inspection goods_not_ready_images rejected_image",
-          )
-          .lean()
-      : [];
     const getImagesFromBuckets = (buckets = []) =>
       (Array.isArray(buckets) ? buckets : []).flatMap((bucket) => bucket.images);
     const eligibleImages = [
@@ -11399,17 +11507,7 @@ exports.downloadQcImages = async (req, res) => {
           includeSingleImages: true,
         }),
       ),
-      ...previousInspectionRecords.flatMap((record) =>
-        getImagesFromBuckets(
-          buildOwnedImageBuckets({
-            qc: record,
-            inspections: previousInspectionImageRecords.filter(
-              (inspection) => String(inspection?.qc || "") === String(record?._id || ""),
-            ),
-            includeSingleImages: true,
-          }),
-        ),
-      ),
+      ...previousImageHistory.flatMap(getPreviousPoHistoryImages),
     ];
     const dedupedEligibleImages = [
       ...new Map(
@@ -11723,23 +11821,24 @@ exports.getQCById = async (req, res) => {
           : null,
       })),
     );
-    const previousInspectionRecords =
-      await findPreviousInspectedQcRecordsForItem({
+    const previousImageHistory =
+      await findPreviousPoImageHistoryForItem({
         qcDoc: qcData,
         user: req.user,
       });
     const previousInspectedPoImages = await Promise.all(
-      previousInspectionRecords.map(async (record) => {
-        const previousRecordInspections = await Inspection.find({
-          qc: record?._id,
-        })
-          .select(
-            "qc_images hardware_inspection goods_not_ready_images rejected_image inspection_date createdAt",
-          )
-          .lean();
+      previousImageHistory.map(async (historyEntry) => {
+        const record = historyEntry.qc_record;
+        const inspectionRecord = historyEntry.inspection_record;
+        const imageOwner = getPreviousPoHistoryOwner(historyEntry);
+        const rejectedImage = getSingleImageAsList(
+          imageOwner?.rejected_image,
+        )[0];
 
         return {
           qc_id: record?._id,
+          inspection_id: inspectionRecord?._id || null,
+          history_source: historyEntry.history_source,
           order_id:
             normalizeText(record?.order_meta?.order_id) ||
             normalizeText(record?.order?.order_id),
@@ -11750,32 +11849,34 @@ exports.getQCById = async (req, res) => {
             normalizeText(record?.order_meta?.vendor) ||
             normalizeText(record?.order?.vendor),
           item_code: normalizeText(record?.item?.item_code || itemCode),
-          last_inspected_date: record?.last_inspected_date || "",
-          qc_images: await buildSignedQcImageList([
-            ...getImageListFromQc(record, "qc_images"),
-            ...getInspectionImageEntriesForField(
-              previousRecordInspections,
-              "qc_images",
+          inspector: inspectionRecord?.inspector || record?.inspector || null,
+          inspection_date:
+            inspectionRecord?.inspection_date || inspectionRecord?.createdAt || "",
+          last_inspected_date:
+            inspectionRecord?.inspection_date ||
+            inspectionRecord?.createdAt ||
+            record?.last_inspected_date ||
+            "",
+          qc_images: await buildSignedQcImageList(
+            getImageListFromQc(imageOwner, "qc_images").filter(
+              hasStoredImageReference,
             ),
-          ]),
-          hardware_inspection: await buildSignedQcImageList([
-            ...getImageListFromQc(record, "hardware_inspection"),
-            ...getInspectionImageEntriesForField(
-              previousRecordInspections,
-              "hardware_inspection",
+          ),
+          hardware_inspection: await buildSignedQcImageList(
+            getImageListFromQc(imageOwner, "hardware_inspection").filter(
+              hasStoredImageReference,
             ),
-          ]),
-          goods_not_ready_images: await buildSignedQcImageList([
-            ...getImageListFromQc(record, "goods_not_ready_images"),
-            ...getInspectionImageEntriesForField(
-              previousRecordInspections,
-              "goods_not_ready_images",
+          ),
+          goods_not_ready_images: await buildSignedQcImageList(
+            getImageListFromQc(imageOwner, "goods_not_ready_images").filter(
+              hasStoredImageReference,
             ),
-          ]),
-          rejected_image: getLatestRejectedInspectionImage(previousRecordInspections)
-            ? await buildSignedQcImage(
-                getLatestRejectedInspectionImage(previousRecordInspections),
-              )
+          ),
+          rejected_image: rejectedImage
+            ? {
+                ...rejectedImage,
+                ...(await buildSignedQcImage(rejectedImage)),
+              }
             : null,
         };
       }),

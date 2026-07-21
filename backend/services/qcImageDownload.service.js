@@ -142,7 +142,14 @@ const getLegacyUrlBuffer = async (url = "") => {
 };
 
 const fetchQcImageContent = async (image = {}) => {
-  const storageKey = normalizeText(image?.key || "");
+  const storageKey = normalizeText(
+    image?.key ||
+      image?.storage?.source_key ||
+      image?.preview?.key ||
+      image?.thumbnail?.key ||
+      image?.thumbnail_key ||
+      "",
+  );
   if (storageKey) {
     return getObjectBuffer(storageKey);
   }
