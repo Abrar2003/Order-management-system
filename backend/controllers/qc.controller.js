@@ -2448,6 +2448,33 @@ const resolveLatestInspectionRecordForRequestEntry = (
   return latestRecord;
 };
 
+const syncRequestHistoryInspectorsFromInspections = (
+  requestHistory = [],
+  inspectionRecords = [],
+) => {
+  const changedEntries = [];
+
+  for (const requestEntry of Array.isArray(requestHistory) ? requestHistory : []) {
+    const latestInspection = resolveLatestInspectionRecordForRequestEntry(
+      inspectionRecords,
+      requestEntry,
+      { allowDateFallbackWithLinkedRecords: false },
+    );
+    const nextInspectorId = String(
+      latestInspection?.inspector?._id || latestInspection?.inspector || "",
+    ).trim();
+    const currentInspectorId = String(
+      requestEntry?.inspector?._id || requestEntry?.inspector || "",
+    ).trim();
+
+    if (!nextInspectorId || nextInspectorId === currentInspectorId) continue;
+    requestEntry.inspector = nextInspectorId;
+    changedEntries.push(requestEntry);
+  }
+
+  return changedEntries;
+};
+
 const resolveRequestedQuantityFromQc = (qcDoc = {}) => {
   const requestHistory = Array.isArray(qcDoc?.request_history)
     ? qcDoc.request_history
@@ -3500,6 +3527,8 @@ const buildApprovedGoodsQuantityByInspectionId = (inspectionRecords = []) => {
 exports.__test__ = {
   buildApprovedGoodsQuantityByInspectionId,
   selectPreviousPoImageHistory,
+  syncQcCurrentRequestFieldsFromHistory,
+  syncRequestHistoryInspectorsFromInspections,
 };
 
 const isIsoDateWithinInclusiveRange = (
@@ -11984,6 +12013,7 @@ exports.editInspectionRecords = async (req, res) => {
     const requestHistoryEntryById = new Map(
       requestHistoryEntries.map((entry) => [String(entry?._id || "").trim(), entry]),
     );
+    const inspectorChangedRequestHistoryEntries = new Set();
     const touchedInspectors = new Set();
     const requestHistoryDateUpdates = new Map();
     const qcRequestedQuantityCap = resolveRequestedQuantityFromQc(qc);
@@ -12533,6 +12563,12 @@ exports.editInspectionRecords = async (req, res) => {
         }
         requestHistoryDateUpdates.set(linkedRequestHistoryId, requestedDate);
       }
+      if (
+        inspectorId !== existingInspectorId &&
+        linkedRequestHistoryEntry
+      ) {
+        inspectorChangedRequestHistoryEntries.add(linkedRequestHistoryEntry);
+      }
 
       touchedInspectors.add(String(record.inspector || ""));
       touchedInspectors.add(inspectorId);
@@ -12633,6 +12669,17 @@ exports.editInspectionRecords = async (req, res) => {
 
     recalculateQcAggregateQuantities(qc, refreshedInspections);
     qc.labels = mergedLabels;
+
+    const inspectorSyncTimestamp = new Date();
+    syncRequestHistoryInspectorsFromInspections(
+      [...inspectorChangedRequestHistoryEntries],
+      refreshedInspections,
+    ).forEach((requestHistoryEntry) => {
+      stampRequestHistoryEntry(requestHistoryEntry, {
+        user: req.user,
+        updatedAt: inspectorSyncTimestamp,
+      });
+    });
 
     syncQcRequestHistoryStatuses(qc, refreshedInspections, {
       user: req.user,
