@@ -4,7 +4,10 @@ import Navbar from "../components/Navbar";
 import ReportInfoBanner from "../components/ReportInfoBanner";
 import UpcomingEtdExportModal from "../components/UpcomingEtdExportModal";
 import SortHeaderButton from "../components/SortHeaderButton";
-import { getUpcomingEtdReport } from "../services/orders.service";
+import {
+  getShippingDelayReport,
+  getUpcomingEtdReport,
+} from "../services/orders.service";
 import {
   getNextClientSortState,
   sortClientRows,
@@ -23,6 +26,14 @@ const getEtdUrgency = (daysUntilEtd) => {
   if (days <= 3) return { className: "is-urgent", label: `${days}d` };
   if (days <= 7) return { className: "is-soon", label: `${days}d` };
   return { className: "is-upcoming", label: `${days}d` };
+};
+
+const getShippingDelayUrgency = (delayDays) => {
+  const days = Number(delayDays || 0);
+  return {
+    className: days > 7 ? "is-urgent" : "is-soon",
+    label: `${days}d late`,
+  };
 };
 
 const getProgressTone = (lastProgress) => {
@@ -68,14 +79,20 @@ const defaultReport = {
     shipped_count: 0,
     total_days_until_etd: 0,
     average_days_until_etd: 0,
+    shipping_delay_po_count: 0,
+    average_delay_days: 0,
   },
   vendors: [],
 };
 
-const UpcomingEtdReports = () => {
+const UpcomingEtdReports = ({ shippingDelay = false }) => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  useRememberSearchParams(searchParams, setSearchParams, "upcoming-etd-reports");
+  useRememberSearchParams(
+    searchParams,
+    setSearchParams,
+    shippingDelay ? "shipping-delay-reports" : "upcoming-etd-reports",
+  );
 
   const defaultToDate = useMemo(() => getDefaultUpcomingEtdToDate(), []);
   const [brandFilter, setBrandFilter] = useState(() =>
@@ -109,7 +126,7 @@ const UpcomingEtdReports = () => {
   const [report, setReport] = useState(defaultReport);
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [sortBy, setSortBy] = useState("daysUntilEtd");
+  const [sortBy, setSortBy] = useState(shippingDelay ? "delayDays" : "daysUntilEtd");
   const [sortOrder, setSortOrder] = useState("asc");
   const [collapsedVendors, setCollapsedVendors] = useState(() => new Set());
 
@@ -118,9 +135,10 @@ const UpcomingEtdReports = () => {
       setLoading(true);
       setError("");
 
-      const params = {
-        to_date: String(toDateFilter || "").trim() || defaultToDate,
-      };
+      const params = {};
+      if (!shippingDelay) {
+        params.to_date = String(toDateFilter || "").trim() || defaultToDate;
+      }
       if (brandFilter !== DEFAULT_ENTITY_FILTER) {
         params.brand = brandFilter;
       }
@@ -128,7 +146,9 @@ const UpcomingEtdReports = () => {
         params.vendor = vendorFilter;
       }
 
-      const response = await getUpcomingEtdReport(params);
+      const response = await (shippingDelay
+        ? getShippingDelayReport(params)
+        : getUpcomingEtdReport(params));
       setReport({
         filters: {
           ...defaultReport.filters,
@@ -139,11 +159,14 @@ const UpcomingEtdReports = () => {
       });
     } catch (err) {
       setReport(defaultReport);
-      setError(err?.response?.data?.message || "Failed to load upcoming ETD report.");
+      setError(
+        err?.response?.data?.message
+          || `Failed to load ${shippingDelay ? "shipping delay" : "upcoming ETD"} report.`,
+      );
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, defaultToDate, toDateFilter, vendorFilter]);
+  }, [brandFilter, defaultToDate, shippingDelay, toDateFilter, vendorFilter]);
 
   useEffect(() => {
     fetchReport();
@@ -181,14 +204,14 @@ const UpcomingEtdReports = () => {
     if (vendorFilter !== DEFAULT_ENTITY_FILTER) {
       next.set("vendor", vendorFilter);
     }
-    if (toDateFilter) {
+    if (!shippingDelay && toDateFilter) {
       next.set("to_date", toDateFilter);
     }
 
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [brandFilter, searchParams, setSearchParams, syncedQuery, toDateFilter, vendorFilter]);
+  }, [brandFilter, searchParams, setSearchParams, shippingDelay, syncedQuery, toDateFilter, vendorFilter]);
 
   const filters = useMemo(
     () => report?.filters || defaultReport.filters,
@@ -263,9 +286,15 @@ const UpcomingEtdReports = () => {
             <span>Back</span>
           </button>
           <div className="upcoming-etd-heading">
-            <span className="upcoming-etd-eyebrow">Planning overview</span>
-            <h1>Upcoming ETD Report</h1>
-            <p>Track purchase orders approaching their effective departure date.</p>
+            <span className="upcoming-etd-eyebrow">
+              {shippingDelay ? "Shipping follow-up" : "Planning overview"}
+            </span>
+            <h1>{shippingDelay ? "Shipping Delay Report" : "Upcoming ETD Report"}</h1>
+            <p>
+              {shippingDelay
+                ? "Track packed purchase orders still awaiting shipment after their ETD."
+                : "Track purchase orders approaching their effective departure date."}
+            </p>
           </div>
           <button
             type="button"
@@ -279,9 +308,13 @@ const UpcomingEtdReports = () => {
 
         <div className="upcoming-etd-info-banner">
           <ReportInfoBanner
-            description="Monitors Purchase Orders with delivery dates approaching within a specified future window."
-            dataShown="PO numbers, brand, order date, effective ETD, days remaining, pending/inspected/shipped item counts, and last recorded progress."
-            howItWorks="Shows upcoming orders grouped by vendor and sorted by days remaining. Filterable by limit date, brand, and vendor."
+            description={shippingDelay
+              ? "Monitors POs fully packed before their ETD that remain unshipped after the ETD."
+              : "Monitors Purchase Orders with delivery dates approaching within a specified future window."}
+            dataShown="PO numbers, brand, order date, effective ETD, pending/inspected/shipped item counts, and last recorded progress."
+            howItWorks={shippingDelay
+              ? "Shows POs only when every item is packed, no item is shipped, and the effective ETD has passed."
+              : "Shows upcoming orders grouped by vendor and sorted by days remaining. Filterable by limit date, brand, and vendor."}
           />
         </div>
 
@@ -289,11 +322,15 @@ const UpcomingEtdReports = () => {
           <div className="upcoming-etd-section-heading">
             <div>
               <h2 id="upcoming-etd-filter-title">Report controls</h2>
-              <p>Adjust the ETD window or narrow the report by brand and vendor.</p>
+              <p>
+                {shippingDelay
+                  ? "Narrow the report by brand and vendor."
+                  : "Adjust the ETD window or narrow the report by brand and vendor."}
+              </p>
             </div>
           </div>
           <form className="upcoming-etd-filter-grid" onSubmit={handleApplyFilters}>
-            <div className="upcoming-etd-filter-field">
+            {!shippingDelay && <div className="upcoming-etd-filter-field">
               <label className="form-label" htmlFor="upcoming-etd-until-date">Until date</label>
               <input
                 id="upcoming-etd-until-date"
@@ -302,7 +339,7 @@ const UpcomingEtdReports = () => {
                 value={draftToDateFilter}
                 onChange={(event) => setDraftToDateFilter(String(event.target.value || "").trim())}
               />
-            </div>
+            </div>}
 
             <div className="upcoming-etd-filter-field">
               <label className="form-label" htmlFor="upcoming-etd-brand">Brand</label>
@@ -366,10 +403,13 @@ const UpcomingEtdReports = () => {
           <div className="upcoming-etd-window-card">
             <div className="upcoming-etd-window-icon" aria-hidden="true">↗</div>
             <div>
-              <span className="upcoming-etd-card-label">ETD window</span>
+              <span className="upcoming-etd-card-label">
+                {shippingDelay ? "ETD status" : "ETD window"}
+              </span>
               <strong>
-                {formatDateDDMMYYYY(filters.report_start_date)} —{" "}
-                {formatDateDDMMYYYY(filters.report_end_date)}
+                {shippingDelay
+                  ? "Past effective ETD"
+                  : <>{formatDateDDMMYYYY(filters.report_start_date)} — {formatDateDDMMYYYY(filters.report_end_date)}</>}
               </strong>
               <div className="upcoming-etd-active-filters">
                 <span>
@@ -384,14 +424,24 @@ const UpcomingEtdReports = () => {
 
           <div className="upcoming-etd-kpi-grid">
             <div className="upcoming-etd-kpi is-primary">
-              <span className="upcoming-etd-card-label">Upcoming POs</span>
-              <strong>{summary.upcoming_po_count ?? 0}</strong>
+              <span className="upcoming-etd-card-label">
+                {shippingDelay ? "Delayed shipments" : "Upcoming POs"}
+              </span>
+              <strong>
+                {shippingDelay
+                  ? summary.shipping_delay_po_count ?? 0
+                  : summary.upcoming_po_count ?? 0}
+              </strong>
               <small>Across {summary.vendors_count ?? 0} vendors</small>
             </div>
             <div className="upcoming-etd-kpi is-warning">
-              <span className="upcoming-etd-card-label">Pending items</span>
-              <strong>{summary.pending_count ?? 0}</strong>
-              <small>Awaiting inspection</small>
+              <span className="upcoming-etd-card-label">
+                {shippingDelay ? "Packed items" : "Pending items"}
+              </span>
+              <strong>
+                {shippingDelay ? summary.inspection_done_count ?? 0 : summary.pending_count ?? 0}
+              </strong>
+              <small>{shippingDelay ? "All PO items are packed" : "Awaiting inspection"}</small>
             </div>
             <div className="upcoming-etd-kpi is-success">
               <span className="upcoming-etd-card-label">Inspection done</span>
@@ -399,12 +449,16 @@ const UpcomingEtdReports = () => {
               <small>Ready for next step</small>
             </div>
             <div className="upcoming-etd-kpi is-neutral">
-              <span className="upcoming-etd-card-label">Avg. time to ETD</span>
+              <span className="upcoming-etd-card-label">
+                {shippingDelay ? "Avg. shipping delay" : "Avg. time to ETD"}
+              </span>
               <strong>
-                {summary.average_days_until_etd ?? 0}
+                {shippingDelay
+                  ? summary.average_delay_days ?? 0
+                  : summary.average_days_until_etd ?? 0}
                 <span> days</span>
               </strong>
-              <small>{summary.shipped_count ?? 0} items shipped</small>
+              <small>{shippingDelay ? "No items shipped" : `${summary.shipped_count ?? 0} items shipped`}</small>
             </div>
           </div>
         </section>
@@ -420,7 +474,7 @@ const UpcomingEtdReports = () => {
             <div className="card om-card upcoming-etd-state-card">
               <div className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
               <div>
-                <strong>Loading upcoming ETDs</strong>
+                <strong>Loading {shippingDelay ? "shipping delays" : "upcoming ETDs"}</strong>
                 <span>Building the latest vendor view…</span>
               </div>
             </div>
@@ -428,8 +482,12 @@ const UpcomingEtdReports = () => {
             <div className="card om-card upcoming-etd-state-card">
               <div className="upcoming-etd-empty-icon" aria-hidden="true">✓</div>
               <div>
-                <strong>No upcoming ETDs found</strong>
-                <span>Try extending the until date or clearing the selected filters.</span>
+                <strong>No {shippingDelay ? "shipping delays" : "upcoming ETDs"} found</strong>
+                <span>
+                  {shippingDelay
+                    ? "No fully packed, unshipped POs have passed their ETD."
+                    : "Try extending the until date or clearing the selected filters."}
+                </span>
               </div>
             </div>
           ) : (
@@ -448,6 +506,7 @@ const UpcomingEtdReports = () => {
                   if (column === "daysUntilEtd") {
                     return Number(row?.days_until_etd || 0);
                   }
+                  if (column === "delayDays") return Number(row?.delay_days || 0);
                   if (column === "pending") return Number(row?.pending_count || 0);
                   if (column === "inspectionDone") {
                     return Number(row?.inspection_done_count || 0);
@@ -484,19 +543,31 @@ const UpcomingEtdReports = () => {
                     <div className="upcoming-etd-vendor-summary">
                       <div>
                         <span>POs</span>
-                        <strong>{vendorEntry.upcoming_po_count ?? 0}</strong>
+                        <strong>
+                          {shippingDelay
+                            ? vendorEntry.shipping_delay_po_count ?? 0
+                            : vendorEntry.upcoming_po_count ?? 0}
+                        </strong>
                       </div>
                       <div className="is-warning">
-                        <span>Pending</span>
-                        <strong>{vendorEntry.pending_count ?? 0}</strong>
+                        <span>{shippingDelay ? "Packed" : "Pending"}</span>
+                        <strong>
+                          {shippingDelay
+                            ? vendorEntry.inspection_done_count ?? 0
+                            : vendorEntry.pending_count ?? 0}
+                        </strong>
                       </div>
                       <div className="is-success">
                         <span>Inspected</span>
                         <strong>{vendorEntry.inspection_done_count ?? 0}</strong>
                       </div>
                       <div>
-                        <span>Avg. ETD</span>
-                        <strong>{vendorEntry.average_days_until_etd ?? 0}d</strong>
+                        <span>{shippingDelay ? "Avg. delay" : "Avg. ETD"}</span>
+                        <strong>
+                          {shippingDelay
+                            ? vendorEntry.average_delay_days ?? 0
+                            : vendorEntry.average_days_until_etd ?? 0}d
+                        </strong>
                       </div>
                       <button
                         type="button"
@@ -550,10 +621,10 @@ const UpcomingEtdReports = () => {
                             </th>
                             <th>
                               <SortHeaderButton
-                                label="Days Until ETD"
-                                isActive={sortBy === "daysUntilEtd"}
+                                label={shippingDelay ? "Delay (Days)" : "Days Until ETD"}
+                                isActive={sortBy === (shippingDelay ? "delayDays" : "daysUntilEtd")}
                                 direction={sortOrder}
-                                onClick={() => handleSortColumn("daysUntilEtd", "asc")}
+                                onClick={() => handleSortColumn(shippingDelay ? "delayDays" : "daysUntilEtd", shippingDelay ? "desc" : "asc")}
                               />
                             </th>
                             <th>
@@ -594,13 +665,15 @@ const UpcomingEtdReports = () => {
                           {sortedRows.length === 0 && (
                             <tr>
                               <td colSpan="9" className="text-center py-3">
-                                No upcoming ETD POs for this vendor.
+                                No {shippingDelay ? "shipping-delay" : "upcoming ETD"} POs for this vendor.
                               </td>
                             </tr>
                           )}
 
                           {sortedRows.map((row) => {
-                            const urgency = getEtdUrgency(row.days_until_etd);
+                            const urgency = shippingDelay
+                              ? getShippingDelayUrgency(row.delay_days)
+                              : getEtdUrgency(row.days_until_etd);
                             return (
                               <tr
                                 key={`${vendorKey}-${row.order_id}`}
@@ -667,10 +740,11 @@ const UpcomingEtdReports = () => {
         <UpcomingEtdExportModal
           onClose={() => setShowExportModal(false)}
           filterOptions={filters}
+          reportType={shippingDelay ? "shipping-delay" : "upcoming-etd"}
           defaultFilters={{
             brand: brandFilter,
             vendor: vendorFilter,
-            to_date: toDateFilter,
+            ...(shippingDelay ? {} : { to_date: toDateFilter }),
           }}
         />
       )}

@@ -44,9 +44,11 @@ const {
   checkShipmentRows,
   getDelayedPoReport,
   getUpcomingEtdReport,
+  getShippingDelayReport,
   exportDelayedPoReport,
   exportPendingPoReport,
   exportUpcomingEtdReport,
+  exportShippingDelayReport,
   exportOrdersDb,
   editOrder,
   bulkUpdateRevisedEtd,
@@ -191,6 +193,13 @@ router.get(
   getUpcomingEtdReport,
 );
 router.get(
+  "/shipping-delay-report",
+  authenticate,
+  requirePermission("reports", "view"),
+  cacheRoute("reports", MEDIUM_CACHE_TTL),
+  getShippingDelayReport,
+);
+router.get(
   "/delayed-po-report/export",
   authenticate,
   requirePermission("reports", "export"),
@@ -216,6 +225,15 @@ router.get(
     metadata: (req) => ({ filters: req.query || {} }),
   }),
   exportUpcomingEtdReport,
+);
+router.get(
+  "/shipping-delay-report/export",
+  authenticate,
+  requirePermission("reports", "export"),
+  securityLog("export_excel", "shipping_delay_report", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
+  exportShippingDelayReport,
 );
 router.get("/revised-etd-history", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getRevisedEtdHistory);
 

@@ -195,6 +195,11 @@ export const getUpcomingEtdReport = async (params = {}) => {
   return res.data;
 };
 
+export const getShippingDelayReport = async (params = {}) => {
+  const res = await axios.get("/orders/shipping-delay-report", { params });
+  return res.data;
+};
+
 export const exportDelayedPoReport = async (params = {}) => {
   return axios.get("/orders/delayed-po-report/export", {
     responseType: "blob",
@@ -211,6 +216,13 @@ export const exportPendingPoReport = async (params = {}) => {
 
 export const exportUpcomingEtdReport = async (params = {}) => {
   return axios.get("/orders/upcoming-etd-report/export", {
+    responseType: "blob",
+    params,
+  });
+};
+
+export const exportShippingDelayReport = async (params = {}) => {
+  return axios.get("/orders/shipping-delay-report/export", {
     responseType: "blob",
     params,
   });

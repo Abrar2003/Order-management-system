@@ -312,6 +312,7 @@ const Navbar = () => {
     const orderReports = [
       routeMenuItem("delayed-pos", "Delayed PO", "/reports/delayed-pos"),
       routeMenuItem("upcoming-etd", "Upcoming ETD", "/reports/upcoming-etd"),
+      routeMenuItem("shipping-delay", "Shipping Delay", "/reports/shipping-delay"),
       routeMenuItem("po-status", "PO Status", "/reports/po-status"),
       routeMenuItem("pending-po", "Pending PO", "/reports/pending-po"),
       routeMenuItem(

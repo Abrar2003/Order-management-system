@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
+  exportShippingDelayReport,
   exportUpcomingEtdReport,
+  getShippingDelayReport,
   getUpcomingEtdReport,
 } from "../services/orders.service";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -60,7 +62,7 @@ const escapeHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 
-const exportDatasetAsPdf = async (dataset) => {
+const exportDatasetAsPdf = async (dataset, isShippingDelay = false) => {
   const filters = dataset?.filters || {};
   const summary = dataset?.summary || {};
   const rows = (Array.isArray(dataset?.vendors) ? dataset.vendors : []).flatMap(
@@ -71,6 +73,7 @@ const exportDatasetAsPdf = async (dataset) => {
       })),
   );
   const metadata = `Window: ${formatDateDDMMYYYY(filters.report_start_date, "-")} - ${formatDateDDMMYYYY(filters.report_end_date, "-")} · POs: ${summary.upcoming_po_count || 0} · Vendors: ${summary.vendors_count || 0} · Pending: ${summary.pending_count || 0} · Inspected: ${summary.inspection_done_count || 0}`;
+  const shippingMetadata = `Past-ETD packed POs: ${summary.shipping_delay_po_count || 0} · Vendors: ${summary.vendors_count || 0}`;
   const bodyRows = rows.length > 0
     ? rows.map((row) => `
         <tr>
@@ -79,30 +82,30 @@ const exportDatasetAsPdf = async (dataset) => {
           <td>${escapeHtml(row.brand)}</td>
           <td>${escapeHtml(formatDateDDMMYYYY(row.order_date, ""))}</td>
           <td>${escapeHtml(formatDateDDMMYYYY(row.effective_etd, ""))}</td>
-          <td>${Number(row.days_until_etd || 0)}</td>
+          <td>${Number(isShippingDelay ? row.delay_days : row.days_until_etd) || 0}</td>
           <td>${Number(row.pending_count || 0)}</td>
           <td>${Number(row.inspection_done_count || 0)}</td>
           <td>${Number(row.shipped_count || 0)}</td>
           <td>${escapeHtml(row.last_progress || "Pending")}</td>
         </tr>
       `).join("")
-    : `<tr><td colspan="10">No upcoming ETD purchase orders found.</td></tr>`;
+    : `<tr><td colspan="10">No ${isShippingDelay ? "shipping-delay" : "upcoming ETD"} purchase orders found.</td></tr>`;
 
   await exportHtmlToPdf({
-    reportKey: "upcoming-etd-report",
-    filename: `upcoming-etd-report-${new Date().toISOString().slice(0, 10)}.pdf`,
+    reportKey: isShippingDelay ? "shipping-delay-report" : "upcoming-etd-report",
+    filename: `${isShippingDelay ? "shipping-delay-report" : "upcoming-etd-report"}-${new Date().toISOString().slice(0, 10)}.pdf`,
     landscape: true,
     repeatHeader: {
       inTable: true,
-      title: "Upcoming ETD Report",
-      subtitle: metadata,
+      title: isShippingDelay ? "Shipping Delay Report" : "Upcoming ETD Report",
+      subtitle: isShippingDelay ? shippingMetadata : metadata,
     },
     html: `
       <table class="table table-sm upcoming-etd-table">
         <thead>
           <tr>
             <th>Vendor</th><th>PO</th><th>Brand</th><th>Order Date</th>
-            <th>ETD</th><th>Days</th><th>Pending</th><th>Inspected</th>
+            <th>ETD</th><th>${isShippingDelay ? "Delay (Days)" : "Days"}</th><th>Pending</th><th>Inspected</th>
             <th>Shipped</th><th>Last Progress</th>
           </tr>
         </thead>
@@ -116,7 +119,10 @@ const UpcomingEtdExportModal = ({
   onClose,
   filterOptions = {},
   defaultFilters = {},
+  reportType = "upcoming-etd",
 }) => {
+  const isShippingDelay = reportType === "shipping-delay";
+  const reportTitle = isShippingDelay ? "Shipping Delay Report" : "Upcoming ETD Report";
   const [form, setForm] = useState(() => buildInitialForm(defaultFilters));
   const [error, setError] = useState("");
   const [isExporting, setIsExporting] = useState(false);
@@ -158,21 +164,27 @@ const UpcomingEtdExportModal = ({
       const params = {
         brand: isAllBrands(form.brand) ? "all" : form.brand.join(","),
         vendor: form.vendor,
-        to_date: form.to_date || undefined,
         tz_offset_minutes: new Date().getTimezoneOffset(),
       };
+      if (!isShippingDelay) {
+        params.to_date = form.to_date || undefined;
+      }
 
       if (form.format === "pdf") {
-        const dataset = await getUpcomingEtdReport(params);
-        await exportDatasetAsPdf(dataset);
+        const dataset = await (isShippingDelay
+          ? getShippingDelayReport(params)
+          : getUpcomingEtdReport(params));
+        await exportDatasetAsPdf(dataset, isShippingDelay);
         onClose?.();
         return;
       }
 
-      const response = await exportUpcomingEtdReport(params);
+      const response = await (isShippingDelay
+        ? exportShippingDelayReport(params)
+        : exportUpcomingEtdReport(params));
 
       const disposition = String(response?.headers?.["content-disposition"] || "");
-      const fallbackName = `upcoming-etd-report-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const fallbackName = `${isShippingDelay ? "shipping-delay-report" : "upcoming-etd-report"}-${new Date().toISOString().slice(0, 10)}.xlsx`;
       const fileName = parseFileNameFromDisposition(disposition, fallbackName);
 
       const blob = new Blob(
@@ -197,7 +209,7 @@ const UpcomingEtdExportModal = ({
     } catch (err) {
       setError(
         err?.response?.data?.message
-          || `Failed to export upcoming ETD report as ${form.format.toUpperCase()}.`,
+          || `Failed to export ${reportTitle.toLowerCase()} as ${form.format.toUpperCase()}.`,
       );
     } finally {
       setIsExporting(false);
@@ -209,7 +221,7 @@ const UpcomingEtdExportModal = ({
       <div className="modal-dialog modal-dialog-centered modal-lg" role="document">
         <div className="modal-content">
           <div className="modal-header">
-            <h5 className="modal-title">Export Upcoming ETD Report</h5>
+            <h5 className="modal-title">Export {reportTitle}</h5>
             <button
               type="button"
               className="btn-close"
@@ -284,7 +296,7 @@ const UpcomingEtdExportModal = ({
               </div>
             </div>
 
-            <div>
+            {!isShippingDelay && <div>
               <label className="form-label">Until Date</label>
               <input
                 type="date"
@@ -293,7 +305,7 @@ const UpcomingEtdExportModal = ({
                 disabled={isExporting}
                 onChange={(e) => setForm((prev) => ({ ...prev, to_date: e.target.value }))}
               />
-            </div>
+            </div>}
 
             <fieldset>
               <legend className="form-label">Export format</legend>
@@ -301,7 +313,7 @@ const UpcomingEtdExportModal = ({
                 <label className={`upcoming-etd-export-format${form.format === "xlsx" ? " is-selected" : ""}`}>
                   <input
                     type="radio"
-                    name="upcoming-etd-export-format"
+                    name={`${reportType}-export-format`}
                     value="xlsx"
                     checked={form.format === "xlsx"}
                     disabled={isExporting}
@@ -315,7 +327,7 @@ const UpcomingEtdExportModal = ({
                 <label className={`upcoming-etd-export-format${form.format === "pdf" ? " is-selected" : ""}`}>
                   <input
                     type="radio"
-                    name="upcoming-etd-export-format"
+                    name={`${reportType}-export-format`}
                     value="pdf"
                     checked={form.format === "pdf"}
                     disabled={isExporting}

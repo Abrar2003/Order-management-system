@@ -7687,8 +7687,10 @@ const buildReformedDelayedPoReportDataset = async ({
         has_pending_quantity: false,
         total_order_quantity: 0,
         total_shipped_quantity: 0,
+        total_inspected_quantity: 0,
         total_passed_quantity: 0,
         total_pending_quantity: 0,
+        last_inspected_date: null,
         rows: [],
       });
     }
@@ -7704,11 +7706,16 @@ const buildReformedDelayedPoReportDataset = async ({
       ) > 0;
     group.total_order_quantity += Number(progress?.order_quantity || 0);
     group.total_shipped_quantity += Number(progress?.shipped_quantity || 0);
+    group.total_inspected_quantity += Number(progress?.passed_quantity || 0);
     group.total_passed_quantity += Number(
       progress?.inspected_unshipped_quantity || 0,
     );
     group.total_pending_quantity += Number(
       progress?.pending_inspection_quantity || 0,
+    );
+    group.last_inspected_date = resolveLaterDate(
+      group.last_inspected_date,
+      resolveLatestInspectionDate(orderEntry?.qc_record),
     );
     group.rows.push({
       id: String(orderEntry?._id || ""),
@@ -7733,7 +7740,18 @@ const buildReformedDelayedPoReportDataset = async ({
       Number(group.total_order_quantity || 0) > 0 &&
       Number(group.total_shipped_quantity || 0) >=
         Number(group.total_order_quantity || 0);
-    return etdCrossed && group.has_pending_quantity && !completelyShipped;
+    const completelyInspectedBeforeEtd =
+      Number(group.total_order_quantity || 0) > 0 &&
+      Number(group.total_inspected_quantity || 0) >=
+        Number(group.total_order_quantity || 0) &&
+      group.last_inspected_date &&
+      group.last_inspected_date.getTime() < group.etd.getTime();
+    return (
+      etdCrossed &&
+      group.has_pending_quantity &&
+      !completelyShipped &&
+      !completelyInspectedBeforeEtd
+    );
   });
 
   const allRows = delayedGroups
@@ -7913,6 +7931,7 @@ const buildUpcomingEtdReportDataset = async ({
   brand = "",
   vendor = "",
   toDate = "",
+  shippingDelay = false,
   user = null,
 } = {}) => {
   const selectedBrands = normalizeFilterValues(brand);
@@ -8056,12 +8075,25 @@ const buildUpcomingEtdReportDataset = async ({
       const isWithinUpcomingWindow =
         effectiveEtd.getTime() >= todayUtc.getTime() &&
         effectiveEtd.getTime() <= reportEndDateUtc.getTime();
+      const isCompletelyPackedBeforeEtd =
+        groupedEntry.total_items > 0 &&
+        groupedEntry.inspection_done_count === groupedEntry.total_items &&
+        groupedEntry.shipped_count === 0 &&
+        groupedEntry.last_inspected_date &&
+        groupedEntry.last_inspected_date.getTime() < effectiveEtd.getTime();
+      const isPastEtd = effectiveEtd.getTime() < todayUtc.getTime();
 
-      if (isFullyShipped || !(hasOpenItems && isWithinUpcomingWindow)) {
+      if (
+        shippingDelay
+          ? !(isCompletelyPackedBeforeEtd && isPastEtd)
+          : isFullyShipped || !(hasOpenItems && isWithinUpcomingWindow)
+      ) {
         return null;
       }
 
-      const daysUntilEtd = Math.max(0, diffUtcDays(effectiveEtd, todayUtc));
+      const daysUntilEtd = shippingDelay
+        ? Math.max(0, diffUtcDays(todayUtc, effectiveEtd))
+        : Math.max(0, diffUtcDays(effectiveEtd, todayUtc));
       const lastProgress = resolveDelayedPoLastProgress(groupedEntry);
 
       return {
@@ -8073,6 +8105,7 @@ const buildUpcomingEtdReportDataset = async ({
         revised_etd: toISODateString(groupedEntry.revised_etd),
         effective_etd: toISODateString(groupedEntry.effective_etd),
         days_until_etd: daysUntilEtd,
+        delay_days: shippingDelay ? daysUntilEtd : 0,
         pending_count: groupedEntry.pending_count,
         inspection_done_count: groupedEntry.inspection_done_count,
         shipped_count: groupedEntry.shipped_count,
@@ -8104,8 +8137,9 @@ const buildUpcomingEtdReportDataset = async ({
       );
       if (vendorCompare !== 0) return vendorCompare;
 
-      const daysCompare =
-        Number(left?.days_until_etd || 0) - Number(right?.days_until_etd || 0);
+      const daysCompare = shippingDelay
+        ? Number(right?.delay_days || 0) - Number(left?.delay_days || 0)
+        : Number(left?.days_until_etd || 0) - Number(right?.days_until_etd || 0);
       if (daysCompare !== 0) return daysCompare;
 
       const etdCompare =
@@ -8174,12 +8208,22 @@ const buildUpcomingEtdReportDataset = async ({
         String(a || "").localeCompare(String(b || "")),
       ),
       upcoming_po_count: vendorEntry.upcoming_po_count,
+      shipping_delay_po_count: shippingDelay ? vendorEntry.upcoming_po_count : 0,
       pending_count: vendorEntry.pending_count,
       inspection_done_count: vendorEntry.inspection_done_count,
       shipped_count: vendorEntry.shipped_count,
       total_days_until_etd: vendorEntry.total_days_until_etd,
       average_days_until_etd:
         vendorEntry.upcoming_po_count > 0
+          ? Number(
+              (
+                vendorEntry.total_days_until_etd / vendorEntry.upcoming_po_count
+              ).toFixed(2),
+            )
+          : 0,
+      total_delay_days: shippingDelay ? vendorEntry.total_days_until_etd : 0,
+      average_delay_days:
+        shippingDelay && vendorEntry.upcoming_po_count > 0
           ? Number(
               (
                 vendorEntry.total_days_until_etd / vendorEntry.upcoming_po_count
@@ -8205,6 +8249,7 @@ const buildUpcomingEtdReportDataset = async ({
     },
     summary: {
       upcoming_po_count: filteredRows.length,
+      shipping_delay_po_count: shippingDelay ? filteredRows.length : 0,
       vendors_count: vendors.length,
       pending_count: totalPendingCount,
       inspection_done_count: totalInspectionDoneCount,
@@ -8212,6 +8257,11 @@ const buildUpcomingEtdReportDataset = async ({
       total_days_until_etd: totalDaysUntilEtd,
       average_days_until_etd:
         filteredRows.length > 0
+          ? Number((totalDaysUntilEtd / filteredRows.length).toFixed(2))
+          : 0,
+      total_delay_days: shippingDelay ? totalDaysUntilEtd : 0,
+      average_delay_days:
+        shippingDelay && filteredRows.length > 0
           ? Number((totalDaysUntilEtd / filteredRows.length).toFixed(2))
           : 0,
     },
@@ -8602,6 +8652,26 @@ exports.getUpcomingEtdReport = async (req, res) => {
   }
 };
 
+exports.getShippingDelayReport = async (req, res) => {
+  try {
+    const dataset = await buildUpcomingEtdReportDataset({
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      shippingDelay: true,
+      user: req.user,
+    });
+
+    return res.status(200).json(dataset);
+  } catch (error) {
+    console.error("Get Shipping Delay Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load shipping delay report",
+      error: error.message,
+    });
+  }
+};
+
 exports.exportUpcomingEtdReport = async (req, res) => {
   try {
     const dataset = await buildUpcomingEtdReportDataset({
@@ -8687,6 +8757,79 @@ exports.exportUpcomingEtdReport = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to export upcoming ETD report",
+      error: error.message,
+    });
+  }
+};
+
+exports.exportShippingDelayReport = async (req, res) => {
+  try {
+    const dataset = await buildUpcomingEtdReportDataset({
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      shippingDelay: true,
+      user: req.user,
+    });
+    const columns = [
+      { key: "vendor", header: "Vendor" },
+      { key: "order_id", header: "PO" },
+      { key: "brand", header: "Brand" },
+      { key: "order_date", header: "Order Date" },
+      { key: "etd", header: "ETD" },
+      { key: "packed_date", header: "Packed Date" },
+      { key: "delay_days", header: "Delay (Days)" },
+      { key: "inspection_done_count", header: "Packed Items" },
+    ];
+    const exportRows = (Array.isArray(dataset?.vendors) ? dataset.vendors : [])
+      .flatMap((vendorEntry) =>
+        (Array.isArray(vendorEntry?.rows) ? vendorEntry.rows : []).map((row) => ({
+          vendor: normalizeLooseString(vendorEntry?.vendor),
+          order_id: String(row?.order_id || "").trim(),
+          brand: String(row?.brand || "").trim(),
+          order_date: formatDateDDMMYYYY(row?.order_date, ""),
+          etd: formatDateDDMMYYYY(row?.effective_etd, ""),
+          packed_date: formatDateDDMMYYYY(row?.last_inspected_date, ""),
+          delay_days: Number(row?.delay_days || 0),
+          inspection_done_count: Number(row?.inspection_done_count || 0),
+        })),
+      );
+    const dataRows = exportRows.map((row) =>
+      columns.map((column) => row[column.key] ?? ""),
+    );
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      columns.map((column) => column.header),
+      ...dataRows,
+    ]);
+    worksheet["!cols"] = columns.map((column, index) => ({
+      wch: Math.min(
+        40,
+        Math.max(
+          12,
+          column.header.length + 2,
+          ...dataRows.map((row) => String(row[index] ?? "").length + 2),
+        ),
+      ),
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Shipping Delay");
+    const fileBuffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+    const fileDate = new Date().toISOString().slice(0, 10);
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="shipping-delay-report-${fileDate}.xlsx"`,
+    );
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Shipping Delay Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export shipping delay report",
       error: error.message,
     });
   }
