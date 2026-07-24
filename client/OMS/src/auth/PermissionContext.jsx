@@ -14,7 +14,7 @@ import { isAdminLikeRole, normalizeUserRole } from "./permissions";
 const PermissionContext = createContext({
   permissions: {},
   permissionMeta: null,
-  loading: false,
+  loading: true,
   error: "",
   isAdmin: false,
   canEditPis: false,
@@ -29,10 +29,11 @@ export const PermissionProvider = ({ children }) => {
   const [permissions, setPermissions] = useState({});
   const [permissionMeta, setPermissionMeta] = useState(null);
   const [role, setRole] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const refreshPermissions = useCallback(async () => {
+    setLoading(true);
     let user = null;
     try {
       user = await getSessionUser();
@@ -46,10 +47,10 @@ export const PermissionProvider = ({ children }) => {
       setPermissions({});
       setPermissionMeta(null);
       setError("");
+      setLoading(false);
       return;
     }
 
-    setLoading(true);
     setError("");
     try {
       const response = await api.get("/permissions/me");

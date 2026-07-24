@@ -146,42 +146,59 @@ const assertBrandIdsExist = async (brandIds = []) => {
   return ids;
 };
 
-const getVendorAccessOptions = async ({ user = null } = {}) => {
-  const [brands, vendors, orderPairs] = await Promise.all([
-    Brand.find({}).select("_id name").lean(),
-    Vendor.find({
-      $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
-    })
-      .select("_id name vendor_code brands is_active")
-      .lean(),
-    Order.aggregate([
-      {
-        $project: {
-          brand: { $trim: { input: { $ifNull: ["$brand", ""] } } },
-          vendor_id: {
-            $convert: {
-              input: "$vendor.vendor_id",
-              to: "string",
-              onError: "",
-              onNull: "",
-            },
+const getVendorAccessOptions = async ({
+  user = null,
+  models = {},
+  maxTimeMS = 0,
+} = {}) => {
+  const BrandModel = models.Brand || Brand;
+  const VendorModel = models.Vendor || Vendor;
+  const OrderModel = models.Order || Order;
+  const brandQuery = BrandModel.find({}).select("_id name");
+  const vendorQuery = VendorModel.find({
+    $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
+  }).select("_id name vendor_code brands is_active");
+  const orderQuery = OrderModel.aggregate([
+    {
+      $project: {
+        brand: { $trim: { input: { $ifNull: ["$brand", ""] } } },
+        vendor_id: {
+          $convert: {
+            input: "$vendor.vendor_id",
+            to: "string",
+            onError: "",
+            onNull: "",
           },
-          vendor_name: {
-            $trim: {
-              input: {
-                $cond: [
-                  { $eq: [{ $type: "$vendor" }, "string"] },
-                  "$vendor",
-                  { $ifNull: ["$vendor.name", ""] },
-                ],
-              },
+        },
+        vendor_name: {
+          $trim: {
+            input: {
+              $cond: [
+                { $eq: [{ $type: "$vendor" }, "string"] },
+                "$vendor",
+                { $ifNull: ["$vendor.name", ""] },
+              ],
             },
           },
         },
       },
-      { $match: { brand: { $ne: "" }, vendor_name: { $ne: "" } } },
-      { $group: { _id: { brand: "$brand", vendor_id: "$vendor_id", vendor_name: "$vendor_name" } } },
-    ]),
+    },
+    { $match: { brand: { $ne: "" }, vendor_name: { $ne: "" } } },
+    { $group: { _id: { brand: "$brand", vendor_id: "$vendor_id", vendor_name: "$vendor_name" } } },
+  ]);
+  const boundedMaxTimeMS = Number.parseInt(String(maxTimeMS || "0"), 10);
+  if (Number.isFinite(boundedMaxTimeMS) && boundedMaxTimeMS > 0) {
+    brandQuery.maxTimeMS(boundedMaxTimeMS);
+    vendorQuery.maxTimeMS(boundedMaxTimeMS);
+    orderQuery.option({
+      allowDiskUse: false,
+      maxTimeMS: boundedMaxTimeMS,
+    });
+  }
+  const [brands, vendors, orderPairs] = await Promise.all([
+    brandQuery.lean(),
+    vendorQuery.lean(),
+    orderQuery,
   ]);
 
   const brandById = new Map();

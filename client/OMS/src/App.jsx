@@ -77,6 +77,7 @@ const WeeklySummary = lazy(() => import("./pages/WeeklySummary"));
 const DailySummary = lazy(() => import("./pages/DailySummary"));
 const Complaints = lazy(() => import("./pages/Complaints"));
 const SecurityDashboard = lazy(() => import("./pages/SecurityDashboard"));
+const OmsAssistant = lazy(() => import("./pages/OmsAssistant"));
 
 // import Users from "./pages/Users"; // later
 const clearStaleUiOverlays = ({ removeCustomModalRoots = false } = {}) => {
@@ -742,6 +743,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <SecurityDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/oms-assistant"
+            element={
+              <ProtectedRoute permissionModule="oms_assistant">
+                <OmsAssistant />
               </ProtectedRoute>
             }
           />

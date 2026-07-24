@@ -121,6 +121,7 @@ const Navbar = () => {
   const canViewPis = hasPermission("pis", "view");
   const canViewWorkflow = hasPermission("workflow", "view");
   const canViewSamples = hasPermission("samples", "view");
+  const canAccessOmsAssistant = hasPermission("oms_assistant", "view");
   const canManageWorkflow = isManagerLikeRole(permissionRole)
     && hasPermission("workflow", "manage");
 
@@ -211,11 +212,20 @@ const Navbar = () => {
     if (isQcOnlyRole) {
       return [
         routeMenuItem("qc", "QC", "/qc"),
+        ...(canAccessOmsAssistant
+          ? [routeMenuItem("oms-assistant", "OMS Assistant", "/oms-assistant")]
+          : []),
         routeMenuItem("inspector-reports", "Inspections Report", "/reports/inspectors"),
       ];
     }
 
     const links = [];
+
+    if (canAccessOmsAssistant) {
+      links.push(
+        routeMenuItem("oms-assistant", "OMS Assistant", "/oms-assistant"),
+      );
+    }
 
     if (canAccessQc) {
       links.push(
@@ -236,7 +246,14 @@ const Navbar = () => {
     }
 
     return links;
-  }, [canAccessQc, hasPermission, isQcOnlyRole, isVendorAdmin, permissionRole]);
+  }, [
+    canAccessOmsAssistant,
+    canAccessQc,
+    hasPermission,
+    isQcOnlyRole,
+    isVendorAdmin,
+    permissionRole,
+  ]);
 
   const generalMenuItems = useMemo(
     () => (isQcOnlyRole ? [] : [routeMenuItem("home", "Home", "/")]),

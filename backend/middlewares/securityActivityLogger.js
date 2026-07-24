@@ -12,7 +12,12 @@ const safeResolve = (resolver, req, res) => {
 const securityLog = (action, resourceType, options = {}) => (req, res, next) => {
   res.on("finish", () => {
     const statusCode = Number(res.statusCode || 0);
-    if (statusCode < 200 || statusCode >= 400) return;
+    if (
+      (statusCode < 200 || statusCode >= 400)
+      && options.includeFailures !== true
+    ) {
+      return;
+    }
 
     const metadata = {
       method: req.method,

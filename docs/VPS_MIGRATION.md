@@ -5,6 +5,7 @@ This runbook prepares the OMS stack for a Linux VPS deployment:
 - Frontend: Vite build served by nginx
 - Process manager: PM2
 - CI/CD: GitHub Actions triggers remote deploys over SSH
+- Optional OMS Assistant: Groq Responses API + a separate read-only MongoDB credential
 
 ## 1. Pre-Migration Checklist
 
@@ -88,7 +89,16 @@ Set real values for:
 - `MONGO_URI`
 - `JWT_SECRET`
 - `CORS_ORIGIN`
+- `GROQ_API_KEY` and `OMS_CHAT_MONGO_URI` when OMS Assistant is enabled; `OMS_CHAT_LLM_MODEL` optionally overrides the default Groq model
 - Google integration keys if those features are used
+
+OMS Assistant values are backend-only. Never add them to a client/Vite env file, never reuse `MONGO_URI` as `OMS_CHAT_MONGO_URI`, and never grant its database user write privileges. Create and test the database user before deployment using [OMS_ASSISTANT.md](OMS_ASSISTANT.md#create-the-read-only-mongodb-user).
+
+After editing, restrict the production env file:
+
+```bash
+chmod 600 /var/www/order-management-system/backend/.env.production
+```
 
 If PIS spreadsheet uploads are enabled, make sure LibreOffice is installed on the VPS. If the executable is not on the default `PATH`, set:
 
@@ -212,6 +222,26 @@ pm2 logs oms-backend --lines 100
 
 Expected `/healthz` response: `200` with `{ ok: true, ... }`.
 
+### OMS Assistant verification
+
+Before restarting the app, independently confirm that `OMS_CHAT_MONGO_URI` can read an approved collection and receives an authorization error for an insert. The exact safe probes are in [OMS_ASSISTANT.md](OMS_ASSISTANT.md#verify-the-database-credential).
+
+After deployment:
+
+1. Sign in with an account whose effective permissions include `oms_assistant.view`.
+2. Open `/oms-assistant` and submit an example question.
+3. Confirm the answer includes safe metadata/supporting rows and does not expose an aggregation pipeline.
+4. Confirm a user without the permission receives `403`.
+5. Review the successful request's application audit output and verify it contains outcome metadata, not credentials or full result documents.
+
+An authenticated API check can also target:
+
+```text
+POST https://api.ghouse-sourcing.com/api/oms-chat/ask
+```
+
+See [OMS_ASSISTANT.md](OMS_ASSISTANT.md#production-deployment-and-verification) for the request and exact deployment verification commands.
+
 ## 10. Zero-Downtime Deploy
 
 Use the prepared deploy script:
@@ -254,6 +284,8 @@ Automated deploy from GitHub Actions:
    - Disable password auth, use SSH keys
    - Keep OS packages updated
    - Rotate JWT/Google secrets periodically
+   - Rotate the Groq key and OMS Assistant database password independently
+   - Re-test that the OMS Assistant database user cannot write after any MongoDB role change
 4. CI/CD maintenance:
    - Rotate the GitHub Actions deploy key periodically
    - Review Actions logs after each production deploy

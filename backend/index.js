@@ -37,6 +37,7 @@ const workflowRouter = require("./routers/workflow.routes");
 const notificationsRouter = require("./routers/notifications.routes");
 const complaintsRouter = require("./routers/complaints.routes");
 const securityRouter = require("./routers/security.routes");
+const omsChatRouter = require("./routers/omsChat.routes");
 const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
 const { createWorkflowSocketServer } = require("./realtime/workflowSocket");
@@ -45,6 +46,9 @@ const {
   stopSecurityBaselineCron,
 } = require("./services/securityBaselineCron");
 const { closePdfRenderer } = require("./services/pdfRenderer");
+const {
+  closeOmsChatConnection,
+} = require("./services/omsChatQuery.service");
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
@@ -145,6 +149,8 @@ app.use("/complaints", complaintsRouter);
 app.use("/api/complaints", complaintsRouter);
 app.use("/security", securityRouter);
 app.use("/api/security", securityRouter);
+app.use("/oms-chat", omsChatRouter);
+app.use("/api/oms-chat", omsChatRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK v2" });
@@ -217,6 +223,7 @@ const startServer = async () => {
           await closePdfRenderer();
           await closeQueues();
           await closeRedisClients();
+          await closeOmsChatConnection();
           await mongoose.connection.close(false);
           console.log("MongoDB connection closed.");
           process.exit(0);

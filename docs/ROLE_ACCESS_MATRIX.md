@@ -2,18 +2,34 @@
 
 Generated on: 2026-02-26
 
+OMS Assistant/permission-system addendum updated: 2026-07-23
+
 ## 1) Defined roles
 
 | Role | Source |
 |---|---|
-| `admin`, `manager`, `QC`, `dev`, `user` | `backend/models/user.model.js` |
+| `admin`, `manager`, `product manager`, `inspection manager`, `super admin`, `QC`, `dev`, `user` | `backend/helpers/userRole.js`, `backend/models/user.model.js` |
 
 ## 2) Authorization behavior
 
 | Layer | Rule | Source |
 |---|---|---|
-| Backend middleware | Access allowed when normalized (case-insensitive) `req.user.role` is in `authorize(...)` list | `backend/middlewares/authorize.middleware.js` |
-| Frontend token decode | UI visibility is based on decoded JWT `role` | `client/OMS/src/auth/auth.service.js`, `client/OMS/src/auth/auth.utils.js` |
+| Backend authentication | Cookie/bearer token is verified and the current user, including allowed brand scope, is loaded | `backend/middlewares/auth.middleware.js` |
+| Backend permissions | Permission-managed routes call `requirePermission(module, action)` against effective role permissions | `backend/middlewares/permission.middleware.js`, `backend/services/permission.service.js` |
+| Backend data scope | Brand/vendor access is derived from the current user and applied server-side | `backend/services/userDataAccess.service.js` |
+| Frontend permissions | Permission context controls navigation/routes; this is a UX check, not the security boundary | `client/OMS/src/auth/PermissionContext.jsx`, guarded route/page components |
+| Legacy role checks | Some older routes/UI still use normalized role lists in addition to the permission system | `backend/middlewares/authorize.middleware.js`, frontend components |
+
+## OMS Assistant permission
+
+| Feature | Required permission | Backend enforcement | Data scope |
+| --- | --- | --- | --- |
+| Open the OMS Assistant page | `oms_assistant.view` | UI route/navigation check | Current user's effective permissions |
+| `POST /oms-chat/ask` and `/api/oms-chat/ask` | `oms_assistant.view` | Authentication + `requirePermission("oms_assistant", "view")` | All OMS business data is readable; the dedicated database credential blocks writes |
+
+The permission module is `oms_assistant` (“OMS Assistant”) and only its `view` action is used. Default role matrices grant view access to the roles configured for reporting access; administrators can change effective role permissions through the existing permission-management screen/API. Existing stored role matrices are merged with code defaults for newly introduced modules.
+
+Frontend visibility is not sufficient authorization. Removing the navigation item or calling the endpoint directly does not bypass the backend guard. A server-issued conversation ID is also ownership-checked and cannot be used to continue another user's assistant context.
 
 ## 3) Backend API role matrix
 

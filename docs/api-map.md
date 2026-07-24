@@ -13,6 +13,43 @@ Generated: 2026-05-26T04:50:54.322Z
 
 This report is generated from static code analysis of Express route files, mounted router prefixes, controller return statements, and frontend axios/fetch calls. Request fields, success shapes, and error cases are inferred only from code references such as `req.params`, `req.query`, `req.body`, and `res.status(...).json(...)`. Dynamic frontend URLs are normalized to route patterns where possible; any unclear field is marked as inferred or unclear.
 
+## OMS Assistant API
+
+This hand-maintained section documents the OMS Assistant routes added after the generated scan above. See [OMS_ASSISTANT.md](OMS_ASSISTANT.md) for the security model, read-only database setup, and operations guide.
+
+| Method | API Path | Auth Required | Permission | Notes |
+| --- | --- | --- | --- | --- |
+| POST | `/oms-chat/ask` | Yes | `oms_assistant.view` | Frontend/shared API-client form |
+| POST | `/api/oms-chat/ask` | Yes | `oms_assistant.view` | Public API alias |
+
+Request:
+
+```json
+{
+  "message": "Give me shipment totals by vendor for June 2026.",
+  "conversationId": "optional server-issued identifier"
+}
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "answer": "A concise answer grounded in OMS data.",
+  "conversationId": "server-issued identifier",
+  "metadata": {
+    "dateRange": {},
+    "filters": {},
+    "returnedRows": 0,
+    "truncated": false
+  },
+  "rows": []
+}
+```
+
+`message` is required and length-limited. `conversationId` is optional but must belong to the authenticated user. The server does not accept browser-supplied provider state. Non-2xx responses contain a safe message for invalid input, unauthenticated/forbidden access, rate limiting, missing configuration, rejected tool calls, provider/database failure, or timeout. Neither successful nor failed responses expose credentials, internal aggregation pipelines, provider payloads, or stack traces.
+
 ## API Summary
 
 | Method | API Path | Backend File | Controller | Middleware | Auth Required | Roles | Frontend Used | Notes |
