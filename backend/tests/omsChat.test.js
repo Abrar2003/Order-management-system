@@ -1045,10 +1045,10 @@ test("oms_assistant.view permission is enforced before route work", async (t) =>
   assert.equal(nextCalled, false);
 });
 
-test("oms_assistant.view permission allows the request to continue", async (t) => {
+test("oms_assistant.view permission allows manager requests to continue", async (t) => {
   t.mock.method(RolePermission, "findOne", () => ({
     lean: async () => ({
-      role: "user",
+      role: "manager",
       permissions: { oms_assistant: { view: true } },
     }),
   }));
@@ -1056,13 +1056,37 @@ test("oms_assistant.view permission allows the request to continue", async (t) =
   let nextCalled = false;
 
   await requirePermission("oms_assistant", "view")(
-    { user: USER },
+    { user: { ...USER, role: "manager" } },
     res,
     () => { nextCalled = true; },
   );
 
   assert.equal(nextCalled, true);
   assert.equal(res.body, null);
+});
+
+test("oms_assistant.view is locked to false for non-manager/admin roles (user, qc, dev)", async (t) => {
+  t.mock.method(RolePermission, "findOne", () => ({
+    lean: async () => ({
+      role: "user",
+      permissions: { oms_assistant: { view: true } },
+    }),
+  }));
+
+  for (const role of ["user", "qc", "dev"]) {
+    const res = responseRecorder();
+    let nextCalled = false;
+
+    await requirePermission("oms_assistant", "view")(
+      { user: { ...USER, role } },
+      res,
+      () => { nextCalled = true; },
+    );
+
+    assert.equal(res.statusCode, 403);
+    assert.match(res.body.message, /oms_assistant\.view/);
+    assert.equal(nextCalled, false);
+  }
 });
 
 test("missing Groq key fails before conversation or network work", async (t) => {

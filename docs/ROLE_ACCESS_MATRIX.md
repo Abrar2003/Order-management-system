@@ -27,7 +27,7 @@ OMS Assistant/permission-system addendum updated: 2026-07-23
 | Open the OMS Assistant page | `oms_assistant.view` | UI route/navigation check | Current user's effective permissions |
 | `POST /oms-chat/ask` and `/api/oms-chat/ask` | `oms_assistant.view` | Authentication + `requirePermission("oms_assistant", "view")` | All OMS business data is readable; the dedicated database credential blocks writes |
 
-The permission module is `oms_assistant` (“OMS Assistant”) and only its `view` action is used. Default role matrices grant view access to the roles configured for reporting access; administrators can change effective role permissions through the existing permission-management screen/API. Existing stored role matrices are merged with code defaults for newly introduced modules.
+The permission module is `oms_assistant` (“OMS Assistant”) and only its `view` action is used. Access is restricted exclusively to managers and admin roles (`admin`, `super_admin`, `manager`, `product_manager`, `inspection_manager`). Permission is hard-locked to `false` for non-manager/non-admin roles (`user`, `qc`, `dev`). Existing stored role matrices are merged with code defaults for newly introduced modules.
 
 Frontend visibility is not sufficient authorization. Removing the navigation item or calling the endpoint directly does not bypass the backend guard. A server-issued conversation ID is also ownership-checked and cannot be used to continue another user's assistant context.
 

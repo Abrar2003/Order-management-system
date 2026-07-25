@@ -165,6 +165,12 @@ const lockAdminOnlyPermissions = (roleKey, permissions) => {
     }
   });
 
+  PERMISSION_ACTIONS.forEach((action) => {
+    if (permissions?.oms_assistant && action in permissions.oms_assistant) {
+      permissions.oms_assistant[action] = false;
+    }
+  });
+
   return applyRequiredPermissionFloors(roleKey, permissions);
 };
 
@@ -208,7 +214,6 @@ const buildUserPermissions = () => {
     "containers",
     "samples",
     "reports",
-    "oms_assistant",
     "calendar",
     "brands",
     "vendors",
@@ -242,7 +247,6 @@ const buildQcPermissions = () => {
     "containers",
     "samples",
     "reports",
-    "oms_assistant",
     "brands",
     "vendors",
     "finishes",
@@ -338,6 +342,7 @@ const isPermissionCellLocked = (role, moduleKey, action) => {
   }
   if (isAdminLikeRole(roleKey)) return false;
   if (moduleKey === "permissions") return true;
+  if (moduleKey === "oms_assistant") return true;
   if (
     moduleKey === "product_type_templates" &&
     PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS.includes(action)
@@ -375,6 +380,11 @@ const buildPermissionMeta = () => ({
       roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
       actions: PERMISSION_ADMIN_ONLY_ACTIONS,
       message: "Permission-management rights are admin-only.",
+    },
+    oms_assistant: {
+      roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
+      actions: PERMISSION_ACTIONS,
+      message: "OMS Assistant access is restricted to managers and admins.",
     },
   },
 });
