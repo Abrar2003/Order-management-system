@@ -5,7 +5,7 @@ import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
 import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import UploadFinishModal from "../components/UploadFinishModal";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { formatDateDDMMYYYY, formatDateTimeIST } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import "../App.css";
 
@@ -192,6 +192,7 @@ const Finishes = () => {
                       <th>Color Code</th>
                       <th>Brands</th>
                       <th>Items</th>
+                      <th>Uploaded At</th>
                       <th>Updated</th>
                       {canManageFinishes && <th>Action</th>}
                     </tr>
@@ -199,7 +200,7 @@ const Finishes = () => {
                   <tbody>
                     {rows.length === 0 && (
                       <tr className="responsive-card-table-empty-row">
-                        <td colSpan={canManageFinishes ? 10 : 9} className="text-center py-4">
+                        <td colSpan={canManageFinishes ? 11 : 10} className="text-center py-4">
                           No finishes found
                         </td>
                       </tr>
@@ -245,6 +246,9 @@ const Finishes = () => {
                             ) : (
                               "N/A"
                             )}
+                          </td>
+                          <td data-label="Uploaded At">
+                            {formatDateTimeIST(finish?.created_at, "N/A")}
                           </td>
                           <td data-label="Updated">
                             {finish?.updated_at ? formatDateDDMMYYYY(finish.updated_at) : "N/A"}

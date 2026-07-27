@@ -1,8 +1,10 @@
 const fs = require("fs/promises");
 const path = require("path");
 const XLSX = require("xlsx");
+const ExcelJS = require("exceljs");
 
 const { loadEnvFiles } = require("../config/loadEnv");
+const { parsePisUpload } = require("../helpers/pisExcelParser");
 
 const EXCEL_EXTENSIONS = new Set([".xlsx", ".xls"]);
 
@@ -73,6 +75,23 @@ const extractItemCodeFromWorkbook = (filePath) => {
   }
 };
 
+const deriveIsaaFolderCode = (folderName) =>
+  String(folderName ?? "").trim().match(/^(\d+)/)?.[1] || "";
+
+const evaluateIsaaCandidate = ({ folderCode, articleNumber }) => {
+  const parsedArticleNumber = normalizeText(articleNumber);
+  if (parsedArticleNumber === folderCode) {
+    return { upload: true, reason: "" };
+  }
+
+  return {
+    upload: false,
+    reason: parsedArticleNumber
+      ? `PIS article number ${parsedArticleNumber} does not match folder code ${folderCode}`
+      : "PIS article number is missing",
+  };
+};
+
 const parseArgs = (argv = []) => {
   const options = {
     folderPath: process.env.PIS_UPLOAD_FOLDER || "",
@@ -95,6 +114,8 @@ const parseArgs = (argv = []) => {
     help: false,
     dryRun: toBoolean(process.env.PIS_UPLOAD_DRY_RUN, false),
     recursive: toBoolean(process.env.PIS_UPLOAD_RECURSIVE, true),
+    isaaLayout: toBoolean(process.env.PIS_UPLOAD_ISAA_LAYOUT, false),
+    reportPath: process.env.PIS_UPLOAD_REPORT_PATH || "",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -166,6 +187,18 @@ const parseArgs = (argv = []) => {
       options.dryRun = true;
       continue;
     }
+    if (arg === "--isaa-layout") {
+      options.isaaLayout = true;
+      continue;
+    }
+    if (arg === "--report" && nextValue) {
+      options.reportPath = consumeNext();
+      continue;
+    }
+    if (arg.startsWith("--report=")) {
+      options.reportPath = arg.slice("--report=".length).trim();
+      continue;
+    }
     if (arg === "--no-recursive") {
       options.recursive = false;
       continue;
@@ -221,6 +254,136 @@ const collectWorkbookFiles = async (targetPath, { recursive = true } = {}) => {
   }
 
   return files.sort((left, right) => left.localeCompare(right));
+};
+
+const collectIsaaWorkbookFiles = async (targetPath) => {
+  const rootPath = path.resolve(targetPath);
+  const vendors = await fs.readdir(rootPath, { withFileTypes: true });
+  const candidates = [];
+
+  for (const vendor of vendors) {
+    if (!vendor.isDirectory()) continue;
+
+    const vendorPath = path.join(rootPath, vendor.name);
+    const itemFolders = await fs.readdir(vendorPath, { withFileTypes: true });
+    for (const itemFolder of itemFolders) {
+      if (!itemFolder.isDirectory()) continue;
+
+      const folderCode = deriveIsaaFolderCode(itemFolder.name);
+      if (!folderCode) continue;
+
+      const itemFolderPath = path.join(vendorPath, itemFolder.name);
+      const files = await fs.readdir(itemFolderPath, { withFileTypes: true });
+      for (const file of files) {
+        if (
+          !file.isFile()
+          || path.extname(file.name).toLowerCase() !== ".xlsx"
+          || file.name.startsWith("~$")
+        ) {
+          continue;
+        }
+
+        const filePath = path.join(itemFolderPath, file.name);
+        candidates.push({
+          filePath,
+          relativeFilePath: path.relative(rootPath, filePath),
+          vendor: vendor.name,
+          folder: itemFolder.name,
+          folderCode,
+          articleNumber: "",
+        });
+      }
+    }
+  }
+
+  return candidates.sort((left, right) =>
+    left.relativeFilePath.localeCompare(right.relativeFilePath),
+  );
+};
+
+const toIsaaException = (candidate, reason, action = "skipped") => ({
+  vendor: candidate.vendor,
+  folder: candidate.folder,
+  sourcePath: candidate.relativeFilePath,
+  folderCode: candidate.folderCode,
+  articleNumber: candidate.articleNumber || "",
+  action,
+  reason,
+});
+
+const validateIsaaCandidate = async (candidate) => {
+  try {
+    const parsed = await parsePisUpload({
+      originalname: path.basename(candidate.filePath),
+      path: candidate.filePath,
+    });
+    const articleNumber = normalizeText(parsed.articleNumber);
+    const validation = evaluateIsaaCandidate({
+      folderCode: candidate.folderCode,
+      articleNumber,
+    });
+
+    return {
+      ...candidate,
+      articleNumber,
+      ...validation,
+    };
+  } catch (error) {
+    return {
+      ...candidate,
+      upload: false,
+      reason: normalizeText(error?.message) || "Unable to parse PIS workbook",
+    };
+  }
+};
+
+const defaultIsaaReportPath = () => {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.resolve(__dirname, "..", "..", "outputs", `isaa-pis-upload-exceptions-${timestamp}.xlsx`);
+};
+
+const writeIsaaExceptionReport = async ({ reportPath, exceptions }) => {
+  await fs.mkdir(path.dirname(reportPath), { recursive: true });
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Exceptions", {
+    views: [{ state: "frozen", ySplit: 4 }],
+  });
+  sheet.mergeCells("A1:G1");
+  sheet.getCell("A1").value = "ISAA PIS Upload Exceptions";
+  sheet.getCell("A2").value = "Generated";
+  sheet.getCell("B2").value = new Date();
+  sheet.getCell("B2").numFmt = "yyyy-mm-dd hh:mm";
+  sheet.getCell("A3").value = "Exception count";
+  sheet.getCell("B3").value = exceptions.length;
+
+  sheet.columns = [
+    { header: "Vendor", key: "vendor", width: 28 },
+    { header: "Item folder", key: "folder", width: 38 },
+    { header: "Source path", key: "sourcePath", width: 68 },
+    { header: "Folder code", key: "folderCode", width: 14 },
+    { header: "Article number", key: "articleNumber", width: 16 },
+    { header: "Action", key: "action", width: 14 },
+    { header: "Reason", key: "reason", width: 56 },
+  ];
+  sheet.getRow(4).values = [
+    "Vendor",
+    "Item folder",
+    "Source path",
+    "Folder code",
+    "Article number",
+    "Action",
+    "Reason",
+  ];
+  exceptions.forEach((exception) => sheet.addRow(exception));
+  sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" }, size: 14 };
+  sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } };
+  sheet.getRow(4).font = { bold: true, color: { argb: "FFFFFFFF" } };
+  sheet.getRow(4).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1D4ED8" } };
+  sheet.getRow(4).alignment = { vertical: "middle" };
+  sheet.autoFilter = "A4:G4";
+
+  await workbook.xlsx.writeFile(reportPath);
 };
 
 const readJsonResponse = async (response) => {
@@ -344,6 +507,128 @@ const uploadPisWorkbook = async ({ apiBaseUrl, token, itemId, filePath }) => {
   });
 };
 
+const runIsaaLayoutUpload = async ({ options, targetPath }) => {
+  const candidates = await collectIsaaWorkbookFiles(targetPath);
+  if (candidates.length === 0) {
+    throw new Error(`No direct item-folder .xlsx files found in ${targetPath}`);
+  }
+
+  const summary = {
+    total: candidates.length,
+    validated: 0,
+    uploaded: 0,
+    dryRunMatched: 0,
+    skipped: 0,
+    missingItem: 0,
+    failed: 0,
+  };
+  const exceptions = [];
+  const readyCandidates = [];
+
+  console.log(`Backend   : ${options.apiBaseUrl}`);
+  console.log(`Target    : ${targetPath}`);
+  console.log(`Workbooks : ${candidates.length}`);
+  console.log(`Layout    : ISAA vendor/item-folder`);
+  console.log(`Mode      : ${options.dryRun ? "dry-run" : "upload"}`);
+
+  for (const candidate of candidates) {
+    const validation = await validateIsaaCandidate(candidate);
+    if (!validation.upload) {
+      summary.skipped += 1;
+      exceptions.push(toIsaaException(validation, validation.reason));
+      console.warn(`[skipped] ${validation.relativeFilePath} :: ${validation.reason}`);
+      continue;
+    }
+
+    summary.validated += 1;
+    readyCandidates.push(validation);
+  }
+
+  if (readyCandidates.length > 0) {
+    let token = "";
+    try {
+      token = await resolveAccessToken(options);
+    } catch (error) {
+      const reason = `Authentication failed: ${normalizeText(error?.message) || "Unknown error"}`;
+      summary.failed += readyCandidates.length;
+      readyCandidates.forEach((candidate) => {
+        exceptions.push(toIsaaException(candidate, reason, "failed"));
+      });
+    }
+
+    for (const candidate of token ? readyCandidates : []) {
+      let item = null;
+      try {
+        item = await findItemByCode({
+          apiBaseUrl: options.apiBaseUrl,
+          token,
+          code: candidate.folderCode,
+        });
+      } catch (error) {
+        summary.failed += 1;
+        const reason = `Item lookup failed: ${normalizeText(error?.message) || "Unknown error"}`;
+        exceptions.push(toIsaaException(candidate, reason, "failed"));
+        console.error(`[lookup-failed] ${candidate.relativeFilePath} -> ${candidate.folderCode} :: ${reason}`);
+        continue;
+      }
+
+      if (!item?._id) {
+        summary.missingItem += 1;
+        const reason = `No OMS item matches code ${candidate.folderCode}`;
+        exceptions.push(toIsaaException(candidate, reason));
+        console.warn(`[missing-item] ${candidate.relativeFilePath} -> ${candidate.folderCode}`);
+        continue;
+      }
+
+      if (options.dryRun) {
+        summary.dryRunMatched += 1;
+        console.log(`[matched] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id}`);
+        continue;
+      }
+
+      try {
+        const response = await uploadPisWorkbook({
+          apiBaseUrl: options.apiBaseUrl,
+          token,
+          itemId: item._id,
+          filePath: candidate.filePath,
+        });
+        summary.uploaded += 1;
+        console.log(
+          `[uploaded] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id} -> ${normalizeText(response?.data?.pis_file?.key)}`,
+        );
+      } catch (error) {
+        summary.failed += 1;
+        const reason = `Upload failed: ${normalizeText(error?.message) || "Unknown error"}`;
+        exceptions.push(toIsaaException(candidate, reason, "failed"));
+        console.error(`[upload-failed] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id} :: ${reason}`);
+      }
+    }
+  }
+
+  const reportPath = options.reportPath
+    ? path.resolve(options.reportPath)
+    : defaultIsaaReportPath();
+  await writeIsaaExceptionReport({ reportPath, exceptions });
+
+  console.log("");
+  console.log("Summary");
+  console.log(`  Total        : ${summary.total}`);
+  console.log(`  Validated    : ${summary.validated}`);
+  console.log(`  Uploaded     : ${summary.uploaded}`);
+  console.log(`  Dry-run hits : ${summary.dryRunMatched}`);
+  console.log(`  Skipped      : ${summary.skipped}`);
+  console.log(`  Missing item : ${summary.missingItem}`);
+  console.log(`  Failed       : ${summary.failed}`);
+  console.log(`  Report       : ${reportPath}`);
+
+  if (summary.failed > 0) {
+    process.exitCode = 1;
+  }
+
+  return { summary, exceptions, reportPath };
+};
+
 const printUsage = () => {
   console.log("Usage:");
   console.log(
@@ -361,6 +646,8 @@ const printUsage = () => {
   console.log("  --password <value>     Backend password for /auth/signin");
   console.log("  --dry-run              Resolve item matches without uploading");
   console.log("  --no-recursive         Only scan the top-level folder");
+  console.log("  --isaa-layout          Scan only <vendor>/<item_code item_name>/*.xlsx and validate folder codes");
+  console.log("  --report <path>        ISAA exception .xlsx path (defaults to workspace outputs)");
 };
 
 const main = async () => {
@@ -381,6 +668,12 @@ const main = async () => {
 
   options.apiBaseUrl = resolveApiBaseUrl(options.apiBaseUrl);
   const targetPath = path.resolve(options.folderPath);
+
+  if (options.isaaLayout) {
+    await runIsaaLayoutUpload({ options, targetPath });
+    return;
+  }
+
   const workbookFiles = await collectWorkbookFiles(targetPath, {
     recursive: options.recursive,
   });
@@ -476,7 +769,16 @@ const main = async () => {
   }
 };
 
-main().catch((error) => {
-  console.error("Batch PIS upload failed:", error?.message || error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("Batch PIS upload failed:", error?.message || error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  collectIsaaWorkbookFiles,
+  deriveIsaaFolderCode,
+  evaluateIsaaCandidate,
+  validateIsaaCandidate,
+};
