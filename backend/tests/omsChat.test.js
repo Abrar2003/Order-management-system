@@ -141,6 +141,18 @@ const queryResult = (rows = [], overrides = {}) => ({
   },
 });
 
+const emptyEntityQuery = async (request) => queryResult([], {
+  metadata: {
+    filters: { collection: request.collection, purpose: request.purpose },
+  },
+  audit: { collection: request.collection },
+});
+
+const withEntityResolver = (executor) => async (request) =>
+  /^Resolve /i.test(request.purpose)
+    ? emptyEntityQuery(request)
+    : executor(request);
+
 const fakeConnection = (toArray, capture = {}) => ({
   db: {
     collection(collection) {
@@ -219,6 +231,9 @@ test("chat tool loop handles a valid count without exposing server state", async
       queryExecutor: async (request) => {
         executed.push(request);
         validatePipeline(request.collection, request.pipeline);
+        if (/^Resolve /i.test(request.purpose)) {
+          return queryResult([], { audit: { collection: request.collection } });
+        }
         return queryResult([{ total: 7 }]);
       },
     },
@@ -227,9 +242,11 @@ test("chat tool loop handles a valid count without exposing server state", async
   assert.equal(result.answer, "There are 7 pending orders.");
   assert.equal(result.conversationId, CONVERSATION_ID);
   assert.deepEqual(result.rows, [{ total: 7 }]);
-  assert.equal(executed.length, 1);
+  assert.equal(executed.length, 5);
+  assert.equal(executed.at(-1).collection, "orders");
   assert.equal(openai.calls.length, 2);
   assert.equal(openai.calls[0].body.parallel_tool_calls, false);
+  assert.match(openai.calls[0].body.instructions, /RESOLVED QUESTION CONTEXT/);
   assert.equal(Object.hasOwn(openai.calls[0].body, "store"), false);
   assert.equal(Object.hasOwn(openai.calls[0].body, "safety_identifier"), false);
   assert.equal(
@@ -243,6 +260,7 @@ test("chat tool loop handles a valid count without exposing server state", async
   assert.equal(openai.calls[1].body.input[1].type, "function_call");
   assert.equal(openai.calls[1].body.input[2].type, "function_call_output");
   assert.doesNotMatch(openai.calls[1].body.instructions, /SCHEMA CATALOGUE/);
+  assert.match(openai.calls[1].body.instructions, /resolved item codes/);
   const sent = JSON.stringify(openai.calls);
   assert.doesNotMatch(sent, /test-key-not-sent-anywhere/);
   assert.doesNotMatch(sent, /allowed_brands|allowed_vendors|Bearer|cookie/i);
@@ -263,6 +281,175 @@ test("chat tool loop handles a valid count without exposing server state", async
   );
 });
 
+test("resolved item descriptions bypass model aggregation for shipment reports", async (t) => {
+  configureAssistant(t);
+  for (const question of [
+    "How many pieces were shipped of lando tables?",
+    "How much quantity were shipped of lando tables?",
+    "How many shipments have been of the lando tables?",
+    "Total shipped quantity of lando tables",
+  ]) {
+    assert.ok(serviceInternals.extractEntityCandidates(question).length);
+  }
+  assert.ok(serviceInternals.parseQuestionDateRange(
+    "How many pieces were shipped of lando tables in the last 6 months?",
+  ));
+  const openai = fakeOpenAi();
+  const executed = [];
+
+  const result = await askOmsAssistant(
+    {
+      message: "How many pieces were shipped of lando tables in last 6 months?",
+      user: USER,
+    },
+    {
+      groqClient: openai,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: async (request) => {
+        executed.push(request);
+        validatePipeline(request.collection, request.pipeline);
+        if (request.collection === "brands") {
+          return queryResult([], { audit: { collection: "brands" } });
+        }
+        if (request.collection === "items") {
+          return queryResult(
+            [{ code: "LANDO-01", name: "Table", description: "Lando table" }],
+            { audit: { collection: "items" } },
+          );
+        }
+        if (request.collection === "vendors") {
+          return queryResult([], { audit: { collection: "vendors" } });
+        }
+        return /^Resolve /i.test(request.purpose)
+          ? queryResult([], { audit: { collection: "orders" } })
+          : queryResult([{ order_id: "PO-1", shipped_quantity: 42 }]);
+      },
+    },
+  );
+
+  assert.deepEqual(executed.map(({ collection }) => collection), [
+    "brands",
+    "items",
+    "vendors",
+    "orders",
+    "orders",
+  ]);
+  assert.equal(openai.calls.length, 0);
+  assert.equal(result.answer, "42 pieces were shipped across 1 order. Orders: PO-1.");
+  assert.ok(executed.at(-1).pipeline.some((stage) =>
+    stage.$match?.["shipment.stuffing_date"]?.$gte));
+});
+
+test("known brands use orders.brand instead of item descriptions", async (t) => {
+  configureAssistant(t);
+  const openai = fakeOpenAi();
+  const executed = [];
+
+  const result = await askOmsAssistant(
+    {
+      message: "How many and which orders has been shipped of the Isaa",
+      user: USER,
+    },
+    {
+      groqClient: openai,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: async (request) => {
+        executed.push(request);
+        validatePipeline(request.collection, request.pipeline);
+        if (request.collection === "brands") {
+          return queryResult([{ name: "Isaa" }], { audit: { collection: "brands" } });
+        }
+        if (request.collection === "items" || request.collection === "vendors") {
+          return queryResult([], { audit: { collection: request.collection } });
+        }
+        return /^Resolve /i.test(request.purpose)
+          ? queryResult([], { audit: { collection: "orders" } })
+          : queryResult([
+            { order_id: "PO-100", shipped_quantity: 20 },
+            { order_id: "PO-200", shipped_quantity: 12 },
+          ]);
+      },
+    },
+  );
+
+  assert.deepEqual(executed.map(({ collection }) => collection), [
+    "brands", "items", "vendors", "orders", "orders",
+  ]);
+  assert.deepEqual(executed.at(-1).pipeline[0].$match.brand, { $in: ["Isaa"] });
+  assert.equal(openai.calls.length, 0);
+  assert.equal(
+    result.answer,
+    "2 shipped orders: PO-100, PO-200.",
+  );
+});
+
+test("entity resolution finds codes and dates, and asks on brand-description collisions", async () => {
+  const queryExecutor = async (request) => {
+    if (request.collection === "brands") {
+      return queryResult([{ name: "Isaa" }], { audit: { collection: "brands" } });
+    }
+    if (request.collection === "items") {
+      return queryResult([
+        {
+          code: "ABC-123",
+          name: "Table",
+          description: "Isaa table",
+          pis_barcode: "BAR-1",
+        },
+      ], { audit: { collection: "items" } });
+    }
+    if (request.collection === "vendors") {
+      return queryResult([], { audit: { collection: "vendors" } });
+    }
+    return queryResult([], { audit: { collection: "orders" } });
+  };
+
+  const codeResolution = await serviceInternals.resolveQuestionEntities({
+    question: "How many pieces were shipped of ABC-123 in last 6 months?",
+    now: new Date("2026-07-27T12:00:00.000Z"),
+    user: USER,
+    queryExecutor,
+  });
+  assert.deepEqual(codeResolution.context.itemCodes, ["ABC-123"]);
+  assert.equal(codeResolution.context.dateRange.label, "last 6 months");
+  assert.equal(codeResolution.ambiguity, "");
+
+  const collision = await serviceInternals.resolveQuestionEntities({
+    question: "How many pieces were shipped of Isaa?",
+    now: new Date("2026-07-27T12:00:00.000Z"),
+    user: USER,
+    queryExecutor,
+  });
+  assert.match(collision.ambiguity, /brand and an item description/);
+});
+
+test("ambiguous brand and description terms do not produce a mixed shipment report", async (t) => {
+  configureAssistant(t);
+  const openai = fakeOpenAi();
+  const result = await askOmsAssistant(
+    { message: "How many pieces were shipped of Isaa?", user: USER },
+    {
+      groqClient: openai,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: async (request) => {
+        if (request.collection === "brands") {
+          return queryResult([{ name: "Isaa" }], { audit: { collection: "brands" } });
+        }
+        if (request.collection === "items") {
+          return queryResult(
+            [{ code: "ISAA-01", description: "Isaa table" }],
+            { audit: { collection: "items" } },
+          );
+        }
+        return queryResult([], { audit: { collection: request.collection } });
+      },
+    },
+  );
+
+  assert.equal(openai.calls.length, 0);
+  assert.match(result.answer, /Do you mean the brand or the item description/);
+});
+
 test("production provider call uses Groq's Responses endpoint", async (t) => {
   configureAssistant(t);
   let request;
@@ -278,7 +465,7 @@ test("production provider call uses Groq's Responses endpoint", async (t) => {
 
   const result = await askOmsAssistant(
     { message: "What can you help with?", user: USER },
-    { conversationModel: fakeConversationModel() },
+    { conversationModel: fakeConversationModel(), queryExecutor: emptyEntityQuery },
   );
   const body = JSON.parse(request.options.body);
 
@@ -314,7 +501,7 @@ test("transient Groq rate limits are retried twice", async (t) => {
 
   const result = await askOmsAssistant(
     { message: "Count orders", user: USER },
-    { conversationModel: fakeConversationModel() },
+    { conversationModel: fakeConversationModel(), queryExecutor: emptyEntityQuery },
   );
 
   assert.equal(calls, 3);
@@ -365,6 +552,7 @@ test("packaging-aware missing-PIS-barcode pipeline is accepted", () => {
   const instructions = buildSystemInstructions(new Date("2026-07-23T12:00:00Z"));
   assert.match(instructions, /exclude barcode_exempted == true/);
   assert.match(instructions, /carton requires both master and inner barcodes/);
+  assert.match(instructions, /first search the whole items collection/i);
 });
 
 test("common read-only Groq string expressions are accepted", () => {
@@ -1206,7 +1394,7 @@ test("conversation continuation sends bounded history and advances its revision"
       conversationId: CONVERSATION_ID,
       user: USER,
     },
-    { groqClient: openai, conversationModel },
+    { groqClient: openai, conversationModel, queryExecutor: emptyEntityQuery },
   );
 
   assert.deepEqual(openai.calls[0].body.input.slice(0, 2), [
@@ -1297,17 +1485,16 @@ test("prompt injection cannot turn an unsafe model tool request into a DB call",
       {
         groqClient: openai,
         conversationModel: fakeConversationModel(),
-        queryExecutor: async () => {
+        queryExecutor: withEntityResolver(async () => {
           databaseCalls += 1;
           return queryResult();
-        },
+        }),
       },
     ),
     (error) => {
       assert.ok(error instanceof OmsChatQueryError);
       assert.equal(error.category, "unsafe_query");
-      assert.deepEqual(error.audit.collections, ["users"]);
-      assert.equal(error.audit.stageCount, 1);
+      assert.equal(error.audit.collections.at(-1), "users");
       return true;
     },
   );
@@ -1325,10 +1512,10 @@ test("invalid model tool JSON is rejected without a DB call", async (t) => {
       {
         groqClient: openai,
         conversationModel: fakeConversationModel(),
-        queryExecutor: async () => {
+        queryExecutor: withEntityResolver(async () => {
           databaseCalls += 1;
           return queryResult();
-        },
+        }),
       },
     ),
     (error) => {
@@ -1358,17 +1545,16 @@ test("a later tool failure retains audit data from an earlier successful query",
       {
         groqClient: openai,
         conversationModel: fakeConversationModel(),
-        queryExecutor: async () => {
+        queryExecutor: withEntityResolver(async () => {
           databaseCalls += 1;
           return queryResult([{ total: 2 }]);
-        },
+        }),
       },
     ),
     (error) => {
       assert.ok(error instanceof OmsChatQueryError);
-      assert.deepEqual(error.audit.collections, ["orders"]);
-      assert.equal(error.audit.stageCount, 2);
-      assert.equal(error.audit.returnedRows, 1);
+      assert.equal(error.audit.collections.at(-1), "orders");
+      assert.ok(error.audit.returnedRows >= 1);
       return true;
     },
   );
@@ -1390,6 +1576,7 @@ test("an explicitly incomplete Groq response is never accepted as an answer", as
       {
         groqClient: openai,
         conversationModel: fakeConversationModel(),
+        queryExecutor: emptyEntityQuery,
       },
     ),
     (error) => {
@@ -1413,6 +1600,7 @@ test("model output containing an internal aggregation pipeline is not returned",
       {
         groqClient: openai,
         conversationModel: fakeConversationModel(),
+        queryExecutor: emptyEntityQuery,
       },
     ),
     (error) => {
@@ -1434,6 +1622,7 @@ test("legitimate OMS codes with CALL_ or RESP_ prefixes are not rejected", async
     {
       groqClient: openai,
       conversationModel: fakeConversationModel(),
+      queryExecutor: emptyEntityQuery,
     },
   );
 
@@ -1456,6 +1645,7 @@ test("an actual provider response identifier is not returned", async (t) => {
       {
         groqClient: openai,
         conversationModel: fakeConversationModel(),
+        queryExecutor: emptyEntityQuery,
       },
     ),
     (error) => {
@@ -1484,17 +1674,16 @@ test("model write attempt is rejected without a DB call", async (t) => {
       {
         groqClient: openai,
         conversationModel: fakeConversationModel(),
-        queryExecutor: async () => {
+        queryExecutor: withEntityResolver(async () => {
           databaseCalls += 1;
           return queryResult();
-        },
+        }),
       },
     ),
     (error) => {
       assert.ok(error instanceof OmsChatQueryError);
       assert.match(error.message, /\$merge/);
-      assert.deepEqual(error.audit.collections, ["orders"]);
-      assert.equal(error.audit.stageCount, 2);
+      assert.equal(error.audit.collections.at(-1), "orders");
       return true;
     },
   );
