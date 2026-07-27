@@ -90,6 +90,7 @@ const INSPECTED_ITEMS_REPORT_SELECT = [
   "brand_name",
   "brands",
   "vendors",
+  "country_of_origin",
   "image",
   "cad_file",
   "pis_file",
@@ -289,11 +290,12 @@ const mergeInspectedItemsSources = (items = [], orders = []) => {
 
 const matchesInspectedItemsReportFilters = (
   row = {},
-  { search, brand, vendor } = {},
+  { search, brand, vendor, country } = {},
 ) => {
   const normalizedSearch = normalizeText(search).toLocaleLowerCase();
   const normalizedBrand = normalizeText(brand).toLocaleLowerCase();
   const normalizedVendor = normalizeText(vendor).toLocaleLowerCase();
+  const normalizedCountry = normalizeText(country).toLocaleLowerCase();
   const rowBrands = normalizeDistinctTextValues([
     row?.brand,
     ...(Array.isArray(row?.brands) ? row.brands : []),
@@ -325,6 +327,14 @@ const matchesInspectedItemsReportFilters = (
     normalizedVendor &&
     normalizedVendor !== "all" &&
     !rowVendors.includes(normalizedVendor)
+  ) {
+    return false;
+  }
+
+  if (
+    normalizedCountry &&
+    normalizedCountry !== "all" &&
+    normalizeText(row?.country_of_origin).toLocaleLowerCase() !== normalizedCountry
   ) {
     return false;
   }
@@ -488,6 +498,7 @@ const buildInspectedItemsReportRow = (item = {}) => {
     brand: normalizeText(item?.brand || item?.brand_name || (Array.isArray(item?.brands) ? item.brands[0] : "")),
     brands: Array.isArray(item?.brands) ? item.brands.filter(Boolean) : [],
     vendors: Array.isArray(item?.vendors) ? item.vendors.filter(Boolean) : [],
+    country_of_origin: normalizeText(item?.country_of_origin),
     last_inspected_date: normalizeText(item?.qc?.last_inspected_date),
     flags,
     requirements: {
@@ -549,6 +560,7 @@ const getInspectedItemsReportDataset = async ({
   search,
   brand,
   vendor,
+  country,
   criterion = "all",
   status = "all",
   fromDate = "",
@@ -584,7 +596,7 @@ const getInspectedItemsReportDataset = async ({
   const allRows = mergeInspectedItemsSources(items, orders)
     .map(buildInspectedItemsReportRow);
   const baseRows = allRows.filter((row) =>
-    matchesInspectedItemsReportFilters(row, { search, brand, vendor }),
+    matchesInspectedItemsReportFilters(row, { search, brand, vendor, country }),
   );
   const dateFilteredRows = baseRows
     .filter((row) => matchesInspectedItemsDateRange(row, dateRange))
@@ -602,6 +614,7 @@ const getInspectedItemsReportDataset = async ({
       search: normalizeText(search),
       brand: normalizeText(brand) || "all",
       vendor: normalizeText(vendor) || "all",
+      country: normalizeText(country) || "all",
       criterion: normalizedCriterion,
       status: normalizedStatus,
       from_date: dateRange.from_date,
@@ -1927,6 +1940,7 @@ exports.getInspectedItemsReport = async (req, res) => {
     const search = req.query.search;
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const country = req.query.country;
     const criterion = normalizeText(req.query.criterion).toLowerCase() || "all";
     const status = normalizeText(req.query.status).toLowerCase() || "all";
     const fromDate = req.query.from_date ?? req.query.fromDate ?? req.query.from;
@@ -1942,6 +1956,7 @@ exports.getInspectedItemsReport = async (req, res) => {
       search,
       brand,
       vendor,
+      country,
       criterion,
       status,
       fromDate,
@@ -1982,6 +1997,7 @@ exports.exportInspectedItemsReport = async (req, res) => {
       search: req.query.search,
       brand: req.query.brand,
       vendor: req.query.vendor,
+      country: req.query.country,
       criterion: normalizeText(req.query.criterion).toLowerCase() || "all",
       status: normalizeText(req.query.status).toLowerCase() || "all",
       fromDate: req.query.from_date ?? req.query.fromDate ?? req.query.from,

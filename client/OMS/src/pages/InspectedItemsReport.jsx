@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import ReportInfoBanner from "../components/ReportInfoBanner";
+import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -118,6 +119,8 @@ const InspectedItemsReport = () => {
   const [draftBrandFilter, setDraftBrandFilter] = useState(() => normalizeFilter(searchParams.get("brand")));
   const [vendorFilter, setVendorFilter] = useState(() => normalizeFilter(searchParams.get("vendor")));
   const [draftVendorFilter, setDraftVendorFilter] = useState(() => normalizeFilter(searchParams.get("vendor")));
+  const [countryFilter, setCountryFilter] = useState(() => normalizeFilter(searchParams.get("country")));
+  const [draftCountryFilter, setDraftCountryFilter] = useState(() => normalizeFilter(searchParams.get("country")));
   const [criterionFilter, setCriterionFilter] = useState(() => normalizeFilter(searchParams.get("criterion")));
   const [draftCriterionFilter, setDraftCriterionFilter] = useState(() => normalizeFilter(searchParams.get("criterion")));
   const [statusFilter, setStatusFilter] = useState(() => normalizeFilter(searchParams.get("status")));
@@ -145,6 +148,7 @@ const InspectedItemsReport = () => {
           search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
+          country: countryFilter,
           criterion: criterionFilter,
           status: statusFilter,
           from_date: fromDate,
@@ -165,7 +169,7 @@ const InspectedItemsReport = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, criterionFilter, fromDate, limit, page, searchInput, statusFilter, toDate, vendorFilter]);
+  }, [brandFilter, countryFilter, criterionFilter, fromDate, limit, page, searchInput, statusFilter, toDate, vendorFilter]);
 
   useEffect(() => {
     fetchReport();
@@ -176,6 +180,7 @@ const InspectedItemsReport = () => {
     if (searchInput) nextParams.set("search", searchInput);
     if (brandFilter !== DEFAULT_FILTER) nextParams.set("brand", brandFilter);
     if (vendorFilter !== DEFAULT_FILTER) nextParams.set("vendor", vendorFilter);
+    if (countryFilter !== DEFAULT_FILTER) nextParams.set("country", countryFilter);
     if (criterionFilter !== DEFAULT_FILTER) nextParams.set("criterion", criterionFilter);
     if (statusFilter !== DEFAULT_FILTER) nextParams.set("status", statusFilter);
     if (fromDate) nextParams.set("from_date", fromDate);
@@ -188,6 +193,7 @@ const InspectedItemsReport = () => {
     }
   }, [
     brandFilter,
+    countryFilter,
     criterionFilter,
     fromDate,
     limit,
@@ -205,6 +211,7 @@ const InspectedItemsReport = () => {
     setSearchInput(normalizeText(draftSearchInput));
     setBrandFilter(draftBrandFilter);
     setVendorFilter(draftVendorFilter);
+    setCountryFilter(draftCountryFilter);
     setCriterionFilter(draftCriterionFilter);
     setStatusFilter(draftStatusFilter);
     setFromDate(toISODateString(draftFromDate));
@@ -216,6 +223,7 @@ const InspectedItemsReport = () => {
     setDraftSearchInput("");
     setDraftBrandFilter(DEFAULT_FILTER);
     setDraftVendorFilter(DEFAULT_FILTER);
+    setDraftCountryFilter(DEFAULT_FILTER);
     setDraftCriterionFilter(DEFAULT_FILTER);
     setDraftStatusFilter(DEFAULT_FILTER);
     setDraftFromDate("");
@@ -223,6 +231,7 @@ const InspectedItemsReport = () => {
     setSearchInput("");
     setBrandFilter(DEFAULT_FILTER);
     setVendorFilter(DEFAULT_FILTER);
+    setCountryFilter(DEFAULT_FILTER);
     setCriterionFilter(DEFAULT_FILTER);
     setStatusFilter(DEFAULT_FILTER);
     setFromDate("");
@@ -239,6 +248,7 @@ const InspectedItemsReport = () => {
           search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
+          country: countryFilter,
           criterion: criterionFilter,
           status: statusFilter,
           from_date: fromDate,
@@ -256,7 +266,14 @@ const InspectedItemsReport = () => {
     } finally {
       setExporting(false);
     }
-  }, [brandFilter, criterionFilter, fromDate, searchInput, statusFilter, toDate, vendorFilter]);
+  }, [brandFilter, countryFilter, criterionFilter, fromDate, searchInput, statusFilter, toDate, vendorFilter]);
+
+  const countryOptions = useMemo(
+    () => getCountryOfOriginOptions(
+      draftCountryFilter === DEFAULT_FILTER ? "" : draftCountryFilter,
+    ),
+    [draftCountryFilter],
+  );
 
   return (
     <>
@@ -282,7 +299,7 @@ const InspectedItemsReport = () => {
         <ReportInfoBanner
           description="Audits all item-master and non-cancelled ordered items, whether they have been inspected or not, to check if essential documents are uploaded."
           dataShown="Item code, description, brand, vendors list, status flags indicating presence of required files, and last inspected date."
-          howItWorks="Combines item-master records with distinct items from non-cancelled order history, then applies brand, vendor, inspection, document, date, and keyword filters."
+          howItWorks="Combines item-master records with distinct items from non-cancelled order history, then applies country, brand, vendor, inspection, document, date, and keyword filters."
         />
 
         <div className="inspected-items-report-pill-row mb-4">
@@ -326,6 +343,21 @@ const InspectedItemsReport = () => {
                   <option value={DEFAULT_FILTER}>All Vendors</option>
                   {(filters.vendor_options || []).map((vendor) => (
                     <option key={vendor} value={vendor}>{vendor}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-lg-2 col-md-6">
+                <label className="form-label">Country of Origin</label>
+                <select
+                  className="form-select"
+                  value={draftCountryFilter}
+                  onChange={(event) => setDraftCountryFilter(event.target.value)}
+                >
+                  <option value={DEFAULT_FILTER}>All Countries</option>
+                  {countryOptions.map((country) => (
+                    <option key={country.value} value={country.value}>
+                      {country.label}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -438,7 +470,7 @@ const InspectedItemsReport = () => {
                           {row.code ? (
                             <Link
                               className="text-reset om-etd-history-label"
-                              to={`/items?search=${encodeURIComponent(row.code)}&country=all`}
+                              to={`/items?search=${encodeURIComponent(row.code)}&country=${encodeURIComponent(countryFilter)}`}
                             >
                               {row.code}
                             </Link>

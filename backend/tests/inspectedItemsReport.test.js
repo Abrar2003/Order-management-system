@@ -133,14 +133,15 @@ test("date-filtered views exclude never-inspected rows", () => {
   );
 });
 
-test("merged report filters search, brand, and vendor values", () => {
-  const row = {
+test("merged report filters search, brand, vendor, and country values", () => {
+  const row = buildInspectedItemsReportRow({
     code: "ITEM-42",
     description: "Wooden chair",
     brand: "Giga",
     brands: ["Giga"],
     vendors: ["Vendor One"],
-  };
+    country_of_origin: "India",
+  });
 
   assert.equal(
     matchesInspectedItemsReportFilters(row, {
@@ -152,6 +153,14 @@ test("merged report filters search, brand, and vendor values", () => {
   );
   assert.equal(
     matchesInspectedItemsReportFilters(row, { vendor: "Other Vendor" }),
+    false,
+  );
+  assert.equal(
+    matchesInspectedItemsReportFilters(row, { country: "india" }),
+    true,
+  );
+  assert.equal(
+    matchesInspectedItemsReportFilters(row, { country: "China" }),
     false,
   );
 });
