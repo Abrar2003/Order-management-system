@@ -233,7 +233,11 @@ const main = async () => {
   if (process.argv.includes("--script-db") && !mongoUri) {
     throw new Error("MONGO_URI_SCRIPT is not configured");
   }
-  await connectDB(mongoUri ? { mongoUri } : {});
+  if (mongoUri) {
+    await mongoose.connect(mongoUri, { directConnection: true });
+  } else {
+    await connectDB();
+  }
 
   const existing = await ProductTypeTemplate.findOne({ key: template.key, version: template.version });
   if (existing) {
