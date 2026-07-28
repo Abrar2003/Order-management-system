@@ -8,16 +8,23 @@ const { parsePisUpload } = require("../helpers/pisExcelParser");
 
 const EXCEL_EXTENSIONS = new Set([".xlsx", ".xls"]);
 
-const normalizeText = (value) => String(value ?? "").replace(/\r/g, "").trim();
+const normalizeText = (value) =>
+  String(value ?? "")
+    .replace(/\r/g, "")
+    .trim();
 
 const normalizeCode = (value) => {
   const normalized = normalizeText(value);
   if (!normalized) return "";
-  return /^\d+\.0+$/.test(normalized) ? normalized.replace(/\.0+$/, "") : normalized;
+  return /^\d+\.0+$/.test(normalized)
+    ? normalized.replace(/\.0+$/, "")
+    : normalized;
 };
 
 const toBoolean = (value, fallback = false) => {
-  const normalized = String(value ?? "").trim().toLowerCase();
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!normalized) return fallback;
   return ["1", "true", "yes", "y", "on"].includes(normalized);
 };
@@ -76,7 +83,9 @@ const extractItemCodeFromWorkbook = (filePath) => {
 };
 
 const deriveIsaaFolderCode = (folderName) =>
-  String(folderName ?? "").trim().match(/^(\d+)/)?.[1] || "";
+  String(folderName ?? "")
+    .trim()
+    .match(/^(\d+)/)?.[1] || "";
 
 const evaluateIsaaCandidate = ({ folderCode, articleNumber }) => {
   const parsedArticleNumber = normalizeText(articleNumber);
@@ -96,21 +105,13 @@ const parseArgs = (argv = []) => {
   const options = {
     folderPath: process.env.PIS_UPLOAD_FOLDER || "",
     apiBaseUrl:
-      process.env.PIS_UPLOAD_API_BASE_URL
-      || process.env.OMS_API_BASE_URL
-      || "",
+      // process.env.PIS_UPLOAD_API_BASE_URL
+      process.env.OMS_API_BASE_URL || process.env.PIS_UPLOAD_API_BASE_URL || "",
     username:
-      process.env.PIS_UPLOAD_USERNAME
-      || process.env.OMS_API_USERNAME
-      || "",
+      process.env.PIS_UPLOAD_USERNAME || process.env.OMS_API_USERNAME || "",
     password:
-      process.env.PIS_UPLOAD_PASSWORD
-      || process.env.OMS_API_PASSWORD
-      || "",
-    token:
-      process.env.PIS_UPLOAD_TOKEN
-      || process.env.OMS_API_TOKEN
-      || "",
+      process.env.PIS_UPLOAD_PASSWORD || process.env.OMS_API_PASSWORD || "",
+    token: process.env.PIS_UPLOAD_TOKEN || process.env.OMS_API_TOKEN || "",
     help: false,
     dryRun: toBoolean(process.env.PIS_UPLOAD_DRY_RUN, false),
     recursive: toBoolean(process.env.PIS_UPLOAD_RECURSIVE, true),
@@ -276,9 +277,9 @@ const collectIsaaWorkbookFiles = async (targetPath) => {
       const files = await fs.readdir(itemFolderPath, { withFileTypes: true });
       for (const file of files) {
         if (
-          !file.isFile()
-          || path.extname(file.name).toLowerCase() !== ".xlsx"
-          || file.name.startsWith("~$")
+          !file.isFile() ||
+          path.extname(file.name).toLowerCase() !== ".xlsx" ||
+          file.name.startsWith("~$")
         ) {
           continue;
         }
@@ -339,7 +340,13 @@ const validateIsaaCandidate = async (candidate) => {
 
 const defaultIsaaReportPath = () => {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return path.resolve(__dirname, "..", "..", "outputs", `isaa-pis-upload-exceptions-${timestamp}.xlsx`);
+  return path.resolve(
+    __dirname,
+    "..",
+    "..",
+    "outputs",
+    `isaa-pis-upload-exceptions-${timestamp}.xlsx`,
+  );
 };
 
 const writeIsaaExceptionReport = async ({ reportPath, exceptions }) => {
@@ -377,9 +384,17 @@ const writeIsaaExceptionReport = async ({ reportPath, exceptions }) => {
   ];
   exceptions.forEach((exception) => sheet.addRow(exception));
   sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" }, size: 14 };
-  sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } };
+  sheet.getRow(1).fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF0F766E" },
+  };
   sheet.getRow(4).font = { bold: true, color: { argb: "FFFFFFFF" } };
-  sheet.getRow(4).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1D4ED8" } };
+  sheet.getRow(4).fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF1D4ED8" },
+  };
   sheet.getRow(4).alignment = { vertical: "middle" };
   sheet.autoFilter = "A4:G4";
 
@@ -397,7 +412,8 @@ const readJsonResponse = async (response) => {
   }
 };
 
-const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const wait = (milliseconds) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const describeFetchError = (error) => {
   const code = normalizeText(error?.cause?.code);
@@ -437,9 +453,9 @@ const apiRequest = async (
 
   if (!response.ok) {
     const message =
-      normalizeText(payload?.message)
-      || normalizeText(payload?.error)
-      || `${method} ${url} failed with status ${response.status}`;
+      normalizeText(payload?.message) ||
+      normalizeText(payload?.error) ||
+      `${method} ${url} failed with status ${response.status}`;
     const error = new Error(message);
     error.statusCode = response.status;
     error.payload = payload;
@@ -528,13 +544,16 @@ const uploadPisWorkbook = async ({ apiBaseUrl, token, itemId, filePath }) => {
     fileName,
   );
 
-  return apiRequest(`${apiBaseUrl}/items/${encodeURIComponent(itemId)}/pis-upload`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
+  return apiRequest(
+    `${apiBaseUrl}/items/${encodeURIComponent(itemId)}/pis-upload`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
     },
-    body: formData,
-  });
+  );
 };
 
 const runIsaaLayoutUpload = async ({ options, targetPath }) => {
@@ -566,7 +585,9 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
     if (!validation.upload) {
       summary.skipped += 1;
       exceptions.push(toIsaaException(validation, validation.reason));
-      console.warn(`[skipped] ${validation.relativeFilePath} :: ${validation.reason}`);
+      console.warn(
+        `[skipped] ${validation.relativeFilePath} :: ${validation.reason}`,
+      );
       continue;
     }
 
@@ -598,7 +619,9 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
         summary.failed += 1;
         const reason = `Item lookup failed: ${normalizeText(error?.message) || "Unknown error"}`;
         exceptions.push(toIsaaException(candidate, reason, "failed"));
-        console.error(`[lookup-failed] ${candidate.relativeFilePath} -> ${candidate.folderCode} :: ${reason}`);
+        console.error(
+          `[lookup-failed] ${candidate.relativeFilePath} -> ${candidate.folderCode} :: ${reason}`,
+        );
         continue;
       }
 
@@ -606,13 +629,17 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
         summary.missingItem += 1;
         const reason = `No OMS item matches code ${candidate.folderCode}`;
         exceptions.push(toIsaaException(candidate, reason));
-        console.warn(`[missing-item] ${candidate.relativeFilePath} -> ${candidate.folderCode}`);
+        console.warn(
+          `[missing-item] ${candidate.relativeFilePath} -> ${candidate.folderCode}`,
+        );
         continue;
       }
 
       if (options.dryRun) {
         summary.dryRunMatched += 1;
-        console.log(`[matched] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id}`);
+        console.log(
+          `[matched] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id}`,
+        );
         continue;
       }
 
@@ -631,7 +658,9 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
         summary.failed += 1;
         const reason = `Upload failed: ${normalizeText(error?.message) || "Unknown error"}`;
         exceptions.push(toIsaaException(candidate, reason, "failed"));
-        console.error(`[upload-failed] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id} :: ${reason}`);
+        console.error(
+          `[upload-failed] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id} :: ${reason}`,
+        );
       }
     }
   }
@@ -669,15 +698,25 @@ const printUsage = () => {
   );
   console.log("");
   console.log("Options:");
-  console.log("  --folder <path>        Folder or single workbook file to process");
-  console.log("  --api-base-url <url>   Backend base URL, defaults to http://127.0.0.1:<PORT>");
+  console.log(
+    "  --folder <path>        Folder or single workbook file to process",
+  );
+  console.log(
+    "  --api-base-url <url>   Backend base URL, defaults to http://127.0.0.1:<PORT>",
+  );
   console.log("  --token <jwt>          Use an existing backend JWT");
   console.log("  --username <value>     Backend username for /auth/signin");
   console.log("  --password <value>     Backend password for /auth/signin");
-  console.log("  --dry-run              Resolve item matches without uploading");
+  console.log(
+    "  --dry-run              Resolve item matches without uploading",
+  );
   console.log("  --no-recursive         Only scan the top-level folder");
-  console.log("  --isaa-layout          Scan only <vendor>/<item_code item_name>/*.xlsx and validate folder codes");
-  console.log("  --report <path>        ISAA exception .xlsx path (defaults to workspace outputs)");
+  console.log(
+    "  --isaa-layout          Scan only <vendor>/<item_code item_name>/*.xlsx and validate folder codes",
+  );
+  console.log(
+    "  --report <path>        ISAA exception .xlsx path (defaults to workspace outputs)",
+  );
 };
 
 const main = async () => {
@@ -730,7 +769,8 @@ const main = async () => {
   };
 
   for (const filePath of workbookFiles) {
-    const relativeFilePath = path.relative(targetPath, filePath) || path.basename(filePath);
+    const relativeFilePath =
+      path.relative(targetPath, filePath) || path.basename(filePath);
     const itemCode = extractItemCodeFromWorkbook(filePath);
 
     if (!itemCode) {
@@ -762,7 +802,9 @@ const main = async () => {
 
     if (options.dryRun) {
       summary.dryRunMatched += 1;
-      console.log(`[matched] ${relativeFilePath} -> ${itemCode} -> ${item._id}`);
+      console.log(
+        `[matched] ${relativeFilePath} -> ${itemCode} -> ${item._id}`,
+      );
       continue;
     }
 
