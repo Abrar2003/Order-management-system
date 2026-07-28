@@ -397,12 +397,42 @@ const readJsonResponse = async (response) => {
   }
 };
 
-const apiRequest = async (url, { method = "GET", headers = {}, body } = {}) => {
-  const response = await fetch(url, {
-    method,
-    headers,
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const describeFetchError = (error) => {
+  const code = normalizeText(error?.cause?.code);
+  const detail = normalizeText(error?.cause?.message || error?.message);
+  return [code, detail].filter(Boolean).join(": ") || "Unknown network error";
+};
+
+const apiRequest = async (
+  url,
+  {
+    method = "GET",
+    headers = {},
     body,
-  });
+    fetchImpl = fetch,
+    retries = method === "GET" ? 2 : 0,
+    retryDelayMs = 500,
+  } = {},
+) => {
+  let response;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      response = await fetchImpl(url, { method, headers, body });
+      break;
+    } catch (error) {
+      if (attempt === retries) {
+        const requestError = new Error(
+          `${method} ${url} failed after ${attempt + 1} attempt${attempt ? "s" : ""}: ${describeFetchError(error)}`,
+        );
+        requestError.cause = error;
+        throw requestError;
+      }
+      await wait(retryDelayMs * (attempt + 1));
+    }
+  }
+
   const payload = await readJsonResponse(response);
 
   if (!response.ok) {
@@ -777,7 +807,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+  apiRequest,
   collectIsaaWorkbookFiles,
+  describeFetchError,
   deriveIsaaFolderCode,
   evaluateIsaaCandidate,
   validateIsaaCandidate,
