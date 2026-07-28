@@ -302,15 +302,24 @@ const collectIsaaWorkbookFiles = async (targetPath) => {
   );
 };
 
-const toIsaaException = (candidate, reason, action = "skipped") => ({
+const toIsaaResult = (candidate, action, reason = "", storedPisFile = "") => ({
   vendor: candidate.vendor,
   folder: candidate.folder,
   sourcePath: candidate.relativeFilePath,
   folderCode: candidate.folderCode,
   articleNumber: candidate.articleNumber || "",
   action,
+  storedPisFile,
   reason,
 });
+
+const getStoredPisFileReference = (item = {}) =>
+  normalizeText(
+    item?.pis_file?.key
+    || item?.pis_file?.link
+    || item?.pis_file?.url
+    || item?.pis_file?.public_id,
+  );
 
 const validateIsaaCandidate = async (candidate) => {
   try {
@@ -345,24 +354,24 @@ const defaultIsaaReportPath = () => {
     "..",
     "..",
     "outputs",
-    `isaa-pis-upload-exceptions-${timestamp}.xlsx`,
+    `isaa-pis-upload-results-${timestamp}.xlsx`,
   );
 };
 
-const writeIsaaExceptionReport = async ({ reportPath, exceptions }) => {
+const writeIsaaUploadReport = async ({ reportPath, results }) => {
   await fs.mkdir(path.dirname(reportPath), { recursive: true });
 
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Exceptions", {
+  const sheet = workbook.addWorksheet("Results", {
     views: [{ state: "frozen", ySplit: 4 }],
   });
-  sheet.mergeCells("A1:G1");
-  sheet.getCell("A1").value = "ISAA PIS Upload Exceptions";
+  sheet.mergeCells("A1:H1");
+  sheet.getCell("A1").value = "ISAA PIS Upload Results";
   sheet.getCell("A2").value = "Generated";
   sheet.getCell("B2").value = new Date();
   sheet.getCell("B2").numFmt = "yyyy-mm-dd hh:mm";
-  sheet.getCell("A3").value = "Exception count";
-  sheet.getCell("B3").value = exceptions.length;
+  sheet.getCell("A3").value = "Result count";
+  sheet.getCell("B3").value = results.length;
 
   sheet.columns = [
     { header: "Vendor", key: "vendor", width: 28 },
@@ -371,6 +380,7 @@ const writeIsaaExceptionReport = async ({ reportPath, exceptions }) => {
     { header: "Folder code", key: "folderCode", width: 14 },
     { header: "Article number", key: "articleNumber", width: 16 },
     { header: "Action", key: "action", width: 14 },
+    { header: "Stored PIS file", key: "storedPisFile", width: 52 },
     { header: "Reason", key: "reason", width: 56 },
   ];
   sheet.getRow(4).values = [
@@ -380,9 +390,10 @@ const writeIsaaExceptionReport = async ({ reportPath, exceptions }) => {
     "Folder code",
     "Article number",
     "Action",
+    "Stored PIS file",
     "Reason",
   ];
-  exceptions.forEach((exception) => sheet.addRow(exception));
+  results.forEach((result) => sheet.addRow(result));
   sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" }, size: 14 };
   sheet.getRow(1).fill = {
     type: "pattern",
@@ -396,7 +407,7 @@ const writeIsaaExceptionReport = async ({ reportPath, exceptions }) => {
     fgColor: { argb: "FF1D4ED8" },
   };
   sheet.getRow(4).alignment = { vertical: "middle" };
-  sheet.autoFilter = "A4:G4";
+  sheet.autoFilter = "A4:H4";
 
   await workbook.xlsx.writeFile(reportPath);
 };
@@ -567,11 +578,12 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
     validated: 0,
     uploaded: 0,
     dryRunMatched: 0,
+    alreadyUploaded: 0,
     skipped: 0,
     missingItem: 0,
     failed: 0,
   };
-  const exceptions = [];
+  const results = [];
   const readyCandidates = [];
 
   console.log(`Backend   : ${options.apiBaseUrl}`);
@@ -584,7 +596,7 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
     const validation = await validateIsaaCandidate(candidate);
     if (!validation.upload) {
       summary.skipped += 1;
-      exceptions.push(toIsaaException(validation, validation.reason));
+      results.push(toIsaaResult(validation, "skipped", validation.reason));
       console.warn(
         `[skipped] ${validation.relativeFilePath} :: ${validation.reason}`,
       );
@@ -603,7 +615,7 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
       const reason = `Authentication failed: ${normalizeText(error?.message) || "Unknown error"}`;
       summary.failed += readyCandidates.length;
       readyCandidates.forEach((candidate) => {
-        exceptions.push(toIsaaException(candidate, reason, "failed"));
+        results.push(toIsaaResult(candidate, "failed", reason));
       });
     }
 
@@ -618,7 +630,7 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
       } catch (error) {
         summary.failed += 1;
         const reason = `Item lookup failed: ${normalizeText(error?.message) || "Unknown error"}`;
-        exceptions.push(toIsaaException(candidate, reason, "failed"));
+        results.push(toIsaaResult(candidate, "failed", reason));
         console.error(
           `[lookup-failed] ${candidate.relativeFilePath} -> ${candidate.folderCode} :: ${reason}`,
         );
@@ -628,15 +640,27 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
       if (!item?._id) {
         summary.missingItem += 1;
         const reason = `No OMS item matches code ${candidate.folderCode}`;
-        exceptions.push(toIsaaException(candidate, reason));
+        results.push(toIsaaResult(candidate, "skipped", reason));
         console.warn(
           `[missing-item] ${candidate.relativeFilePath} -> ${candidate.folderCode}`,
         );
         continue;
       }
 
+      const storedPisFile = getStoredPisFileReference(item);
+      if (storedPisFile) {
+        summary.alreadyUploaded += 1;
+        const reason = "Item already has a PIS file";
+        results.push(toIsaaResult(candidate, "already uploaded", reason, storedPisFile));
+        console.log(
+          `[already-uploaded] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id}`,
+        );
+        continue;
+      }
+
       if (options.dryRun) {
         summary.dryRunMatched += 1;
+        results.push(toIsaaResult(candidate, "dry-run matched"));
         console.log(
           `[matched] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id}`,
         );
@@ -651,13 +675,21 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
           filePath: candidate.filePath,
         });
         summary.uploaded += 1;
+        results.push(
+          toIsaaResult(
+            candidate,
+            "uploaded",
+            "",
+            getStoredPisFileReference(response?.data) || "PIS file uploaded",
+          ),
+        );
         console.log(
           `[uploaded] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id} -> ${normalizeText(response?.data?.pis_file?.key)}`,
         );
       } catch (error) {
         summary.failed += 1;
         const reason = `Upload failed: ${normalizeText(error?.message) || "Unknown error"}`;
-        exceptions.push(toIsaaException(candidate, reason, "failed"));
+        results.push(toIsaaResult(candidate, "failed", reason));
         console.error(
           `[upload-failed] ${candidate.relativeFilePath} -> ${candidate.folderCode} -> ${item._id} :: ${reason}`,
         );
@@ -668,7 +700,7 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
   const reportPath = options.reportPath
     ? path.resolve(options.reportPath)
     : defaultIsaaReportPath();
-  await writeIsaaExceptionReport({ reportPath, exceptions });
+  await writeIsaaUploadReport({ reportPath, results });
 
   console.log("");
   console.log("Summary");
@@ -676,6 +708,7 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
   console.log(`  Validated    : ${summary.validated}`);
   console.log(`  Uploaded     : ${summary.uploaded}`);
   console.log(`  Dry-run hits : ${summary.dryRunMatched}`);
+  console.log(`  Existing PIS : ${summary.alreadyUploaded}`);
   console.log(`  Skipped      : ${summary.skipped}`);
   console.log(`  Missing item : ${summary.missingItem}`);
   console.log(`  Failed       : ${summary.failed}`);
@@ -685,7 +718,7 @@ const runIsaaLayoutUpload = async ({ options, targetPath }) => {
     process.exitCode = 1;
   }
 
-  return { summary, exceptions, reportPath };
+  return { summary, results, reportPath };
 };
 
 const printUsage = () => {
@@ -715,7 +748,7 @@ const printUsage = () => {
     "  --isaa-layout          Scan only <vendor>/<item_code item_name>/*.xlsx and validate folder codes",
   );
   console.log(
-    "  --report <path>        ISAA exception .xlsx path (defaults to workspace outputs)",
+    "  --report <path>        ISAA results .xlsx path (defaults to workspace outputs)",
   );
 };
 
@@ -854,5 +887,6 @@ module.exports = {
   describeFetchError,
   deriveIsaaFolderCode,
   evaluateIsaaCandidate,
+  getStoredPisFileReference,
   validateIsaaCandidate,
 };

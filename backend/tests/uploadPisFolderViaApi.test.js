@@ -5,6 +5,7 @@ const {
   apiRequest,
   deriveIsaaFolderCode,
   evaluateIsaaCandidate,
+  getStoredPisFileReference,
 } = require("../scripts/uploadPisFolderViaApi");
 
 test("ISAA folder code validation only permits exact PIS article matches", () => {
@@ -44,4 +45,12 @@ test("retries transient GET lookup failures and reports their transport cause", 
 
   assert.equal(calls, 3);
   assert.deepEqual(payload, { data: [] });
+});
+
+test("recognizes an existing stored PIS file before upload", () => {
+  assert.equal(getStoredPisFileReference({ pis_file: {} }), "");
+  assert.equal(
+    getStoredPisFileReference({ pis_file: { key: "items/86468/pis.xlsx" } }),
+    "items/86468/pis.xlsx",
+  );
 });
