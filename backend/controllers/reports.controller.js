@@ -2010,6 +2010,7 @@ exports.exportInspectedItemsReport = async (req, res) => {
       { header: "Description", value: (row) => row.description || row.name || "N/A" },
       { header: "Brand", value: (row) => row.brand || (row.brands || []).join(", ") || "N/A" },
       { header: "Vendors", value: (row) => (row.vendors || []).join(", ") || "N/A" },
+      { header: "Country of Origin", value: (row) => row.country_of_origin || "N/A" },
       { header: "Inspected", value: (row) => (row.flags?.inspected ? "Yes" : "No") },
       { header: "CAD", value: (row) => (row.flags?.cad ? "Yes" : "No") },
       { header: "PIS", value: (row) => normalizeText(row.brand).toLowerCase() === "giga" ? "N/A" : (row.flags?.pis ? "Yes" : "No") },
