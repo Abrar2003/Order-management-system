@@ -97,6 +97,8 @@ const INSPECTED_ITEMS_REPORT_SELECT = [
   "assembly_file",
   "mounting_file",
   "mounting_file_needed",
+  "satin_label",
+  "satin_label_required",
   "packeging_ppt",
   "kd",
   "finish",
@@ -123,6 +125,7 @@ const INSPECTED_ITEM_CRITERIA = Object.freeze({
   PIS: "pis",
   ASSEMBLY: "assembly",
   MOUNTING_FILE: "mounting_file",
+  SATIN_LABEL: "satin_label",
   PACKAGING_PPT: "packaging_ppt",
   PRODUCT_IMAGE: "product_image",
   FINISH: "finish",
@@ -399,6 +402,7 @@ const buildInspectedItemsReportFlags = (item = {}) => ({
   pis: hasStoredItemFile(item?.pis_file),
   assembly: item?.kd === true ? hasStoredItemFile(item?.assembly_file) : null,
   mounting_file: item?.mounting_file_needed === true ? hasStoredItemFile(item?.mounting_file) : null,
+  satin_label: item?.satin_label_required === true ? hasStoredItemFile(item?.satin_label) : null,
   packaging_ppt: hasStoredItemFile(item?.packeging_ppt),
   product_image: hasStoredItemFile(item?.image),
   finish: hasFinishUploaded(item),
@@ -416,6 +420,9 @@ const isInspectedItemsCriterionApplicable = (row = {}, criterion = "all") => {
   }
   if (normalizedCriterion === INSPECTED_ITEM_CRITERIA.MOUNTING_FILE) {
     return row?.requirements?.mounting_file === true;
+  }
+  if (normalizedCriterion === INSPECTED_ITEM_CRITERIA.SATIN_LABEL) {
+    return row?.requirements?.satin_label === true;
   }
   return true;
 };
@@ -504,6 +511,7 @@ const buildInspectedItemsReportRow = (item = {}) => {
     requirements: {
       assembly: item?.kd === true,
       mounting_file: item?.mounting_file_needed === true,
+      satin_label: item?.satin_label_required === true,
     },
     files: {
       image: item?.image || {},
@@ -511,6 +519,7 @@ const buildInspectedItemsReportRow = (item = {}) => {
       pis_file: item?.pis_file || {},
       assembly_file: item?.assembly_file || {},
       mounting_file: item?.mounting_file || {},
+      satin_label: item?.satin_label || {},
       packeging_ppt: item?.packeging_ppt || {},
       finish_count: Array.isArray(item?.finish) ? item.finish.length : 0,
       shipping_marks: item?.shipping_marks || {},
@@ -537,6 +546,7 @@ const buildInspectedItemsSummary = (rows = []) => {
   };
   const assemblyRows = rows.filter((row) => row?.requirements?.assembly === true);
   const mountingFileRows = rows.filter((row) => row?.requirements?.mounting_file === true);
+  const satinLabelRows = rows.filter((row) => row?.requirements?.satin_label === true);
 
   return {
     total_items: total,
@@ -545,6 +555,7 @@ const buildInspectedItemsSummary = (rows = []) => {
     pis: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PIS, "PIS Uploaded"),
     assembly: createSummaryEntry(INSPECTED_ITEM_CRITERIA.ASSEMBLY, "Assembly Uploaded", assemblyRows),
     mounting_file: createSummaryEntry(INSPECTED_ITEM_CRITERIA.MOUNTING_FILE, "Mounting File Uploaded", mountingFileRows),
+    satin_label: createSummaryEntry(INSPECTED_ITEM_CRITERIA.SATIN_LABEL, "Satin Label Uploaded", satinLabelRows),
     packaging_ppt: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PACKAGING_PPT, "Packaging PPT Uploaded"),
     product_image: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PRODUCT_IMAGE, "Product Image Uploaded"),
     finish: createSummaryEntry(INSPECTED_ITEM_CRITERIA.FINISH, "Finish Uploaded"),
@@ -2016,6 +2027,7 @@ exports.exportInspectedItemsReport = async (req, res) => {
       { header: "PIS", value: (row) => normalizeText(row.brand).toLowerCase() === "giga" ? "N/A" : (row.flags?.pis ? "Yes" : "No") },
       { header: "Assembly", value: (row) => row.requirements?.assembly ? (row.flags?.assembly ? "Yes" : "No") : "N/A" },
       { header: "Mounting File", value: (row) => row.requirements?.mounting_file ? (row.flags?.mounting_file ? "Yes" : "No") : "N/A" },
+      { header: "Satin Label", value: (row) => row.requirements?.satin_label ? (row.flags?.satin_label ? "Yes" : "No") : "N/A" },
       { header: "Packaging PPT", value: (row) => (row.flags?.packaging_ppt ? "Yes" : "No") },
       { header: "Product Image", value: (row) => (row.flags?.product_image ? "Yes" : "No") },
       { header: "Finish", value: (row) => (row.flags?.finish ? "Yes" : "No") },
@@ -3057,6 +3069,7 @@ exports.getMonthlyShipmentsDrilldown = async (req, res) => {
 
 exports.__test__ = {
   buildInspectedItemsReportRow,
+  buildInspectedItemsSummary,
   buildOrderItemReportGroups,
   canCreateQcMismatchComment,
   matchesInspectedItemsReportFilters,

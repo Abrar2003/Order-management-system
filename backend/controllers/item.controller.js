@@ -936,6 +936,16 @@ const ITEM_FILE_CONFIG = Object.freeze({
     defaultExtension: ".pdf",
     invalidTypeMessage: "Only PDF, JPG, JPEG, and PNG files are allowed for 3D carton",
   },
+  satin_label: {
+    field: "satin_label",
+    folder: "item-shipping-marks",
+    label: "Satin label",
+    mimeTypes: ITEM_PDF_MIME_TYPES,
+    extensions: ITEM_PDF_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF files are allowed for Satin labels",
+    requiresSatinLabelRequired: true,
+  },
 });
 const ALLOWED_ITEM_FILE_TYPES = new Set(Object.keys(ITEM_FILE_CONFIG));
 const ITEM_FILE_URL_EXPIRES_IN = 24 * 60 * 60;
@@ -964,7 +974,8 @@ const getItemFileConfig = (fileType = "") =>
   ITEM_FILE_CONFIG[normalizeTextField(fileType).toLowerCase()] || null;
 
 const isItemFileAllowedForItem = (item = {}, fileConfig = {}) =>
-  !fileConfig?.requiresMountingFileNeeded || item?.mounting_file_needed === true;
+  (!fileConfig?.requiresMountingFileNeeded || item?.mounting_file_needed === true) &&
+  (!fileConfig?.requiresSatinLabelRequired || item?.satin_label_required === true);
 
 const normalizeStoredItemFile = (file = {}) => {
   const parsedSize = Number(file?.size || 0);
@@ -1648,6 +1659,8 @@ const ITEM_DETAILS_SELECT = [
   "packeging_ppt",
   "shipping_marks",
   "mounting_file_needed",
+  "satin_label",
+  "satin_label_required",
   "finish",
   "pis_item_sizes",
   "pis_box_sizes",
@@ -1802,6 +1815,9 @@ const buildItemFileViewMatch = (fileType = "") => {
   const normalizedFileType = normalizeTextField(fileType).toLowerCase();
   if (normalizedFileType === "mounting_file") {
     return { mounting_file_needed: true };
+  }
+  if (normalizedFileType === "satin_label") {
+    return { satin_label_required: true };
   }
   if (normalizedFileType !== "assembly_file") return {};
 
@@ -5466,6 +5482,7 @@ const buildItemDetailFilePayloads = async (item = {}) => {
     { type: "assembly_file", field: "assembly_file", fallbackBaseName: "item-assembly", extension: ".pdf" },
     { type: "mounting_file", field: "mounting_file", fallbackBaseName: "item-mounting", extension: ".pdf" },
     { type: "packeging_ppt", field: "packeging_ppt", fallbackBaseName: "item-packaging-ppt", extension: ".pptx" },
+    { type: "satin_label", field: "satin_label", fallbackBaseName: "satin-label", extension: ".pdf" },
   ];
 
   const shippingMarksEntries = [
@@ -6318,6 +6335,10 @@ exports.createItem = async (req, res) => {
         payload.mounting_file_needed,
         "mounting_file_needed",
       ),
+      satin_label_required: toBooleanValue(
+        payload.satin_label_required,
+        "satin_label_required",
+      ),
       source: {
         from_orders: false,
         from_qc: false,
@@ -6485,6 +6506,12 @@ exports.updateItem = async (req, res) => {
       setPath(
         "mounting_file_needed",
         toBooleanValue(payload.mounting_file_needed, "mounting_file_needed"),
+      );
+    }
+    if (hasOwn(payload, "satin_label_required")) {
+      setPath(
+        "satin_label_required",
+        toBooleanValue(payload.satin_label_required, "satin_label_required"),
       );
     }
 
@@ -7503,6 +7530,7 @@ exports.getItemFileUrl = async (req, res) => {
     const fileSelectFields = [
       "code",
       "mounting_file_needed",
+      "satin_label_required",
       fileConfig.field,
       ...(Array.isArray(fileConfig.legacyFields) ? fileConfig.legacyFields : []),
     ].join(" ");
@@ -7515,9 +7543,12 @@ exports.getItemFileUrl = async (req, res) => {
       });
     }
     if (!isItemFileAllowedForItem(item, fileConfig)) {
+      const requirement = fileConfig.requiresSatinLabelRequired
+        ? "satin label is required for this item"
+        : "mounting file is needed for this item";
       return res.status(400).json({
         success: false,
-        message: `${fileConfig.label} can only be used when mounting file is needed for this item`,
+        message: `${fileConfig.label} can only be used when ${requirement}`,
       });
     }
 
@@ -7648,9 +7679,12 @@ exports.uploadItemFile = async (req, res) => {
       });
     }
     if (!isItemFileAllowedForItem(item, fileConfig)) {
+      const requirement = fileConfig.requiresSatinLabelRequired
+        ? "satin label is required for this item"
+        : "mounting file is needed for this item";
       return res.status(400).json({
         success: false,
-        message: `${fileConfig.label} can only be uploaded when mounting file is needed for this item`,
+        message: `${fileConfig.label} can only be uploaded when ${requirement}`,
       });
     }
     const beforeItemSnapshot = item.toObject();

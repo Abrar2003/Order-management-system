@@ -37,6 +37,7 @@ const createInitialForm = () => ({
   vendor: "",
   kd: false,
   mounting_file_needed: false,
+  satin_label_required: false,
   pis_item_count: "1",
   pis_box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
   pis_box_count: "1",
@@ -223,6 +224,7 @@ const CreateItemModal = ({
       formData.append("vendor", vendor);
       formData.append("kd", String(form.kd === true));
       formData.append("mounting_file_needed", String(form.mounting_file_needed === true));
+      formData.append("satin_label_required", String(form.satin_label_required === true));
       formData.append("pis_box_mode", form.pis_box_mode);
       formData.append("pis_item_sizes", JSON.stringify(pisItemPayload.value));
       formData.append("pis_box_sizes", JSON.stringify(pisBoxPayload.value));
@@ -324,7 +326,7 @@ const CreateItemModal = ({
                   disabled={saving}
                 />
               </div>
-              <div className="col-md-6">
+              <div className="col-md-4">
                 <label className="form-label">K/D</label>
                 <div className="btn-group w-100" role="group" aria-label="K/D">
                   <button
@@ -345,7 +347,7 @@ const CreateItemModal = ({
                   </button>
                 </div>
               </div>
-              <div className="col-md-6">
+              <div className="col-md-4">
                 <label className="form-label">Mounting File Needed</label>
                 <div className="btn-group w-100" role="group" aria-label="Mounting File Needed">
                   <button
@@ -360,6 +362,27 @@ const CreateItemModal = ({
                     type="button"
                     className={`btn ${!form.mounting_file_needed ? "btn-primary" : "btn-outline-secondary"}`}
                     onClick={() => handleFieldChange("mounting_file_needed", false)}
+                    disabled={saving}
+                  >
+                    No
+                  </button>
+                </div>
+              </div>
+              <div className="col-md-4">
+                <label className="form-label">Satin Label Required</label>
+                <div className="btn-group w-100" role="group" aria-label="Satin Label Required">
+                  <button
+                    type="button"
+                    className={`btn ${form.satin_label_required ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => handleFieldChange("satin_label_required", true)}
+                    disabled={saving}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${!form.satin_label_required ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => handleFieldChange("satin_label_required", false)}
                     disabled={saving}
                   >
                     No

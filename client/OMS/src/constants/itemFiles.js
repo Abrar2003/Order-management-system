@@ -136,6 +136,18 @@ export const SHIPPING_MARKS_SUB_OPTIONS = Object.freeze([
     invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Shipping marks.",
   },
   {
+    value: "satin_label",
+    label: "Satin Label",
+    buttonLabel: "Satin Label",
+    field: "satin_label",
+    previewMode: "pdf",
+    accept: ".pdf,application/pdf",
+    extensions: [".pdf"],
+    mimeTypes: ["application/pdf"],
+    invalidMessage: "Only PDF files are allowed for Satin Label.",
+    requiresSatinLabelRequired: true,
+  },
+  {
     value: "ean",
     label: "EAN",
     buttonLabel: "EAN",
@@ -202,8 +214,15 @@ export const isItemFileOptionAvailableForItem = (option, item = {}) => {
   const resolvedOption =
     typeof option === "string" ? getItemFileOption(option) : option;
   if (!resolvedOption) return false;
-  if (!resolvedOption.requiresMountingFileNeeded) return true;
-  return item?.mounting_file_needed === true;
+  if (
+    resolvedOption.requiresMountingFileNeeded &&
+    item?.mounting_file_needed !== true
+  ) return false;
+  if (
+    resolvedOption.requiresSatinLabelRequired &&
+    item?.satin_label_required !== true
+  ) return false;
+  return true;
 };
 
 export const hasStoredItemFile = (file = {}) =>

@@ -20,6 +20,7 @@ const CRITERIA_OPTIONS = [
   { value: "pis", label: "PIS Uploaded" },
   { value: "assembly", label: "Assembly Uploaded" },
   { value: "mounting_file", label: "Mounting File Uploaded" },
+  { value: "satin_label", label: "Satin Label Uploaded" },
   { value: "packaging_ppt", label: "Packaging PPT Uploaded" },
   { value: "product_image", label: "Product Image Uploaded" },
   { value: "finish", label: "Finish Uploaded" },
@@ -42,6 +43,7 @@ const SUMMARY_KEYS = [
   "pis",
   "assembly",
   "mounting_file",
+  "satin_label",
   "packaging_ppt",
   "product_image",
   "finish",
@@ -298,7 +300,7 @@ const InspectedItemsReport = () => {
 
         <ReportInfoBanner
           description="Audits all item-master and non-cancelled ordered items, whether they have been inspected or not, to check if essential documents are uploaded."
-          dataShown="Item code, description, brand, vendors list, status flags indicating presence of required files, and last inspected date."
+          dataShown="Item code, description, brand, vendors list, status flags for required files including satin labels, and last inspected date."
           howItWorks="Combines item-master records with distinct items from non-cancelled order history, then applies country, brand, vendor, inspection, document, date, and keyword filters."
         />
 
@@ -452,6 +454,7 @@ const InspectedItemsReport = () => {
                       <th>PIS</th>
                       <th>Assembly</th>
                       <th>Mounting File</th>
+                      <th>Satin Label</th>
                       <th>Packaging PPT</th>
                       <th>Product Image</th>
                       <th>Finish</th>
@@ -494,6 +497,12 @@ const InspectedItemsReport = () => {
                             applicable={row.requirements?.mounting_file === true}
                           />
                         </td>
+                        <td>
+                          <FlagBadge
+                            value={row.flags?.satin_label}
+                            applicable={row.requirements?.satin_label === true}
+                          />
+                        </td>
                         <td><FlagBadge value={row.flags?.packaging_ppt} /></td>
                         <td><FlagBadge value={row.flags?.product_image} /></td>
                         <td>
@@ -514,7 +523,7 @@ const InspectedItemsReport = () => {
                     ))}
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan={18} className="text-center py-4">
+                        <td colSpan={19} className="text-center py-4">
                           No items found
                         </td>
                       </tr>

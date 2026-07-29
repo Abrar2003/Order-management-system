@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   __test__: {
     buildInspectedItemsReportRow,
+    buildInspectedItemsSummary,
     buildOrderItemReportGroups,
     matchesInspectedItemsDateRange,
     matchesInspectedItemsReportFilters,
@@ -163,4 +164,22 @@ test("merged report filters search, brand, vendor, and country values", () => {
     matchesInspectedItemsReportFilters(row, { country: "China" }),
     false,
   );
+});
+
+test("satin label summary counts only items that require a label", () => {
+  const uploaded = buildInspectedItemsReportRow({
+    code: "SATIN-1",
+    satin_label_required: true,
+    satin_label: { key: "item-shipping-marks/satin-label.pdf" },
+  });
+  const notRequired = buildInspectedItemsReportRow({ code: "SATIN-2" });
+  const summary = buildInspectedItemsSummary([uploaded, notRequired]);
+
+  assert.deepEqual(summary.satin_label, {
+    key: "satin_label",
+    label: "Satin Label Uploaded",
+    count: 1,
+    total: 1,
+  });
+  assert.equal(notRequired.flags.satin_label, null);
 });

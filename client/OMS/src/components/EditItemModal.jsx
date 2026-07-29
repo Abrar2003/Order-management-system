@@ -79,6 +79,7 @@ const buildInitialForm = (item = {}) => {
     description: toText(item?.description),
     kd: Boolean(item?.kd),
     mounting_file_needed: Boolean(item?.mounting_file_needed),
+    satin_label_required: Boolean(item?.satin_label_required),
     inspected_item_count: String(inspectedItemCount),
     inspected_box_mode: inspectedBoxMode,
     inspected_box_count: String(inspectedBoxCount),
@@ -282,6 +283,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
         description: toText(form.description),
         kd: Boolean(form.kd),
         mounting_file_needed: Boolean(form.mounting_file_needed),
+        satin_label_required: Boolean(form.satin_label_required),
         inspected_item_sizes: inspectedItemPayload.value,
         inspected_box_mode: form.inspected_box_mode,
         inspected_box_sizes: inspectedBoxPayload.value,
@@ -519,6 +521,27 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                     type="button"
                     className={`btn btn-sm ${!form.mounting_file_needed ? "btn-primary" : "btn-outline-secondary"}`}
                     onClick={() => updateField("mounting_file_needed", false)}
+                    disabled={saving}
+                  >
+                    No
+                  </button>
+                </div>
+              </div>
+              <div className="col-md-3">
+                <label className="form-label">Satin Label Required</label>
+                <div className="btn-group w-100" role="group" aria-label="Satin Label Required">
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${form.satin_label_required ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("satin_label_required", true)}
+                    disabled={saving}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${!form.satin_label_required ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("satin_label_required", false)}
                     disabled={saving}
                   >
                     No
