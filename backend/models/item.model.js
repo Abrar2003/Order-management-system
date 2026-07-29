@@ -572,6 +572,15 @@ const itemSchema = new mongoose.Schema(
       link: { type: String, default: "", trim: true },
       public_id: { type: String, default: "", trim: true },
     },
+    satin_label: {
+      key: { type: String, default: "", trim: true },
+      originalName: { type: String, default: "", trim: true },
+      contentType: { type: String, default: "", trim: true },
+      size: { type: Number, default: 0, min: 0 },
+      link: { type: String, default: "", trim: true },
+      public_id: { type: String, default: "", trim: true },
+    },
+    satin_label_required: { type: Boolean, default: false },
     mounting_file: {
       key: { type: String, default: "", trim: true },
       originalName: { type: String, default: "", trim: true },
