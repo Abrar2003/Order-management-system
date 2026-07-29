@@ -4,12 +4,42 @@ const XLSX = require("xlsx");
 
 const { loadEnvFiles } = require("../config/loadEnv");
 
-const SHIPPING_MARK_FILE_PATTERN = /^(.+?)_Shippingmarks?(?:[_\s.-].*)?\.pdf$/i;
 const SHIPPING_MARK_CONTENT_TYPE = "application/pdf";
 const DEFAULT_API_BASE_URL = "https://api.ghouse-sourcing.com";
+const ITEM_FILE_TYPES_BY_FOLDER = new Map([
+  ["shiping mark left right", "shipping_marks"],
+  ["shipping mark left right", "shipping_marks"],
+  ["ean", "ean"],
+  ["flat carton", "flat_carton"],
+  ["3d carton", "three_d_carton"],
+  ["satin", "satin_label"],
+]);
+const ITEM_FILE_TYPE_CONFIG = Object.freeze({
+  shipping_marks: {
+    label: "Shipping Marks",
+    field: "shipping_marks.files",
+    legacyFields: ["shipping_marks.shipping_marks_1", "shipping_marks.shipping_marks_2"],
+    multiple: true,
+  },
+  ean: { label: "EAN", field: "shipping_marks.ean" },
+  flat_carton: {
+    label: "Flat Carton",
+    field: "shipping_marks.flat_carton",
+    legacyFields: ["shipping_marks.flat_carton_1", "shipping_marks.flat_carton_2"],
+    multiple: true,
+  },
+  three_d_carton: { label: "3D Carton", field: "shipping_marks.three_d_carton" },
+  satin_label: {
+    label: "Satin Label",
+    field: "satin_label",
+    requiresSatinLabelRequired: true,
+  },
+});
 const ISSUE_STATUSES = new Set([
   "lookup-failed",
   "missing-code",
+  "unknown-file-type",
+  "ambiguous-file-group",
   "missing-item",
   "skipped-existing",
   "upload-failed",
@@ -53,7 +83,9 @@ const parseArgs = (argv = []) => {
     help: false,
     dryRun: toBoolean(process.env.SHIPPING_MARKS_UPLOAD_DRY_RUN, false),
     recursive: toBoolean(process.env.SHIPPING_MARKS_UPLOAD_RECURSIVE, true),
-    skipExisting: toBoolean(process.env.SHIPPING_MARKS_UPLOAD_SKIP_EXISTING, false),
+    skipExisting: process.env.SHIPPING_MARKS_UPLOAD_SKIP_EXISTING === undefined
+      ? true
+      : toBoolean(process.env.SHIPPING_MARKS_UPLOAD_SKIP_EXISTING, true),
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -239,17 +271,33 @@ const getRelativePathParts = (rootPath, filePath) => {
   return relativePath.split(path.sep).filter(Boolean);
 };
 
-const getShippingMarkFileMatch = (filePath, { rootPath = path.dirname(filePath) } = {}) => {
+const normalizeFolderName = (value = "") =>
+  normalizeText(value).toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+
+const getItemFileType = (filePath, { rootPath = path.dirname(filePath) } = {}) => {
+  const relativeParts = getRelativePathParts(rootPath, filePath);
+  const directoryNames = [
+    ...relativeParts.slice(0, -1).reverse(),
+    path.basename(rootPath),
+  ];
+
+  return directoryNames
+    .map(normalizeFolderName)
+    .map((folderName) => ITEM_FILE_TYPES_BY_FOLDER.get(folderName))
+    .find(Boolean) || "";
+};
+
+const getItemFileMatch = (filePath, { rootPath = path.dirname(filePath) } = {}) => {
   if (!isPdfFile(filePath)) return null;
 
   const fileName = path.basename(filePath);
-  const shippingMarkNameMatch = fileName.match(SHIPPING_MARK_FILE_PATTERN);
-  const fileNameCode = normalizeCode(shippingMarkNameMatch?.[1])
-    || extractCodeFromText(path.parse(fileName).name);
+  const fileNameCode = extractCodeFromText(path.parse(fileName).name);
+  const fileType = getItemFileType(filePath, { rootPath });
 
   if (fileNameCode) {
     return {
       itemCode: fileNameCode,
+      fileType,
       filePath,
     };
   }
@@ -261,6 +309,7 @@ const getShippingMarkFileMatch = (filePath, { rootPath = path.dirname(filePath) 
     if (directoryCode) {
       return {
         itemCode: directoryCode,
+        fileType,
         filePath,
       };
     }
@@ -268,11 +317,12 @@ const getShippingMarkFileMatch = (filePath, { rootPath = path.dirname(filePath) 
 
   return {
     itemCode: "",
+    fileType,
     filePath,
   };
 };
 
-const collectShippingMarkFiles = async (
+const collectItemFiles = async (
   targetPath,
   { recursive = true, rootPath = "" } = {},
 ) => {
@@ -285,14 +335,15 @@ const collectShippingMarkFiles = async (
       : resolvedPath;
 
   if (stats.isFile()) {
-    const match = getShippingMarkFileMatch(resolvedPath, { rootPath: scanRootPath });
+    const match = getItemFileMatch(resolvedPath, { rootPath: scanRootPath });
     const isPdf = isPdfFile(resolvedPath);
     return {
       scannedFiles: 1,
       ignoredFiles: isPdf ? 0 : 1,
       pdfFiles: isPdf ? 1 : 0,
-      files: match?.itemCode ? [match] : [],
+      files: match?.itemCode && match?.fileType ? [match] : [],
       missingCodeFiles: isPdf && !match?.itemCode ? [resolvedPath] : [],
+      unknownFileTypeFiles: isPdf && match?.itemCode && !match?.fileType ? [resolvedPath] : [],
     };
   }
 
@@ -303,6 +354,7 @@ const collectShippingMarkFiles = async (
       pdfFiles: 0,
       files: [],
       missingCodeFiles: [],
+      unknownFileTypeFiles: [],
     };
   }
 
@@ -313,6 +365,7 @@ const collectShippingMarkFiles = async (
     pdfFiles: 0,
     files: [],
     missingCodeFiles: [],
+    unknownFileTypeFiles: [],
   };
 
   for (const entry of entries) {
@@ -320,7 +373,7 @@ const collectShippingMarkFiles = async (
 
     if (entry.isDirectory()) {
       if (recursive) {
-        const nestedResult = await collectShippingMarkFiles(entryPath, {
+        const nestedResult = await collectItemFiles(entryPath, {
           recursive,
           rootPath: scanRootPath,
         });
@@ -329,6 +382,7 @@ const collectShippingMarkFiles = async (
         result.pdfFiles += nestedResult.pdfFiles;
         result.files.push(...nestedResult.files);
         result.missingCodeFiles.push(...nestedResult.missingCodeFiles);
+        result.unknownFileTypeFiles.push(...nestedResult.unknownFileTypeFiles);
       }
       continue;
     }
@@ -342,9 +396,13 @@ const collectShippingMarkFiles = async (
     }
 
     result.pdfFiles += 1;
-    const match = getShippingMarkFileMatch(entryPath, { rootPath: scanRootPath });
+    const match = getItemFileMatch(entryPath, { rootPath: scanRootPath });
     if (match?.itemCode) {
-      result.files.push(match);
+      if (match.fileType) {
+        result.files.push(match);
+      } else {
+        result.unknownFileTypeFiles.push(entryPath);
+      }
     } else {
       result.missingCodeFiles.push(entryPath);
     }
@@ -352,6 +410,7 @@ const collectShippingMarkFiles = async (
 
   result.files.sort((left, right) => left.filePath.localeCompare(right.filePath));
   result.missingCodeFiles.sort((left, right) => left.localeCompare(right));
+  result.unknownFileTypeFiles.sort((left, right) => left.localeCompare(right));
   return result;
 };
 
@@ -362,18 +421,23 @@ const groupFilesByItemCode = (files = []) => {
     const itemCode = normalizeCode(file?.itemCode);
     if (!itemCode) continue;
 
-    const groupKey = itemCode.toLowerCase();
+    const fileType = normalizeText(file?.fileType).toLowerCase();
+    if (!fileType) continue;
+
+    const groupKey = `${fileType}:${itemCode.toLowerCase()}`;
     const existingGroup = grouped.get(groupKey) || {
       itemCode,
+      fileType,
       files: [],
     };
     existingGroup.files.push(file.filePath);
     grouped.set(groupKey, existingGroup);
   }
 
-  return [...grouped.values()].sort((left, right) =>
-    left.itemCode.localeCompare(right.itemCode),
-  );
+  return [...grouped.values()].sort((left, right) => {
+    const typeCompare = left.fileType.localeCompare(right.fileType);
+    return typeCompare || left.itemCode.localeCompare(right.itemCode);
+  });
 };
 
 const readJsonResponse = async (response) => {
@@ -533,13 +597,22 @@ const hasStoredItemFile = (file = {}) =>
         normalizeText(file?.key || file?.url || file?.link || file?.public_id),
       );
 
-const hasExistingShippingMarks = (item = {}) =>
-  hasStoredItemFile(item?.shipping_marks?.files);
+const getPathValue = (value = {}, field = "") =>
+  String(field).split(".").reduce(
+    (current, key) => (current && current[key] !== undefined ? current[key] : undefined),
+    value,
+  );
 
-const uploadShippingMarks = async ({ apiBaseUrl, authHeaders, itemId, filePaths }) => {
+const hasExistingItemFile = (item = {}, fileConfig = {}) =>
+  hasStoredItemFile(getPathValue(item, fileConfig.field))
+  || (fileConfig.legacyFields || []).some((field) =>
+    hasStoredItemFile(getPathValue(item, field)),
+  );
+
+const uploadItemFiles = async ({ apiBaseUrl, authHeaders, itemId, fileType, filePaths }) => {
   const selectedFilePaths = Array.isArray(filePaths) ? filePaths.filter(Boolean) : [];
   const formData = new FormData();
-  formData.append("file_type", "shipping_marks");
+  formData.append("file_type", fileType);
 
   for (const filePath of selectedFilePaths) {
     const fileBuffer = await fs.readFile(filePath);
@@ -558,6 +631,16 @@ const uploadShippingMarks = async ({ apiBaseUrl, authHeaders, itemId, filePaths 
     body: formData,
   });
 };
+
+const markSatinLabelRequired = async ({ apiBaseUrl, authHeaders, itemId }) =>
+  apiRequest(`${apiBaseUrl}/items/${encodeURIComponent(itemId)}`, {
+    method: "PATCH",
+    headers: {
+      ...authHeaders,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ satin_label_required: true }),
+  });
 
 const formatRelativeFileList = (basePath, filePaths = []) =>
   filePaths
@@ -578,6 +661,7 @@ const formatDetailRecord = ({
   status = "",
   itemCode = "",
   itemId = "",
+  fileType = "",
   folderList = "",
   relativeFileList = "",
   message = "",
@@ -587,6 +671,7 @@ const formatDetailRecord = ({
     : `[${status}]`;
   const parts = [
     itemLabel,
+    `type=${fileType || "unknown"}`,
     `folder=${folderList || "."}`,
     `files=${relativeFileList}`,
   ];
@@ -608,6 +693,7 @@ const buildReportRow = ({
   status = "",
   itemCode = "",
   itemId = "",
+  fileType = "",
   folderList = "",
   relativeFileList = "",
   fileCount = 0,
@@ -618,10 +704,11 @@ const buildReportRow = ({
   Status: status,
   "Item Code": itemCode,
   "Item ID": normalizeText(itemId),
+  "File Type": normalizeText(fileType),
   "PDF Folder": folderList,
   Files: relativeFileList,
   "File Count": Number(fileCount || 0),
-  "Existing Shipping Marks": existing,
+  "Existing File": existing,
   "Uploaded Files": Number(uploadedFiles || 0),
   Reason: message,
 });
@@ -667,6 +754,8 @@ const writeExcelReport = async ({
     { Metric: "Item Groups", Value: summary.itemGroups },
     { Metric: "Files Matched", Value: summary.filesMatched },
     { Metric: "Missing Code", Value: summary.missingCode },
+    { Metric: "Unknown File Type", Value: summary.unknownFileType },
+    { Metric: "Ambiguous Single-file Groups", Value: summary.ambiguousSingleFileGroups },
     { Metric: "Uploaded Groups", Value: summary.uploadedGroups },
     { Metric: "Uploaded Files", Value: summary.uploadedFiles },
     { Metric: "Dry-run Groups", Value: summary.dryRunMatchedGroups },
@@ -681,10 +770,11 @@ const writeExcelReport = async ({
     "Status",
     "Item Code",
     "Item ID",
+    "File Type",
     "PDF Folder",
     "Files",
     "File Count",
-    "Existing Shipping Marks",
+    "Existing File",
     "Uploaded Files",
     "Reason",
   ];
@@ -694,14 +784,14 @@ const writeExcelReport = async ({
     "Details",
     detailHeaders,
     safeDetailRows,
-    [18, 16, 28, 32, 100, 12, 24, 16, 60],
+    [18, 16, 28, 20, 32, 100, 12, 20, 16, 60],
   );
   addSheet(
     workbook,
     "Issues",
     detailHeaders,
     safeDetailRows.filter((row) => ISSUE_STATUSES.has(row?.Status)),
-    [18, 16, 28, 32, 100, 12, 24, 16, 60],
+    [18, 16, 28, 20, 32, 100, 12, 20, 16, 60],
   );
 
   await ensureReportParentDirectory(resolvedReportPath);
@@ -719,7 +809,7 @@ const printUsage = () => {
   );
   console.log("");
   console.log("Options:");
-  console.log("  --folder <path>        Folder or single shipping mark PDF to process");
+  console.log("  --folder <path>        Root folder or single PDF to process");
   console.log(`  --api-base-url <url>   Backend base URL, defaults to ${DEFAULT_API_BASE_URL}`);
   console.log("  --token <jwt>          Use an existing backend JWT");
   console.log("  --username <value>     Backend username for /auth/signin");
@@ -727,13 +817,13 @@ const printUsage = () => {
   console.log("  --dry-run              Resolve item matches without uploading");
   console.log("  --report <path>        Write Excel report to a custom .xlsx/.xls path");
   console.log("  --no-report            Do not write the Excel report");
-  console.log("  --skip-existing        Skip items that already have shipping marks.files");
-  console.log("  --replace-existing     Upload even when shipping marks already exist");
+  console.log("  --skip-existing        Skip items that already have the target file (default)");
+  console.log("  --replace-existing     Upload even when the target file already exists");
   console.log("  --no-recursive         Only scan the top-level folder");
   console.log("");
   console.log("Item code detection:");
-  console.log("  Scans every .pdf and uses the code from the PDF name or nearest folder.");
-  console.log("  Examples: 95650_Shippingmarks_Box1.pdf, Shipping marks 95650, 95650_Item name");
+  console.log("  Scans PDFs in SHIPING MARK LEFT RIGHT, EAN, FLAT CARTON, 3D CARTON, and SATIN folders.");
+  console.log("  Uses the leading item code from the PDF name or nearest folder.");
 };
 
 const main = async () => {
@@ -754,7 +844,7 @@ const main = async () => {
 
   options.apiBaseUrl = resolveApiBaseUrl(options.apiBaseUrl);
   const targetPath = path.resolve(options.folderPath);
-  const scanResult = await collectShippingMarkFiles(targetPath, {
+  const scanResult = await collectItemFiles(targetPath, {
     recursive: options.recursive,
   });
   const groupedFiles = groupFilesByItemCode(scanResult.files);
@@ -781,6 +871,8 @@ const main = async () => {
     itemGroups: groupedFiles.length,
     filesMatched: scanResult.files.length,
     missingCode: scanResult.missingCodeFiles.length,
+    unknownFileType: scanResult.unknownFileTypeFiles.length,
+    ambiguousSingleFileGroups: 0,
     uploadedGroups: 0,
     uploadedFiles: 0,
     dryRunMatchedGroups: 0,
@@ -791,6 +883,8 @@ const main = async () => {
   };
   const detailRecords = {
     missingCodeFiles: [],
+    unknownFileTypeFiles: [],
+    ambiguousGroups: [],
     missingItems: [],
     skippedItems: [],
     failedItems: [],
@@ -819,9 +913,58 @@ const main = async () => {
     console.warn(`[missing-code] folder=${folderList} :: files=${relativeFileList} :: ${message}`);
   }
 
+  for (const filePath of scanResult.unknownFileTypeFiles) {
+    const relativeFileList = formatRelativeFileList(targetPath, [filePath]);
+    const folderList = formatFolderList([filePath]);
+    const message = "Folder does not map to an OMS item file type";
+    detailRecords.unknownFileTypeFiles.push({
+      status: "unknown-file-type",
+      folderList,
+      relativeFileList,
+      message,
+    });
+    reportRows.push(buildReportRow({
+      status: "unknown-file-type",
+      folderList,
+      relativeFileList,
+      fileCount: 1,
+      message,
+    }));
+    console.warn(`[unknown-file-type] folder=${folderList} :: files=${relativeFileList} :: ${message}`);
+  }
+
   for (const group of groupedFiles) {
     const relativeFileList = formatRelativeFileList(targetPath, group.files);
     const folderList = formatFolderList(group.files);
+    const fileConfig = ITEM_FILE_TYPE_CONFIG[group.fileType];
+
+    if (!fileConfig) {
+      summary.unknownFileType += group.files.length;
+      continue;
+    }
+    if (!fileConfig.multiple && group.files.length > 1) {
+      summary.ambiguousSingleFileGroups += 1;
+      const message = `${fileConfig.label} accepts one file; review this group before upload`;
+      detailRecords.ambiguousGroups.push({
+        status: "ambiguous-file-group",
+        itemCode: group.itemCode,
+        fileType: group.fileType,
+        folderList,
+        relativeFileList,
+        message,
+      });
+      reportRows.push(buildReportRow({
+        status: "ambiguous-file-group",
+        itemCode: group.itemCode,
+        fileType: group.fileType,
+        folderList,
+        relativeFileList,
+        fileCount: group.files.length,
+        message,
+      }));
+      console.warn(`[ambiguous-file-group] ${group.itemCode} :: type=${group.fileType} :: ${relativeFileList}`);
+      continue;
+    }
 
     let item = null;
     try {
@@ -835,6 +978,7 @@ const main = async () => {
       detailRecords.failedItems.push({
         status: "lookup-failed",
         itemCode: group.itemCode,
+        fileType: group.fileType,
         folderList,
         relativeFileList,
         message: error.message,
@@ -842,6 +986,7 @@ const main = async () => {
       reportRows.push(buildReportRow({
         status: "lookup-failed",
         itemCode: group.itemCode,
+        fileType: group.fileType,
         folderList,
         relativeFileList,
         fileCount: group.files.length,
@@ -858,12 +1003,14 @@ const main = async () => {
       detailRecords.missingItems.push({
         status: "missing-item",
         itemCode: group.itemCode,
+        fileType: group.fileType,
         folderList,
         relativeFileList,
       });
       reportRows.push(buildReportRow({
         status: "missing-item",
         itemCode: group.itemCode,
+        fileType: group.fileType,
         folderList,
         relativeFileList,
         fileCount: group.files.length,
@@ -873,7 +1020,7 @@ const main = async () => {
       continue;
     }
 
-    const hasExistingFiles = hasExistingShippingMarks(item);
+    const hasExistingFiles = hasExistingItemFile(item, fileConfig);
 
     if (options.skipExisting && hasExistingFiles) {
       summary.skippedExisting += 1;
@@ -881,6 +1028,7 @@ const main = async () => {
         status: "skipped-existing",
         itemCode: group.itemCode,
         itemId: item._id,
+        fileType: group.fileType,
         folderList,
         relativeFileList,
       });
@@ -888,6 +1036,7 @@ const main = async () => {
         status: "skipped-existing",
         itemCode: group.itemCode,
         itemId: item._id,
+        fileType: group.fileType,
         folderList,
         relativeFileList,
         fileCount: group.files.length,
@@ -907,6 +1056,7 @@ const main = async () => {
         status: "matched",
         itemCode: group.itemCode,
         itemId: item._id,
+        fileType: group.fileType,
         folderList,
         relativeFileList,
         fileCount: group.files.length,
@@ -919,10 +1069,20 @@ const main = async () => {
     }
 
     try {
-      const response = await uploadShippingMarks({
+      const satinRequirementEnabled =
+        fileConfig.requiresSatinLabelRequired && item?.satin_label_required !== true;
+      if (satinRequirementEnabled) {
+        await markSatinLabelRequired({
+          apiBaseUrl: options.apiBaseUrl,
+          authHeaders,
+          itemId: item._id,
+        });
+      }
+      const response = await uploadItemFiles({
         apiBaseUrl: options.apiBaseUrl,
         authHeaders,
         itemId: item._id,
+        fileType: group.fileType,
         filePaths: group.files,
       });
       const uploadedFiles = Array.isArray(response?.data?.files)
@@ -934,11 +1094,13 @@ const main = async () => {
         status: "uploaded",
         itemCode: group.itemCode,
         itemId: item._id,
+        fileType: group.fileType,
         folderList,
         relativeFileList,
         fileCount: group.files.length,
         existing: hasExistingFiles ? "yes" : "no",
         uploadedFiles,
+        message: satinRequirementEnabled ? "Satin Label Required enabled" : "",
       }));
       console.log(
         `[uploaded] ${group.itemCode} -> ${item._id} -> ${uploadedFiles} file(s) :: ${relativeFileList}`,
@@ -949,6 +1111,7 @@ const main = async () => {
         status: "upload-failed",
         itemCode: group.itemCode,
         itemId: item._id,
+        fileType: group.fileType,
         folderList,
         relativeFileList,
         message: error.message,
@@ -957,6 +1120,7 @@ const main = async () => {
         status: "upload-failed",
         itemCode: group.itemCode,
         itemId: item._id,
+        fileType: group.fileType,
         folderList,
         relativeFileList,
         fileCount: group.files.length,
@@ -974,6 +1138,8 @@ const main = async () => {
   console.log(`  Item groups       : ${summary.itemGroups}`);
   console.log(`  Files matched     : ${summary.filesMatched}`);
   console.log(`  Missing code      : ${summary.missingCode}`);
+  console.log(`  Unknown type      : ${summary.unknownFileType}`);
+  console.log(`  Ambiguous groups  : ${summary.ambiguousSingleFileGroups}`);
   console.log(`  Uploaded groups   : ${summary.uploadedGroups}`);
   console.log(`  Uploaded files    : ${summary.uploadedFiles}`);
   console.log(`  Dry-run groups    : ${summary.dryRunMatchedGroups}`);
@@ -983,6 +1149,8 @@ const main = async () => {
   console.log(`  Failed            : ${summary.failed}`);
 
   printDetailSection("Missing Code Files", detailRecords.missingCodeFiles);
+  printDetailSection("Unknown File Type Files", detailRecords.unknownFileTypeFiles);
+  printDetailSection("Ambiguous Single-file Groups", detailRecords.ambiguousGroups);
   printDetailSection("Missing Items", detailRecords.missingItems);
   printDetailSection("Skipped Items", detailRecords.skippedItems);
   printDetailSection("Failed Items", detailRecords.failedItems);
@@ -1005,7 +1173,15 @@ const main = async () => {
   }
 };
 
-main().catch((error) => {
-  console.error("Batch shipping marks upload failed:", error?.message || error);
-  process.exitCode = 1;
-});
+module.exports.__test__ = {
+  getItemFileMatch,
+  getItemFileType,
+  groupFilesByItemCode,
+};
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("Batch item file upload failed:", error?.message || error);
+    process.exitCode = 1;
+  });
+}
