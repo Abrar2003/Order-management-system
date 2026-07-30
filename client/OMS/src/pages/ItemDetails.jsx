@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
+import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
 import FilePreviewModal from "../components/FilePreviewModal";
 import QcItemComplaintsSection from "../components/complaints/QcItemComplaintsSection";
@@ -508,6 +509,7 @@ const getNestedValue = (obj, path) => {
 const ItemDetails = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { hasPermission } = usePermissions();
   const { itemCode } = useParams();
   const resolvedItemCode = useMemo(
     () => decodeURIComponent(String(itemCode || "")).trim(),
@@ -523,8 +525,10 @@ const ItemDetails = () => {
   const [details, setDetails] = useState(null);
   const [brandLogoSrc, setBrandLogoSrc] = useState("");
   const [previewFile, setPreviewFile] = useState(null);
+  const [deletingFileKey, setDeletingFileKey] = useState("");
   const [poSortBy, setPoSortBy] = useState("po");
   const [poSortOrder, setPoSortOrder] = useState("asc");
+  const canDeleteItemFiles = hasPermission("images_documents", "delete");
 
   const fetchDetails = useCallback(async () => {
     if (!resolvedItemCode) {
@@ -622,6 +626,7 @@ const ItemDetails = () => {
         return {
           ...opt,
           value: `${opt.value}-${index}`,
+          fileType: opt.value,
           label: files.length > 1 ? `${opt.label} ${index + 1}` : opt.label,
           file,
           previewMode: isImage ? "image" : "pdf",
@@ -941,6 +946,34 @@ const ItemDetails = () => {
     });
   };
 
+  const handleDeleteFile = useCallback(async (entry) => {
+    const itemId = String(item?._id || "").trim();
+    const fileType = String(entry?.fileType || entry?.value || "").trim();
+    const fileKey = String(entry?.file?.key || entry?.file?.public_id || "").trim();
+    if (!itemId || !fileType || !fileKey || deletingFileKey) return;
+    if (!window.confirm(`Delete ${entry.label || "this file"}?`)) return;
+
+    try {
+      setDeletingFileKey(fileKey);
+      const response = await api.delete(
+        `/items/${encodeURIComponent(itemId)}/files/${encodeURIComponent(fileType)}`,
+        { params: { file_key: fileKey } },
+      );
+      alert(response?.data?.message || `${entry.label || "File"} deleted successfully.`);
+      setPreviewFile(null);
+      await fetchDetails();
+    } catch (deleteError) {
+      console.error(deleteError);
+      alert(
+        deleteError?.response?.data?.message
+          || deleteError?.message
+          || `Failed to delete ${entry.label || "file"}.`,
+      );
+    } finally {
+      setDeletingFileKey("");
+    }
+  }, [deletingFileKey, fetchDetails, item?._id]);
+
   return (
     <>
       <Navbar />
@@ -1026,6 +1059,7 @@ const ItemDetails = () => {
                     <div className="row g-3">
                       {uploadedFiles.map((entry) => {
                         const fileUrl = getStoredItemFileUrl(entry.file);
+                        const fileKey = String(entry.file?.key || entry.file?.public_id || "").trim();
                         return (
                           <div key={entry.value} className="col-md-6 col-xl-4">
                             <div className="card h-100 shadow-sm border-0">
@@ -1039,6 +1073,16 @@ const ItemDetails = () => {
                                   <a href={fileUrl || "#"} target="_blank" rel="noreferrer" className="btn btn-outline-secondary btn-sm rounded-pill" onClick={(event) => { if (!fileUrl) event.preventDefault(); }}>
                                     Open File
                                   </a>
+                                  {canDeleteItemFiles && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-danger btn-sm rounded-pill"
+                                      onClick={() => handleDeleteFile(entry)}
+                                      disabled={!fileKey || Boolean(deletingFileKey)}
+                                    >
+                                      {deletingFileKey === fileKey ? "Deleting..." : "Delete File"}
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1089,6 +1133,29 @@ const ItemDetails = () => {
                                   >
                                     Open File
                                   </a>
+                                  {canDeleteItemFiles && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-danger btn-sm rounded-pill"
+                                      onClick={() => handleDeleteFile(activeDetailsShippingMarkFile)}
+                                      disabled={
+                                        !String(
+                                          activeDetailsShippingMarkFile?.file?.key
+                                          || activeDetailsShippingMarkFile?.file?.public_id
+                                          || "",
+                                        ).trim()
+                                        || Boolean(deletingFileKey)
+                                      }
+                                    >
+                                      {deletingFileKey === String(
+                                        activeDetailsShippingMarkFile?.file?.key
+                                        || activeDetailsShippingMarkFile?.file?.public_id
+                                        || "",
+                                      ).trim()
+                                        ? "Deleting..."
+                                        : "Delete File"}
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             </div>

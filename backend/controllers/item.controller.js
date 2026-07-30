@@ -4227,6 +4227,226 @@ exports.getItems = async (req, res) => {
   }
 };
 
+const buildItemPoStatusSummary = (orders = []) => {
+  const summary = {
+    current_running_pos: 0,
+    inspected_pos: 0,
+    partially_inspected_pos: 0,
+    shipped_pos: 0,
+    partially_shipped_pos: 0,
+    pending_pos: 0,
+  };
+  const currentRunningPos = [];
+
+  (Array.isArray(orders) ? orders : []).forEach((order) => {
+    const progress = deriveOrderProgress({ orderEntry: order });
+    const status = progress.status;
+    const row = { order, progress: { ...progress, status } };
+
+    if (status === "Inspection Done") summary.inspected_pos += 1;
+    else if (status === "Under Inspection") summary.partially_inspected_pos += 1;
+    else if (status === "Shipped") summary.shipped_pos += 1;
+    else if (status === "Partial Shipped") summary.partially_shipped_pos += 1;
+    else summary.pending_pos += 1;
+
+    if (status !== "Shipped") {
+      summary.current_running_pos += 1;
+      currentRunningPos.push(row);
+    }
+  });
+
+  return { summary, currentRunningPos };
+};
+
+const getItemsExportDataset = async ({ search, brand, vendor, country, user } = {}) => {
+  const items = await Item.find(
+    applyItemDataAccess(buildItemMatch({ search, brand, vendor, country }), user),
+  )
+    .sort({ updatedAt: -1, code: 1 })
+    .lean();
+  const itemCodes = items.map((item) => normalizeLookupKey(item?.code)).filter(Boolean);
+  const orders = itemCodes.length === 0
+    ? []
+    : await Order.find(applyDataAccessMatch({
+        ...ACTIVE_ORDER_MATCH,
+        $expr: {
+          $in: [
+            { $toLower: { $trim: { input: { $ifNull: ["$item.item_code", ""] } } } },
+            itemCodes,
+          ],
+        },
+      }, user))
+      .select("order_id item brand vendor order_date ETD revised_ETD status quantity shipment qc_record updatedAt createdAt")
+      .populate({ path: "qc_record", select: "quantities request_history" })
+      .sort({ order_date: -1, ETD: -1, updatedAt: -1, order_id: 1 })
+      .lean();
+  const ordersByItemCode = new Map();
+  orders.forEach((order) => {
+    const itemCode = normalizeLookupKey(order?.item?.item_code);
+    if (!itemCode) return;
+    const itemOrders = ordersByItemCode.get(itemCode) || [];
+    itemOrders.push(order);
+    ordersByItemCode.set(itemCode, itemOrders);
+  });
+
+  return (Array.isArray(items) ? items : []).map((item) => ({
+    item,
+    ...buildItemPoStatusSummary(ordersByItemCode.get(normalizeLookupKey(item?.code)) || []),
+  }));
+};
+
+exports.exportItems = async (req, res) => {
+  try {
+    const dataset = await getItemsExportDataset({
+      search: req.query.search,
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      country: req.query.country,
+      user: req.user,
+    });
+    // ponytail: Excel cells max at 32,767 characters; add chunked raw-data sheets if an item exceeds it.
+    const stringifyForExport = (value) => {
+      try {
+        return JSON.stringify(value || {}).slice(0, 32767);
+      } catch {
+        return String(value || "").slice(0, 32767);
+      }
+    };
+    const formatSizesForExport = (entries, weightKey, weightLabel) => {
+      const { sizeDisplay, weightDisplay } = formatMeasurementBlockForReport(entries, {
+        weightKey,
+        fallbackWeight: "",
+      });
+      return sizeDisplay === "Not Set"
+        ? ""
+        : `${sizeDisplay} | ${weightLabel}: ${weightDisplay}`;
+    };
+    const itemColumns = [
+      { key: "code", header: "Item Code" },
+      { key: "name", header: "Name" },
+      { key: "description", header: "Description" },
+      { key: "brand", header: "Brand" },
+      { key: "vendors", header: "Vendors" },
+      { key: "country", header: "Country of Origin" },
+      { key: "pis_item_sizes", header: "PIS Item Sizes" },
+      { key: "pis_box_sizes", header: "PIS Box Sizes" },
+      { key: "inspected_item_sizes", header: "Inspected Item Sizes" },
+      { key: "inspected_box_sizes", header: "Inspected Box Sizes" },
+      { key: "master_item_sizes", header: "Master Item Sizes" },
+      { key: "master_box_sizes", header: "Master Box Sizes" },
+      { key: "pd_item_sizes", header: "PD Item Sizes" },
+      { key: "pd_box_sizes", header: "PD Box Sizes" },
+      { key: "pis_master_barcode", header: "PIS Master Barcode" },
+      { key: "pis_inner_barcode", header: "PIS Inner Barcode" },
+      { key: "inspected_master_barcode", header: "Inspected Master Barcode" },
+      { key: "inspected_inner_barcode", header: "Inspected Inner Barcode" },
+      { key: "master_master_barcode", header: "Master Master Barcode" },
+      { key: "master_inner_barcode", header: "Master Inner Barcode" },
+      { key: "pd_master_barcode", header: "PD Master Barcode" },
+      { key: "pd_inner_barcode", header: "PD Inner Barcode" },
+      { key: "current_running_pos", header: "Current Running POs" },
+      { key: "inspected_pos", header: "Inspected POs" },
+      { key: "partially_inspected_pos", header: "Partially Inspected POs" },
+      { key: "shipped_pos", header: "Shipped POs" },
+      { key: "partially_shipped_pos", header: "Partially Shipped POs" },
+      { key: "pending_pos", header: "Pending POs" },
+      { key: "all_item_data", header: "All Item Data" },
+    ];
+    const itemRows = dataset.map(({ item, summary }) => ({
+      code: normalizeTextField(item?.code),
+      name: normalizeTextField(item?.name),
+      description: normalizeTextField(item?.description),
+      brand: normalizeTextField(item?.brand_name || item?.brand)
+        || (Array.isArray(item?.brands) ? item.brands.join(", ") : ""),
+      vendors: normalizeVendorDisplayList(item?.vendors).join(", "),
+      country: normalizeTextField(item?.country_of_origin),
+      pis_item_sizes: formatSizesForExport(item?.pis_item_sizes, "net_weight", "Net Weight"),
+      pis_box_sizes: formatSizesForExport(item?.pis_box_sizes, "gross_weight", "Gross Weight"),
+      inspected_item_sizes: formatSizesForExport(item?.inspected_item_sizes, "net_weight", "Net Weight"),
+      inspected_box_sizes: formatSizesForExport(item?.inspected_box_sizes, "gross_weight", "Gross Weight"),
+      master_item_sizes: formatSizesForExport(item?.master_item_sizes, "net_weight", "Net Weight"),
+      master_box_sizes: formatSizesForExport(item?.master_box_sizes, "gross_weight", "Gross Weight"),
+      pd_item_sizes: formatSizesForExport(item?.pd_item_sizes, "net_weight", "Net Weight"),
+      pd_box_sizes: formatSizesForExport(item?.pd_box_sizes, "gross_weight", "Gross Weight"),
+      pis_master_barcode: formatEan13BarcodeDisplay(item?.pis_master_barcode || item?.pis_barcode),
+      pis_inner_barcode: formatEan13BarcodeDisplay(item?.pis_inner_barcode),
+      inspected_master_barcode: formatEan13BarcodeDisplay(item?.qc?.master_barcode || item?.qc?.barcode),
+      inspected_inner_barcode: formatEan13BarcodeDisplay(item?.qc?.inner_barcode),
+      master_master_barcode: formatEan13BarcodeDisplay(item?.master_master_barcode || item?.master_barcode),
+      master_inner_barcode: formatEan13BarcodeDisplay(item?.master_inner_barcode),
+      pd_master_barcode: formatEan13BarcodeDisplay(item?.pd_master_barcode || item?.pd_barcode),
+      pd_inner_barcode: formatEan13BarcodeDisplay(item?.pd_inner_barcode),
+      ...summary,
+      all_item_data: stringifyForExport(item),
+    }));
+    const poColumns = [
+      { key: "item_code", header: "Item Code" },
+      { key: "po", header: "PO" },
+      { key: "description", header: "Description" },
+      { key: "brand", header: "Brand" },
+      { key: "vendor", header: "Vendor" },
+      { key: "status", header: "Current Status" },
+      { key: "order_date", header: "Order Date" },
+      { key: "etd", header: "ETD" },
+      { key: "revised_etd", header: "Revised ETD" },
+      { key: "quantity", header: "PO Quantity" },
+      { key: "passed_quantity", header: "Passed Quantity" },
+      { key: "shipped_quantity", header: "Shipped Quantity" },
+      { key: "pending_inspection_quantity", header: "Pending Inspection Quantity" },
+      { key: "shipment_data", header: "Shipment Data" },
+      { key: "all_po_data", header: "All PO Data" },
+    ];
+    const poRows = dataset.flatMap(({ currentRunningPos }) =>
+      currentRunningPos.map(({ order, progress }) => ({
+        item_code: normalizeTextField(order?.item?.item_code),
+        po: normalizeTextField(order?.order_id),
+        description: normalizeTextField(order?.item?.description),
+        brand: normalizeTextField(order?.brand),
+        vendor: normalizeVendorTextField(order?.vendor),
+        status: progress.status,
+        order_date: toDisplayDateString(order?.order_date),
+        etd: toDisplayDateString(order?.ETD),
+        revised_etd: toDisplayDateString(order?.revised_ETD),
+        quantity: progress.order_quantity,
+        passed_quantity: progress.passed_quantity,
+        shipped_quantity: progress.shipped_quantity,
+        pending_inspection_quantity: progress.pending_inspection_quantity,
+        shipment_data: stringifyForExport(order?.shipment),
+        all_po_data: stringifyForExport(order),
+      })),
+    );
+    const toWorksheet = (columns, rows) => {
+      const dataRows = rows.map((row) => columns.map((column) => row[column.key] ?? ""));
+      const worksheet = XLSX.utils.aoa_to_sheet([
+        columns.map((column) => column.header),
+        ...dataRows,
+      ]);
+      worksheet["!cols"] = columns.map((column, index) => ({
+        wch: Math.min(60, Math.max(12, column.header.length + 2, ...dataRows.map(
+          (row) => Math.min(60, String(row[index] ?? "").length + 2),
+        ))),
+      }));
+      return worksheet;
+    };
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, toWorksheet(itemColumns, itemRows), "Items");
+    XLSX.utils.book_append_sheet(workbook, toWorksheet(poColumns, poRows), "Current Running POs");
+    const fileDate = new Date().toISOString().slice(0, 10);
+
+    res.setHeader("Content-Type", "application/vnd.ms-excel");
+    res.setHeader("Content-Disposition", `attachment; filename="items-${fileDate}.xls"`);
+    return res.status(200).send(XLSX.write(workbook, { type: "buffer", bookType: "xls" }));
+  } catch (error) {
+    console.error("Export Items Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to export items.",
+    });
+  }
+};
+
+exports.__test__.buildItemPoStatusSummary = buildItemPoStatusSummary;
+
 exports.getItemMasters = async (req, res) => {
   try {
     const search = req.query.search;
@@ -8077,17 +8297,34 @@ exports.deleteItemFile = async (req, res) => {
       : [normalizeStoredItemFile(getPathValue(item, fileConfig.field))].filter(
           (file) => file.key || file.link || file.url,
         );
-    if (existingFiles.length === 0) {
+    const fileKey = normalizeTextField(req.query?.file_key || req.query?.fileKey);
+    const filesToDelete = fileKey
+      ? existingFiles.filter((file) => file.key === fileKey)
+      : existingFiles;
+    if (filesToDelete.length === 0) {
       return res.status(404).json({
         success: false,
-        message: `${fileConfig.label} not found`,
+        message: fileKey ? "File not found" : `${fileConfig.label} not found`,
       });
     }
 
     const beforeItemSnapshot = item.toObject();
-    item.set(fileConfig.field, fileConfig.multiple ? [] : {});
-    if (fileConfig.multiple && Array.isArray(fileConfig.legacyFields)) {
-      fileConfig.legacyFields.forEach((field) => item.set(field, {}));
+    if (fileConfig.multiple && fileKey) {
+      item.set(
+        fileConfig.field,
+        normalizeStoredItemFileList(getPathValue(item, fileConfig.field)).filter(
+          (file) => file.key !== fileKey,
+        ),
+      );
+      (fileConfig.legacyFields || []).forEach((field) => {
+        const legacyFile = normalizeStoredItemFile(getPathValue(item, field));
+        if (legacyFile.key === fileKey) item.set(field, {});
+      });
+    } else {
+      item.set(fileConfig.field, fileConfig.multiple ? [] : {});
+      if (fileConfig.multiple && Array.isArray(fileConfig.legacyFields)) {
+        fileConfig.legacyFields.forEach((field) => item.set(field, {}));
+      }
     }
     appendItemUpdateHistory(item, {
       before: beforeItemSnapshot,
@@ -8099,8 +8336,8 @@ exports.deleteItemFile = async (req, res) => {
       metadata: {
         file_type: fileType,
         label: fileConfig.label,
-        previous_storage_key: existingFiles.map((file) => file.key).filter(Boolean).join(", "),
-        previous_original_name: existingFiles
+        previous_storage_key: filesToDelete.map((file) => file.key).filter(Boolean).join(", "),
+        previous_original_name: filesToDelete
           .map((file) => file.originalName)
           .filter(Boolean)
           .join(", "),
@@ -8110,7 +8347,7 @@ exports.deleteItemFile = async (req, res) => {
 
     let storageDeleteWarning = "";
     await Promise.all(
-      existingFiles
+      filesToDelete
         .map((file) => file.key)
         .filter(Boolean)
         .map((storageKey) =>

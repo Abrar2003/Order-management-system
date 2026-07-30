@@ -23,6 +23,7 @@ const {
 const { userHasPermission } = require("../services/permission.service");
 const {
   getItems,
+  exportItems,
   getItemMasters,
   getPisDiffItems,
   getPisDiffCheckedReportPreview,
@@ -130,6 +131,16 @@ router.get(
   requirePermission("items", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getItems,
+);
+
+router.get(
+  "/export",
+  auth,
+  requirePermission("items", "view"),
+  securityLog("export_excel", "items", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
+  exportItems,
 );
 
 router.get(

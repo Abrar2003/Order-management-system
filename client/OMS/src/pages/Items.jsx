@@ -54,6 +54,23 @@ const normalizeFilterParam = (value, fallback = "all") => {
 
 const normalizeSearchParam = (value) => String(value || "").trim();
 
+const downloadBlobResponse = (response, fallbackName) => {
+  const disposition = String(response?.headers?.["content-disposition"] || "");
+  const match = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+  const fileName = match?.[1] ? decodeURIComponent(match[1].trim()) : fallbackName;
+  const blob = new Blob([response.data], {
+    type: response?.headers?.["content-type"] || "application/vnd.ms-excel",
+  });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
+
 const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
@@ -369,6 +386,7 @@ const Items = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCreateSampleModal, setShowCreateSampleModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [savingComplaint, setSavingComplaint] = useState(false);
   const [error, setError] = useState("");
@@ -578,6 +596,36 @@ const Items = () => {
       setSyncing(false);
     }
   };
+
+  const handleExportXls = useCallback(async () => {
+    try {
+      setExporting(true);
+      setError("");
+      const response = await api.get("/items/export", {
+        responseType: "blob",
+        params: {
+          search: searchInput,
+          brand: brandFilter,
+          vendor: vendorFilter,
+          country: countryFilter,
+        },
+      });
+      downloadBlobResponse(response, `items-${new Date().toISOString().slice(0, 10)}.xls`);
+    } catch (exportError) {
+      console.error(exportError);
+      let message = "Failed to export items as XLS.";
+      if (exportError?.response?.data instanceof Blob) {
+        try {
+          message = JSON.parse(await exportError.response.data.text())?.message || message;
+        } catch {
+          // Keep the fallback when the error body is not JSON.
+        }
+      }
+      setError(message);
+    } finally {
+      setExporting(false);
+    }
+  }, [brandFilter, countryFilter, searchInput, vendorFilter]);
 
   const handleApplyFilters = useCallback((event) => {
     event?.preventDefault();
@@ -876,8 +924,17 @@ const Items = () => {
             Back
           </button>
           <h2 className="h4 mb-0">Items</h2>
-          {canSyncItems || canCreateItems ? (
+          {canSyncItems || canCreateItems || totalRecords > 0 ? (
             <div className="d-flex gap-2 flex-wrap justify-content-end oms-responsive-page-actions">
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={handleExportXls}
+                disabled={loading || exporting || totalRecords === 0}
+                title="Export all items matching the current filters and their current running POs"
+              >
+                {exporting ? "Exporting..." : "Export XLS"}
+              </button>
               {canCreateItems && (
                 <>
                   <button
