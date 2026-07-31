@@ -2089,6 +2089,8 @@ const formatShipmentEntriesForUploadLog = (shipmentEntries = []) => {
   return rows
     .map((entry, index) => {
       const stuffingDate = formatDateDDMMYYYY(entry?.stuffing_date, "Not Set");
+      const shippingEtd = formatDateDDMMYYYY(entry?.shipping_ETD, "Not Set");
+      const shippingEta = formatDateDDMMYYYY(entry?.shipping_ETA, "Not Set");
       const container = String(entry?.container || "").trim() || "N/A";
       const invoiceNumber = normalizeShipmentInvoiceNumber(
         entry?.invoice_number,
@@ -2099,7 +2101,7 @@ const formatShipmentEntriesForUploadLog = (shipmentEntries = []) => {
       const stuffedBy =
         String(entry?.stuffed_by?.name || "").trim() || "Unknown";
       const checked = entry?.checked?.checked ? "Yes" : "No";
-      return `${index + 1}) ${stuffingDate} | ${container} | invoice ${invoiceNumber} | stuffed by ${stuffedBy} | checked ${checked} | qty ${Number.isFinite(quantity) ? quantity : 0} | pending ${Number.isFinite(pending) ? pending : 0} | remarks: ${remarks}`;
+      return `${index + 1}) ${stuffingDate} | ETD ${shippingEtd} | ETA ${shippingEta} | ${container} | invoice ${invoiceNumber} | stuffed by ${stuffedBy} | checked ${checked} | qty ${Number.isFinite(quantity) ? quantity : 0} | pending ${Number.isFinite(pending) ? pending : 0} | remarks: ${remarks}`;
     })
     .join(" || ");
 };
@@ -2760,6 +2762,15 @@ const getShipmentQuantityTotal = (shipmentEntries = []) =>
     0,
   );
 
+const parseOptionalShipmentDate = (value, label) => {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+  const parsedDate = parseDateLike(value);
+  if (!parsedDate) throw new Error(`${label} is invalid`);
+  return parsedDate;
+};
+
 const normalizeShipmentEntries = (shipmentPayload) => {
   if (!Array.isArray(shipmentPayload)) {
     throw new Error("shipment must be an array");
@@ -2780,6 +2791,14 @@ const normalizeShipmentEntries = (shipmentPayload) => {
     if (!stuffingDate) {
       throw new Error(`shipment[${index + 1}] stuffing_date is invalid`);
     }
+    const shippingEtd = parseOptionalShipmentDate(
+      entry?.shipping_ETD,
+      `shipment[${index + 1}] shipping_ETD`,
+    );
+    const shippingEta = parseOptionalShipmentDate(
+      entry?.shipping_ETA,
+      `shipment[${index + 1}] shipping_ETA`,
+    );
 
     const quantity = Number(entry?.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
@@ -2798,6 +2817,8 @@ const normalizeShipmentEntries = (shipmentPayload) => {
       container,
       invoice_number: invoiceNumber,
       stuffing_date: stuffingDate,
+      shipping_ETD: shippingEtd,
+      shipping_ETA: shippingEta,
       quantity,
       remaining_remarks: remarks,
       stuffed_by: stuffedBy,
@@ -2839,6 +2860,14 @@ const fitShipmentEntriesToOrderQuantity = (
       container: String(entry?.container ?? "").trim(),
       invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number, ""),
       stuffing_date: parseDateLike(entry?.stuffing_date),
+      shipping_ETD: parseOptionalShipmentDate(
+        entry?.shipping_ETD,
+        "shipping_ETD",
+      ),
+      shipping_ETA: parseOptionalShipmentDate(
+        entry?.shipping_ETA,
+        "shipping_ETA",
+      ),
       quantity: adjustedQuantity,
       pending: Math.max(0, normalizedQuantity - cumulativeShipped),
       remaining_remarks: String(entry?.remaining_remarks ?? "").trim(),
@@ -3533,6 +3562,8 @@ const mapOrdersToShipmentRows = (orders = []) =>
         ...baseRow,
         shipment_id: entry?._id || `${order?._id || "order"}-${index}`,
         stuffing_date: entry?.stuffing_date || null,
+        shipping_ETD: entry?.shipping_ETD || null,
+        shipping_ETA: entry?.shipping_ETA || null,
         container: entry?.container || "",
         invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number),
         quantity: Number.isFinite(parsedShipmentQuantity)
@@ -3647,6 +3678,8 @@ const mapSamplesToShipmentRows = (samples = []) =>
         sample_name: sample?.name || "",
         shipment_id: entry?._id || `${sample?._id || "sample"}-${index}`,
         stuffing_date: entry?.stuffing_date || null,
+        shipping_ETD: entry?.shipping_ETD || null,
+        shipping_ETA: entry?.shipping_ETA || null,
         container: entry?.container || "",
         invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number),
         quantity,
@@ -4011,12 +4044,17 @@ const getContainerDataset = async ({
   for (const row of shipmentData.rows) {
     const containerNumber = String(row?.container || "").trim();
     if (!containerNumber) continue;
+    const containerKey = containerNumber.toLowerCase();
 
-    const existingGroup = groupedByContainer.get(containerNumber) || {
+    const existingGroup = groupedByContainer.get(containerKey) || {
       container: containerNumber,
       brandSet: new Set(),
       vendorSet: new Set(),
       shipping_date: null,
+      stuffingDateSet: new Set(),
+      invoiceSet: new Set(),
+      shippingEtdSet: new Set(),
+      shippingEtaSet: new Set(),
       itemKeySet: new Set(),
       total_quantity: 0,
       total_cbm: 0,
@@ -4027,6 +4065,9 @@ const getContainerDataset = async ({
     const brandValue = String(row?.brand || "").trim();
     const vendorValue = normalizeLooseString(row?.vendor);
     const shippingDate = row?.stuffing_date || null;
+    const stuffingDateValue = toISODateString(row?.stuffing_date) || "";
+    const shippingEtdValue = toISODateString(row?.shipping_ETD) || "";
+    const shippingEtaValue = toISODateString(row?.shipping_ETA) || "";
     const itemKey = String(
       row?._id || `${row?.order_id || ""}::${row?.item_code || ""}`,
     ).trim();
@@ -4040,6 +4081,12 @@ const getContainerDataset = async ({
 
     if (brandValue) existingGroup.brandSet.add(brandValue);
     if (vendorValue) existingGroup.vendorSet.add(vendorValue);
+    existingGroup.stuffingDateSet.add(stuffingDateValue);
+    existingGroup.invoiceSet.add(
+      normalizeShipmentInvoiceNumber(row?.invoice_number),
+    );
+    existingGroup.shippingEtdSet.add(shippingEtdValue);
+    existingGroup.shippingEtaSet.add(shippingEtaValue);
     if (
       shippingDate &&
       (!existingGroup.shipping_date ||
@@ -4050,11 +4097,13 @@ const getContainerDataset = async ({
     }
     if (itemKey) existingGroup.itemKeySet.add(itemKey);
 
-    groupedByContainer.set(containerNumber, existingGroup);
+    groupedByContainer.set(containerKey, existingGroup);
   }
 
   let rows = Array.from(groupedByContainer.values())
     .map((group) => {
+      const commonValue = (values) =>
+        values.size === 1 ? [...values][0] || null : null;
       const shipmentCount = Number(group.shipment_count || 0);
       const checkedCount = Number(group.checked_count || 0);
       const checkedStatus =
@@ -4073,6 +4122,10 @@ const getContainerDataset = async ({
           normalizeDistinctValues(Array.from(group.vendorSet)).join(", ") ||
           "N/A",
         shipping_date: group.shipping_date || null,
+        common_shipping_date: commonValue(group.stuffingDateSet),
+        invoice_number: commonValue(group.invoiceSet),
+        shipping_ETD: commonValue(group.shippingEtdSet),
+        shipping_ETA: commonValue(group.shippingEtaSet),
         item_count: group.itemKeySet.size,
         shipment_count: shipmentCount,
         checked_count: checkedCount,
@@ -10317,6 +10370,149 @@ exports.getContainersDb = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch containers list",
+      error: error.message,
+    });
+  }
+};
+
+exports.updateContainer = async (req, res) => {
+  try {
+    const currentContainer = normalizeFilterValue(req.body?.current_container);
+    const nextContainer = String(
+      req.body?.container ?? currentContainer ?? "",
+    ).trim();
+
+    if (!currentContainer) {
+      return res.status(400).json({ message: "Current container is required" });
+    }
+
+    if (!/^[A-Za-z]{4}-\d{6}-\d{1}$/.test(nextContainer)) {
+      return res.status(400).json({
+        message:
+          "Container number must be in the format 'AAAA-111111-2' (4 letters, hyphen, 6 digits, hyphen, 1 digit)",
+      });
+    }
+
+    const shipmentUpdates = { container: nextContainer };
+    if (hasOwn(req.body, "invoice_number")) {
+      shipmentUpdates.invoice_number = normalizeShipmentInvoiceNumber(
+        req.body.invoice_number,
+      );
+    }
+
+    for (const [field, label] of [
+      ["stuffing_date", "shipping date"],
+      ["shipping_ETD", "ETD"],
+      ["shipping_ETA", "ETA"],
+    ]) {
+      if (!hasOwn(req.body, field)) continue;
+      const value = req.body[field];
+      if (value === null || String(value).trim() === "") {
+        shipmentUpdates[field] = null;
+        continue;
+      }
+      const parsedDate = parseDateLike(value);
+      if (!parsedDate) {
+        return res.status(400).json({ message: `Invalid ${label}` });
+      }
+      shipmentUpdates[field] = parsedDate;
+    }
+
+    const containerMatch = {
+      "shipment.container": {
+        $regex: `^${escapeRegex(currentContainer)}$`,
+        $options: "i",
+      },
+    };
+    const [orders, samples] = await Promise.all([
+      Order.find(applyDataAccessMatch(containerMatch, req.user)),
+      Sample.find(
+        applyDataAccessMatch(containerMatch, req.user, {
+          vendorFields: ["vendor"],
+        }),
+      ),
+    ]);
+
+    const updatedAt = new Date();
+    const actor = buildAuditActor(req.user);
+    const currentContainerKey = currentContainer.toLowerCase();
+    const updateShipmentEntries = (parentDoc) => {
+      let count = 0;
+      (Array.isArray(parentDoc?.shipment) ? parentDoc.shipment : []).forEach(
+        (entry) => {
+          if (
+            String(entry?.container || "").trim().toLowerCase() !==
+            currentContainerKey
+          ) {
+            return;
+          }
+          Object.assign(entry, shipmentUpdates, {
+            updated_at: updatedAt,
+            updated_by: actor,
+          });
+          count += 1;
+        },
+      );
+      if (count > 0) parentDoc.updated_by = actor;
+      return count;
+    };
+
+    const orderUpdates = orders
+      .map((orderDoc) => {
+        const beforeSnapshot = buildOrderEditLogSnapshot(orderDoc);
+        const shipmentCount = updateShipmentEntries(orderDoc);
+        return shipmentCount > 0
+          ? { orderDoc, beforeSnapshot, shipmentCount }
+          : null;
+      })
+      .filter(Boolean);
+    const sampleUpdates = samples
+      .map((sampleDoc) => ({
+        sampleDoc,
+        shipmentCount: updateShipmentEntries(sampleDoc),
+      }))
+      .filter((entry) => entry.shipmentCount > 0);
+
+    const updatedShipmentCount =
+      orderUpdates.reduce((sum, entry) => sum + entry.shipmentCount, 0) +
+      sampleUpdates.reduce((sum, entry) => sum + entry.shipmentCount, 0);
+    if (updatedShipmentCount === 0) {
+      return res.status(404).json({ message: "Container records were not found" });
+    }
+
+    await Promise.all([
+      ...orderUpdates.map(({ orderDoc }) => orderDoc.save()),
+      ...sampleUpdates.map(({ sampleDoc }) => sampleDoc.save()),
+    ]);
+    await Promise.all(
+      orderUpdates.map(({ orderDoc, beforeSnapshot }) =>
+        createOrderEditLog({
+          reqUser: req.user,
+          operationType: "order_edit",
+          beforeSnapshot,
+          afterSnapshot: buildOrderEditLogSnapshot(orderDoc),
+          extraRemarks: [
+            `Container details updated for ${currentContainer}.`,
+          ],
+        }),
+      ),
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `${updatedShipmentCount} shipment record${updatedShipmentCount === 1 ? "" : "s"} updated successfully`,
+      data: {
+        container: nextContainer,
+        order_records: orderUpdates.length,
+        sample_records: sampleUpdates.length,
+        shipment_records: updatedShipmentCount,
+      },
+    });
+  } catch (error) {
+    console.error("Update Container Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update container records",
       error: error.message,
     });
   }

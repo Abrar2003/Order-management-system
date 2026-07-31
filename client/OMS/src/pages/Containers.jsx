@@ -10,6 +10,9 @@ import {
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { getUserFromToken } from "../auth/auth.service";
+import { hasShipmentEditRole } from "../auth/permissions";
+import { usePermissions } from "../auth/PermissionContext";
 import "../App.css";
 
 const normalizeSearchParam = (value) => String(value || "").trim();
@@ -56,10 +59,17 @@ const Containers = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "containers-list");
+  const user = getUserFromToken();
+  const { hasPermission } = usePermissions();
+  const canUpdateContainers =
+    hasPermission("containers", "edit") ||
+    hasPermission("shipments", "edit") ||
+    hasShipmentEditRole(user?.role);
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [containerSearch, setContainerSearch] = useState(() =>
     normalizeSearchParam(searchParams.get("container")),
   );
@@ -105,6 +115,15 @@ const Containers = () => {
   });
   const [sortBy, setSortBy] = useState("container");
   const [sortOrder, setSortOrder] = useState("asc");
+  const [selectedContainer, setSelectedContainer] = useState(null);
+  const [containerUpdate, setContainerUpdate] = useState({
+    container: "",
+    invoice_number: "",
+    stuffing_date: "",
+    shipping_ETD: "",
+    shipping_ETA: "",
+  });
+  const [updatingContainer, setUpdatingContainer] = useState(false);
 
   const fetchContainers = useCallback(async () => {
     try {
@@ -247,6 +266,49 @@ const Containers = () => {
     [navigate],
   );
 
+  const handleOpenContainerUpdate = useCallback((row) => {
+    setSelectedContainer(row);
+    setContainerUpdate({
+      container: String(row?.container || "").trim(),
+      invoice_number: String(row?.invoice_number || "").trim(),
+      stuffing_date: toISODateString(row?.common_shipping_date),
+      shipping_ETD: toISODateString(row?.shipping_ETD),
+      shipping_ETA: toISODateString(row?.shipping_ETA),
+    });
+  }, []);
+
+  const handleUpdateContainer = async (event) => {
+    event.preventDefault();
+    const currentContainer = String(selectedContainer?.container || "").trim();
+    const nextContainer = String(containerUpdate.container || "").trim();
+    if (!currentContainer || !nextContainer) return;
+
+    const payload = {
+      current_container: currentContainer,
+      container: nextContainer,
+    };
+    ["invoice_number", "stuffing_date", "shipping_ETD", "shipping_ETA"].forEach(
+      (field) => {
+        const value = String(containerUpdate[field] || "").trim();
+        if (value) payload[field] = value;
+      },
+    );
+
+    try {
+      setUpdatingContainer(true);
+      setError("");
+      setSuccess("");
+      const response = await api.patch("/orders/containers/update", payload);
+      setSuccess(response?.data?.message || "Container updated successfully.");
+      setSelectedContainer(null);
+      await fetchContainers();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Failed to update container.");
+    } finally {
+      setUpdatingContainer(false);
+    }
+  };
+
   const handleSortColumn = useCallback(
     (column, defaultDirection = "asc") => {
       const nextSortState = getNextClientSortState(
@@ -303,11 +365,12 @@ const Containers = () => {
           if (column === "brand") return row?.brand;
           if (column === "vendor") return row?.vendor;
           if (column === "shippingDate") return new Date(row?.shipping_date || 0).getTime();
+          if (column === "shippingEtd") return new Date(row?.shipping_ETD || 0).getTime();
+          if (column === "shippingEta") return new Date(row?.shipping_ETA || 0).getTime();
           if (column === "checkedStatus") {
             return CHECKED_STATUS_SORT_ORDER[row?.checked_status] ?? 99;
           }
           if (column === "itemCount") return Number(row?.item_count || 0);
-          if (column === "totalQuantity") return Number(row?.total_quantity || 0);
           if (column === "totalCbm") return Number(row?.total_cbm || 0);
           return "";
         },
@@ -474,6 +537,11 @@ const Containers = () => {
             {error}
           </div>
         )}
+        {success && (
+          <div className="alert alert-success mb-3" role="status">
+            {success}
+          </div>
+        )}
 
         <div className="card om-card">
           <div className="card-body p-0">
@@ -518,6 +586,24 @@ const Containers = () => {
                       </th>
                       <th>
                         <SortHeaderButton
+                          label="ETD"
+                          title="Estimated Time of Departure"
+                          isActive={sortBy === "shippingEtd"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("shippingEtd", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="ETA"
+                          title="Estimated Time of Arrival"
+                          isActive={sortBy === "shippingEta"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("shippingEta", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
                           label="Checked Status"
                           isActive={sortBy === "checkedStatus"}
                           direction={sortOrder}
@@ -534,26 +620,19 @@ const Containers = () => {
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="Total Quantity"
-                          isActive={sortBy === "totalQuantity"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("totalQuantity", "desc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
                           label="Total CBM"
                           isActive={sortBy === "totalCbm"}
                           direction={sortOrder}
                           onClick={() => handleSortColumn("totalCbm", "desc")}
                         />
                       </th>
+                      {canUpdateContainers && <th>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 ? (
                       <tr>
-                        <td colSpan="8" className="text-center py-4">
+                        <td colSpan={canUpdateContainers ? "10" : "9"} className="text-center py-4">
                           No containers found
                         </td>
                       </tr>
@@ -569,14 +648,29 @@ const Containers = () => {
                           <td>{row.brand || "N/A"}</td>
                           <td>{row.vendor || "N/A"}</td>
                           <td>{formatDateDDMMYYYY(row.shipping_date)}</td>
+                          <td>{formatDateDDMMYYYY(row.shipping_ETD)}</td>
+                          <td>{formatDateDDMMYYYY(row.shipping_ETA)}</td>
                           <td>
                             <span className={getCheckedStatusClassName(row.checked_status)}>
                               {row.checked_status || "Checking Pending"}
                             </span>
                           </td>
                           <td>{row.item_count ?? 0}</td>
-                          <td>{row.total_quantity ?? 0}</td>
                           <td>{(Number(row.total_cbm) ?? 0).toFixed(2)}</td>
+                          {canUpdateContainers && (
+                            <td>
+                              <button
+                                type="button"
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleOpenContainerUpdate(row);
+                                }}
+                              >
+                                Update Container
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))
                     )}
@@ -586,6 +680,152 @@ const Containers = () => {
             )}
           </div>
         </div>
+
+        {selectedContainer && (
+          <>
+            <div
+              className="modal fade show d-block"
+              tabIndex="-1"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="update-container-title"
+            >
+              <div className="modal-dialog modal-dialog-centered" role="document">
+                <form className="modal-content" onSubmit={handleUpdateContainer}>
+                  <div className="modal-header">
+                    <h3 id="update-container-title" className="modal-title fs-5">
+                      Update Container
+                    </h3>
+                    <button
+                      type="button"
+                      className="btn-close"
+                      aria-label="Close"
+                      disabled={updatingContainer}
+                      onClick={() => setSelectedContainer(null)}
+                    />
+                  </div>
+                  <div className="modal-body">
+                    <p className="text-secondary small">
+                      Updates every order and sample shipment using {selectedContainer.container}.
+                    </p>
+                    <div className="mb-3">
+                      <label className="form-label" htmlFor="update-container-number">
+                        Container Number
+                      </label>
+                      <input
+                        id="update-container-number"
+                        type="text"
+                        className="form-control"
+                        value={containerUpdate.container}
+                        required
+                        pattern="[A-Za-z]{4}-[0-9]{6}-[0-9]{1}"
+                        title="Use the format AAAA-111111-2"
+                        onChange={(event) =>
+                          setContainerUpdate((current) => ({
+                            ...current,
+                            container: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="mb-3">
+                      <label className="form-label" htmlFor="update-container-invoice">
+                        Invoice Number
+                      </label>
+                      <input
+                        id="update-container-invoice"
+                        type="text"
+                        className="form-control"
+                        value={containerUpdate.invoice_number}
+                        onChange={(event) =>
+                          setContainerUpdate((current) => ({
+                            ...current,
+                            invoice_number: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="row g-3">
+                      <div className="col-md-4">
+                        <label className="form-label" htmlFor="update-container-shipping-date">
+                          Shipping Date
+                        </label>
+                        <input
+                          id="update-container-shipping-date"
+                          type="date"
+                          className="form-control"
+                          value={containerUpdate.stuffing_date}
+                          onChange={(event) =>
+                            setContainerUpdate((current) => ({
+                              ...current,
+                              stuffing_date: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="col-md-4">
+                        <label
+                          className="form-label"
+                          htmlFor="update-container-etd"
+                          title="Estimated Time of Departure"
+                        >
+                          ETD
+                        </label>
+                        <input
+                          id="update-container-etd"
+                          type="date"
+                          className="form-control"
+                          value={containerUpdate.shipping_ETD}
+                          onChange={(event) =>
+                            setContainerUpdate((current) => ({
+                              ...current,
+                              shipping_ETD: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="col-md-4">
+                        <label
+                          className="form-label"
+                          htmlFor="update-container-eta"
+                          title="Estimated Time of Arrival"
+                        >
+                          ETA
+                        </label>
+                        <input
+                          id="update-container-eta"
+                          type="date"
+                          className="form-control"
+                          value={containerUpdate.shipping_ETA}
+                          onChange={(event) =>
+                            setContainerUpdate((current) => ({
+                              ...current,
+                              shipping_ETA: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="modal-footer">
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      disabled={updatingContainer}
+                      onClick={() => setSelectedContainer(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button type="submit" className="btn btn-primary" disabled={updatingContainer}>
+                      {updatingContainer ? "Updating..." : "Update Container"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div className="modal-backdrop fade show" />
+          </>
+        )}
       </div>
     </>
   );

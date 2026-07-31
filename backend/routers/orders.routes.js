@@ -39,6 +39,7 @@ const {
   getPackedGoods,
   exportPackedGoods,
   getContainersDb,
+  updateContainer,
   getShipmentsDb,
   exportShipmentsDb,
   checkShipmentRows,
@@ -244,6 +245,14 @@ router.get(
   requirePermission("containers", "view"),
   cacheRoute("orders", SHORT_CACHE_TTL),
   getContainersDb,
+);
+
+router.patch(
+  "/containers/update",
+  authenticate,
+  requireShipmentEditAccess("containers"),
+  invalidateOrdersOnSuccess,
+  updateContainer,
 );
 
 router.get(

@@ -8,6 +8,7 @@ const SortHeaderButton = ({
   onClick,
   className = "",
   showNativeTitle = true,
+  title = "",
 }) => {
   const normalizedDirection = normalizeSortDirection(direction);
   const buttonClassName = [
@@ -28,7 +29,7 @@ const SortHeaderButton = ({
       className={buttonClassName}
       onClick={onClick}
       aria-label={`${label}. ${sortLabel}.`}
-      title={showNativeTitle ? `${label} - ${sortLabel}` : undefined}
+      title={showNativeTitle ? title || `${label} - ${sortLabel}` : undefined}
     >
       <span>{label}</span>
       <span className="om-sort-header-arrows" aria-hidden="true">

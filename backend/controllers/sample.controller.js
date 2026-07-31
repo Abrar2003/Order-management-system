@@ -407,6 +407,8 @@ const normalizeShipmentEntries = (entries = [], actor = {}) => {
       container,
       invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number, ""),
       stuffing_date: stuffingDate,
+      shipping_ETD: parseDate(entry?.shipping_ETD, `shipment[${index + 1}].shipping_ETD`),
+      shipping_ETA: parseDate(entry?.shipping_ETA, `shipment[${index + 1}].shipping_ETA`),
       quantity,
       pending: Math.max(0, toSafeNumber(entry?.pending, 0)),
       remaining_remarks: normalizeText(entry?.remaining_remarks),

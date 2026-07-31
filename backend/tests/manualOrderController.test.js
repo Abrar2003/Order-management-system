@@ -4,6 +4,8 @@ const assert = require("node:assert/strict");
 const Brand = require("../models/brand.model");
 const Item = require("../models/item.model");
 const Order = require("../models/order.model");
+const OrderEditLog = require("../models/orderEditLog.model");
+const Sample = require("../models/sample.model");
 const UploadLog = require("../models/uploadLog.model");
 const Vendor = require("../models/vendor.model");
 const orderController = require("../controllers/order.controller");
@@ -58,6 +60,50 @@ const requestFor = (body, user = {}) => ({
     brand_scope: "all",
     ...user,
   },
+});
+
+test("updates every accessible order and sample shipment for a container", async (t) => {
+  const order = {
+    order_id: "PO-1",
+    brand: "Giga",
+    vendor: "Jodhana",
+    item: { item_code: "ITEM-1" },
+    quantity: 2,
+    shipment: [
+      { container: "ABCD-123456-1", invoice_number: "OLD" },
+      { container: "OTHER-123456-1", invoice_number: "UNCHANGED" },
+    ],
+    save: async () => order,
+  };
+  const sample = {
+    shipment: [{ container: "abcd-123456-1", invoice_number: "OLD" }],
+    save: async () => sample,
+  };
+  const res = makeResponse();
+
+  t.mock.method(Order, "find", async () => [order]);
+  t.mock.method(Sample, "find", async () => [sample]);
+  t.mock.method(OrderEditLog, "create", async () => ({}));
+
+  await orderController.updateContainer(
+    requestFor({
+      current_container: "ABCD-123456-1",
+      container: "WXYZ-654321-2",
+      invoice_number: "INV-2",
+      stuffing_date: "2026-08-01",
+      shipping_ETD: "2026-08-04",
+      shipping_ETA: "2026-08-20",
+    }),
+    res,
+  );
+
+  assert.equal(res.statusVal, 200);
+  assert.equal(res.jsonVal.data.shipment_records, 2);
+  assert.equal(order.shipment[0].container, "WXYZ-654321-2");
+  assert.equal(sample.shipment[0].invoice_number, "INV-2");
+  assert.equal(order.shipment[1].container, "OTHER-123456-1");
+  assert.equal(order.shipment[0].shipping_ETD.toISOString().slice(0, 10), "2026-08-04");
+  assert.equal(sample.shipment[0].shipping_ETA.toISOString().slice(0, 10), "2026-08-20");
 });
 
 const stubItemLookup = (t, docs = []) => {

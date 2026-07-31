@@ -62,6 +62,8 @@ const ShipmentEntrySchema = new mongoose.Schema(
       default: "",
     },
     stuffing_date: { type: Date },
+    shipping_ETD: { type: Date, default: null },
+    shipping_ETA: { type: Date, default: null },
     quantity: { type: Number },
     pending: { type: Number },
     cases: [{ type: Number, required: true }],
