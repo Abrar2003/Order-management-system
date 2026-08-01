@@ -340,6 +340,42 @@ test("resolved item descriptions bypass model aggregation for shipment reports",
     stage.$match?.["shipment.stuffing_date"]?.$gte));
 });
 
+test("generic shipment reports include all vendors instead of reporting a missing entity", async (t) => {
+  configureAssistant(t);
+  const openai = fakeOpenAi(
+    functionResponse({
+      collection: "orders",
+      purpose: "Total June shipments by vendor",
+      pipeline: [
+        { $match: { archived: { $ne: true }, status: { $in: ["Partial Shipped", "Shipped"] } } },
+        { $unwind: "$shipment" },
+        { $match: { "shipment.stuffing_date": {
+          $gte: { $date: "2026-06-01T00:00:00.000+05:30" },
+          $lt: { $date: "2026-07-01T00:00:00.000+05:30" },
+        } } },
+        { $group: { _id: "$__oms_vendor_name", shipment_total: { $sum: "$shipment.quantity" } } },
+        { $project: { _id: 0, vendor: "$_id", shipment_total: 1 } },
+      ],
+    }),
+    finalResponse("June 2026 shipment totals are grouped by vendor."),
+  );
+
+  const result = await askOmsAssistant(
+    { message: "Give me shipment totals by vendor for June 2026.", user: USER },
+    {
+      groqClient: openai,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: withEntityResolver(async () => queryResult([
+        { vendor: "Acme", shipment_total: 42 },
+      ])),
+    },
+  );
+
+  assert.equal(result.answer, "June 2026 shipment totals are grouped by vendor.");
+  assert.equal(openai.calls.length, 2);
+  assert.match(openai.calls[0].body.instructions, /include all of them/);
+});
+
 test("known brands use orders.brand instead of item descriptions", async (t) => {
   configureAssistant(t);
   const openai = fakeOpenAi();
