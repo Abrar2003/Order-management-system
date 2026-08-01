@@ -8,6 +8,7 @@ import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { getOptionText } from "../utils/optionText";
+import { hasOpenVendorOrders } from "../utils/vendorSummary";
 import "../App.css";
 
 const DEFAULT_TODAY_ETD_SORT_BY = "ETD";
@@ -37,6 +38,7 @@ const toNumber = (value) => {
 const Home = () => {
   const [brands, setBrands] = useState([]);
   const [vendorSummary, setVendorSummary] = useState([]);
+  const [vendorScope, setVendorScope] = useState("active");
   const [todayEtdOrders, setTodayEtdOrders] = useState([]);
   const [todayEtdLoading, setTodayEtdLoading] = useState(false);
   const [todayEtdError, setTodayEtdError] = useState("");
@@ -106,9 +108,17 @@ const Home = () => {
     };
   }, [brands]);
 
+  const visibleVendorSummary = useMemo(
+    () =>
+      vendorScope === "all"
+        ? vendorSummary
+        : vendorSummary.filter(hasOpenVendorOrders),
+    [vendorScope, vendorSummary],
+  );
+
   const vendorTotals = useMemo(
     () =>
-      vendorSummary.reduce(
+      visibleVendorSummary.reduce(
         (acc, summary) => {
           acc.totalOrders += toNumber(summary?.totalOrders);
           acc.totalPending += toNumber(summary?.totalPending);
@@ -127,18 +137,18 @@ const Home = () => {
           totalShipped: 0,
         },
       ),
-    [vendorSummary],
+    [visibleVendorSummary],
   );
 
   const sortedVendorSummary = useMemo(
     () =>
-      [...vendorSummary].sort((a, b) =>
+      [...visibleVendorSummary].sort((a, b) =>
         getVendorSummaryName(a).localeCompare(getVendorSummaryName(b), undefined, {
           sensitivity: "base",
           numeric: true,
         }),
       ),
-    [vendorSummary],
+    [visibleVendorSummary],
   );
 
   const todayEtdTotals = useMemo(
@@ -397,7 +407,25 @@ const Home = () => {
 
         <div className="card om-card">
           <div className="card-body">
-            <h3 className="h5 mb-3">Orders for {selectedBrand}</h3>
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+              <h3 className="h5 mb-0">Orders for {selectedBrand}</h3>
+              <div className="btn-group btn-group-sm" role="group" aria-label="Vendor order filter">
+                {[
+                  ["active", "Active"],
+                  ["all", "All"],
+                ].map(([scope, label]) => (
+                  <button
+                    key={scope}
+                    type="button"
+                    className={`btn ${vendorScope === scope ? "btn-primary" : "btn-outline-primary"}`}
+                    aria-pressed={vendorScope === scope}
+                    onClick={() => setVendorScope(scope)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {loading ? (
               <div className="text-center py-4">Loading...</div>
@@ -463,15 +491,15 @@ const Home = () => {
                       );
                     })}
 
-                    {vendorSummary.length === 0 && (
+                    {visibleVendorSummary.length === 0 && (
                       <tr>
                         <td colSpan="7" className="text-center py-4">
-                          No orders found for {selectedBrand}
+                          No {vendorScope === "active" ? "active " : ""}vendors found for {selectedBrand}
                         </td>
                       </tr>
                     )}
                   </tbody>
-                  {vendorSummary.length > 0 && (
+                  {visibleVendorSummary.length > 0 && (
                     <tfoot>
                       <tr className="table-light fw-semibold">
                         <td>Total</td>
@@ -490,7 +518,7 @@ const Home = () => {
           </div>
         </div>
 
-        {vendorSummary.length > 0 && (
+        {visibleVendorSummary.length > 0 && (
           <div className="d-flex justify-content-center align-items-center gap-3 mt-3">
             <button
               type="button"
