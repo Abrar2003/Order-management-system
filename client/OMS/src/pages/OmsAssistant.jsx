@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import {
@@ -19,6 +21,21 @@ const displayValue = (value) => {
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 };
+
+const Answer = ({ children }) => (
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    components={{
+      table: ({ children: tableChildren }) => (
+        <div className="table-responsive">
+          <table className="table table-sm align-middle mb-0">{tableChildren}</table>
+        </div>
+      ),
+    }}
+  >
+    {children}
+  </ReactMarkdown>
+);
 
 const ResultRows = ({ rows = [] }) => {
   const columns = useMemo(() => {
@@ -224,7 +241,7 @@ const OmsAssistant = () => {
                   {message.role === "user" ? "You" : "OMS Assistant"}
                 </div>
                 <div className="oms-assistant-bubble">
-                  <div className="oms-assistant-answer">{message.text}</div>
+                  <div className="oms-assistant-answer"><Answer>{message.text}</Answer></div>
                   {message.role === "assistant" && (
                     <>
                       <AnswerMetadata metadata={message.metadata} />

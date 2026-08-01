@@ -11392,7 +11392,31 @@ button.om-item-order-presence-label {
 }
 
 .oms-assistant-answer {
-  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.oms-assistant-answer > :first-child {
+  margin-top: 0;
+}
+
+.oms-assistant-answer > :last-child {
+  margin-bottom: 0;
+}
+
+.oms-assistant-answer ul,
+.oms-assistant-answer ol {
+  padding-left: 1.4rem;
+}
+
+.oms-assistant-answer pre {
+  overflow-x: auto;
+  padding: 0.75rem;
+  border-radius: var(--om-radius-sm);
+  background: var(--om-color-surface);
+}
+
+.oms-assistant-answer table {
+  margin: 0.75rem 0;
 }
 
 .oms-assistant-metadata {
