@@ -376,6 +376,95 @@ test("generic shipment reports include all vendors instead of reporting a missin
   assert.match(openai.calls[0].body.instructions, /include all of them/);
 });
 
+test("complex reports can use up to four bounded data calls", async (t) => {
+  configureAssistant(t);
+  const reportSection = (purpose) => functionResponse({
+    collection: "orders",
+    purpose,
+    pipeline: [
+      { $match: { archived: { $ne: true } } },
+      { $count: "total" },
+    ],
+  });
+  const openai = fakeOpenAi(
+    reportSection("First report section"),
+    reportSection("Second report section"),
+    reportSection("Third report section"),
+    reportSection("Fourth report section"),
+    finalResponse("The complete report is ready."),
+  );
+
+  const result = await askOmsAssistant(
+    { message: "Give me a detailed PO, brand, and container breakdown.", user: USER },
+    {
+      groqClient: openai,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: withEntityResolver(async () => queryResult([{ total: 1 }])),
+    },
+  );
+
+  assert.equal(result.answer, "The complete report is ready.");
+  assert.equal(openai.calls.length, 5);
+  assert.match(openai.calls[0].body.instructions, /at most 4 database calls/);
+});
+
+test("PO container CBM breakdowns bypass the model and calculate safe container shares", async (t) => {
+  configureAssistant(t);
+  const openai = fakeOpenAi();
+  const executed = [];
+
+  const result = await askOmsAssistant(
+    {
+      message: "Give me bifurcation of Jodhana as per PO and brand, with CBM percentage for that container and stuffing date.",
+      user: USER,
+    },
+    {
+      groqClient: openai,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: async (request) => {
+        executed.push(request);
+        validatePipeline(request.collection, request.pipeline);
+        if (request.collection === "brands" || request.collection === "items") {
+          return queryResult([], { audit: { collection: request.collection } });
+        }
+        if (request.collection === "vendors") {
+          return queryResult([{ name: "Jodhana" }], { audit: { collection: "vendors" } });
+        }
+        if (/^Resolve /i.test(request.purpose)) {
+          return queryResult([], { audit: { collection: "orders" } });
+        }
+        return queryResult([
+          {
+            order_id: "PO-1", brand: "Brand A", vendor: "Jodhana",
+            order_quantity: 100, po_cbm: 10, shipment_quantity: 20,
+            container: "CONT-1", stuffing_date: "2026-06-01T00:00:00.000Z",
+          },
+          {
+            order_id: "PO-2", brand: "Brand B", vendor: "Jodhana",
+            order_quantity: 100, po_cbm: 10, shipment_quantity: 60,
+            container: "CONT-1", stuffing_date: "2026-06-01T00:00:00.000Z",
+          },
+          {
+            order_id: "PO-3", brand: "Brand B", vendor: "Jodhana",
+            order_quantity: 0, po_cbm: 0, shipment_quantity: 10,
+            container: "CONT-2", stuffing_date: "2026-06-02T00:00:00.000Z",
+          },
+        ]);
+      },
+    },
+  );
+
+  assert.equal(openai.calls.length, 0);
+  assert.match(result.answer, /PO\/container CBM breakdown/);
+  assert.match(result.answer, /25%/);
+  assert.match(result.answer, /75%/);
+  assert.doesNotMatch(result.answer, /NaN|Infinity/);
+  assert.equal(result.rows[2].container_cbm_percentage, null);
+  assert.deepEqual(executed.at(-1).pipeline[0].$match.$and, [{
+    $or: [{ __oms_vendor_name: { $regex: "^Jodhana$", $options: "i" } }],
+  }]);
+});
+
 test("known brands use orders.brand instead of item descriptions", async (t) => {
   configureAssistant(t);
   const openai = fakeOpenAi();
