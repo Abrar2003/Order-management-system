@@ -643,14 +643,18 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       setSaving(true);
       setError("");
 
-      if (!toText(form.master_barcode)) {
+      if (!form.barcode_exempted && !toText(form.master_barcode)) {
         throw new Error(
           isPisMasterMode
             ? "PIS master barcode is required for this box mode."
             : "PIS barcode is required.",
         );
       }
-      if (isPisCartonMode && !toText(form.inner_barcode)) {
+      if (
+        !form.barcode_exempted &&
+        isPisCartonMode &&
+        !toText(form.inner_barcode)
+      ) {
         throw new Error("PIS inner barcode is required for carton packaging.");
       }
 

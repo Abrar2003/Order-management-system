@@ -153,6 +153,7 @@ const parsePositiveInt = (value, fallback) => {
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
 const normalizeTextField = (value) => String(value ?? "").trim();
+const requiresPisBarcodes = (item = {}) => item?.barcode_exempted !== true;
 
 const normalizeVendorTextField = (value) => normalizeVendorText(value);
 
@@ -2771,6 +2772,7 @@ exports.__test__ = {
   buildItemMatch,
   buildFinalPisCheckAccessMatch,
   buildFinalPisCheckMatch,
+  requiresPisBarcodes,
 };
 
 const getFinalPisCheckRowsForQuery = async ({
@@ -7377,7 +7379,8 @@ exports.updateItemPis = async (req, res) => {
     const effectivePisMasterBarcode = normalizeTextField(
       item?.pis_master_barcode || item?.pis_barcode,
     );
-    if (!effectivePisMasterBarcode) {
+    const pisBarcodesRequired = requiresPisBarcodes(item);
+    if (pisBarcodesRequired && !effectivePisMasterBarcode) {
       return res.status(400).json({
         success: false,
         message: requiresMasterBarcode(effectivePisBoxMode)
@@ -7386,6 +7389,7 @@ exports.updateItemPis = async (req, res) => {
       });
     }
     if (
+      pisBarcodesRequired &&
       requiresInnerBarcode(effectivePisBoxMode) &&
       !normalizeTextField(item?.pis_inner_barcode)
     ) {
