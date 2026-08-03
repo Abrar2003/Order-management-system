@@ -56,6 +56,7 @@ const {
   calculateEffectiveBoxEntriesCbmTotal,
   detectBoxPackagingMode,
   normalizeStoredBoxEntries,
+  requiresInnerBarcode,
 } = require("../helpers/boxMeasurement");
 const {
   buildInspectionSizeSnapshot,
@@ -6138,6 +6139,15 @@ const updateQC = async (req, res) => {
         ),
       );
     }
+    const barcodeBoxMode =
+      parsedInspectedBoxSizeEntries.hasInput || hasInspectedBoxModeUpdate
+        ? parsedInspectedBoxMode
+        : detectBoxPackagingMode(
+            itemDocForBarcodeRequirement?.inspected_box_mode ||
+              itemDocForBarcodeRequirement?.pis_box_mode,
+            itemDocForBarcodeRequirement?.inspected_box_sizes ||
+              itemDocForBarcodeRequirement?.pis_box_sizes,
+          );
     const pisMasterBarcode = normalizeText(
       itemDocForBarcodeRequirement?.pis_master_barcode ||
         itemDocForBarcodeRequirement?.pis_barcode ||
@@ -6145,8 +6155,8 @@ const updateQC = async (req, res) => {
     );
     if (
       !itemDocForBarcodeRequirement ||
-      !Number.isFinite(Number(pisMasterBarcode)) ||
-      Number(pisMasterBarcode) <= 0
+        !Number.isFinite(Number(pisMasterBarcode)) ||
+        Number(pisMasterBarcode) <= 0
     ) {
       return res.status(400).json({
         message: "A valid PIS master barcode is required before updating this QC record.",
@@ -6204,18 +6214,8 @@ const updateQC = async (req, res) => {
     }
     qc.master_barcode = resolvedMasterBarcode;
     qc.barcode = resolvedMasterBarcode;
-
-    const barcodeBoxMode =
-      parsedInspectedBoxSizeEntries.hasInput || hasInspectedBoxModeUpdate
-        ? parsedInspectedBoxMode
-        : detectBoxPackagingMode(
-            itemDocForBarcodeRequirement?.inspected_box_mode ||
-              itemDocForBarcodeRequirement?.pis_box_mode,
-            itemDocForBarcodeRequirement?.inspected_box_sizes ||
-              itemDocForBarcodeRequirement?.pis_box_sizes,
-          );
     const isCartonModeForBarcode =
-      barcodeBoxMode === BOX_PACKAGING_MODES.CARTON;
+      requiresInnerBarcode(barcodeBoxMode);
     const pisInnerBarcode = normalizeText(
       itemDocForBarcodeRequirement?.pis_inner_barcode || "",
     );
@@ -12215,7 +12215,7 @@ exports.editInspectionRecords = async (req, res) => {
       Number(pisMasterBarcode) <= 0
     ) {
       return res.status(400).json({
-        message: "A valid PIS master barcode is required before updating inspection records.",
+        message: "A valid PIS barcode is required before updating inspection records.",
       });
     }
 
@@ -12889,7 +12889,7 @@ exports.editInspectionRecords = async (req, res) => {
 	      }
 	      record.master_barcode = resolvedMasterBarcode;
 	      record.barcode = resolvedMasterBarcode;
-	      if (parsedInspectedBoxMode === BOX_PACKAGING_MODES.CARTON) {
+	      if (requiresInnerBarcode(parsedInspectedBoxMode)) {
 	        const pisInnerBarcode = normalizeText(
 	          itemDocForBarcodeRequirement?.pis_inner_barcode || "",
 	        );

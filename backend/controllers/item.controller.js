@@ -41,6 +41,8 @@ const {
   BOX_SIZE_REMARK_OPTIONS,
   buildBoxMeasurementCbmSummary,
   detectBoxPackagingMode,
+  requiresInnerBarcode,
+  requiresMasterBarcode,
 } = require("../helpers/boxMeasurement");
 const {
   FINAL_PIS_CHECK_ITEM_SELECT,
@@ -7368,21 +7370,23 @@ exports.updateItemPis = async (req, res) => {
       setPisPath("pis_weight", nextPisWeight);
     }
 
+    const effectivePisBoxMode = detectBoxPackagingMode(
+      item?.pis_box_mode,
+      item?.pis_box_sizes,
+    );
     const effectivePisMasterBarcode = normalizeTextField(
       item?.pis_master_barcode || item?.pis_barcode,
     );
     if (!effectivePisMasterBarcode) {
       return res.status(400).json({
         success: false,
-        message: "PIS master barcode is required.",
+        message: requiresMasterBarcode(effectivePisBoxMode)
+          ? "PIS master barcode is required for this box mode."
+          : "PIS barcode is required.",
       });
     }
-    const effectivePisBoxMode = detectBoxPackagingMode(
-      item?.pis_box_mode,
-      item?.pis_box_sizes,
-    );
     if (
-      effectivePisBoxMode === BOX_PACKAGING_MODES.CARTON &&
+      requiresInnerBarcode(effectivePisBoxMode) &&
       !normalizeTextField(item?.pis_inner_barcode)
     ) {
       return res.status(400).json({

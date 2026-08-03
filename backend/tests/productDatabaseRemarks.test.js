@@ -7,6 +7,7 @@ const {
   buildProductDatabaseCompletionSummary,
   getProductDatabaseCompletionRange,
   normalizeProductDatabaseInput,
+  applyProductDatabaseBarcodeDefaults,
   assertProductDatabaseBarcodes,
 } = require("../helpers/productDatabase");
 
@@ -39,14 +40,44 @@ test("Product Database accepts five item-size entries", () => {
   assert.equal(result.data.pd_item_sizes.length, 5);
 });
 
-test("Product Database rejects blank barcode writes", () => {
+test("Product Database rejects blank writes and requires mode-specific barcodes", () => {
   assert.throws(
     () => normalizeProductDatabaseInput({ pd_inner_barcode: "" }),
     /Barcode fields cannot be blank/,
   );
   assert.throws(
     () => assertProductDatabaseBarcodes({ pd_box_mode: "individual" }),
+    /Product Database barcode is required/,
+  );
+  assert.throws(
+    () => assertProductDatabaseBarcodes({ pd_box_mode: "individual_master" }),
     /master barcode is required/,
+  );
+  assert.throws(
+    () => assertProductDatabaseBarcodes({ pd_box_mode: "carton", pd_master_barcode: "123" }),
+    /inner barcode is required/,
+  );
+  assert.throws(
+    () => assertProductDatabaseBarcodes(
+      { pd_box_mode: "individual_master", pd_master_barcode: "123" },
+      {},
+    ),
+    /PIS master barcode is required/,
+  );
+});
+
+test("Product Database defaults required barcodes from PIS", () => {
+  assert.deepEqual(
+    applyProductDatabaseBarcodeDefaults(
+      { pd_box_mode: "carton" },
+      { pis_master_barcode: "123", pis_inner_barcode: "456" },
+    ),
+    {
+      pd_box_mode: "carton",
+      pd_barcode: "123",
+      pd_master_barcode: "123",
+      pd_inner_barcode: "456",
+    },
   );
 });
 

@@ -14,6 +14,8 @@ import {
   hasMeaningfulMeasuredSize,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
+  requiresInnerBarcode,
+  requiresMasterBarcode,
   resolvePreferredMeasuredSizeCbm,
 } from "../utils/measuredSizeForm";
 import "../App.css";
@@ -21,6 +23,7 @@ import "../App.css";
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
 
 const toNumberString = (value, fallback = "0") => {
+  if (String(value ?? "").trim() === "") return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return String(parsed);
@@ -98,10 +101,16 @@ const buildInitialForm = (item = {}) => {
       finishing: Boolean(item?.qc?.finishing),
       branding: Boolean(item?.qc?.branding),
       master_barcode: toNumberString(
-        item?.qc?.master_barcode ?? item?.qc?.barcode,
-        "0",
+        item?.qc?.master_barcode ||
+          item?.qc?.barcode ||
+          item?.pis_master_barcode ||
+          item?.pis_barcode,
+        "",
       ),
-      inner_barcode: toNumberString(item?.qc?.inner_barcode, "0"),
+      inner_barcode: toNumberString(
+        item?.qc?.inner_barcode || item?.pis_inner_barcode,
+        "",
+      ),
       last_inspected_date: toText(item?.qc?.last_inspected_date),
       quantities: {
         checked: toNumberString(item?.qc?.quantities?.checked, "0"),
@@ -160,7 +169,11 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
     );
   }, [calculatedInspectedBoxCbm, calculatedInspectedItemCbm]);
   const isInspectedCartonMode =
-    form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON;
+    requiresInnerBarcode(form.inspected_box_mode, form.inspected_box_sizes);
+  const isInspectedMasterMode = requiresMasterBarcode(
+    form.inspected_box_mode,
+    form.inspected_box_sizes,
+  );
 
   const updateField = (path, value) => {
     setForm((prev) => {
@@ -251,7 +264,11 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       setError("");
 
       if (Number(form.qc.master_barcode) <= 0) {
-        throw new Error("QC master barcode is required.");
+        throw new Error(
+          isInspectedMasterMode
+            ? "QC master barcode is required for this box mode."
+            : "QC barcode is required.",
+        );
       }
       if (isInspectedCartonMode && Number(form.qc.inner_barcode) <= 0) {
         throw new Error("QC inner barcode is required for carton packaging.");
@@ -298,14 +315,6 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
           packed_size: Boolean(form.qc.packed_size),
           finishing: Boolean(form.qc.finishing),
           branding: Boolean(form.qc.branding),
-          barcode: parseNonNegativeNumber(
-            form.qc.master_barcode,
-            "QC master barcode",
-          ),
-          master_barcode: parseNonNegativeNumber(
-            form.qc.master_barcode,
-            "QC master barcode",
-          ),
           last_inspected_date: toText(form.qc.last_inspected_date),
           quantities: {
             checked: parseNonNegativeNumber(form.qc.quantities.checked, "QC checked"),
@@ -318,6 +327,18 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
           from_qc: Boolean(form.source.from_qc),
         },
       };
+      const masterBarcode = toText(form.qc.master_barcode);
+      if (masterBarcode) {
+        const parsedMasterBarcode = parseNonNegativeNumber(
+          masterBarcode,
+          "QC master barcode",
+        );
+        if (parsedMasterBarcode <= 0) {
+          throw new Error("QC barcode cannot be blank.");
+        }
+        payload.qc.barcode = parsedMasterBarcode;
+        payload.qc.master_barcode = parsedMasterBarcode;
+      }
       if (isInspectedCartonMode) {
         payload.qc.inner_barcode = parseNonNegativeNumber(
           form.qc.inner_barcode,
@@ -557,7 +578,11 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
               </div>
               <div className={isInspectedCartonMode ? "col-md-3" : "col-md-6"}>
                 <label className="form-label">
-                  {isInspectedCartonMode ? "Master Carton Barcode" : "Barcode"}
+                  {isInspectedCartonMode
+                    ? "Master Carton Barcode"
+                    : isInspectedMasterMode
+                      ? "Master Barcode"
+                      : "Barcode"}
                 </label>
                 <input
                   type="number"

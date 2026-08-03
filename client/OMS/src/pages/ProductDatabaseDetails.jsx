@@ -86,7 +86,11 @@ const normalizeRawValues = (value) => {
 };
 const buildProductDatabaseActionPayload = (productDatabase = {}) => {
   const masterBarcode =
-    productDatabase.pd_master_barcode || productDatabase.pd_barcode || "";
+    productDatabase.pd_master_barcode ||
+    productDatabase.pd_barcode ||
+    productDatabase.pis_master_barcode ||
+    productDatabase.pis_barcode ||
+    "";
   const payload = {
     country_of_origin: productDatabase.country_of_origin || "",
     product_type: productDatabase.product_type || null,
@@ -110,8 +114,10 @@ const buildProductDatabaseActionPayload = (productDatabase = {}) => {
     payload.pd_barcode = masterBarcode;
     payload.pd_master_barcode = masterBarcode;
   }
-  if (productDatabase.pd_inner_barcode) {
-    payload.pd_inner_barcode = productDatabase.pd_inner_barcode;
+  const innerBarcode =
+    productDatabase.pd_inner_barcode || productDatabase.pis_inner_barcode || "";
+  if (innerBarcode) {
+    payload.pd_inner_barcode = innerBarcode;
   }
   return payload;
 };
@@ -359,11 +365,18 @@ const ProductDatabaseDetails = () => {
                   rows={[
                     {
                       label: "Single / Master Barcode",
-                      value: formatEan13BarcodeDisplay(productDatabase.pd_master_barcode || productDatabase.pd_barcode),
+                      value: formatEan13BarcodeDisplay(
+                        productDatabase.pd_master_barcode ||
+                          productDatabase.pd_barcode ||
+                          productDatabase.pis_master_barcode ||
+                          productDatabase.pis_barcode,
+                      ),
                     },
                     {
                       label: "Inner Barcode",
-                      value: formatEan13BarcodeDisplay(productDatabase.pd_inner_barcode),
+                      value: formatEan13BarcodeDisplay(
+                        productDatabase.pd_inner_barcode || productDatabase.pis_inner_barcode,
+                      ),
                     },
                   ]}
                 />

@@ -2,6 +2,8 @@ const {
   BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
   detectBoxPackagingMode,
+  requiresInnerBarcode,
+  requiresMasterBarcode,
 } = require("./boxMeasurement");
 const {
   normalizeProductSpecsPayload,
@@ -913,17 +915,63 @@ const hasProductDatabaseData = (state = {}) =>
   (Array.isArray(state?.product_specs?.item_sizes) && state.product_specs.item_sizes.length > 0) ||
   (Array.isArray(state?.product_specs?.box_sizes) && state.product_specs.box_sizes.length > 0);
 
-const assertProductDatabaseBarcodes = (state = {}) => {
-  if (!normalizeText(state?.pd_master_barcode || state?.pd_barcode)) {
-    throw new ProductDatabaseError("Product Database master barcode is required");
-  }
+const applyProductDatabaseBarcodeDefaults = (state = {}, item = {}) => {
+  const boxMode = detectBoxPackagingMode(state?.pd_box_mode, state?.pd_box_sizes);
+  const barcode = normalizeText(
+    state?.pd_barcode || state?.pd_master_barcode || item?.pis_barcode || item?.pis_master_barcode,
+  );
+  const masterBarcode = normalizeText(
+    state?.pd_master_barcode || state?.pd_barcode || item?.pis_master_barcode || item?.pis_barcode,
+  );
+  const innerBarcode = normalizeText(
+    state?.pd_inner_barcode || item?.pis_inner_barcode,
+  );
 
+  return {
+    ...state,
+    pd_barcode: barcode,
+    ...(requiresMasterBarcode(boxMode) ? { pd_master_barcode: masterBarcode } : {}),
+    ...(requiresInnerBarcode(boxMode) ? { pd_inner_barcode: innerBarcode } : {}),
+  };
+};
+
+const assertProductDatabaseBarcodes = (state = {}, item = null) => {
   const boxMode = detectBoxPackagingMode(
     state?.pd_box_mode,
     state?.pd_box_sizes,
   );
+  const pisMasterBarcode = normalizeText(
+    item?.pis_master_barcode || item?.pis_barcode,
+  );
+  const pisInnerBarcode = normalizeText(item?.pis_inner_barcode);
   if (
-    boxMode === BOX_PACKAGING_MODES.CARTON &&
+    requiresMasterBarcode(boxMode) &&
+    item &&
+    !pisMasterBarcode
+  ) {
+    throw new ProductDatabaseError("PIS master barcode is required for this box mode");
+  }
+  if (item && !pisMasterBarcode) {
+    throw new ProductDatabaseError("PIS barcode is required before updating Product Database data");
+  }
+  if (
+    requiresMasterBarcode(boxMode) &&
+    !normalizeText(state?.pd_master_barcode || state?.pd_barcode)
+  ) {
+    throw new ProductDatabaseError("Product Database master barcode is required");
+  }
+  if (!normalizeText(state?.pd_barcode || state?.pd_master_barcode)) {
+    throw new ProductDatabaseError("Product Database barcode is required");
+  }
+  if (
+    requiresInnerBarcode(boxMode) &&
+    item &&
+    !pisInnerBarcode
+  ) {
+    throw new ProductDatabaseError("PIS inner barcode is required for carton packaging");
+  }
+  if (
+    requiresInnerBarcode(boxMode) &&
     !normalizeText(state?.pd_inner_barcode)
   ) {
     throw new ProductDatabaseError(
@@ -1033,8 +1081,11 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
   const previousStatus = normalizePdStatus(item?.pd_checked);
   const currentState = extractProductDatabaseFields(item);
   const input = normalizeProductDatabaseInput(payload);
-  const nextState = mergeProductDatabaseFields(currentState, input.data);
-  assertProductDatabaseBarcodes(nextState);
+  const nextState = applyProductDatabaseBarcodeDefaults(
+    mergeProductDatabaseFields(currentState, input.data),
+    item,
+  );
+  assertProductDatabaseBarcodes(nextState, item);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (!input.hasInput) {
@@ -1075,8 +1126,11 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
   const previousStatus = normalizePdStatus(item?.pd_checked);
   const currentState = extractProductDatabaseFields(item);
   const input = normalizeProductDatabaseInput(payload);
-  const nextState = mergeProductDatabaseFields(currentState, input.data);
-  assertProductDatabaseBarcodes(nextState);
+  const nextState = applyProductDatabaseBarcodeDefaults(
+    mergeProductDatabaseFields(currentState, input.data),
+    item,
+  );
+  assertProductDatabaseBarcodes(nextState, item);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (changedFields.length > 0) {
@@ -1141,8 +1195,11 @@ const applyProductDatabaseApprove = ({ item, payload = {}, user = {} } = {}) => 
   const previousStatus = normalizePdStatus(item?.pd_checked);
   const currentState = extractProductDatabaseFields(item);
   const input = normalizeProductDatabaseInput(payload);
-  const nextState = mergeProductDatabaseFields(currentState, input.data);
-  assertProductDatabaseBarcodes(nextState);
+  const nextState = applyProductDatabaseBarcodeDefaults(
+    mergeProductDatabaseFields(currentState, input.data),
+    item,
+  );
+  assertProductDatabaseBarcodes(nextState, item);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (changedFields.length === 0 && previousStatus !== PD_STATUSES.CHECKED) {
@@ -1234,6 +1291,9 @@ const buildProductDatabaseRow = (item = {}, user = {}) => {
     pd_barcode: state.pd_barcode,
     pd_master_barcode: state.pd_master_barcode,
     pd_inner_barcode: state.pd_inner_barcode,
+    pis_barcode: normalizeText(item?.pis_barcode),
+    pis_master_barcode: normalizeText(item?.pis_master_barcode),
+    pis_inner_barcode: normalizeText(item?.pis_inner_barcode),
     pd_item_sizes: state.pd_item_sizes,
     pd_box_sizes: state.pd_box_sizes,
     pd_box_mode: state.pd_box_mode,
@@ -1267,6 +1327,7 @@ module.exports = {
   mergeProductDatabaseFields,
   getChangedProductDatabaseFields,
   hasProductDatabaseData,
+  applyProductDatabaseBarcodeDefaults,
   assertProductDatabaseBarcodes,
   buildProductDatabaseCompletion,
   buildProductDatabaseCompletionSummary,

@@ -116,6 +116,17 @@ const detectBoxPackagingMode = (value = "", entries = []) => {
   return BOX_PACKAGING_MODES.INDIVIDUAL;
 };
 
+const requiresMasterBarcode = (mode = "", entries = []) => {
+  const resolvedMode = detectBoxPackagingMode(mode, entries);
+  return (
+    resolvedMode === BOX_PACKAGING_MODES.CARTON ||
+    resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+  );
+};
+
+const requiresInnerBarcode = (mode = "", entries = []) =>
+  detectBoxPackagingMode(mode, entries) === BOX_PACKAGING_MODES.CARTON;
+
 const normalizeIndividualRemark = (value = "") => {
   const normalized = normalizeText(value);
   return normalized;
@@ -466,6 +477,8 @@ module.exports = {
   BOX_CARTON_REMARK_OPTIONS,
   BOX_SIZE_REMARK_OPTIONS,
   detectBoxPackagingMode,
+  requiresMasterBarcode,
+  requiresInnerBarcode,
   normalizeStoredBoxEntries,
   buildBoxEntriesFromLegacy,
   buildBoxLegacyFieldsFromEntries,

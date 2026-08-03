@@ -20,6 +20,8 @@ import {
   hasMeaningfulMeasuredSize,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
+  requiresInnerBarcode,
+  requiresMasterBarcode,
   resolvePreferredMeasuredSizeCbm,
 } from "../utils/measuredSizeForm";
 import { formatEan13BarcodeDisplay } from "../utils/barcode";
@@ -434,7 +436,14 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       calculatedPisItemCbm,
     );
   }, [calculatedPisBoxCbm, calculatedPisItemCbm]);
-  const isPisCartonMode = form.pis_box_mode === BOX_PACKAGING_MODES.CARTON;
+  const isPisMasterMode = requiresMasterBarcode(
+    form.pis_box_mode,
+    form.pis_box_sizes,
+  );
+  const isPisCartonMode = requiresInnerBarcode(
+    form.pis_box_mode,
+    form.pis_box_sizes,
+  );
 
   useEffect(() => {
     if (!showInspectedReference || !itemCode || itemCode === "N/A") {
@@ -635,7 +644,11 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       setError("");
 
       if (!toText(form.master_barcode)) {
-        throw new Error("PIS master barcode is required.");
+        throw new Error(
+          isPisMasterMode
+            ? "PIS master barcode is required for this box mode."
+            : "PIS barcode is required.",
+        );
       }
       if (isPisCartonMode && !toText(form.inner_barcode)) {
         throw new Error("PIS inner barcode is required for carton packaging.");
@@ -677,8 +690,13 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         pis_box_sizes: pisBoxPayload.value,
       };
       payload.country_of_origin = toText(form.country_of_origin);
-      payload.pis_barcode = toText(form.master_barcode);
-      payload.pis_master_barcode = toText(form.master_barcode);
+      const barcode = toText(form.master_barcode);
+      if (barcode) {
+        payload.pis_barcode = barcode;
+        if (isPisMasterMode) {
+          payload.pis_master_barcode = barcode;
+        }
+      }
       if (isPisCartonMode) {
         payload.pis_inner_barcode = toText(form.inner_barcode);
       }
@@ -701,8 +719,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         ? {
             ...item,
             country_of_origin: payload.country_of_origin,
-            pis_barcode: payload.pis_barcode,
-            pis_master_barcode: payload.pis_master_barcode,
+            pis_barcode: payload.pis_barcode ?? item?.pis_barcode,
+            pis_master_barcode:
+              payload.pis_master_barcode ?? item?.pis_master_barcode,
             pis_inner_barcode: payload.pis_inner_barcode ?? item?.pis_inner_barcode,
             pis_box_mode: payload.pis_box_mode,
             pis_item_sizes: payload.pis_item_sizes,
@@ -713,8 +732,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
               ? payload.barcode_exempted
               : item?.barcode_exempted,
             master_country_of_origin: payload.country_of_origin,
-            master_barcode: payload.pis_master_barcode,
-            master_master_barcode: payload.pis_master_barcode,
+            master_barcode: payload.pis_master_barcode ?? item?.master_barcode,
+            master_master_barcode:
+              payload.pis_master_barcode ?? item?.master_master_barcode,
             master_inner_barcode:
               payload.pis_inner_barcode ?? item?.master_inner_barcode,
             master_box_mode: payload.pis_box_mode,
@@ -862,7 +882,11 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             <div className="row g-2">
               <div className={isPisCartonMode ? "col-md-6" : "col-md-12"}>
                 <label className="form-label">
-                  {isPisCartonMode ? "Master Carton Barcode" : "Barcode"}
+                  {isPisCartonMode
+                    ? "Master Carton Barcode"
+                    : isPisMasterMode
+                      ? "Master Barcode"
+                      : "Barcode"}
                 </label>
                 <input
                   type="text"

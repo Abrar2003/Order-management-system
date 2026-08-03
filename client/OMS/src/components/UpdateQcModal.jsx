@@ -1406,8 +1406,12 @@ const UpdateQcModal = ({
               BOX_SIZE_ENTRY_LIMIT,
             )
           : 1;
-    const storedMasterBarcode = getRecordMasterBarcodeValue(barcodePrefillRecord);
-    const storedInnerBarcode = getRecordInnerBarcodeValue(barcodePrefillRecord);
+    const storedMasterBarcode =
+      getRecordMasterBarcodeValue(barcodePrefillRecord) ||
+      getPositiveBarcodeValue(itemMaster, ["pis_master_barcode", "pis_barcode"]);
+    const storedInnerBarcode =
+      getRecordInnerBarcodeValue(barcodePrefillRecord) ||
+      getPositiveBarcodeValue(itemMaster, ["pis_inner_barcode"]);
 
     setForm({
       inspector: defaultInspectorId,

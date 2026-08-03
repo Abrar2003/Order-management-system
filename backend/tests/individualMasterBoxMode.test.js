@@ -7,6 +7,8 @@ const {
   buildBoxMeasurementCbmSummary,
   calculateEffectiveBoxEntriesCbmTotal,
   detectBoxPackagingMode,
+  requiresInnerBarcode,
+  requiresMasterBarcode,
 } = require("../helpers/boxMeasurement");
 const {
   calculateTotalPoCbm,
@@ -28,6 +30,15 @@ test("detects master-only box entries as individual packing plus master", () => 
     detectBoxPackagingMode("", [masterEntry]),
     BOX_PACKAGING_MODES.INDIVIDUAL_MASTER,
   );
+});
+
+test("requires master and inner barcodes only for their box modes", () => {
+  assert.equal(requiresMasterBarcode(BOX_PACKAGING_MODES.INDIVIDUAL), false);
+  assert.equal(requiresInnerBarcode(BOX_PACKAGING_MODES.INDIVIDUAL), false);
+  assert.equal(requiresMasterBarcode(BOX_PACKAGING_MODES.INDIVIDUAL_MASTER), true);
+  assert.equal(requiresInnerBarcode(BOX_PACKAGING_MODES.INDIVIDUAL_MASTER), false);
+  assert.equal(requiresMasterBarcode(BOX_PACKAGING_MODES.CARTON), true);
+  assert.equal(requiresInnerBarcode(BOX_PACKAGING_MODES.CARTON), true);
 });
 
 test("calculates individual packing plus master CBM per piece from master box", () => {
