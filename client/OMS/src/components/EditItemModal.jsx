@@ -250,6 +250,13 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       setSaving(true);
       setError("");
 
+      if (Number(form.qc.master_barcode) <= 0) {
+        throw new Error("QC master barcode is required.");
+      }
+      if (isInspectedCartonMode && Number(form.qc.inner_barcode) <= 0) {
+        throw new Error("QC inner barcode is required for carton packaging.");
+      }
+
       const inspectedItemPayload = parseMeasuredSizeEntries({
         entries: form.inspected_item_sizes,
         count: form.inspected_item_count,
@@ -299,12 +306,6 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
             form.qc.master_barcode,
             "QC master barcode",
           ),
-          inner_barcode: isInspectedCartonMode
-            ? parseNonNegativeNumber(
-                form.qc.inner_barcode,
-                "QC inner barcode",
-              )
-            : 0,
           last_inspected_date: toText(form.qc.last_inspected_date),
           quantities: {
             checked: parseNonNegativeNumber(form.qc.quantities.checked, "QC checked"),
@@ -317,6 +318,12 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
           from_qc: Boolean(form.source.from_qc),
         },
       };
+      if (isInspectedCartonMode) {
+        payload.qc.inner_barcode = parseNonNegativeNumber(
+          form.qc.inner_barcode,
+          "QC inner barcode",
+        );
+      }
 
       await api.patch(`/items/${item?._id}`, payload);
       onUpdated?.();

@@ -6,6 +6,7 @@ const FilePreviewModal = ({
   url = "",
   originalName = "",
   previewMode = "pdf",
+  modalClassName = "",
   onClose,
 }) => {
   useEffect(() => {
@@ -35,7 +36,7 @@ const FilePreviewModal = ({
 
   return (
     <div
-      className="modal d-block om-modal-backdrop"
+      className={`modal d-block om-modal-backdrop ${modalClassName}`.trim()}
       tabIndex="-1"
       role="dialog"
       aria-modal="true"

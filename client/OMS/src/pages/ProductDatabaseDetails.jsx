@@ -84,27 +84,37 @@ const normalizeRawValues = (value) => {
       value: formatValue(entryValue),
     }));
 };
-const buildProductDatabaseActionPayload = (productDatabase = {}) => ({
-  country_of_origin: productDatabase.country_of_origin || "",
-  pd_barcode: productDatabase.pd_barcode || "",
-  pd_master_barcode: productDatabase.pd_master_barcode || productDatabase.pd_barcode || "",
-  pd_inner_barcode: productDatabase.pd_inner_barcode || "",
-  product_type: productDatabase.product_type || null,
-  product_specs: productDatabase.product_specs || {
-    fields: [],
-    item_sizes: [],
-    box_sizes: [],
-    box_mode: "individual",
-    raw_values: {},
-  },
-  pd_item_sizes: Array.isArray(productDatabase.pd_item_sizes)
-    ? productDatabase.pd_item_sizes
-    : [],
-  pd_box_sizes: Array.isArray(productDatabase.pd_box_sizes)
-    ? productDatabase.pd_box_sizes
-    : [],
-  pd_box_mode: productDatabase.pd_box_mode || productDatabase.product_specs?.box_mode || "individual",
-});
+const buildProductDatabaseActionPayload = (productDatabase = {}) => {
+  const masterBarcode =
+    productDatabase.pd_master_barcode || productDatabase.pd_barcode || "";
+  const payload = {
+    country_of_origin: productDatabase.country_of_origin || "",
+    product_type: productDatabase.product_type || null,
+    product_specs: productDatabase.product_specs || {
+      fields: [],
+      item_sizes: [],
+      box_sizes: [],
+      box_mode: "individual",
+      raw_values: {},
+    },
+    pd_item_sizes: Array.isArray(productDatabase.pd_item_sizes)
+      ? productDatabase.pd_item_sizes
+      : [],
+    pd_box_sizes: Array.isArray(productDatabase.pd_box_sizes)
+      ? productDatabase.pd_box_sizes
+      : [],
+    pd_box_mode:
+      productDatabase.pd_box_mode || productDatabase.product_specs?.box_mode || "individual",
+  };
+  if (masterBarcode) {
+    payload.pd_barcode = masterBarcode;
+    payload.pd_master_barcode = masterBarcode;
+  }
+  if (productDatabase.pd_inner_barcode) {
+    payload.pd_inner_barcode = productDatabase.pd_inner_barcode;
+  }
+  return payload;
+};
 
 const DetailCard = ({ title, children }) => (
   <div className="card om-card h-100 product-database-detail-card">

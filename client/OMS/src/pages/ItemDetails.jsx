@@ -1021,7 +1021,18 @@ const ItemDetails = () => {
                                 <div className="inspection-report-finish-images">
                                   {[["Front", finish.frontImageUrl], ["Back", finish.backImageUrl]].map(([label, imageUrl]) => imageUrl ? (
                                     <figure key={label} className="mb-0 text-center">
-                                      <img src={imageUrl} alt={`${finish.uniqueCode} ${label.toLowerCase()} finish`} className="inspection-report-brand-logo inspection-report-brand-logo--finish" />
+                                      <button
+                                        type="button"
+                                        className="finish-image-trigger"
+                                        onClick={() => setPreviewFile({
+                                          title: `${finish.uniqueCode} ${label} Finish`,
+                                          originalUrl: imageUrl,
+                                          mode: "image",
+                                          modalClassName: "finish-image-preview-modal",
+                                        })}
+                                      >
+                                        <img src={imageUrl} alt={`${finish.uniqueCode} ${label.toLowerCase()} finish`} className="inspection-report-brand-logo inspection-report-brand-logo--finish" />
+                                      </button>
                                       <figcaption className="small text-secondary">{label}</figcaption>
                                     </figure>
                                   ) : null)}
@@ -1191,7 +1202,20 @@ const ItemDetails = () => {
                               <td>{row.colorCode}</td>
                               {["front", "back"].map((side) => {
                                 const imageUrl = side === "front" ? row.frontImageUrl : row.backImageUrl;
-                                return <td key={side}>{imageUrl ? <img src={imageUrl} alt={`${row.uniqueCode} ${side} finish`} className="inspection-report-finish-image" /> : "N/A"}</td>;
+                                return <td key={side}>{imageUrl ? (
+                                  <button
+                                    type="button"
+                                    className="finish-image-trigger"
+                                    onClick={() => setPreviewFile({
+                                      title: `${row.uniqueCode} ${side === "front" ? "Front" : "Back"} Finish`,
+                                      originalUrl: imageUrl,
+                                      mode: "image",
+                                      modalClassName: "finish-image-preview-modal",
+                                    })}
+                                  >
+                                    <img src={imageUrl} alt={`${row.uniqueCode} ${side} finish`} className="inspection-report-finish-image" />
+                                  </button>
+                                ) : "N/A"}</td>;
                               })}
                             </tr>
                           ))}
@@ -1340,6 +1364,7 @@ const ItemDetails = () => {
           title={previewFile.title}
           url={previewFile.originalUrl}
           previewMode={previewFile.mode}
+          modalClassName={previewFile.modalClassName}
           onClose={() => setPreviewFile(null)}
         />
       )}

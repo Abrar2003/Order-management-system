@@ -7,6 +7,7 @@ const {
   buildProductDatabaseCompletionSummary,
   getProductDatabaseCompletionRange,
   normalizeProductDatabaseInput,
+  assertProductDatabaseBarcodes,
 } = require("../helpers/productDatabase");
 
 test("Product Database accepts Base 2, Pedestal, and Stretcher item-size remarks", () => {
@@ -36,6 +37,17 @@ test("Product Database accepts five item-size entries", () => {
   });
 
   assert.equal(result.data.pd_item_sizes.length, 5);
+});
+
+test("Product Database rejects blank barcode writes", () => {
+  assert.throws(
+    () => normalizeProductDatabaseInput({ pd_inner_barcode: "" }),
+    /Barcode fields cannot be blank/,
+  );
+  assert.throws(
+    () => assertProductDatabaseBarcodes({ pd_box_mode: "individual" }),
+    /master barcode is required/,
+  );
 });
 
 test("Product Database completion buckets count filled Table fields", () => {

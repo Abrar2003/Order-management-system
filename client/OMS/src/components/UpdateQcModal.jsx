@@ -2705,6 +2705,18 @@ const UpdateQcModal = ({
       return;
     }
 
+    const inspectionRecordBarcodeFields = {
+      ...(barcodeParsed !== null
+        ? {
+            barcode: barcodeParsed,
+            master_barcode: barcodeParsed,
+          }
+        : {}),
+      ...(isCartonPackagingMode && innerBarcodeParsed !== null
+        ? { inner_barcode: innerBarcodeParsed }
+        : {}),
+    };
+
     if (isQcUser && !submitBarcodeValidationExempted) {
       const typeLabel = selectedBarcodeValidationOption.label.toLowerCase();
 
@@ -2793,12 +2805,16 @@ const UpdateQcModal = ({
 
 
 
-      if (isAdminRewriteMode) {
-        payload.barcode = barcodeParsed ?? "";
-        payload.master_barcode = barcodeParsed ?? "";
-        if (shouldReadInnerBarcode) {
-          payload.inner_barcode = innerBarcodeParsed ?? "";
-        }
+      if (isAdminRewriteMode && barcodeParsed !== null) {
+        payload.barcode = barcodeParsed;
+        payload.master_barcode = barcodeParsed;
+      }
+      if (
+        isAdminRewriteMode &&
+        shouldReadInnerBarcode &&
+        innerBarcodeParsed !== null
+      ) {
+        payload.inner_barcode = innerBarcodeParsed;
       } else if (isQcUser && barcodeParsed !== null) {
         payload.barcode = barcodeParsed;
         payload.master_barcode = barcodeParsed;
@@ -2972,9 +2988,7 @@ const UpdateQcModal = ({
               label_ranges: normalizedLabelRanges,
               labels_added: labelsForUpdate,
               remarks: normalizedRemarks,
-              barcode: barcodeParsed ?? "",
-              master_barcode: barcodeParsed ?? "",
-              inner_barcode: isCartonPackagingMode ? innerBarcodeParsed ?? "" : "",
+              ...inspectionRecordBarcodeFields,
               packed_size: Boolean(form.packed_size),
               finishing: Boolean(form.finishing),
               branding: Boolean(form.branding),
@@ -3143,9 +3157,7 @@ const UpdateQcModal = ({
               label_ranges: normalizedLabelRanges,
               labels_added: labelsForUpdate,
               remarks: normalizedRemarks,
-              barcode: barcodeParsed ?? "",
-              master_barcode: barcodeParsed ?? "",
-              inner_barcode: isCartonPackagingMode ? innerBarcodeParsed ?? "" : "",
+              ...inspectionRecordBarcodeFields,
               packed_size: Boolean(form.packed_size),
               finishing: Boolean(form.finishing),
               branding: Boolean(form.branding),

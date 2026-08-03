@@ -580,7 +580,16 @@ const itemSchema = new mongoose.Schema(
       link: { type: String, default: "", trim: true },
       public_id: { type: String, default: "", trim: true },
     },
+    logistics_ean: {
+      key: { type: String, default: "", trim: true },
+      originalName: { type: String, default: "", trim: true },
+      contentType: { type: String, default: "", trim: true },
+      size: { type: Number, default: 0, min: 0 },
+      link: { type: String, default: "", trim: true },
+      public_id: { type: String, default: "", trim: true },
+    },
     satin_label_required: { type: Boolean, default: false },
+    logistics_ean_required: { type: Boolean, default: false },
     mounting_file: {
       key: { type: String, default: "", trim: true },
       originalName: { type: String, default: "", trim: true },
@@ -704,7 +713,9 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
 itemSchema.pre("validate", async function resolveVendorReferences() {
   await resolveDocumentVendorFields(this, { array: ["vendors"] });
 
-  const countries = [...new Set((this.vendors || []).map(getVendorCountry).filter(Boolean))];
+  const countries = [
+    ...new Set((this.vendors || []).map(getVendorCountry).filter(Boolean)),
+  ];
   if (countries.length === 1) this.country_of_origin = countries[0];
 
   if (Array.isArray(this.finish)) {

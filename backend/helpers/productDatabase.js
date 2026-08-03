@@ -616,6 +616,14 @@ const normalizeProductDatabaseInput = (payload = {}) => {
     data.country_of_origin = normalizeText(payload.country_of_origin);
   }
 
+  if (
+    (hasPdBarcode && !normalizeText(payload.pd_barcode)) ||
+    (hasPdMasterBarcode && !normalizeText(payload.pd_master_barcode)) ||
+    (hasPdInnerBarcode && !normalizeText(payload.pd_inner_barcode))
+  ) {
+    throw new ProductDatabaseError("Barcode fields cannot be blank");
+  }
+
   if (hasPdBarcode || hasPdMasterBarcode) {
     const nextMasterBarcode = normalizeText(
       hasPdMasterBarcode ? payload.pd_master_barcode : payload.pd_barcode,
@@ -905,6 +913,25 @@ const hasProductDatabaseData = (state = {}) =>
   (Array.isArray(state?.product_specs?.item_sizes) && state.product_specs.item_sizes.length > 0) ||
   (Array.isArray(state?.product_specs?.box_sizes) && state.product_specs.box_sizes.length > 0);
 
+const assertProductDatabaseBarcodes = (state = {}) => {
+  if (!normalizeText(state?.pd_master_barcode || state?.pd_barcode)) {
+    throw new ProductDatabaseError("Product Database master barcode is required");
+  }
+
+  const boxMode = detectBoxPackagingMode(
+    state?.pd_box_mode,
+    state?.pd_box_sizes,
+  );
+  if (
+    boxMode === BOX_PACKAGING_MODES.CARTON &&
+    !normalizeText(state?.pd_inner_barcode)
+  ) {
+    throw new ProductDatabaseError(
+      "Product Database inner barcode is required for carton packaging",
+    );
+  }
+};
+
 const appendPdHistory = (
   item,
   {
@@ -1007,6 +1034,7 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
   const currentState = extractProductDatabaseFields(item);
   const input = normalizeProductDatabaseInput(payload);
   const nextState = mergeProductDatabaseFields(currentState, input.data);
+  assertProductDatabaseBarcodes(nextState);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (!input.hasInput) {
@@ -1048,6 +1076,7 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
   const currentState = extractProductDatabaseFields(item);
   const input = normalizeProductDatabaseInput(payload);
   const nextState = mergeProductDatabaseFields(currentState, input.data);
+  assertProductDatabaseBarcodes(nextState);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (changedFields.length > 0) {
@@ -1113,6 +1142,7 @@ const applyProductDatabaseApprove = ({ item, payload = {}, user = {} } = {}) => 
   const currentState = extractProductDatabaseFields(item);
   const input = normalizeProductDatabaseInput(payload);
   const nextState = mergeProductDatabaseFields(currentState, input.data);
+  assertProductDatabaseBarcodes(nextState);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (changedFields.length === 0 && previousStatus !== PD_STATUSES.CHECKED) {
@@ -1237,6 +1267,7 @@ module.exports = {
   mergeProductDatabaseFields,
   getChangedProductDatabaseFields,
   hasProductDatabaseData,
+  assertProductDatabaseBarcodes,
   buildProductDatabaseCompletion,
   buildProductDatabaseCompletionSummary,
   buildProductDatabaseCompletionRangeSummary,

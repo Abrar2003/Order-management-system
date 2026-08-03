@@ -328,17 +328,17 @@ const buildPayloadFromForm = (form = {}, boxMode = null) => {
       ? form.masterBarcode
       : form.singleBarcode;
 
-  return {
+  const payload = {
     country_of_origin: normalizeTextValue(form.countryOfOrigin),
     pd_barcode: normalizeTextValue(primaryBarcode),
     pd_master_barcode: normalizeTextValue(primaryBarcode),
-    pd_inner_barcode:
-      effectiveBarcodeMode === BARCODE_MODES.INNER_MASTER
-        ? normalizeTextValue(form.innerBarcode)
-        : "",
     kd: form.kd === true,
     mounting_file_needed: form.mountingFileNeeded === true,
   };
+  if (effectiveBarcodeMode === BARCODE_MODES.INNER_MASTER) {
+    payload.pd_inner_barcode = normalizeTextValue(form.innerBarcode);
+  }
+  return payload;
 };
 
 const PRODUCT_DATABASE_SIZE_DIFF_TOLERANCE = 0.5;
@@ -1830,6 +1830,17 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
 
       if (normalizeTemplateKey(form.productTypeKey) && !templateReady) {
         setError("Please wait for the selected product type template to finish loading.");
+        return;
+      }
+      if (!normalizeTextValue(currentPayload.pd_master_barcode)) {
+        setError("Product Database master barcode is required.");
+        return;
+      }
+      if (
+        Object.hasOwn(currentPayload, "pd_inner_barcode") &&
+        !normalizeTextValue(currentPayload.pd_inner_barcode)
+      ) {
+        setError("Product Database inner barcode is required for carton packaging.");
         return;
       }
 

@@ -5014,6 +5014,43 @@ small,
   background: rgba(46, 36, 26, 0.42);
 }
 
+.finish-image-preview-modal {
+  background: rgba(24, 20, 16, 0.52);
+}
+
+.finish-image-preview-modal .modal-dialog {
+  width: 80vw;
+  max-width: 80vw;
+  height: 80vh;
+  min-height: 80vh;
+  margin: 10vh auto;
+}
+
+.finish-image-preview-modal .modal-content {
+  height: 100%;
+}
+
+.finish-image-preview-modal .modal-body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.finish-image-preview-modal .modal-body > .d-flex {
+  min-height: 0 !important;
+  height: 100%;
+}
+
+.finish-image-preview-modal img {
+  max-height: 100% !important;
+}
+
+.finish-image-trigger {
+  display: inline-block;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
 .qc-info-label {
   font-size: 0.75rem;
   font-weight: 600;

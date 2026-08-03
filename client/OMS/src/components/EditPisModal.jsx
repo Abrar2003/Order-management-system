@@ -634,6 +634,13 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       setSaving(true);
       setError("");
 
+      if (!toText(form.master_barcode)) {
+        throw new Error("PIS master barcode is required.");
+      }
+      if (isPisCartonMode && !toText(form.inner_barcode)) {
+        throw new Error("PIS inner barcode is required for carton packaging.");
+      }
+
       const pisItemPayload = parseMeasuredSizeEntries({
         entries: form.pis_item_sizes,
         count: form.pis_item_count,
@@ -672,7 +679,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       payload.country_of_origin = toText(form.country_of_origin);
       payload.pis_barcode = toText(form.master_barcode);
       payload.pis_master_barcode = toText(form.master_barcode);
-      payload.pis_inner_barcode = isPisCartonMode ? toText(form.inner_barcode) : "";
+      if (isPisCartonMode) {
+        payload.pis_inner_barcode = toText(form.inner_barcode);
+      }
       payload.kd = Boolean(form.kd);
       payload.mounting_file_needed = Boolean(form.mounting_file_needed);
       if (canToggleBarcodeExemption) {
@@ -694,7 +703,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             country_of_origin: payload.country_of_origin,
             pis_barcode: payload.pis_barcode,
             pis_master_barcode: payload.pis_master_barcode,
-            pis_inner_barcode: payload.pis_inner_barcode,
+            pis_inner_barcode: payload.pis_inner_barcode ?? item?.pis_inner_barcode,
             pis_box_mode: payload.pis_box_mode,
             pis_item_sizes: payload.pis_item_sizes,
             pis_box_sizes: payload.pis_box_sizes,
@@ -706,7 +715,8 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             master_country_of_origin: payload.country_of_origin,
             master_barcode: payload.pis_master_barcode,
             master_master_barcode: payload.pis_master_barcode,
-            master_inner_barcode: payload.pis_inner_barcode,
+            master_inner_barcode:
+              payload.pis_inner_barcode ?? item?.master_inner_barcode,
             master_box_mode: payload.pis_box_mode,
             master_item_sizes: payload.pis_item_sizes,
             master_box_sizes: payload.pis_box_sizes,

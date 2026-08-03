@@ -3034,7 +3034,17 @@ const QcDetails = () => {
                               <div key={label} className="col-6">
                                 <div className="small text-secondary mb-1">{label}</div>
                                 {imageUrl ? (
-                                  <button type="button" className="btn btn-link p-0 text-decoration-none w-100" onClick={() => window.open(imageUrl, "_blank", "noopener,noreferrer")}>
+                                  <button
+                                    type="button"
+                                    className="finish-image-trigger w-100"
+                                    onClick={() => setPreviewFile({
+                                      title: `${finish.uniqueCode} ${label} Finish`,
+                                      url: imageUrl,
+                                      originalName: `${finish.uniqueCode}-${label.toLowerCase()}-finish`,
+                                      previewMode: "image",
+                                      modalClassName: "finish-image-preview-modal",
+                                    })}
+                                  >
                                     <img src={imageUrl} alt={`${finish.uniqueCode} ${label.toLowerCase()} finish`} className="img-fluid rounded border" loading="lazy" decoding="async" style={{ width: "100%", height: "180px", objectFit: "contain", backgroundColor: "#f8f9fa" }} />
                                   </button>
                                 ) : (
@@ -3635,6 +3645,7 @@ const QcDetails = () => {
           url={previewFile.url}
           originalName={previewFile.originalName}
           previewMode={previewFile.previewMode}
+          modalClassName={previewFile.modalClassName}
           onClose={() => setPreviewFile(null)}
         />
       )}

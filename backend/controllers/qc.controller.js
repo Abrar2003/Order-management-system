@@ -220,6 +220,26 @@ const normalizeComparableBarcode = (value) => {
   const withoutLeadingZeroes = normalized.replace(/^0+/, "");
   return withoutLeadingZeroes || "0";
 };
+const resolveBarcodeWithPisDefault = ({
+  currentValue,
+  requestedValue,
+  pisValue,
+} = {}) => {
+  const normalizedPisValue = normalizeComparableBarcode(pisValue);
+  if (!normalizedPisValue || normalizedPisValue === "0") return "";
+
+  if (requestedValue !== undefined) {
+    const normalizedRequestedValue = normalizeComparableBarcode(requestedValue);
+    return normalizedRequestedValue && normalizedRequestedValue !== "0"
+      ? normalizeText(requestedValue)
+      : normalizeText(pisValue);
+  }
+
+  const normalizedCurrentValue = normalizeComparableBarcode(currentValue);
+  return normalizedCurrentValue && normalizedCurrentValue !== "0"
+    ? normalizeText(currentValue)
+    : normalizeText(pisValue);
+};
 const QC_BARCODE_VALIDATION_TYPES = Object.freeze({
   individual: {
     label: "individual",
@@ -3573,6 +3593,7 @@ const buildApprovedGoodsQuantityByInspectionId = (inspectionRecords = []) => {
 
 exports.__test__ = {
   buildApprovedGoodsQuantityByInspectionId,
+  resolveBarcodeWithPisDefault,
   selectPreviousPoImageHistory,
   syncQcCurrentRequestFieldsFromHistory,
   syncRequestHistoryInspectorsFromInspections,
@@ -6100,11 +6121,7 @@ const updateQC = async (req, res) => {
     const qcItemCodeForBarcodeRequirement = normalizeText(
       qc?.item?.item_code || itemCodeForInspectedSizeUpdate || "",
     );
-    if (
-      isQcUser &&
-      !itemDocForBarcodeRequirement &&
-      qcItemCodeForBarcodeRequirement
-    ) {
+    if (!itemDocForBarcodeRequirement && qcItemCodeForBarcodeRequirement) {
       itemDocForBarcodeRequirement = await Item.findOne(
         applyDataAccessMatch(
           {
@@ -6121,8 +6138,20 @@ const updateQC = async (req, res) => {
         ),
       );
     }
-    const itemIsBarcodeValidationExempt =
-      itemDocForBarcodeRequirement?.barcode_exempted === true;
+    const pisMasterBarcode = normalizeText(
+      itemDocForBarcodeRequirement?.pis_master_barcode ||
+        itemDocForBarcodeRequirement?.pis_barcode ||
+        "",
+    );
+    if (
+      !itemDocForBarcodeRequirement ||
+      !Number.isFinite(Number(pisMasterBarcode)) ||
+      Number(pisMasterBarcode) <= 0
+    ) {
+      return res.status(400).json({
+        message: "A valid PIS master barcode is required before updating this QC record.",
+      });
+    }
 
     /* ────────────────────────
          🔢 BARCODE
@@ -6131,9 +6160,21 @@ const updateQC = async (req, res) => {
     const nextMasterBarcodeRaw =
       master_barcode !== undefined ? master_barcode : barcode;
     const currentMasterBarcode = Number(qc?.master_barcode || qc?.barcode || 0);
-    let resolvedMasterBarcode = currentMasterBarcode;
+    const resolvedMasterBarcodeRaw = resolveBarcodeWithPisDefault({
+      currentValue: currentMasterBarcode,
+      requestedValue: nextMasterBarcodeRaw,
+      pisValue: pisMasterBarcode,
+    });
+    const resolvedMasterBarcode = Number(resolvedMasterBarcodeRaw);
+    if (!Number.isFinite(resolvedMasterBarcode) || resolvedMasterBarcode <= 0) {
+      return res.status(400).json({
+        message: "PIS master barcode must be a positive number before updating this QC record.",
+      });
+    }
     if (nextMasterBarcodeRaw !== undefined) {
       const nextMasterBarcode = Number(nextMasterBarcodeRaw);
+      const hasSubmittedMasterBarcode =
+        Number.isFinite(nextMasterBarcode) && nextMasterBarcode > 0;
       if (!Number.isFinite(nextMasterBarcode) || nextMasterBarcode < 0) {
         return res.status(400).json({
           message: "master_barcode must be a non-negative number",
@@ -6141,7 +6182,8 @@ const updateQC = async (req, res) => {
       }
       if (
         isQcUser &&
-        nextMasterBarcode !== currentMasterBarcode &&
+        hasSubmittedMasterBarcode &&
+        resolvedMasterBarcode !== currentMasterBarcode &&
         !barcodeScannedByQcUser
       ) {
         return res.status(403).json({
@@ -6149,53 +6191,100 @@ const updateQC = async (req, res) => {
         });
       }
       if (!allowQcFieldEdits && !isAdmin && !isCurrentUserLabelExempt) {
-        if (currentMasterBarcode > 0 && nextMasterBarcode !== currentMasterBarcode) {
+        if (
+          hasSubmittedMasterBarcode &&
+          currentMasterBarcode > 0 &&
+          resolvedMasterBarcode !== currentMasterBarcode
+        ) {
           return res
             .status(400)
             .json({ message: "master barcode can only be set once" });
         }
       }
-      resolvedMasterBarcode = nextMasterBarcode;
-      qc.master_barcode = nextMasterBarcode;
-      qc.barcode = nextMasterBarcode;
+    }
+    qc.master_barcode = resolvedMasterBarcode;
+    qc.barcode = resolvedMasterBarcode;
+
+    const barcodeBoxMode =
+      parsedInspectedBoxSizeEntries.hasInput || hasInspectedBoxModeUpdate
+        ? parsedInspectedBoxMode
+        : detectBoxPackagingMode(
+            itemDocForBarcodeRequirement?.inspected_box_mode ||
+              itemDocForBarcodeRequirement?.pis_box_mode,
+            itemDocForBarcodeRequirement?.inspected_box_sizes ||
+              itemDocForBarcodeRequirement?.pis_box_sizes,
+          );
+    const isCartonModeForBarcode =
+      barcodeBoxMode === BOX_PACKAGING_MODES.CARTON;
+    const pisInnerBarcode = normalizeText(
+      itemDocForBarcodeRequirement?.pis_inner_barcode || "",
+    );
+    if (
+      isCartonModeForBarcode &&
+      (!Number.isFinite(Number(pisInnerBarcode)) || Number(pisInnerBarcode) <= 0)
+    ) {
+      return res.status(400).json({
+        message: "A valid PIS inner barcode is required before updating this QC record.",
+      });
     }
 
     const currentInnerBarcode = Number(qc?.inner_barcode || 0);
-    let resolvedInnerBarcode = currentInnerBarcode;
-    if (inner_barcode !== undefined) {
-      const nextInnerBarcode = Number(inner_barcode);
-      if (!Number.isFinite(nextInnerBarcode) || nextInnerBarcode < 0) {
-        return res.status(400).json({
-          message: "inner_barcode must be a non-negative number",
-        });
-      }
-      if (
-        isQcUser &&
-        nextInnerBarcode !== currentInnerBarcode &&
-        !innerBarcodeScannedByQcUser
-      ) {
-        return res.status(403).json({
-          message: "QC users must scan the inner barcode. Manual inner barcode entry is not allowed.",
-        });
-      }
-      if (!allowQcFieldEdits && !isAdmin && !isCurrentUserLabelExempt) {
-        if (currentInnerBarcode > 0 && nextInnerBarcode !== currentInnerBarcode) {
-          return res
-            .status(400)
-            .json({ message: "inner barcode can only be set once" });
-        }
-      }
-      resolvedInnerBarcode = nextInnerBarcode;
-      qc.inner_barcode = nextInnerBarcode;
+    const hasInnerBarcodeInput = inner_barcode !== undefined;
+    const submittedInnerBarcode = hasInnerBarcodeInput
+      ? Number(inner_barcode)
+      : null;
+    if (
+      hasInnerBarcodeInput &&
+      (!Number.isFinite(submittedInnerBarcode) || submittedInnerBarcode < 0)
+    ) {
+      return res.status(400).json({
+        message: "inner_barcode must be a non-negative number",
+      });
+    }
+    if (!isCartonModeForBarcode && hasInnerBarcodeInput && submittedInnerBarcode <= 0) {
+      return res.status(400).json({
+        message: "inner barcode cannot be blank",
+      });
     }
 
-    if (isQcUser && !itemIsBarcodeValidationExempt) {
-      if (!itemDocForBarcodeRequirement) {
-        return res.status(400).json({
-          message: "Item master with PIS barcode is required before QC can update this record.",
-        });
+    const shouldDefaultInnerBarcode =
+      isCartonModeForBarcode &&
+      (hasInnerBarcodeInput
+        ? submittedInnerBarcode <= 0
+        : currentInnerBarcode <= 0);
+    const resolvedInnerBarcode = shouldDefaultInnerBarcode
+      ? Number(pisInnerBarcode)
+      : hasInnerBarcodeInput
+        ? submittedInnerBarcode
+        : currentInnerBarcode;
+    const hasSubmittedInnerBarcode =
+      hasInnerBarcodeInput && submittedInnerBarcode > 0;
+    if (
+      isQcUser &&
+      hasSubmittedInnerBarcode &&
+      resolvedInnerBarcode !== currentInnerBarcode &&
+      !innerBarcodeScannedByQcUser
+    ) {
+      return res.status(403).json({
+        message: "QC users must scan the inner barcode. Manual inner barcode entry is not allowed.",
+      });
+    }
+    if (!allowQcFieldEdits && !isAdmin && !isCurrentUserLabelExempt) {
+      if (
+        hasSubmittedInnerBarcode &&
+        currentInnerBarcode > 0 &&
+        resolvedInnerBarcode !== currentInnerBarcode
+      ) {
+        return res
+          .status(400)
+          .json({ message: "inner barcode can only be set once" });
       }
+    }
+    if (isCartonModeForBarcode || hasInnerBarcodeInput) {
+      qc.inner_barcode = resolvedInnerBarcode;
+    }
 
+    if (isQcUser) {
       if (toNonNegativeNumber(resolvedMasterBarcode, 0) <= 0) {
         return res.status(400).json({
           message: "QC users must scan and save a master barcode before updating this QC record.",
@@ -12098,6 +12187,38 @@ exports.editInspectionRecords = async (req, res) => {
       return res.status(404).json({ message: "QC record not found" });
     }
 
+    const qcItemCode = normalizeText(qc?.item?.item_code);
+    const itemDocForBarcodeRequirement = qcItemCode
+      ? await Item.findOne(
+          applyDataAccessMatch(
+            {
+              code: {
+                $regex: `^${escapeRegex(qcItemCode)}$`,
+                $options: "i",
+              },
+            },
+            req.user,
+            {
+              brandFields: ["brand", "brand_name", "brands"],
+              vendorFields: ["vendors"],
+            },
+          ),
+        )
+      : null;
+    const pisMasterBarcode = normalizeText(
+      itemDocForBarcodeRequirement?.pis_master_barcode ||
+        itemDocForBarcodeRequirement?.pis_barcode ||
+        "",
+    );
+    if (
+      !Number.isFinite(Number(pisMasterBarcode)) ||
+      Number(pisMasterBarcode) <= 0
+    ) {
+      return res.status(400).json({
+        message: "A valid PIS master barcode is required before updating inspection records.",
+      });
+    }
+
     const inspectionDocs = await Inspection.find({ qc: qc._id });
     if (inspectionDocs.length === 0) {
       return res
@@ -12199,10 +12320,17 @@ exports.editInspectionRecords = async (req, res) => {
 	      return { hasInput: true, value: parsed };
 	    };
 
-      const parseOptionalBarcodeField = (value, fieldName) => {
+      const parseOptionalBarcodeField = (
+        value,
+        fieldName,
+        { allowBlankDefault = false } = {},
+      ) => {
         if (value === undefined) return { hasInput: false, value: null };
         const normalized = String(value ?? "").trim();
         if (!normalized || /^0+$/.test(normalized)) {
+          if (!allowBlankDefault) {
+            throw new Error(`${fieldName} cannot be blank`);
+          }
           return { hasInput: true, value: "" };
         }
         if (!/^\d+$/.test(normalized)) {
@@ -12509,21 +12637,27 @@ exports.editInspectionRecords = async (req, res) => {
 	        throw new Error("Passed quantity cannot exceed offered quantity");
 	      }
 
+	      const parsedInspectedBoxMode = detectBoxPackagingMode(
+	        row?.inspected_box_mode ?? record?.inspected_box_mode,
+	        row?.inspected_box_sizes ?? record?.inspected_box_sizes,
+	      );
 	      const parsedBarcode = parseOptionalBarcodeField(
 	        row?.barcode,
 	        "Barcode",
+	        { allowBlankDefault: true },
 	      );
 	      const parsedMasterBarcode = parseOptionalBarcodeField(
 	        row?.master_barcode,
 	        "Master barcode",
+	        { allowBlankDefault: true },
 	      );
 	      const parsedInnerBarcode = parseOptionalBarcodeField(
 	        row?.inner_barcode,
 	        "Inner barcode",
-	      );
-	      const parsedInspectedBoxMode = detectBoxPackagingMode(
-	        row?.inspected_box_mode ?? record?.inspected_box_mode,
-	        row?.inspected_box_sizes ?? record?.inspected_box_sizes,
+	        {
+	          allowBlankDefault:
+	            parsedInspectedBoxMode === BOX_PACKAGING_MODES.CARTON,
+	        },
 	      );
 	      const parsedInspectedItemSizes = parseInspectionSizeEntries(
 	        row?.inspected_item_sizes,
@@ -12737,14 +12871,43 @@ exports.editInspectionRecords = async (req, res) => {
 	        row?.kd,
 	        Boolean(record?.kd ?? record?.inspected_k_d ?? record?.pis_k_d),
 	      );
-	      if (parsedBarcode.hasInput) {
-	        record.barcode = parsedBarcode.value;
+	      const requestedMasterBarcode = parsedMasterBarcode.hasInput
+	        ? parsedMasterBarcode.value
+	        : parsedBarcode.hasInput
+	          ? parsedBarcode.value
+	          : undefined;
+	      const resolvedMasterBarcode = resolveBarcodeWithPisDefault({
+	        currentValue: record?.master_barcode || record?.barcode,
+	        requestedValue: requestedMasterBarcode,
+	        pisValue: pisMasterBarcode,
+	      });
+	      if (
+	        !Number.isFinite(Number(resolvedMasterBarcode)) ||
+	        Number(resolvedMasterBarcode) <= 0
+	      ) {
+	        throw new Error("PIS master barcode must be a positive number before updating inspection records.");
 	      }
-	      if (parsedMasterBarcode.hasInput) {
-	        record.master_barcode = parsedMasterBarcode.value;
-	        record.barcode = parsedMasterBarcode.value;
-	      }
-	      if (parsedInnerBarcode.hasInput) {
+	      record.master_barcode = resolvedMasterBarcode;
+	      record.barcode = resolvedMasterBarcode;
+	      if (parsedInspectedBoxMode === BOX_PACKAGING_MODES.CARTON) {
+	        const pisInnerBarcode = normalizeText(
+	          itemDocForBarcodeRequirement?.pis_inner_barcode || "",
+	        );
+	        const resolvedInnerBarcode = resolveBarcodeWithPisDefault({
+	          currentValue: record?.inner_barcode,
+	          requestedValue: parsedInnerBarcode.hasInput
+	            ? parsedInnerBarcode.value
+	            : undefined,
+	          pisValue: pisInnerBarcode,
+	        });
+	        if (
+	          !Number.isFinite(Number(resolvedInnerBarcode)) ||
+	          Number(resolvedInnerBarcode) <= 0
+	        ) {
+	          throw new Error("PIS inner barcode must be a positive number before updating inspection records.");
+	        }
+	        record.inner_barcode = resolvedInnerBarcode;
+	      } else if (parsedInnerBarcode.hasInput) {
 	        record.inner_barcode = parsedInnerBarcode.value;
 	      }
 	      if (hasOwn(row, "packed_size")) {

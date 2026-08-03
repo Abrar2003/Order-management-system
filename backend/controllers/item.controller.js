@@ -6853,6 +6853,13 @@ exports.updateItem = async (req, res) => {
     }
 
     if (payload?.qc && typeof payload.qc === "object") {
+      const parseRequiredBarcode = (value, fieldName) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          throw createHttpError(400, `${fieldName} cannot be blank`);
+        }
+        return parsed;
+      };
       if (hasOwn(payload.qc, "packed_size")) {
         setPath(
           "qc.packed_size",
@@ -6866,12 +6873,15 @@ exports.updateItem = async (req, res) => {
         setPath("qc.branding", toBooleanValue(payload.qc.branding, "qc.branding"));
       }
       if (hasOwn(payload.qc, "barcode")) {
-        const nextMasterBarcode = toNonNegativeNumber(payload.qc.barcode, "qc.barcode");
+        const nextMasterBarcode = parseRequiredBarcode(
+          payload.qc.barcode,
+          "qc.barcode",
+        );
         setPath("qc.barcode", nextMasterBarcode);
         setPath("qc.master_barcode", nextMasterBarcode);
       }
       if (hasOwn(payload.qc, "master_barcode")) {
-        const nextMasterBarcode = toNonNegativeNumber(
+        const nextMasterBarcode = parseRequiredBarcode(
           payload.qc.master_barcode,
           "qc.master_barcode",
         );
@@ -6881,7 +6891,7 @@ exports.updateItem = async (req, res) => {
       if (hasOwn(payload.qc, "inner_barcode")) {
         setPath(
           "qc.inner_barcode",
-          toNonNegativeNumber(payload.qc.inner_barcode, "qc.inner_barcode"),
+          parseRequiredBarcode(payload.qc.inner_barcode, "qc.inner_barcode"),
         );
       }
       if (hasOwn(payload.qc, "last_inspected_date")) {
@@ -7222,6 +7232,20 @@ exports.updateItemPis = async (req, res) => {
       }
     }
 
+    if (
+      (hasOwn(payload, "pis_barcode") &&
+        !normalizeTextField(payload.pis_barcode)) ||
+      (hasOwn(payload, "pis_master_barcode") &&
+        !normalizeTextField(payload.pis_master_barcode)) ||
+      (hasOwn(payload, "pis_inner_barcode") &&
+        !normalizeTextField(payload.pis_inner_barcode))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "PIS barcode fields cannot be blank.",
+      });
+    }
+
     if (hasOwn(payload, "pis_barcode")) {
       const nextMasterBarcode = normalizeTextField(payload.pis_barcode);
       if (requestedPisDiffCheck) {
@@ -7342,6 +7366,29 @@ exports.updateItemPis = async (req, res) => {
 
     if (pisWeightTouched) {
       setPisPath("pis_weight", nextPisWeight);
+    }
+
+    const effectivePisMasterBarcode = normalizeTextField(
+      item?.pis_master_barcode || item?.pis_barcode,
+    );
+    if (!effectivePisMasterBarcode) {
+      return res.status(400).json({
+        success: false,
+        message: "PIS master barcode is required.",
+      });
+    }
+    const effectivePisBoxMode = detectBoxPackagingMode(
+      item?.pis_box_mode,
+      item?.pis_box_sizes,
+    );
+    if (
+      effectivePisBoxMode === BOX_PACKAGING_MODES.CARTON &&
+      !normalizeTextField(item?.pis_inner_barcode)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "PIS inner barcode is required for carton packaging.",
+      });
     }
 
     if (requestedPisDiffCheck && !masterFieldsTouched) {
