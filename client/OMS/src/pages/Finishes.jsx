@@ -184,7 +184,7 @@ const Finishes = () => {
                 <table className="table table-striped table-hover align-middle om-table responsive-card-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Image</th>
+                      <th>Images</th>
                       <th>Unique Code</th>
                       <th>Vendor</th>
                       <th>Vendor Code</th>
@@ -210,13 +210,21 @@ const Finishes = () => {
                       const visibleItems = items.slice(0, 4);
                       return (
                         <tr key={finish?._id || finish?.unique_code}>
-                          <td data-label="Image">
+                          <td data-label="Images">
+                            <div className="d-flex gap-2">
                             <ProductImageThumbnail
-                              src={getFinishImageSrc(finish?.image_url || finish?.image?.link)}
-                              originalName={finish?.image?.originalName}
-                              alt={`${finish?.unique_code || "Finish"} image`}
+                              src={getFinishImageSrc(finish?.front_image_url || finish?.front_image?.link)}
+                              originalName={finish?.front_image?.originalName}
+                              alt={`${finish?.unique_code || "Finish"} front`}
                               size="sm"
                             />
+                            <ProductImageThumbnail
+                              src={getFinishImageSrc(finish?.back_image_url || finish?.back_image?.link)}
+                              originalName={finish?.back_image?.originalName}
+                              alt={`${finish?.unique_code || "Finish"} back`}
+                              size="sm"
+                            />
+                            </div>
                           </td>
                           <td data-label="Unique Code" className="fw-semibold">
                             {finish?.unique_code || "N/A"}

@@ -7,7 +7,7 @@ const finishController = require("../controllers/finish.controller");
 
 const router = express.Router();
 
-// Public endpoint for fetching finish images (no auth required)
+// Public endpoint for fetching finish front/back images (no auth required)
 router.get(
   "/public/image",
   finishController.getFinishImage,
@@ -52,7 +52,10 @@ router.post(
   "/",
   auth,
   requirePermission("finishes", "upload"),
-  upload.safeSingle("image"),
+  upload.safeFields([
+    { name: "front_image", maxCount: 1 },
+    { name: "back_image", maxCount: 1 },
+  ]),
   finishController.upsertFinish,
 );
 

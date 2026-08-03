@@ -5230,6 +5230,37 @@ small,
   max-height: 10rem;
 }
 
+.inspection-report-finish-images {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.inspection-report-finish-list {
+  display: grid;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.inspection-report-finish-summary-entry + .inspection-report-finish-summary-entry {
+  border-top: 1px solid var(--om-color-border);
+  padding-top: 0.75rem;
+}
+
+.inspection-report-finish-summary-panel figure {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.inspection-report-finish-summary-panel .inspection-report-brand-logo--finish {
+  max-width: 100%;
+}
+
+.inspection-report-finish-images .inspection-report-brand-logo--finish {
+  margin-inline: auto;
+}
+
 .inspection-report-finish-banner-meta {
   text-align: center;
 }
@@ -8333,6 +8364,8 @@ small,
   .inspection-report-finish-table td:nth-child(3)::before { content: "Vendor Code"; }
   .inspection-report-finish-table td:nth-child(4)::before { content: "Color"; }
   .inspection-report-finish-table td:nth-child(5)::before { content: "Color Code"; }
+  .inspection-report-finish-table td:nth-child(6)::before { content: "Front"; }
+  .inspection-report-finish-table td:nth-child(7)::before { content: "Back"; }
 
   .inspection-report-record-table td:nth-child(1)::before { content: "Request Date"; }
   .inspection-report-record-table td:nth-child(2)::before { content: "Inspection Date"; }

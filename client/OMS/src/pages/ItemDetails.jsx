@@ -657,28 +657,16 @@ const ItemDetails = () => {
           vendorCode: toDisplay(entry?.vendor_code, "N/A"),
           color: toDisplay(entry?.color, "N/A"),
           colorCode: toDisplay(entry?.color_code, "N/A"),
-          imageUrl: getStoredItemFileUrl(entry?.image),
+          frontImageUrl: getStoredItemFileUrl(entry?.front_image),
+          backImageUrl: getStoredItemFileUrl(entry?.back_image),
         }))
         .filter((entry) =>
-          Boolean(entry.imageUrl) ||
+          Boolean(entry.frontImageUrl || entry.backImageUrl) ||
           [entry.uniqueCode, entry.vendor, entry.vendorCode, entry.color, entry.colorCode]
             .some((value) => value !== "N/A"),
         ),
     [item?.finish],
   );
-
-  const featuredFinish = useMemo(
-    () => finishRows.find((row) => row.imageUrl) || finishRows[0] || null,
-    [finishRows],
-  );
-
-  const featuredFinishName = useMemo(() => {
-    if (!featuredFinish) return "";
-    if (featuredFinish.color !== "N/A" && featuredFinish.colorCode !== "N/A") {
-      return `${featuredFinish.color} (${featuredFinish.colorCode})`;
-    }
-    return featuredFinish.color !== "N/A" ? featuredFinish.color : featuredFinish.vendor;
-  }, [featuredFinish]);
 
   const handlePoSort = (column, defaultDirection = "asc") => {
     const next = getNextClientSortState(poSortBy, poSortOrder, column, defaultDirection);
@@ -1026,20 +1014,29 @@ const ItemDetails = () => {
                     </div>
                     <div className="inspection-report-summary-column inspection-report-summary-media inspection-report-summary-media--finish">
                       <div className="inspection-report-brand-panel inspection-report-finish-summary-panel">
-                        {featuredFinish ? (
-                          <>
-                            {featuredFinish.imageUrl ? (
-                              <img src={featuredFinish.imageUrl} alt={`${featuredFinish.uniqueCode} finish`} className="inspection-report-brand-logo inspection-report-brand-logo--finish" />
-                            ) : (
-                              <div className="inspection-report-media-empty">Finish image not available</div>
-                            )}
-                            <div className="inspection-report-finish-banner-meta">
-                              <div className="fw-semibold">{featuredFinish.uniqueCode}</div>
-                              {featuredFinishName && featuredFinishName !== "N/A" && (
-                                <div className="text-secondary small">{featuredFinishName}</div>
-                              )}
-                            </div>
-                          </>
+                        {finishRows.length > 0 ? (
+                          <div className="inspection-report-finish-list">
+                            {finishRows.map((finish) => (
+                              <div key={finish.key} className="inspection-report-finish-summary-entry">
+                                <div className="inspection-report-finish-images">
+                                  {[["Front", finish.frontImageUrl], ["Back", finish.backImageUrl]].map(([label, imageUrl]) => imageUrl ? (
+                                    <figure key={label} className="mb-0 text-center">
+                                      <img src={imageUrl} alt={`${finish.uniqueCode} ${label.toLowerCase()} finish`} className="inspection-report-brand-logo inspection-report-brand-logo--finish" />
+                                      <figcaption className="small text-secondary">{label}</figcaption>
+                                    </figure>
+                                  ) : null)}
+                                </div>
+                                <div className="inspection-report-finish-banner-meta">
+                                  <div className="fw-semibold">{finish.uniqueCode}</div>
+                                  {finish.color !== "N/A" && (
+                                    <div className="text-secondary small">
+                                      {finish.color}{finish.colorCode !== "N/A" ? ` (${finish.colorCode})` : ""}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         ) : (
                           <div className="inspection-report-media-empty">Finish not mapped</div>
                         )}
@@ -1180,6 +1177,8 @@ const ItemDetails = () => {
                             <th>Vendor Code</th>
                             <th>Color</th>
                             <th>Color Code</th>
+                            <th>Front</th>
+                            <th>Back</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1190,6 +1189,10 @@ const ItemDetails = () => {
                               <td>{row.vendorCode}</td>
                               <td>{row.color}</td>
                               <td>{row.colorCode}</td>
+                              {["front", "back"].map((side) => {
+                                const imageUrl = side === "front" ? row.frontImageUrl : row.backImageUrl;
+                                return <td key={side}>{imageUrl ? <img src={imageUrl} alt={`${row.uniqueCode} ${side} finish`} className="inspection-report-finish-image" /> : "N/A"}</td>;
+                              })}
                             </tr>
                           ))}
                         </tbody>

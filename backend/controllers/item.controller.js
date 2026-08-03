@@ -5794,14 +5794,18 @@ const getRequestBaseUrl = (req = {}) => {
   return host ? `${protocol}://${host}` : "";
 };
 
-const buildFinishImagePublicUrl = (finish = {}, req = {}) => {
+const buildFinishImagePublicUrl = (finish = {}, req = {}, side = "front") => {
   const uniqueCode = normalizeTextField(finish?.unique_code).toUpperCase();
   if (!uniqueCode) return "";
-  const image = finish?.image || {};
+  const storedImage = finish?.[`${side}_image`] || {};
+  const image =
+    side === "front" && !normalizeTextField(storedImage?.key || storedImage?.public_id || storedImage?.link)
+      ? finish?.image || {}
+      : storedImage;
   const version = normalizeTextField(image?.key || image?.public_id || image?.link);
   if (!version) return "";
   const baseUrl = getRequestBaseUrl(req).replace(/\/$/, "");
-  return `${baseUrl}/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}&v=${encodeURIComponent(version)}`;
+  return `${baseUrl}/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}&side=${side}&v=${encodeURIComponent(version)}`;
 };
 
 const enrichItemDetailFinishes = async (item = {}, req = {}) => {
@@ -5830,7 +5834,7 @@ const enrichItemDetailFinishes = async (item = {}, req = {}) => {
       ...(uniqueCodes.length > 0 ? [{ unique_code: { $in: uniqueCodes } }] : []),
     ],
   })
-    .select("_id unique_code image")
+    .select("_id unique_code front_image back_image image")
     .lean();
   const byId = new Map(finishDocs.map((finish) => [String(finish?._id || ""), finish]));
   const byCode = new Map(
@@ -5841,11 +5845,17 @@ const enrichItemDetailFinishes = async (item = {}, req = {}) => {
     const matched =
       byId.get(normalizeTextField(entry?.finish_id)) ||
       byCode.get(normalizeTextField(entry?.unique_code).toUpperCase());
-    const imageUrl = matched ? buildFinishImagePublicUrl(matched, req) : "";
+    const frontImageUrl = matched ? buildFinishImagePublicUrl(matched, req, "front") : "";
+    const backImageUrl = matched ? buildFinishImagePublicUrl(matched, req, "back") : "";
     return {
       ...entry,
       finish_id: matched?._id || entry?.finish_id || null,
-      image: imageUrl ? { ...(matched?.image || {}), url: imageUrl } : entry?.image || null,
+      front_image: frontImageUrl
+        ? { ...(matched?.front_image || {}), url: frontImageUrl }
+        : null,
+      back_image: backImageUrl
+        ? { ...(matched?.back_image || {}), url: backImageUrl }
+        : null,
     };
   });
 };

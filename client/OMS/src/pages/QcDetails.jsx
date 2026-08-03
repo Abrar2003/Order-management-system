@@ -1065,7 +1065,8 @@ const QcDetails = () => {
         vendorCode: String(entry?.vendor_code || "").trim() || "N/A",
         color: String(entry?.color || "").trim() || "N/A",
         colorCode: String(entry?.color_code || "").trim() || "N/A",
-        imageUrl: String(entry?.image?.url || entry?.image?.link || "").trim(),
+        frontImageUrl: String(entry?.front_image?.url || entry?.front_image?.link || "").trim(),
+        backImageUrl: String(entry?.back_image?.url || entry?.back_image?.link || "").trim(),
       }))
       .sort((left, right) => left.uniqueCode.localeCompare(right.uniqueCode));
   }, [qc?.item_master?.finish]);
@@ -3024,43 +3025,20 @@ const QcDetails = () => {
                     <div key={finish.key} className="col-md-6 col-xl-4">
                       <div className="card h-100 border-0 shadow-sm">
                         <div className="card-body d-grid gap-3">
-                          {finish.imageUrl ? (
-                            <button
-                              type="button"
-                              className="btn btn-link p-0 text-decoration-none"
-                              onClick={() =>
-                                window.open(
-                                  finish.imageUrl,
-                                  "_blank",
-                                  "noopener,noreferrer",
-                                )
-                              }
-                            >
-                              <img
-                                src={finish.imageUrl}
-                                alt={`${finish.uniqueCode} finish`}
-                                className="img-fluid rounded border"
-                                loading="lazy"
-                                decoding="async"
-                                style={{
-                                  width: "100%",
-                                  maxHeight: "220px",
-                                  objectFit: "contain",
-                                  backgroundColor: "#f8f9fa",
-                                }}
-                              />
-                            </button>
-                          ) : (
-                            <div
-                              className="border rounded d-flex align-items-center justify-content-center text-secondary small"
-                              style={{
-                                minHeight: "180px",
-                                backgroundColor: "#f8f9fa",
-                              }}
-                            >
-                              Finish image not available
-                            </div>
-                          )}
+                          <div className="row g-2">
+                            {[["Front", finish.frontImageUrl], ["Back", finish.backImageUrl]].map(([label, imageUrl]) => (
+                              <div key={label} className="col-6">
+                                <div className="small text-secondary mb-1">{label}</div>
+                                {imageUrl ? (
+                                  <button type="button" className="btn btn-link p-0 text-decoration-none w-100" onClick={() => window.open(imageUrl, "_blank", "noopener,noreferrer")}>
+                                    <img src={imageUrl} alt={`${finish.uniqueCode} ${label.toLowerCase()} finish`} className="img-fluid rounded border" loading="lazy" decoding="async" style={{ width: "100%", height: "180px", objectFit: "contain", backgroundColor: "#f8f9fa" }} />
+                                  </button>
+                                ) : (
+                                  <div className="border rounded d-flex align-items-center justify-content-center text-secondary small" style={{ height: "180px", backgroundColor: "#f8f9fa" }}>{label} image not available</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
 
                           <div className="d-grid gap-2">
                             <div>

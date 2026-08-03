@@ -29,7 +29,8 @@ const createInitialForm = (finish = {}) => ({
   vendor_code: normalizeCode(finish?.vendor_code || finish?.vendorCode),
   color: normalizeText(finish?.color),
   color_code: normalizeCode(finish?.color_code || finish?.colorCode),
-  image: null,
+  front_image: null,
+  back_image: null,
 });
 
 const getInitialItemCodes = (finish = {}) =>
@@ -40,6 +41,18 @@ const getInitialItemCodes = (finish = {}) =>
         .filter(Boolean),
     ),
   ];
+
+const hasStoredImage = (image = {}) =>
+  Boolean(normalizeText(image?.key || image?.public_id || image?.link));
+
+const getStoredFinishImageUrl = (finish = {}, side = "front") => {
+  const image = finish?.[`${side}_image`] || {};
+  const imageUrl = normalizeText(finish?.[`${side}_image_url`] || image?.link);
+  if (!imageUrl || !imageUrl.startsWith("/finishes/")) return imageUrl;
+
+  const apiBase = normalizeText(import.meta.env.VITE_API_BASE_URL);
+  return apiBase ? `${apiBase.replace(/\/$/, "")}${imageUrl}` : imageUrl;
+};
 
 const useDebouncedValue = (value, delay = 300) => {
   const [debounced, setDebounced] = useState(value);
@@ -295,9 +308,8 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
       formData.append("color", normalizeText(form.color));
       formData.append("color_code", normalizeCode(form.color_code));
       formData.append("item_codes", JSON.stringify(selectedItemCodes));
-      if (form.image instanceof File) {
-        formData.append("image", form.image);
-      }
+      if (form.front_image instanceof File) formData.append("front_image", form.front_image);
+      if (form.back_image instanceof File) formData.append("back_image", form.back_image);
 
       const response = await api.post("/finishes", formData);
       onSaved?.(
@@ -394,14 +406,41 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
               </div>
 
               <div className="col-md-6">
-                <label className="form-label">Finish Image</label>
+                <label className="form-label">Finish Front Image</label>
                 <input
                   type="file"
                   className="form-control"
                   accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
                   disabled={saving}
-                  onChange={(event) => updateField("image", event.target.files?.[0] || null)}
+                  onChange={(event) => updateField("front_image", event.target.files?.[0] || null)}
                 />
+                {isEditing && getStoredFinishImageUrl(initialFinish, "front") && (
+                  <img
+                    src={getStoredFinishImageUrl(initialFinish, "front")}
+                    alt={`${initialFinish?.unique_code || "Finish"} front`}
+                    className="img-thumbnail mt-2"
+                    style={{ width: "100%", height: "140px", objectFit: "contain" }}
+                  />
+                )}
+              </div>
+
+              <div className="col-md-6">
+                <label className="form-label">Finish Back Image</label>
+                <input
+                  type="file"
+                  className="form-control"
+                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                  disabled={saving}
+                  onChange={(event) => updateField("back_image", event.target.files?.[0] || null)}
+                />
+                {isEditing && getStoredFinishImageUrl(initialFinish, "back") && (
+                  <img
+                    src={getStoredFinishImageUrl(initialFinish, "back")}
+                    alt={`${initialFinish?.unique_code || "Finish"} back`}
+                    className="img-thumbnail mt-2"
+                    style={{ width: "100%", height: "140px", objectFit: "contain" }}
+                  />
+                )}
               </div>
 
               <div className="col-12">
@@ -536,6 +575,8 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
                 || !normalizeText(form.color)
                 || !normalizeCode(form.color_code)
                 || selectedItemCodes.length === 0
+                || !(form.front_image instanceof File || hasStoredImage(initialFinish?.front_image))
+                || !(form.back_image instanceof File || hasStoredImage(initialFinish?.back_image))
               }
             >
               {saving ? "Saving..." : isEditing ? "Update Finish" : "Save Finish"}

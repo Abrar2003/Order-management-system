@@ -2001,11 +2001,11 @@ const getRequestBaseUrl = (req = {}) => {
   return host ? `${protocol}://${host}` : "";
 };
 
-const buildFinishImagePublicUrl = (finishEntry = {}, baseUrl = "", image = {}) => {
+const buildFinishImagePublicUrl = (finishEntry = {}, baseUrl = "", image = {}, side = "front") => {
   const uniqueCode = String(finishEntry?.unique_code || "").trim().toUpperCase();
   if (!uniqueCode) return null;
   const version = String(image?.key || image?.public_id || image?.link || "").trim();
-  const path = `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}${version ? `&v=${encodeURIComponent(version)}` : ""}`;
+  const path = `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}&side=${side}${version ? `&v=${encodeURIComponent(version)}` : ""}`;
   
   return {
     key: "",
@@ -11720,7 +11720,7 @@ exports.getQCById = async (req, res) => {
                 : []),
             ],
           })
-            .select("_id unique_code image")
+            .select("_id unique_code front_image back_image image")
             .lean()
         : [];
     const finishDocById = new Map(
@@ -11744,16 +11744,28 @@ exports.getQCById = async (req, res) => {
           (finishId ? finishDocById.get(finishId) : null) ||
           (uniqueCode ? finishDocByUniqueCode.get(uniqueCode) : null) ||
           null;
-        const matchedImage = matchedFinish?.image || {};
-        const hasFinishImage = Boolean(
-          String(matchedImage?.key || matchedImage?.link || "").trim(),
+        const storedFrontImage = matchedFinish?.front_image || {};
+        const frontImage = String(
+          storedFrontImage?.key || storedFrontImage?.public_id || storedFrontImage?.link || "",
+        ).trim()
+          ? storedFrontImage
+          : matchedFinish?.image || {};
+        const backImage = matchedFinish?.back_image || {};
+        const hasFrontImage = Boolean(
+          String(frontImage?.key || frontImage?.public_id || frontImage?.link || "").trim(),
+        );
+        const hasBackImage = Boolean(
+          String(backImage?.key || backImage?.public_id || backImage?.link || "").trim(),
         );
 
         return {
           ...entry,
           finish_id: matchedFinish?._id || null,
-          image: hasFinishImage
-            ? buildFinishImagePublicUrl(entry, requestBaseUrl, matchedImage)
+          front_image: hasFrontImage
+            ? buildFinishImagePublicUrl(entry, requestBaseUrl, frontImage, "front")
+            : null,
+          back_image: hasBackImage
+            ? buildFinishImagePublicUrl(entry, requestBaseUrl, backImage, "back")
             : null,
         };
       }),

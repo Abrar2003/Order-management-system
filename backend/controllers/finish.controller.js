@@ -183,6 +183,11 @@ const buildVendorItemMatch = ({ vendor = "", search = "" } = {}) => {
   };
 };
 
+const hasStoredImage = (image = {}) => {
+  const storedImage = toStoredImage(image);
+  return Boolean(storedImage.key || storedImage.link);
+};
+
 const serializeFinishItem = (item = {}) => ({
   _id: String(item?._id || ""),
   code: normalizeText(item?.code),
@@ -198,9 +203,17 @@ const serializeFinish = (finish = {}, itemsByCode = new Map()) => {
     .map((code) => itemsByCode.get(code))
     .filter(Boolean)
     .map(serializeFinishItem);
-  const storedImage = toStoredImage(finish?.image);
+  const frontImage = toStoredImage(
+    hasStoredImage(finish?.front_image) ? finish.front_image : finish?.image,
+  );
+  const backImage = toStoredImage(finish?.back_image);
   const uniqueCode = normalizeCode(finish?.unique_code);
-  const imageVersion = normalizeText(storedImage.key || storedImage.public_id || storedImage.link);
+  const buildImageUrl = (image = {}, side = "front") => {
+    const imageVersion = normalizeText(image.key || image.public_id || image.link);
+    return uniqueCode && imageVersion
+      ? `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}&side=${side}&v=${encodeURIComponent(imageVersion)}`
+      : "";
+  };
 
   return {
     _id: String(finish?._id || ""),
@@ -213,11 +226,10 @@ const serializeFinish = (finish = {}, itemsByCode = new Map()) => {
     item_codes: itemCodes,
     items,
     brands: normalizeDistinctValues(items.map((item) => item.brand)),
-    image: storedImage,
-    image_url:
-      uniqueCode && (storedImage.key || storedImage.link)
-        ? `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}${imageVersion ? `&v=${encodeURIComponent(imageVersion)}` : ""}`
-        : "",
+    front_image: frontImage,
+    back_image: backImage,
+    front_image_url: buildImageUrl(frontImage, "front"),
+    back_image_url: buildImageUrl(backImage, "back"),
     created_at: finish?.createdAt || finish?.created_at || null,
     updated_at: finish?.updatedAt || finish?.updated_at || null,
   };
@@ -377,8 +389,6 @@ exports.getFinishImage = async (req, res) => {
     if (requestedUniqueCode) {
       lookupConditions.push({ unique_code: requestedUniqueCode });
     }
-    console.log("lookupConditions", lookupConditions)
-    console.log("requestedIdentifier", requestedIdentifier)
     if (mongoose.Types.ObjectId.isValid(requestedIdentifier)) {
       lookupConditions.push({
         _id: new mongoose.Types.ObjectId(requestedIdentifier),
@@ -397,12 +407,12 @@ exports.getFinishImage = async (req, res) => {
       });
     }
 
+    const imageSide = normalizeText(req.query.side).toLowerCase() === "back" ? "back" : "front";
     const finish = await Finish.findOne({
       $or: lookupConditions,
     })
-      .select("unique_code image")
+      .select("unique_code front_image back_image image")
       .lean();
-      console.log("finish", finish)
     if (!finish) {
       return res.status(404).json({
         success: false,
@@ -410,8 +420,11 @@ exports.getFinishImage = async (req, res) => {
       });
     }
 
-    const storedImage = toStoredImage(finish?.image);
-    // console.log("storedImage", storedImage)
+    const storedImage = toStoredImage(
+      imageSide === "front" && !hasStoredImage(finish?.front_image)
+        ? finish?.image
+        : finish?.[`${imageSide}_image`],
+    );
     if (!storedImage.key && !storedImage.link) {
       return res.status(404).json({
         success: false,
@@ -471,8 +484,8 @@ exports.getFinishImage = async (req, res) => {
 };
 
 exports.upsertFinish = async (req, res) => {
-  let uploadedImage = null;
-  let cleanupUploadedImage = false;
+  const uploadedImages = [];
+  let saved = false;
 
   try {
     const finishId = normalizeText(req.body?.finish_id ?? req.body?.finishId ?? req.body?._id);
@@ -559,16 +572,34 @@ exports.upsertFinish = async (req, res) => {
       });
     }
     const previousUniqueCode = normalizeCode(existingFinish?.unique_code);
-    const previousImageKey = normalizeText(existingFinish?.image?.key || "");
+    const files = req.files || {};
+    const frontImageFile = files.front_image?.[0];
+    const backImageFile = files.back_image?.[0];
+    const previousFrontImage = toStoredImage(
+      hasStoredImage(existingFinish?.front_image)
+        ? existingFinish.front_image
+        : existingFinish?.image,
+    );
+    const previousBackImage = toStoredImage(existingFinish?.back_image);
 
-    if (req.file) {
-      uploadedImage = await uploadFinishImage(req.file, uniqueCode);
-      cleanupUploadedImage = Boolean(uploadedImage?.key);
+    if (!frontImageFile && !hasStoredImage(previousFrontImage)) {
+      return res.status(400).json({ success: false, message: "Front image is required" });
+    }
+    if (!backImageFile && !hasStoredImage(previousBackImage)) {
+      return res.status(400).json({ success: false, message: "Back image is required" });
     }
 
-    const nextImage = uploadedImage
-      ? uploadedImage
-      : toStoredImage(existingFinish?.image);
+    const uploadedFrontImage = frontImageFile
+      ? await uploadFinishImage(frontImageFile, uniqueCode)
+      : null;
+    if (uploadedFrontImage?.key) uploadedImages.push(uploadedFrontImage);
+    const uploadedBackImage = backImageFile
+      ? await uploadFinishImage(backImageFile, uniqueCode)
+      : null;
+    if (uploadedBackImage?.key) uploadedImages.push(uploadedBackImage);
+
+    const nextFrontImage = uploadedFrontImage || previousFrontImage;
+    const nextBackImage = uploadedBackImage || previousBackImage;
 
     const finishDoc = existingFinish || new Finish();
     finishDoc.vendor = vendor;
@@ -577,9 +608,11 @@ exports.upsertFinish = async (req, res) => {
     finishDoc.color_code = colorCode;
     finishDoc.unique_code = uniqueCode;
     finishDoc.item_codes = [...selectedItemCodes].sort((left, right) => left.localeCompare(right));
-    finishDoc.image = nextImage;
+    finishDoc.front_image = nextFrontImage;
+    finishDoc.back_image = nextBackImage;
+    finishDoc.image = undefined;
     await finishDoc.save();
-    cleanupUploadedImage = false;
+    saved = true;
 
     const finishSummary = normalizeFinishSummary({
       finishId: finishDoc._id,
@@ -614,9 +647,14 @@ exports.upsertFinish = async (req, res) => {
       },
     );
 
-    if (uploadedImage?.key && previousImageKey && previousImageKey !== uploadedImage.key) {
-      await deleteObject(previousImageKey).catch(() => undefined);
-    }
+    await Promise.all([
+      uploadedFrontImage?.key && previousFrontImage.key !== uploadedFrontImage.key
+        ? deleteObject(previousFrontImage.key).catch(() => undefined)
+        : null,
+      uploadedBackImage?.key && previousBackImage.key !== uploadedBackImage.key
+        ? deleteObject(previousBackImage.key).catch(() => undefined)
+        : null,
+    ]);
 
     return res.status(existingFinish ? 200 : 201).json({
       success: true,
@@ -634,8 +672,8 @@ exports.upsertFinish = async (req, res) => {
       },
     });
   } catch (error) {
-    if (cleanupUploadedImage && uploadedImage?.key) {
-      await deleteObject(uploadedImage.key).catch(() => undefined);
+    if (!saved) {
+      await Promise.all(uploadedImages.map((image) => deleteObject(image.key).catch(() => undefined)));
     }
 
     console.error("Upsert Finish Error:", error);
@@ -674,10 +712,14 @@ exports.deleteFinish = async (req, res) => {
     }
 
     await Finish.deleteOne({ _id: finish._id });
-    const imageKey = normalizeText(finish?.image?.key || "");
-    if (imageKey) {
-      await deleteObject(imageKey).catch(() => undefined);
-    }
+    await Promise.all(
+      [...new Set(
+        [finish?.front_image, finish?.back_image, finish?.image]
+          .map((image) => normalizeText(image?.key || ""))
+          .filter(Boolean),
+      )]
+        .map((imageKey) => deleteObject(imageKey).catch(() => undefined)),
+    );
 
     return res.status(200).json({
       success: true,

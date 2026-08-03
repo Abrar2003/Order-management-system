@@ -17,11 +17,22 @@ const finishImageSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const requiredFinishImage = (side) => ({
+  type: finishImageSchema,
+  required: true,
+  validate: {
+    validator: (image) => Boolean(image?.key || image?.public_id || image?.link),
+    message: `${side} image is required`,
+  },
+});
+
 const finishSchema = new mongoose.Schema(
   {
     color: { type: String, required: true, trim: true },
     color_code: { type: String, required: true, trim: true, uppercase: true },
-    image: { type: finishImageSchema, default: () => ({}) },
+    front_image: requiredFinishImage("Front"),
+    back_image: requiredFinishImage("Back"),
+    image: { type: finishImageSchema, default: undefined },
     vendor: {
       type: embeddedVendorSchema,
       required: true,
