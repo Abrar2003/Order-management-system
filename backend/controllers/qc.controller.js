@@ -14,6 +14,9 @@ const {
   isManagerLikeRole,
   normalizeUserRoleKey,
 } = require("../helpers/userRole");
+const {
+  getQcUserInspectionUpdateAllowance,
+} = require("../helpers/qcUpdateWindow");
 
 const Order = require("../models/order.model");
 const mongoose = require("mongoose");
@@ -2719,7 +2722,10 @@ const getQcUserLatestRequestAvailability = (
   const latestRequestStatus = normalizeRequestHistoryStatus(
     latestRequestEntry?.status || REQUEST_HISTORY_STATUS.OPEN,
   );
-  if (latestRequestStatus !== REQUEST_HISTORY_STATUS.OPEN) {
+  if (
+    latestRequestStatus !== REQUEST_HISTORY_STATUS.OPEN &&
+    latestRequestStatus !== REQUEST_HISTORY_STATUS.INSPECTED
+  ) {
     return {
       isAvailable: false,
       latestRequestEntry,
@@ -2734,6 +2740,22 @@ const getQcUserLatestRequestAvailability = (
   );
   const latestInspectionRecord =
     resolveLatestInspectionRecordFromList(requestInspectionRecords);
+  const latestRecordInspectorId = String(
+    latestInspectionRecord?.inspector?._id ||
+      latestInspectionRecord?.inspector ||
+      "",
+  ).trim();
+  if (
+    latestRecordInspectorId &&
+    latestRecordInspectorId !== normalizedCurrentUserId
+  ) {
+    return {
+      isAvailable: false,
+      latestRequestEntry,
+      latestInspectionRecord,
+      reason: "QC users can update only their own inspection record.",
+    };
+  }
   const latestRequestHasActivity = requestInspectionRecords.some((record) =>
     hasInspectionRecordActivity({
       checked: record?.checked,
@@ -2747,12 +2769,28 @@ const getQcUserLatestRequestAvailability = (
   );
 
   if (latestRequestHasActivity) {
+    const updateAllowance = getQcUserInspectionUpdateAllowance({
+      inspectionRecord: latestInspectionRecord,
+      userId: normalizedCurrentUserId,
+      hasExistingUpdate: true,
+    });
+    return {
+      isAvailable: updateAllowance.isAvailable,
+      latestRequestEntry,
+      latestInspectionRecord,
+      reason: updateAllowance.reason,
+      currentUpdateCount: updateAllowance.currentUpdateCount,
+      remainingUpdates: updateAllowance.remainingUpdates,
+      windowStartedAt: updateAllowance.windowStartedAt,
+    };
+  }
+
+  if (latestRequestStatus !== REQUEST_HISTORY_STATUS.OPEN) {
     return {
       isAvailable: false,
       latestRequestEntry,
       latestInspectionRecord,
-      reason:
-        "This QC request has already been inspected and cannot be updated again.",
+      reason: "This QC request is already closed and cannot be updated again.",
     };
   }
 
@@ -2761,6 +2799,9 @@ const getQcUserLatestRequestAvailability = (
     latestRequestEntry,
     latestInspectionRecord,
     reason: "",
+    currentUpdateCount: 0,
+    remainingUpdates: 3,
+    windowStartedAt: null,
   };
 };
 
@@ -2890,6 +2931,7 @@ const upsertInspectionRecordForRequest = async ({
   explicitStatus = "",
   currentSizeSource = null,
   sizeSnapshotPayload = {},
+  restrictToInspectorId = "",
 }) => {
   if (!qcDoc?._id) return null;
 
@@ -2909,10 +2951,14 @@ const upsertInspectionRecordForRequest = async ({
   }
 
   let inspectionRecord = null;
+  const inspectorMatch = restrictToInspectorId
+    ? { inspector: restrictToInspectorId }
+    : {};
   if (requestHistoryId && mongoose.Types.ObjectId.isValid(requestHistoryId)) {
     inspectionRecord = await Inspection.findOne({
       qc: qcDoc._id,
       request_history_id: requestHistoryId,
+      ...inspectorMatch,
     }).sort({ createdAt: -1 });
   }
 
@@ -2920,6 +2966,7 @@ const upsertInspectionRecordForRequest = async ({
     inspectionRecord = await Inspection.findOne({
       qc: qcDoc._id,
       requested_date: resolvedRequestDate,
+      ...inspectorMatch,
     }).sort({ createdAt: -1 });
   }
 
@@ -6772,9 +6819,11 @@ const updateQC = async (req, res) => {
         itemDocForInspectedSizeUpdate,
         req.user,
       );
-      const inspectionInspectorId = qc.inspector?._id
-        ? qc.inspector._id
-        : qc.inspector;
+      const inspectionInspectorId = isQcUser
+        ? currentUserId
+        : qc.inspector?._id
+          ? qc.inspector._id
+          : qc.inspector;
       if (!inspectionInspectorId) {
         return res.status(400).json({
           message:
@@ -6855,7 +6904,21 @@ const updateQC = async (req, res) => {
         explicitStatus: isQcUser ? INSPECTION_RECORD_STATUS.DONE : "",
         currentSizeSource: inspectionSizeSource,
         sizeSnapshotPayload: req.body || {},
+        restrictToInspectorId:
+          isQcUser && !allowAdminRewrite ? currentUserId : "",
       });
+
+      if (isQcUser && !allowAdminRewrite && inspectionRecord) {
+        const currentUpdateCount = Number(
+          qcUserRequestAvailability?.currentUpdateCount || 0,
+        );
+        inspectionRecord.qc_update_count = currentUpdateCount + 1;
+        inspectionRecord.qc_update_window_started_at =
+          currentUpdateCount > 0
+            ? qcUserRequestAvailability.windowStartedAt
+            : new Date();
+        await inspectionRecord.save();
+      }
 
       if (targetRequestEntry && inspectionRecord && (isVisitUpdate || isQcUser)) {
         targetRequestEntry.status = REQUEST_HISTORY_STATUS.INSPECTED;
@@ -8743,8 +8806,9 @@ exports.markGoodsNotReady = async (req, res) => {
       });
     }
 
+    let qcUserRequestAvailability = null;
     if (!hasElevatedAccess && normalizedRole === "qc") {
-      const qcUserRequestAvailability = getQcUserLatestRequestAvailability(
+      qcUserRequestAvailability = getQcUserLatestRequestAvailability(
         qc,
         beforeInspectionRecords,
         { currentUserId },
@@ -8758,9 +8822,11 @@ exports.markGoodsNotReady = async (req, res) => {
       }
     }
 
-    const inspectionInspectorId = qc?.inspector?._id
-      ? qc.inspector._id
-      : qc.inspector;
+    const inspectionInspectorId = normalizedRole === "qc"
+      ? currentUserId
+      : qc?.inspector?._id
+        ? qc.inspector._id
+        : qc.inspector;
     if (!inspectionInspectorId) {
       return res.status(400).json({
         message: "Inspector is required before marking goods not ready",
@@ -8814,7 +8880,20 @@ exports.markGoodsNotReady = async (req, res) => {
         reason,
       },
       currentSizeSource: inspectionSizeSource,
+      restrictToInspectorId:
+        normalizedRole === "qc" && !hasElevatedAccess ? currentUserId : "",
     });
+    if (!hasElevatedAccess && normalizedRole === "qc" && inspectionRecord) {
+      const currentUpdateCount = Number(
+        qcUserRequestAvailability?.currentUpdateCount || 0,
+      );
+      inspectionRecord.qc_update_count = currentUpdateCount + 1;
+      inspectionRecord.qc_update_window_started_at =
+        currentUpdateCount > 0
+          ? qcUserRequestAvailability.windowStartedAt
+          : new Date();
+      await inspectionRecord.save();
+    }
     const existingGoodsNotReadyImages = Array.isArray(
       inspectionRecord?.goods_not_ready_images,
     )
@@ -8974,8 +9053,9 @@ exports.rejectAllQc = async (req, res) => {
       });
     }
 
+    let qcUserRequestAvailability = null;
     if (!hasElevatedAccess && normalizedRole === "qc") {
-      const qcUserRequestAvailability = getQcUserLatestRequestAvailability(
+      qcUserRequestAvailability = getQcUserLatestRequestAvailability(
         qc,
         beforeInspectionRecords,
         { currentUserId },
@@ -8989,9 +9069,11 @@ exports.rejectAllQc = async (req, res) => {
       }
     }
 
-    const inspectionInspectorId = qc?.inspector?._id
-      ? qc.inspector._id
-      : qc.inspector;
+    const inspectionInspectorId = normalizedRole === "qc"
+      ? currentUserId
+      : qc?.inspector?._id
+        ? qc.inspector._id
+        : qc.inspector;
     if (!inspectionInspectorId) {
       return res.status(400).json({
         message: "Inspector is required before rejecting this QC request",
@@ -9056,11 +9138,16 @@ exports.rejectAllQc = async (req, res) => {
     const inspectionBarcodeSnapshot = buildInspectionBarcodeSnapshotFromQc(qc);
 
     const requestHistoryId = latestRequestEntry?._id || null;
+    const inspectorMatch =
+      normalizedRole === "qc" && !hasElevatedAccess
+        ? { inspector: currentUserId }
+        : {};
     let inspectionRecord = null;
     if (requestHistoryId && mongoose.Types.ObjectId.isValid(requestHistoryId)) {
       inspectionRecord = await Inspection.findOne({
         qc: qc._id,
         request_history_id: requestHistoryId,
+        ...inspectorMatch,
       }).sort({ createdAt: -1 });
     }
 
@@ -9068,6 +9155,7 @@ exports.rejectAllQc = async (req, res) => {
       inspectionRecord = await Inspection.findOne({
         qc: qc._id,
         requested_date: requestedDateForRecord,
+        ...inspectorMatch,
       }).sort({ createdAt: -1 });
     }
 
@@ -9141,6 +9229,16 @@ exports.rejectAllQc = async (req, res) => {
       inspectionRecord?.rejected_image?.key || "",
     );
     inspectionRecord.rejected_image = nextRejectedImageEntry;
+    if (!hasElevatedAccess && normalizedRole === "qc") {
+      const currentUpdateCount = Number(
+        qcUserRequestAvailability?.currentUpdateCount || 0,
+      );
+      inspectionRecord.qc_update_count = currentUpdateCount + 1;
+      inspectionRecord.qc_update_window_started_at =
+        currentUpdateCount > 0
+          ? qcUserRequestAvailability.windowStartedAt
+          : new Date();
+    }
     await inspectionRecord.save();
 
     qc.inspection_record = Array.isArray(qc.inspection_record)
@@ -12051,11 +12149,14 @@ exports.editInspectionRecords = async (req, res) => {
       alignedInspectorId === currentUserId;
     const canLabelExemptUserEditInspectionRecord = (record = {}) => {
       if (!isCurrentUserLabelExempt || !currentUserId) return false;
-      if (isCurrentUserAlignedToQc) return true;
 
       const recordInspectorId = String(
         record?.inspector?._id || record?.inspector || "",
       ).trim();
+      if (isQcUser) {
+        return Boolean(recordInspectorId) && recordInspectorId === currentUserId;
+      }
+      if (isCurrentUserAlignedToQc) return true;
       return Boolean(recordInspectorId) && recordInspectorId === currentUserId;
     };
     const parseRequiredDate = (value, fieldName) => {
@@ -12318,6 +12419,26 @@ exports.editInspectionRecords = async (req, res) => {
         return res.status(403).json({
           message: "You are not allowed to update this inspection record",
         });
+      }
+
+      let qcUpdateAllowance = null;
+      if (isQcUser) {
+        qcUpdateAllowance = getQcUserInspectionUpdateAllowance({
+          inspectionRecord: record,
+          userId: currentUserId,
+          hasExistingUpdate: hasInspectionRecordActivity({
+            checked: record?.checked,
+            passed: record?.passed,
+            vendorOffered: record?.vendor_offered,
+            labelsAdded: record?.labels_added,
+            labelRanges: record?.label_ranges,
+            goodsNotReady: record?.goods_not_ready,
+            status: record?.status,
+          }),
+        });
+        if (!qcUpdateAllowance.isAvailable) {
+          return res.status(403).json({ message: qcUpdateAllowance.reason });
+        }
       }
 
       const requestedDate = parseRequiredDate(
@@ -12647,6 +12768,13 @@ exports.editInspectionRecords = async (req, res) => {
 	      }
 	      record.remarks = remarks;
 	      record.updated_by = buildAuditActor(req.user);
+      if (qcUpdateAllowance) {
+        record.qc_update_count = qcUpdateAllowance.currentUpdateCount + 1;
+        record.qc_update_window_started_at =
+          qcUpdateAllowance.currentUpdateCount > 0
+            ? qcUpdateAllowance.windowStartedAt
+            : new Date();
+      }
 	    }
 
     const requestHistoryUpdatedAt = new Date();

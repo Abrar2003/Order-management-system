@@ -107,6 +107,57 @@ const hasInspectionRecordActivity = ({
   (Array.isArray(labelsAdded) && labelsAdded.length > 0) ||
   (Array.isArray(labelRanges) && labelRanges.length > 0);
 
+const QC_USER_UPDATE_WINDOW_MS = 60 * 60 * 1000;
+const QC_USER_MAX_UPDATES = 3;
+
+const getQcUserUpdateAllowance = ({
+  inspectionRecord = {},
+  currentUserId = "",
+  hasExistingUpdate = false,
+} = {}) => {
+  const recordInspectorId = String(
+    inspectionRecord?.inspector?._id || inspectionRecord?.inspector || "",
+  ).trim();
+  if (!currentUserId || recordInspectorId !== String(currentUserId).trim()) {
+    return {
+      isAvailable: false,
+      reason: "QC users can update only their own inspection record.",
+    };
+  }
+
+  const storedCount = Math.max(
+    0,
+    Math.floor(Number(inspectionRecord?.qc_update_count) || 0),
+  );
+  const currentUpdateCount = storedCount || (hasExistingUpdate ? 1 : 0);
+  if (currentUpdateCount === 0) {
+    return { isAvailable: true, reason: "" };
+  }
+
+  const windowStartedAt = new Date(
+    inspectionRecord?.qc_update_window_started_at ||
+      inspectionRecord?.updatedAt ||
+      inspectionRecord?.createdAt,
+  );
+  if (Number.isNaN(windowStartedAt.getTime())) {
+    return { isAvailable: false, reason: "QC update window is invalid." };
+  }
+  if (currentUpdateCount >= QC_USER_MAX_UPDATES) {
+    return {
+      isAvailable: false,
+      reason: "This inspection record has reached the 3-update limit.",
+    };
+  }
+  if (Date.now() - windowStartedAt.getTime() >= QC_USER_UPDATE_WINDOW_MS) {
+    return {
+      isAvailable: false,
+      reason: "The 1-hour QC update window has expired.",
+    };
+  }
+
+  return { isAvailable: true, reason: "" };
+};
+
 const getUtcDayOffsetFromToday = (isoDateValue) => {
   const normalizedIso = toISODateString(isoDateValue);
   if (!normalizedIso) return null;
@@ -335,7 +386,7 @@ export const getQcUserUpdateRequestAvailability = (
   const latestRequestStatus = normalizeRequestHistoryStatus(
     latestRequestEntry?.status || "open",
   );
-  if (latestRequestStatus !== "open") {
+  if (latestRequestStatus !== "open" && latestRequestStatus !== "inspected") {
     return {
       isAvailable: false,
       reason: "This QC request is already closed and cannot be updated again.",
@@ -350,6 +401,20 @@ export const getQcUserUpdateRequestAvailability = (
   );
   const latestInspectionRecord =
     resolveLatestInspectionRecordForRequestEntry(qc?.inspection_record, latestRequestEntry);
+  const latestRecordInspectorId = String(
+    latestInspectionRecord?.inspector?._id || latestInspectionRecord?.inspector || "",
+  ).trim();
+  if (
+    latestRecordInspectorId &&
+    latestRecordInspectorId !== normalizedCurrentUserId
+  ) {
+    return {
+      isAvailable: false,
+      reason: "QC users can update only their own inspection record.",
+      latestRequestEntry,
+      latestInspectionRecord,
+    };
+  }
   const latestRequestHasActivity = requestInspectionRecords.some((record) =>
     hasInspectionRecordActivity({
       checked: record?.checked,
@@ -363,9 +428,22 @@ export const getQcUserUpdateRequestAvailability = (
   );
 
   if (latestRequestHasActivity) {
+    const updateAllowance = getQcUserUpdateAllowance({
+      inspectionRecord: latestInspectionRecord,
+      currentUserId: normalizedCurrentUserId,
+      hasExistingUpdate: true,
+    });
+    return {
+      ...updateAllowance,
+      latestRequestEntry,
+      latestInspectionRecord,
+    };
+  }
+
+  if (latestRequestStatus !== "open") {
     return {
       isAvailable: false,
-      reason: "This QC request has already been inspected and cannot be updated again.",
+      reason: "This QC request is already closed and cannot be updated again.",
       latestRequestEntry,
       latestInspectionRecord,
     };

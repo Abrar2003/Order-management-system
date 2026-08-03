@@ -705,11 +705,14 @@ const QcDetails = () => {
       if (isTransferredInspectionRecord(record)) return false;
       if (isAdmin) return true;
       if (!isCurrentUserLabelExempt || !currentUserId) return false;
-      if (isLabelExemptAlignedInspectionEditor) return true;
 
       const recordInspectorId = String(
         record?.inspector?._id || record?.inspector || "",
       ).trim();
+      if (isQcUser) {
+        return Boolean(recordInspectorId) && recordInspectorId === currentUserId;
+      }
+      if (isLabelExemptAlignedInspectionEditor) return true;
       return Boolean(recordInspectorId) && recordInspectorId === currentUserId;
     },
     [
@@ -717,6 +720,7 @@ const QcDetails = () => {
       isAdmin,
       isCurrentUserLabelExempt,
       isLabelExemptAlignedInspectionEditor,
+      isQcUser,
       isTransferredInspectionRecord,
     ],
   );
