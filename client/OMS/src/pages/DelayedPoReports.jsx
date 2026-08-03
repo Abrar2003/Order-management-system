@@ -11,7 +11,7 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { exportElementToPdf } from "../services/pdfExport.service";
@@ -56,10 +56,13 @@ const distinct = (values) =>
   [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
 
-const readFilters = (params) => ({
+const getDefaultReportDate = () => toISODateString(new Date());
+
+const readFilters = (params, fallbackDate = getDefaultReportDate()) => ({
   brand: normalizeBrands(params.getAll("brand").length ? params.getAll("brand") : params.get("brand")),
   vendor: normalizeFilter(params.get("vendor")),
   po: normalizeFilter(params.get("po")),
+  fromDate: String(params.get("from_date") || params.get("fromDate") || fallbackDate).trim(),
 });
 
 const buildSearchParams = ({ filters, sortBy, sortOrder, page, limit }) => {
@@ -67,6 +70,7 @@ const buildSearchParams = ({ filters, sortBy, sortOrder, page, limit }) => {
   if (!isAllBrands(filters.brand)) params.set("brand", filters.brand.join(","));
   if (filters.vendor !== "all") params.set("vendor", filters.vendor);
   if (filters.po !== "all") params.set("po", filters.po);
+  if (filters.fromDate) params.set("from_date", filters.fromDate);
   if (sortBy !== "po") params.set("sort_by", sortBy);
   if (sortOrder !== "asc") params.set("sort_order", sortOrder);
   if (page > 1) params.set("page", String(page));
@@ -79,6 +83,7 @@ const buildApiParams = (filters) => {
   if (!isAllBrands(filters.brand)) params.brand = filters.brand.join(",");
   if (filters.vendor !== "all") params.vendor = filters.vendor;
   if (filters.po !== "all") params.order_id = filters.po;
+  if (filters.fromDate) params.from_date = filters.fromDate;
   return params;
 };
 
@@ -130,11 +135,13 @@ const DelayedPoReports = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "delayed-po-reports");
 
-  const initialFilters = readFilters(searchParams);
+  const defaultReportDate = useMemo(() => getDefaultReportDate(), []);
+  const initialFilters = readFilters(searchParams, defaultReportDate);
   const [allRows, setAllRows] = useState([]);
   const [draftBrand, setDraftBrand] = useState(initialFilters.brand);
   const [draftVendor, setDraftVendor] = useState(initialFilters.vendor);
   const [draftPo, setDraftPo] = useState(initialFilters.po);
+  const [draftFromDate, setDraftFromDate] = useState(initialFilters.fromDate);
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
   const [sortBy, setSortBy] = useState(searchParams.get("sort_by") || "po");
   const [sortOrder, setSortOrder] = useState(
@@ -150,8 +157,10 @@ const DelayedPoReports = () => {
   const [exportReportType, setExportReportType] = useState("summary");
   const [exportBrand, setExportBrand] = useState(DEFAULT_BRANDS);
   const [exportVendor, setExportVendor] = useState("all");
+  const [exportFromDate, setExportFromDate] = useState(initialFilters.fromDate);
   const [error, setError] = useState("");
   const [reportDate, setReportDate] = useState("");
+  const [pdfExportData, setPdfExportData] = useState(null);
   const [syncedQuery, setSyncedQuery] = useState(null);
   const pdfReportRef = useRef(null);
 
@@ -159,16 +168,16 @@ const DelayedPoReports = () => {
     try {
       setLoading(true);
       setError("");
-      const response = await getDelayedPoReport();
+      const response = await getDelayedPoReport({ from_date: appliedFilters.fromDate });
       setAllRows(Array.isArray(response?.rows) ? response.rows : []);
-      setReportDate(response?.filters?.report_date || "");
+      setReportDate(response?.filters?.report_date || appliedFilters.fromDate || "");
     } catch (fetchError) {
       setAllRows([]);
       setError(fetchError?.response?.data?.message || "Failed to load delayed PO report.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [appliedFilters.fromDate]);
 
   useEffect(() => {
     fetchRows();
@@ -176,14 +185,16 @@ const DelayedPoReports = () => {
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
-    const nextFilters = readFilters(searchParams);
+    const nextFilters = readFilters(searchParams, defaultReportDate);
     setDraftBrand((previous) => sameBrands(previous, nextFilters.brand) ? previous : nextFilters.brand);
     setDraftVendor(nextFilters.vendor);
     setDraftPo(nextFilters.po);
+    setDraftFromDate(nextFilters.fromDate);
     setAppliedFilters((previous) =>
       sameBrands(previous.brand, nextFilters.brand)
       && previous.vendor === nextFilters.vendor
       && previous.po === nextFilters.po
+      && previous.fromDate === nextFilters.fromDate
         ? previous
         : nextFilters
     );
@@ -192,7 +203,7 @@ const DelayedPoReports = () => {
     setPage(parsePositiveInt(searchParams.get("page"), 1));
     setLimit(parseLimit(searchParams.get("limit")));
     setSyncedQuery(currentQuery);
-  }, [searchParams]);
+  }, [defaultReportDate, searchParams]);
 
   useEffect(() => {
     if (syncedQuery !== searchParams.toString()) return;
@@ -230,15 +241,17 @@ const DelayedPoReports = () => {
     [allRows, appliedFilters],
   );
 
+  const exportSourceRows = pdfExportData?.rows || allRows;
+  const pdfReportDate = pdfExportData?.reportDate || reportDate;
   const exportFilteredRows = useMemo(() => {
     const brandFilterToUse = exportingFormat === "pdf" ? exportBrand : appliedFilters.brand;
     const vendorFilterToUse = exportingFormat === "pdf" ? exportVendor : appliedFilters.vendor;
-    return allRows.filter((row) => (
+    return exportSourceRows.filter((row) => (
       (isAllBrands(brandFilterToUse) || brandFilterToUse.includes(row?.brand))
       && (vendorFilterToUse === "all" || row?.vendor === vendorFilterToUse)
       && (appliedFilters.po === "all" || row?.order_id === appliedFilters.po)
     ));
-  }, [allRows, exportingFormat, exportBrand, exportVendor, appliedFilters]);
+  }, [exportSourceRows, exportingFormat, exportBrand, exportVendor, appliedFilters]);
 
   const pdfSortedRows = useMemo(
     () => sortClientRows(exportFilteredRows, {
@@ -247,7 +260,7 @@ const DelayedPoReports = () => {
       getSortValue: (row, column) => {
         if (column === "po") return row?.order_id;
         if (column === "itemCode") return row?.item_code;
-        if (column === "dates") return new Date(row?.etd || row?.po_etd || 0).getTime();
+        if (column === "dates") return new Date(row?.po_effective_etd || row?.effective_etd || row?.etd || 0).getTime();
         if (column === "delayDays") return Number(row?.delay_days || 0);
         if (column === "orderQuantity") return Number(row?.order_quantity || 0);
         if (column === "quantities") return Number(row?.pending_quantity || 0);
@@ -273,7 +286,7 @@ const DelayedPoReports = () => {
           brand: row?.brand || "N/A",
           vendor: row?.vendor || "N/A",
           order_date: row?.order_date || "",
-          etd: row?.po_etd || row?.etd || "",
+          etd: row?.po_effective_etd || row?.effective_etd || row?.etd || "",
           delay_days: row?.delay_days || 0,
           item_count: 0,
           shipped_item_count: 0,
@@ -333,7 +346,7 @@ const DelayedPoReports = () => {
       getSortValue: (row, column) => {
         if (column === "po") return row?.order_id;
         if (column === "itemCode") return row?.item_code;
-        if (column === "dates") return new Date(row?.etd || row?.po_etd || 0).getTime();
+        if (column === "dates") return new Date(row?.po_effective_etd || row?.effective_etd || row?.etd || 0).getTime();
         if (column === "delayDays") return Number(row?.delay_days || 0);
         if (column === "orderQuantity") return Number(row?.order_quantity || 0);
         if (column === "quantities") return Number(row?.pending_quantity || 0);
@@ -357,7 +370,7 @@ const DelayedPoReports = () => {
           brand: row?.brand || "N/A",
           vendor: row?.vendor || "N/A",
           order_date: row?.order_date || "",
-          etd: row?.po_etd || row?.etd || "",
+          etd: row?.po_effective_etd || row?.effective_etd || row?.etd || "",
           delay_days: row?.delay_days || 0,
           item_count: 0,
           shipped_item_count: 0,
@@ -446,13 +459,15 @@ const DelayedPoReports = () => {
       brand: normalizeBrands(draftBrand),
       vendor: vendorOptions.includes(draftVendor) ? draftVendor : "all",
       po: poOptions.includes(draftPo) ? draftPo : "all",
+      fromDate: draftFromDate || defaultReportDate,
     });
   };
   const clearFilters = () => {
-    const cleared = { brand: DEFAULT_BRANDS, vendor: "all", po: "all" };
+    const cleared = { brand: DEFAULT_BRANDS, vendor: "all", po: "all", fromDate: defaultReportDate };
     setDraftBrand(cleared.brand);
     setDraftVendor(cleared.vendor);
     setDraftPo(cleared.po);
+    setDraftFromDate(cleared.fromDate);
     setAppliedFilters(cleared);
     setPage(1);
     setSummaryPage(1);
@@ -471,6 +486,7 @@ const DelayedPoReports = () => {
           brand: exportBrand,
           vendor: exportVendor,
           po: appliedFilters.po,
+          fromDate: exportFromDate,
         }),
         report_type: reportType,
       });
@@ -485,10 +501,16 @@ const DelayedPoReports = () => {
   };
 
   const handleExportPdf = async (reportType) => {
-    if (loading || sortedRows.length === 0) return;
+    if (loading) return;
 
     try {
       setExportingFormat("pdf");
+      const response = await getDelayedPoReport({ from_date: exportFromDate });
+      const exportReportDate = response?.filters?.report_date || exportFromDate;
+      setPdfExportData({
+        rows: Array.isArray(response?.rows) ? response.rows : [],
+        reportDate: exportReportDate,
+      });
       setExportReportType(reportType);
       await new Promise((resolve) => window.setTimeout(resolve, 0));
       const target = pdfReportRef.current;
@@ -506,7 +528,7 @@ const DelayedPoReports = () => {
           title: reportType === "summary"
             ? "PO-wise Summary"
             : "Delayed PO Detailed Report",
-          subtitle: `Report date: ${formatDateDDMMYYYY(reportDate)} · Brand: ${
+          subtitle: `Report date: ${formatDateDDMMYYYY(exportReportDate)} · Brand: ${
             isAllBrands(exportBrand)
               ? "All Brands"
               : exportBrand.join(", ")
@@ -527,6 +549,7 @@ const DelayedPoReports = () => {
       console.error(pdfError);
       alert("Failed to export delayed PO report as PDF.");
     } finally {
+      setPdfExportData(null);
       setExportingFormat("");
     }
   };
@@ -560,29 +583,39 @@ const DelayedPoReports = () => {
               onClick={() => {
                 setExportBrand(appliedFilters.brand);
                 setExportVendor(appliedFilters.vendor);
+                setExportFromDate(appliedFilters.fromDate);
                 setShowExportModal(true);
               }}
-              disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
+              disabled={loading || exportingFormat !== ""}
             >
               {exportingFormat ? "Exporting..." : "Export Report"}
             </button>
             <div className="d-flex flex-wrap justify-content-end gap-2">
               <span className="om-summary-chip">POs: {poCount}</span>
               <span className="om-summary-chip">Rows: {filteredRows.length}</span>
-              <span className="om-summary-chip">Report Date: {formatDateDDMMYYYY(reportDate)}</span>
+              <span className="om-summary-chip">From Date: {formatDateDDMMYYYY(reportDate)}</span>
             </div>
           </div>
         </div>
 
         <ReportInfoBanner
           description="Tracks Purchase Orders that are past their Estimated Time of Delivery (ETD) with outstanding items."
-          dataShown="PO numbers, item codes, order dates, original ETD, order quantities, shipped vs pending quantities, and status badges."
+          dataShown="PO numbers, item codes, order dates, effective ETD, order quantities, shipped vs pending quantities, and status badges."
           howItWorks="Excludes fully shipped POs. Summarizes and filters delayed orders by brand, vendor, and PO ID, sortable by dates and quantities."
         />
 
         <div className="card om-card mb-3">
           <div className="card-body">
             <div className="packed-goods-filter-bar">
+              <div className="packed-goods-filter-field">
+                <label className="form-label small mb-1">From Date</label>
+                <input
+                  type="date"
+                  className="form-control form-control-sm"
+                  value={draftFromDate}
+                  onChange={(event) => setDraftFromDate(event.target.value)}
+                />
+              </div>
               <div className="packed-goods-filter-field packed-goods-filter-field--brand dropdown">
                 <label className="form-label small mb-1">Brand</label>
                 <button
@@ -711,7 +744,7 @@ const DelayedPoReports = () => {
                         <td>{row.vendor}</td>
                         <td>
                           <div><span className="text-secondary small">Order:</span> {formatDateDDMMYYYY(row.order_date)}</div>
-                          <div><span className="text-secondary small">ETD:</span> {formatDateDDMMYYYY(row.etd)}</div>
+                          <div><span className="text-secondary small">Effective ETD:</span> {formatDateDDMMYYYY(row.etd)}</div>
                         </td>
                         <td>
                           <span className="text-danger fw-semibold">
@@ -773,7 +806,7 @@ const DelayedPoReports = () => {
           </div>
         )}
 
-        {!loading && sortedRows.length > 0 && (
+        {!loading && (sortedRows.length > 0 || exportingFormat === "pdf") && (
           <div className="packed-goods-pdf-surface" aria-hidden="true">
             <div ref={pdfReportRef} className="packed-goods-pdf-report delayed-po-pdf-report">
               {exportReportType === "summary" ? (
@@ -782,7 +815,7 @@ const DelayedPoReports = () => {
                     <h2>PO-wise Summary</h2>
                     <p>Aggregated totals for the currently selected filters.</p>
                     <div className="delayed-po-pdf-summary-meta">
-                      <span>Report date: {formatDateDDMMYYYY(reportDate)}</span>
+                      <span>Report date: {formatDateDDMMYYYY(pdfReportDate)}</span>
                       <span>POs: {pdfPoCount}</span>
                       <span>
                         Brand: {isAllBrands(exportBrand)
@@ -852,7 +885,7 @@ const DelayedPoReports = () => {
                             <td>
                               <div className="delayed-po-pdf-dates">
                                 <span><small>Order:</small> {formatDateDDMMYYYY(row.order_date)}</span>
-                                <span><small>ETD:</small> {formatDateDDMMYYYY(row.etd)}</span>
+                                <span><small>Effective ETD:</small> {formatDateDDMMYYYY(row.etd)}</span>
                               </div>
                             </td>
                             <td>
@@ -892,7 +925,7 @@ const DelayedPoReports = () => {
                     <div>
                       <h2 className="h4 mb-1">Delayed PO Detailed Report</h2>
                       <p className="text-secondary mb-0">
-                        Report date: {formatDateDDMMYYYY(reportDate)}
+                        Report date: {formatDateDDMMYYYY(pdfReportDate)}
                       </p>
                     </div>
                     <div className="d-flex flex-wrap justify-content-end gap-2">
@@ -908,7 +941,7 @@ const DelayedPoReports = () => {
                       <th>Brand</th>
                       <th>Vendor</th>
                       <th>Order Date</th>
-                      <th>ETD</th>
+                      <th>Effective ETD</th>
                       <th>Delay</th>
                       <th>Order Qty</th>
                       <th>Shipped</th>
@@ -927,7 +960,7 @@ const DelayedPoReports = () => {
                         <td>{row?.brand || "N/A"}</td>
                         <td>{row?.vendor || "N/A"}</td>
                         <td>{formatDateDDMMYYYY(row?.order_date)}</td>
-                        <td>{formatDateDDMMYYYY(row?.etd || row?.po_etd)}</td>
+                        <td>{formatDateDDMMYYYY(row?.po_effective_etd || row?.effective_etd || row?.etd)}</td>
                         <td>{row?.delay_days} {row?.delay_days === 1 ? "day" : "days"}</td>
                         <td>{Number(row?.order_quantity || 0)}</td>
                         <td>{Number(row?.shipped_quantity || 0)}</td>
@@ -974,7 +1007,7 @@ const DelayedPoReports = () => {
                         <td>{row?.item_code || "N/A"}</td>
                         <td>
                           <div><span className="text-secondary small">Order:</span> {formatDateDDMMYYYY(row?.order_date)}</div>
-                          <div><span className="text-secondary small">ETD:</span> {formatDateDDMMYYYY(row?.etd || row?.po_etd)}</div>
+                          <div><span className="text-secondary small">Effective ETD:</span> {formatDateDDMMYYYY(row?.po_effective_etd || row?.effective_etd || row?.etd)}</div>
                         </td>
                         <td>
                           <span className="text-danger fw-semibold">
@@ -1103,6 +1136,17 @@ const DelayedPoReports = () => {
                         </option>
                       ))}
                     </select>
+                  </div>
+
+                  <div className="col-md-6">
+                    <label className="form-label">From Date</label>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={exportFromDate}
+                      disabled={Boolean(exportingFormat)}
+                      onChange={(event) => setExportFromDate(event.target.value)}
+                    />
                   </div>
                 </div>
 

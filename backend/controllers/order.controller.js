@@ -717,6 +717,22 @@ const diffUtcDays = (laterValue, earlierValue) => {
   return Math.floor((later.getTime() - earlier.getTime()) / MS_PER_DAY);
 };
 
+const createReportDateError = (message) => {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+};
+
+const resolveReportReferenceDate = (value, label = "From date") => {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return toUtcDayStart(new Date());
+  }
+
+  const parsed = toUtcDayStart(value);
+  if (!parsed) throw createReportDateError(`${label} is invalid.`);
+  return parsed;
+};
+
 const resolveLaterDate = (currentValue, nextValue) => {
   const currentDate =
     currentValue instanceof Date ? currentValue : parseDateLike(currentValue);
@@ -7918,6 +7934,7 @@ const buildReformedDelayedPoReportDataset = async ({
   brands = [],
   vendor = "",
   orderId = "",
+  fromDate = "",
   user = null,
 } = {}) => {
   const selectedBrands = normalizeFilterValues(brands);
@@ -7926,7 +7943,7 @@ const buildReformedDelayedPoReportDataset = async ({
   );
   const selectedVendor = normalizeFilterValue(vendor);
   const selectedOrderId = normalizeFilterValue(orderId);
-  const todayUtc = toUtcDayStart(new Date());
+  const reportDateUtc = resolveReportReferenceDate(fromDate);
 
   const orders = await Order.find(
     applyDataAccessMatch(ACTIVE_ORDER_MATCH, user),
@@ -7954,13 +7971,14 @@ const buildReformedDelayedPoReportDataset = async ({
     ].join("__");
     const progress = deriveOrderProgress({ orderEntry });
     const originalEtd = parseDateLike(orderEntry?.ETD);
+    const effectiveEtd = resolveEffectiveOrderEtdDate(orderEntry);
 
     if (!poGroups.has(poKey)) {
       poGroups.set(poKey, {
         order_id: orderIdValue,
         brand: brandValue,
         vendor: vendorValue,
-        etd: originalEtd,
+        effective_etd: effectiveEtd,
         has_pending_quantity: false,
         total_order_quantity: 0,
         total_shipped_quantity: 0,
@@ -7973,7 +7991,7 @@ const buildReformedDelayedPoReportDataset = async ({
     }
 
     const group = poGroups.get(poKey);
-    group.etd = resolveEarlierDate(group.etd, originalEtd);
+    group.effective_etd = resolveEarlierDate(group.effective_etd, effectiveEtd);
     group.has_pending_quantity =
       group.has_pending_quantity ||
       Math.max(
@@ -8002,6 +8020,7 @@ const buildReformedDelayedPoReportDataset = async ({
       vendor: vendorValue,
       order_date: toISODateString(orderEntry?.order_date),
       etd: toISODateString(originalEtd),
+      effective_etd: toISODateString(effectiveEtd),
       order_quantity: Number(progress?.order_quantity || 0),
       shipped_quantity: Number(progress?.shipped_quantity || 0),
       passed_quantity: Number(progress?.inspected_unshipped_quantity || 0),
@@ -8010,8 +8029,8 @@ const buildReformedDelayedPoReportDataset = async ({
   });
 
   const delayedGroups = Array.from(poGroups.values()).filter((group) => {
-    if (!group?.etd || !todayUtc) return false;
-    const etdCrossed = group.etd.getTime() < todayUtc.getTime();
+    if (!group?.effective_etd || !reportDateUtc) return false;
+    const etdCrossed = group.effective_etd.getTime() < reportDateUtc.getTime();
     const completelyShipped =
       Number(group.total_order_quantity || 0) > 0 &&
       Number(group.total_shipped_quantity || 0) >=
@@ -8021,7 +8040,7 @@ const buildReformedDelayedPoReportDataset = async ({
       Number(group.total_inspected_quantity || 0) >=
         Number(group.total_order_quantity || 0) &&
       group.last_inspected_date &&
-      group.last_inspected_date.getTime() < group.etd.getTime();
+      group.last_inspected_date.getTime() < group.effective_etd.getTime();
     return (
       etdCrossed &&
       group.has_pending_quantity &&
@@ -8033,9 +8052,9 @@ const buildReformedDelayedPoReportDataset = async ({
   const allRows = delayedGroups
     .flatMap((group) =>
       group.rows.map((row) => {
-        const rowEtdDate = parseDateLike(row.etd);
-        const delayMs = rowEtdDate
-          ? todayUtc.getTime() - rowEtdDate.getTime()
+        const effectiveEtdDate = group.effective_etd;
+        const delayMs = effectiveEtdDate
+          ? reportDateUtc.getTime() - effectiveEtdDate.getTime()
           : 0;
         const delayDays = Math.max(
           0,
@@ -8043,14 +8062,14 @@ const buildReformedDelayedPoReportDataset = async ({
         );
         return {
           ...row,
-          po_etd: toISODateString(group.etd),
+          po_effective_etd: toISODateString(group.effective_etd),
           delay_days: delayDays,
         };
       }),
     )
     .sort((left, right) => {
-      const etdCompare = String(left?.po_etd || "").localeCompare(
-        String(right?.po_etd || ""),
+      const etdCompare = String(left?.po_effective_etd || "").localeCompare(
+        String(right?.po_effective_etd || ""),
       );
       if (etdCompare !== 0) return etdCompare;
       const poCompare = String(left?.order_id || "").localeCompare(
@@ -8110,10 +8129,10 @@ const buildReformedDelayedPoReportDataset = async ({
     ].join("__");
 
     if (!poSummaryMap.has(poKey)) {
-      const summaryEtd = row?.po_etd || row?.etd || "";
+      const summaryEtd = row?.po_effective_etd || row?.effective_etd || row?.etd || "";
       const summaryEtdDate = parseDateLike(summaryEtd);
       const delayMs = summaryEtdDate
-        ? todayUtc.getTime() - summaryEtdDate.getTime()
+        ? reportDateUtc.getTime() - summaryEtdDate.getTime()
         : 0;
       const delayDays = Math.max(
         0,
@@ -8189,7 +8208,7 @@ const buildReformedDelayedPoReportDataset = async ({
       order_ids: normalizeDistinctValues(
         vendorFilteredRows.map((row) => row?.order_id),
       ),
-      report_date: toISODateString(todayUtc),
+      report_date: toISODateString(reportDateUtc),
     },
     summary: {
       row_count: rows.length,
@@ -8217,17 +8236,29 @@ const buildReformedDelayedPoReportDataset = async ({
 const buildUpcomingEtdReportDataset = async ({
   brand = "",
   vendor = "",
+  fromDate = "",
   toDate = "",
   shippingDelay = false,
   user = null,
 } = {}) => {
   const selectedBrands = normalizeFilterValues(brand);
   const selectedVendor = normalizeFilterValue(vendor) || "";
-  const todayUtc = toUtcDayStart(new Date());
-  const defaultRangeEnd = todayUtc
-    ? new Date(todayUtc.getTime() + 15 * MS_PER_DAY)
+  const reportStartDateUtc = resolveReportReferenceDate(fromDate);
+  const defaultRangeEnd = reportStartDateUtc
+    ? new Date(reportStartDateUtc.getTime() + 10 * MS_PER_DAY)
     : null;
-  const reportEndDateUtc = toUtcDayStart(toDate) || defaultRangeEnd;
+  const reportEndDateUtc = toDate
+    ? resolveReportReferenceDate(toDate, "Until date")
+    : defaultRangeEnd;
+
+  if (
+    !shippingDelay &&
+    reportStartDateUtc &&
+    reportEndDateUtc &&
+    reportEndDateUtc.getTime() < reportStartDateUtc.getTime()
+  ) {
+    throw createReportDateError("Until date must be on or after From date.");
+  }
 
   const orders = await Order.find(
     applyDataAccessMatch(ACTIVE_ORDER_MATCH, user),
@@ -8350,7 +8381,7 @@ const buildUpcomingEtdReportDataset = async ({
   const allRows = Array.from(groupedOrders.values())
     .map((groupedEntry) => {
       const effectiveEtd = groupedEntry.effective_etd;
-      if (!effectiveEtd || !todayUtc || !reportEndDateUtc) {
+      if (!effectiveEtd || !reportStartDateUtc || !reportEndDateUtc) {
         return null;
       }
 
@@ -8362,7 +8393,7 @@ const buildUpcomingEtdReportDataset = async ({
         groupedEntry.inspection_done_count === 0 &&
         groupedEntry.shipped_count > 0;
       const isWithinUpcomingWindow =
-        effectiveEtd.getTime() >= todayUtc.getTime() &&
+        effectiveEtd.getTime() >= reportStartDateUtc.getTime() &&
         effectiveEtd.getTime() <= reportEndDateUtc.getTime();
       const isCompletelyPackedBeforeEtd =
         groupedEntry.total_items > 0 &&
@@ -8370,7 +8401,7 @@ const buildUpcomingEtdReportDataset = async ({
         groupedEntry.shipped_count === 0 &&
         groupedEntry.last_inspected_date &&
         groupedEntry.last_inspected_date.getTime() < effectiveEtd.getTime();
-      const isPastEtd = effectiveEtd.getTime() < todayUtc.getTime();
+      const isPastEtd = effectiveEtd.getTime() < reportStartDateUtc.getTime();
 
       if (
         shippingDelay
@@ -8381,8 +8412,8 @@ const buildUpcomingEtdReportDataset = async ({
       }
 
       const daysUntilEtd = shippingDelay
-        ? Math.max(0, diffUtcDays(todayUtc, effectiveEtd))
-        : Math.max(0, diffUtcDays(effectiveEtd, todayUtc));
+        ? Math.max(0, diffUtcDays(reportStartDateUtc, effectiveEtd))
+        : Math.max(0, diffUtcDays(effectiveEtd, reportStartDateUtc));
       const lastProgress = resolveDelayedPoLastProgress(groupedEntry);
 
       return {
@@ -8537,7 +8568,7 @@ const buildUpcomingEtdReportDataset = async ({
       vendor: selectedVendor,
       brand_options: brandOptions,
       vendor_options: vendorOptions,
-      report_start_date: toISODateString(todayUtc),
+      report_start_date: toISODateString(reportStartDateUtc),
       report_end_date: toISODateString(reportEndDateUtc),
     },
     summary: {
@@ -8917,15 +8948,16 @@ exports.getDelayedPoReport = async (req, res) => {
       brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
       vendor: req.query.vendor,
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+      fromDate: req.query.from_date ?? req.query.fromDate,
       user: req.user,
     });
 
     return res.status(200).json(dataset);
   } catch (error) {
-    console.error("Get Delayed PO Report Error:", error);
-    return res.status(500).json({
+    if (!error?.statusCode) console.error("Get Delayed PO Report Error:", error);
+    return res.status(error?.statusCode || 500).json({
       success: false,
-      message: "Failed to load delayed PO report",
+      message: error?.statusCode ? error.message : "Failed to load delayed PO report",
       error: error.message,
     });
   }
@@ -8936,6 +8968,11 @@ exports.getUpcomingEtdReport = async (req, res) => {
     const dataset = await buildUpcomingEtdReportDataset({
       brand: req.query.brand,
       vendor: req.query.vendor,
+      fromDate:
+        req.query.from_date ??
+        req.query.fromDate ??
+        req.query.start_date ??
+        req.query.startDate,
       toDate:
         req.query.to_date ??
         req.query.toDate ??
@@ -8947,10 +8984,10 @@ exports.getUpcomingEtdReport = async (req, res) => {
 
     return res.status(200).json(dataset);
   } catch (error) {
-    console.error("Get Upcoming ETD Report Error:", error);
-    return res.status(500).json({
+    if (!error?.statusCode) console.error("Get Upcoming ETD Report Error:", error);
+    return res.status(error?.statusCode || 500).json({
       success: false,
-      message: "Failed to load upcoming ETD report",
+      message: error?.statusCode ? error.message : "Failed to load upcoming ETD report",
       error: error.message,
     });
   }
@@ -8981,6 +9018,11 @@ exports.exportUpcomingEtdReport = async (req, res) => {
     const dataset = await buildUpcomingEtdReportDataset({
       brand: req.query.brand,
       vendor: req.query.vendor,
+      fromDate:
+        req.query.from_date ??
+        req.query.fromDate ??
+        req.query.start_date ??
+        req.query.startDate,
       toDate:
         req.query.to_date ??
         req.query.toDate ??
@@ -8995,7 +9037,7 @@ exports.exportUpcomingEtdReport = async (req, res) => {
       { key: "order_id", header: "PO" },
       { key: "brand", header: "Brand" },
       { key: "order_date", header: "Order Date" },
-      { key: "etd", header: "ETD" },
+      { key: "etd", header: "Effective ETD" },
       { key: "days_until_etd", header: "Days Until ETD" },
       { key: "pending_count", header: "Pending" },
       { key: "inspection_done_count", header: "Inspection Done" },
@@ -9057,10 +9099,10 @@ exports.exportUpcomingEtdReport = async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.status(200).send(fileBuffer);
   } catch (error) {
-    console.error("Export Upcoming ETD Report Error:", error);
-    return res.status(500).json({
+    if (!error?.statusCode) console.error("Export Upcoming ETD Report Error:", error);
+    return res.status(error?.statusCode || 500).json({
       success: false,
-      message: "Failed to export upcoming ETD report",
+      message: error?.statusCode ? error.message : "Failed to export upcoming ETD report",
       error: error.message,
     });
   }
@@ -9377,7 +9419,7 @@ exports.exportDelayedPoReport = async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.status(200).send(fileBuffer);
   } catch (error) {
-    console.error("Export Delayed PO Report Error:", error);
+    if (!error?.statusCode) console.error("Export Delayed PO Report Error:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to export delayed PO report",
@@ -9399,6 +9441,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
       vendor: req.query.vendor,
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+      fromDate: req.query.from_date ?? req.query.fromDate,
       user: req.user,
     });
     const columns = [
@@ -9407,7 +9450,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       { key: "brand", header: "Brand" },
       { key: "vendor", header: "Vendor" },
       { key: "order_date", header: "Order Date" },
-      { key: "etd", header: "ETD" },
+      { key: "etd", header: "Effective ETD" },
       { key: "delay_days", header: "Delay (Days)" },
       { key: "order_quantity", header: "Order Quantity" },
       { key: "shipped_quantity", header: "Shipped Quantity" },
@@ -9419,7 +9462,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       { key: "brand", header: "Brand" },
       { key: "vendor", header: "Vendor" },
       { key: "order_date", header: "Order Date" },
-      { key: "etd", header: "ETD" },
+      { key: "etd", header: "Effective ETD" },
       { key: "delay_days", header: "Delay (Days)" },
       { key: "item_count", header: "Item Count" },
       { key: "shipped_item_count", header: "Shipped Items" },
@@ -9436,7 +9479,10 @@ exports.exportDelayedPoReport = async (req, res) => {
       brand: String(row?.brand || "").trim(),
       vendor: normalizeLooseString(row?.vendor),
       order_date: formatDateDDMMYYYY(row?.order_date, ""),
-      etd: formatDateDDMMYYYY(row?.etd || row?.po_etd, ""),
+      etd: formatDateDDMMYYYY(
+        row?.po_effective_etd || row?.effective_etd || row?.etd,
+        "",
+      ),
       delay_days: Number(row?.delay_days || 0),
       order_quantity: Number(row?.order_quantity || 0),
       shipped_quantity: Number(row?.shipped_quantity || 0),
@@ -9501,10 +9547,10 @@ exports.exportDelayedPoReport = async (req, res) => {
     );
     return res.status(200).send(fileBuffer);
   } catch (error) {
-    console.error("Export Delayed PO Report Error:", error);
-    return res.status(500).json({
+    if (!error?.statusCode) console.error("Export Delayed PO Report Error:", error);
+    return res.status(error?.statusCode || 500).json({
       success: false,
-      message: "Failed to export delayed PO report",
+      message: error?.statusCode ? error.message : "Failed to export delayed PO report",
       error: error.message,
     });
   }

@@ -54,10 +54,9 @@ const normalizeEntityFilter = (value) => {
   return normalized;
 };
 
-const getDefaultUpcomingEtdToDate = () => {
-  const todayIso = toISODateString(new Date());
-  const todayUtc = todayIso ? new Date(`${todayIso}T00:00:00Z`) : new Date();
-  const nextDate = new Date(todayUtc);
+const getDefaultUpcomingEtdToDate = (fromDate = toISODateString(new Date())) => {
+  const fromUtc = fromDate ? new Date(`${fromDate}T00:00:00Z`) : new Date();
+  const nextDate = new Date(fromUtc);
   nextDate.setUTCDate(nextDate.getUTCDate() + 10);
   return toISODateString(nextDate);
 };
@@ -94,7 +93,11 @@ const UpcomingEtdReports = ({ shippingDelay = false }) => {
     shippingDelay ? "shipping-delay-reports" : "upcoming-etd-reports",
   );
 
-  const defaultToDate = useMemo(() => getDefaultUpcomingEtdToDate(), []);
+  const defaultFromDate = useMemo(() => toISODateString(new Date()), []);
+  const defaultToDate = useMemo(
+    () => getDefaultUpcomingEtdToDate(defaultFromDate),
+    [defaultFromDate],
+  );
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("brand")),
   );
@@ -107,18 +110,44 @@ const UpcomingEtdReports = ({ shippingDelay = false }) => {
   const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("vendor")),
   );
+  const [fromDateFilter, setFromDateFilter] = useState(() =>
+    String(
+      searchParams.get("from_date")
+      || searchParams.get("fromDate")
+      || defaultFromDate,
+    ).trim(),
+  );
+  const [draftFromDateFilter, setDraftFromDateFilter] = useState(() =>
+    String(
+      searchParams.get("from_date")
+      || searchParams.get("fromDate")
+      || defaultFromDate,
+    ).trim(),
+  );
   const [toDateFilter, setToDateFilter] = useState(() =>
     String(
       searchParams.get("to_date")
       || searchParams.get("toDate")
-      || defaultToDate,
+      || getDefaultUpcomingEtdToDate(
+        String(
+          searchParams.get("from_date")
+          || searchParams.get("fromDate")
+          || defaultFromDate,
+        ).trim(),
+      ),
     ).trim(),
   );
   const [draftToDateFilter, setDraftToDateFilter] = useState(() =>
     String(
       searchParams.get("to_date")
       || searchParams.get("toDate")
-      || defaultToDate,
+      || getDefaultUpcomingEtdToDate(
+        String(
+          searchParams.get("from_date")
+          || searchParams.get("fromDate")
+          || defaultFromDate,
+        ).trim(),
+      ),
     ).trim(),
   );
   const [loading, setLoading] = useState(true);
@@ -137,7 +166,9 @@ const UpcomingEtdReports = ({ shippingDelay = false }) => {
 
       const params = {};
       if (!shippingDelay) {
-        params.to_date = String(toDateFilter || "").trim() || defaultToDate;
+        const fromDate = String(fromDateFilter || "").trim() || defaultFromDate;
+        params.from_date = fromDate;
+        params.to_date = String(toDateFilter || "").trim() || getDefaultUpcomingEtdToDate(fromDate);
       }
       if (brandFilter !== DEFAULT_ENTITY_FILTER) {
         params.brand = brandFilter;
@@ -166,7 +197,7 @@ const UpcomingEtdReports = ({ shippingDelay = false }) => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, defaultToDate, shippingDelay, toDateFilter, vendorFilter]);
+  }, [brandFilter, defaultFromDate, defaultToDate, fromDateFilter, shippingDelay, toDateFilter, vendorFilter]);
 
   useEffect(() => {
     fetchReport();
@@ -178,20 +209,27 @@ const UpcomingEtdReports = ({ shippingDelay = false }) => {
 
     const nextBrandFilter = normalizeEntityFilter(searchParams.get("brand"));
     const nextVendorFilter = normalizeEntityFilter(searchParams.get("vendor"));
+    const nextFromDate = String(
+      searchParams.get("from_date")
+      || searchParams.get("fromDate")
+      || defaultFromDate,
+    ).trim();
     const nextToDate = String(
       searchParams.get("to_date")
       || searchParams.get("toDate")
-      || defaultToDate,
+      || getDefaultUpcomingEtdToDate(nextFromDate),
     ).trim();
 
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
+    setDraftFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
     setToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
     setDraftToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
-  }, [defaultToDate, searchParams, syncedQuery]);
+  }, [defaultFromDate, defaultToDate, searchParams, syncedQuery]);
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
@@ -204,14 +242,15 @@ const UpcomingEtdReports = ({ shippingDelay = false }) => {
     if (vendorFilter !== DEFAULT_ENTITY_FILTER) {
       next.set("vendor", vendorFilter);
     }
-    if (!shippingDelay && toDateFilter) {
-      next.set("to_date", toDateFilter);
+    if (!shippingDelay) {
+      if (fromDateFilter) next.set("from_date", fromDateFilter);
+      if (toDateFilter) next.set("to_date", toDateFilter);
     }
 
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [brandFilter, searchParams, setSearchParams, shippingDelay, syncedQuery, toDateFilter, vendorFilter]);
+  }, [brandFilter, fromDateFilter, searchParams, setSearchParams, shippingDelay, syncedQuery, toDateFilter, vendorFilter]);
 
   const filters = useMemo(
     () => report?.filters || defaultReport.filters,
@@ -222,15 +261,19 @@ const UpcomingEtdReports = ({ shippingDelay = false }) => {
     event?.preventDefault();
     setBrandFilter(normalizeEntityFilter(draftBrandFilter));
     setVendorFilter(normalizeEntityFilter(draftVendorFilter));
-    setToDateFilter(String(draftToDateFilter || "").trim() || defaultToDate);
+    const fromDate = String(draftFromDateFilter || "").trim() || defaultFromDate;
+    setFromDateFilter(fromDate);
+    setToDateFilter(String(draftToDateFilter || "").trim() || getDefaultUpcomingEtdToDate(fromDate));
   };
 
   const handleClearFilters = () => {
     setDraftBrandFilter(DEFAULT_ENTITY_FILTER);
     setDraftVendorFilter(DEFAULT_ENTITY_FILTER);
+    setDraftFromDateFilter(defaultFromDate);
     setDraftToDateFilter(defaultToDate);
     setBrandFilter(DEFAULT_ENTITY_FILTER);
     setVendorFilter(DEFAULT_ENTITY_FILTER);
+    setFromDateFilter(defaultFromDate);
     setToDateFilter(defaultToDate);
   };
   const summary = useMemo(
@@ -331,12 +374,28 @@ const UpcomingEtdReports = ({ shippingDelay = false }) => {
           </div>
           <form className="upcoming-etd-filter-grid" onSubmit={handleApplyFilters}>
             {!shippingDelay && <div className="upcoming-etd-filter-field">
+              <label className="form-label" htmlFor="upcoming-etd-from-date">From date</label>
+              <input
+                id="upcoming-etd-from-date"
+                type="date"
+                className="form-control"
+                value={draftFromDateFilter}
+                onChange={(event) => {
+                  const fromDate = String(event.target.value || "").trim();
+                  setDraftFromDateFilter(fromDate);
+                  setDraftToDateFilter(getDefaultUpcomingEtdToDate(fromDate || defaultFromDate));
+                }}
+              />
+            </div>}
+
+            {!shippingDelay && <div className="upcoming-etd-filter-field">
               <label className="form-label" htmlFor="upcoming-etd-until-date">Until date</label>
               <input
                 id="upcoming-etd-until-date"
                 type="date"
                 className="form-control"
                 value={draftToDateFilter}
+                min={draftFromDateFilter || undefined}
                 onChange={(event) => setDraftToDateFilter(String(event.target.value || "").trim())}
               />
             </div>}
@@ -744,7 +803,7 @@ const UpcomingEtdReports = ({ shippingDelay = false }) => {
           defaultFilters={{
             brand: brandFilter,
             vendor: vendorFilter,
-            ...(shippingDelay ? {} : { to_date: toDateFilter }),
+            ...(shippingDelay ? {} : { from_date: fromDateFilter, to_date: toDateFilter }),
           }}
         />
       )}

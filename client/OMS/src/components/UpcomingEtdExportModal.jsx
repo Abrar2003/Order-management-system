@@ -5,7 +5,7 @@ import {
   getShippingDelayReport,
   getUpcomingEtdReport,
 } from "../services/orders.service";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { exportHtmlToPdf } from "../services/pdfExport.service";
 import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
@@ -24,12 +24,21 @@ const normalizeBrands = (value) => {
 
 const isAllBrands = (values) => !Array.isArray(values) || values.includes("all");
 
+const getDefaultToDate = (fromDate = toISODateString(new Date())) => {
+  const fromUtc = fromDate ? new Date(`${fromDate}T00:00:00Z`) : new Date();
+  const toDate = new Date(fromUtc);
+  toDate.setUTCDate(toDate.getUTCDate() + 10);
+  return toISODateString(toDate);
+};
+
 const buildInitialForm = (defaultFilters = {}) => {
   const vendor = getOptionText(defaultFilters?.vendor);
+  const fromDate = defaultFilters?.from_date || toISODateString(new Date());
   return {
     brand: normalizeBrands(defaultFilters?.brand),
     vendor: !vendor || vendor === "all" ? "all" : vendor,
-    to_date: defaultFilters?.to_date || "",
+    from_date: fromDate,
+    to_date: defaultFilters?.to_date || getDefaultToDate(fromDate),
     format: "xlsx",
   };
 };
@@ -105,7 +114,7 @@ const exportDatasetAsPdf = async (dataset, isShippingDelay = false) => {
         <thead>
           <tr>
             <th>Vendor</th><th>PO</th><th>Brand</th><th>Order Date</th>
-            <th>ETD</th><th>${isShippingDelay ? "Delay (Days)" : "Days"}</th><th>Pending</th><th>Inspected</th>
+            <th>Effective ETD</th><th>${isShippingDelay ? "Delay (Days)" : "Days"}</th><th>Pending</th><th>Inspected</th>
             <th>Shipped</th><th>Last Progress</th>
           </tr>
         </thead>
@@ -167,7 +176,13 @@ const UpcomingEtdExportModal = ({
         tz_offset_minutes: new Date().getTimezoneOffset(),
       };
       if (!isShippingDelay) {
+        params.from_date = form.from_date || undefined;
         params.to_date = form.to_date || undefined;
+      }
+
+      if (!isShippingDelay && form.to_date < form.from_date) {
+        setError("Until date must be on or after From date.");
+        return;
       }
 
       if (form.format === "pdf") {
@@ -296,16 +311,38 @@ const UpcomingEtdExportModal = ({
               </div>
             </div>
 
-            {!isShippingDelay && <div>
-              <label className="form-label">Until Date</label>
-              <input
-                type="date"
-                className="form-control"
-                value={form.to_date}
-                disabled={isExporting}
-                onChange={(e) => setForm((prev) => ({ ...prev, to_date: e.target.value }))}
-              />
-            </div>}
+            {!isShippingDelay && (
+              <div className="row g-3">
+                <div className="col-md-6">
+                  <label className="form-label">From Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={form.from_date}
+                    disabled={isExporting}
+                    onChange={(event) => {
+                      const fromDate = event.target.value;
+                      setForm((prev) => ({
+                        ...prev,
+                        from_date: fromDate,
+                        to_date: getDefaultToDate(fromDate),
+                      }));
+                    }}
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">Until Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={form.to_date}
+                    min={form.from_date || undefined}
+                    disabled={isExporting}
+                    onChange={(event) => setForm((prev) => ({ ...prev, to_date: event.target.value }))}
+                  />
+                </div>
+              </div>
+            )}
 
             <fieldset>
               <legend className="form-label">Export format</legend>
