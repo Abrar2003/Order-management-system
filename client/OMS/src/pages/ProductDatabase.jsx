@@ -360,6 +360,15 @@ const buildPayloadFromForm = (form = {}, boxMode = null) => {
   return payload;
 };
 
+const buildProductDatabaseRequestPayload = (payload = {}) => {
+  const boxMode = detectBoxPackagingMode(payload.pd_box_mode, payload.pd_box_sizes);
+  const { pd_inner_barcode, ...withoutInnerBarcode } = payload;
+  if (requiresInnerBarcode(boxMode)) return payload;
+  if (requiresMasterBarcode(boxMode)) return withoutInnerBarcode;
+  const { pd_master_barcode, ...withoutUnusedBarcodes } = withoutInnerBarcode;
+  return withoutUnusedBarcodes;
+};
+
 const PRODUCT_DATABASE_SIZE_DIFF_TOLERANCE = 0.5;
 const PRODUCT_DATABASE_CBM_DECIMALS = 2;
 const PRODUCT_DATABASE_SIZE_DIMENSIONS = Object.freeze(["L", "B", "H"]);
@@ -1871,15 +1880,16 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
         return;
       }
 
+      const requestPayload = buildProductDatabaseRequestPayload(currentPayload);
       let response;
       if (action === "check") {
-        response = await api.post(`/items/${item.id}/product-database/check`, currentPayload);
+        response = await api.post(`/items/${item.id}/product-database/check`, requestPayload);
       } else if (action === "approve") {
         const confirmed = window.confirm("Approve this Product Database record?");
         if (!confirmed) return;
-        response = await api.post(`/items/${item.id}/product-database/approve`, currentPayload);
+        response = await api.post(`/items/${item.id}/product-database/approve`, requestPayload);
       } else {
-        response = await api.patch(`/items/${item.id}/product-database`, currentPayload);
+        response = await api.patch(`/items/${item.id}/product-database`, requestPayload);
       }
 
       onSaved?.(
