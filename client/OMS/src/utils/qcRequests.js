@@ -1,8 +1,8 @@
-import { getTodayISODate, toISODateString } from "./date";
+import { getTodayISODate, toISODateString } from "./date.js";
 import {
   buildUpdateQcPastDaysMessage,
   getUpdateQcPastDaysLimit,
-} from "./qcUpdateAccess";
+} from "./qcUpdateAccess.js";
 
 const normalizeRequestHistoryStatus = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -122,6 +122,7 @@ const getQcUserUpdateAllowance = ({
     return {
       isAvailable: false,
       reason: "QC users can update only their own inspection record.",
+      currentUpdateCount: 0,
     };
   }
 
@@ -131,7 +132,7 @@ const getQcUserUpdateAllowance = ({
   );
   const currentUpdateCount = storedCount || (hasExistingUpdate ? 1 : 0);
   if (currentUpdateCount === 0) {
-    return { isAvailable: true, reason: "" };
+    return { isAvailable: true, reason: "", currentUpdateCount };
   }
 
   const windowStartedAt = new Date(
@@ -140,22 +141,28 @@ const getQcUserUpdateAllowance = ({
       inspectionRecord?.createdAt,
   );
   if (Number.isNaN(windowStartedAt.getTime())) {
-    return { isAvailable: false, reason: "QC update window is invalid." };
+    return {
+      isAvailable: false,
+      reason: "QC update window is invalid.",
+      currentUpdateCount,
+    };
   }
   if (currentUpdateCount >= QC_USER_MAX_UPDATES) {
     return {
       isAvailable: false,
       reason: "This inspection record has reached the 3-update limit.",
+      currentUpdateCount,
     };
   }
   if (Date.now() - windowStartedAt.getTime() >= QC_USER_UPDATE_WINDOW_MS) {
     return {
       isAvailable: false,
       reason: "The 1-hour QC update window has expired.",
+      currentUpdateCount,
     };
   }
 
-  return { isAvailable: true, reason: "" };
+  return { isAvailable: true, reason: "", currentUpdateCount };
 };
 
 const getUtcDayOffsetFromToday = (isoDateValue) => {
@@ -454,6 +461,7 @@ export const getQcUserUpdateRequestAvailability = (
     reason: "",
     latestRequestEntry,
     latestInspectionRecord,
+    currentUpdateCount: 0,
   };
 };
 

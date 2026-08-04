@@ -1118,7 +1118,9 @@ const UpdateQcModal = ({
     !isInspectionRecordUpdate && isQcUser
       ? qcUserRequestAvailability.latestInspectionRecord
       : null;
-  const isQcUserRewriteMode = Boolean(qcUserRewriteInspectionRecord?._id);
+  const isQcUserRewriteMode =
+    Boolean(qcUserRewriteInspectionRecord?._id) &&
+    Number(qcUserRequestAvailability.currentUpdateCount || 0) > 0;
   const selectedInspectionRecord = isInspectionRecordUpdate
     ? inspectionRecord
     : canRewriteLatestInspectionRecord

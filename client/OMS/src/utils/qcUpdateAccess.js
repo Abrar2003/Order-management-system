@@ -1,4 +1,4 @@
-import { isAdminLikeRole, isManagerLikeRole, normalizeUserRole } from "../auth/permissions";
+import { isAdminLikeRole, isManagerLikeRole, normalizeUserRole } from "../auth/permissions.js";
 
 const MANAGER_ALLOWED_PAST_DAYS = 2;
 const QC_ALLOWED_PAST_DAYS = 1;
@@ -17,12 +17,14 @@ const parseUserIdList = (value = "") =>
       .filter(Boolean),
   )];
 
+const env = import.meta.env || {};
+
 const LABEL_EXEMPT_USERS = new Set(
   parseUserIdList(
-    import.meta.env.LabelExemptUsers ||
-      import.meta.env.LABEL_EXEMPT_USERS ||
-      import.meta.env.VITE_LabelExemptUsers ||
-      import.meta.env.VITE_LABEL_EXEMPT_USERS ||
+    env.LabelExemptUsers ||
+      env.LABEL_EXEMPT_USERS ||
+      env.VITE_LabelExemptUsers ||
+      env.VITE_LABEL_EXEMPT_USERS ||
       "",
   ),
 );
