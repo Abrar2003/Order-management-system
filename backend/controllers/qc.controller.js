@@ -2948,6 +2948,7 @@ const upsertInspectionRecordForRequest = async ({
   addProvision = 0,
   appendLabelRanges = [],
   appendLabels = [],
+  replaceCurrentRecord = false,
   replaceCbmSnapshot = false,
   allowRequestedDateFallback = true,
   goodsNotReady = null,
@@ -3084,15 +3085,18 @@ const upsertInspectionRecordForRequest = async ({
   inspectionRecord.inspection_date = resolvedInspectionDate;
   inspectionRecord.vendor_requested = requestedQty;
 
-  const nextChecked =
-    toNonNegativeNumber(inspectionRecord.checked, 0) +
-    toNonNegativeNumber(addChecked, 0);
-  const nextPassed =
-    toNonNegativeNumber(inspectionRecord.passed, 0) +
-    toNonNegativeNumber(addPassed, 0);
-  const nextOffered =
-    toNonNegativeNumber(inspectionRecord.vendor_offered, 0) +
-    toNonNegativeNumber(addProvision, 0);
+  const nextChecked = replaceCurrentRecord
+    ? toNonNegativeNumber(addChecked, 0)
+    : toNonNegativeNumber(inspectionRecord.checked, 0) +
+      toNonNegativeNumber(addChecked, 0);
+  const nextPassed = replaceCurrentRecord
+    ? toNonNegativeNumber(addPassed, 0)
+    : toNonNegativeNumber(inspectionRecord.passed, 0) +
+      toNonNegativeNumber(addPassed, 0);
+  const nextOffered = replaceCurrentRecord
+    ? toNonNegativeNumber(addProvision, 0)
+    : toNonNegativeNumber(inspectionRecord.vendor_offered, 0) +
+      toNonNegativeNumber(addProvision, 0);
 
   inspectionRecord.checked = nextChecked;
   inspectionRecord.passed = nextPassed;
@@ -3113,7 +3117,10 @@ const upsertInspectionRecordForRequest = async ({
     inspectionRecord.cbm = qcCbmSnapshot;
   }
 
-  if (labelRangesToAppend.length > 0) {
+  if (replaceCurrentRecord) {
+    inspectionRecord.label_ranges = labelRangesToAppend;
+    inspectionRecord.labels_added = labelsToAppend;
+  } else if (labelRangesToAppend.length > 0) {
     const existingRanges = Array.isArray(inspectionRecord.label_ranges)
       ? inspectionRecord.label_ranges
       : [];
@@ -3134,7 +3141,7 @@ const upsertInspectionRecordForRequest = async ({
     inspectionRecord.label_ranges = existingRanges;
   }
 
-  if (labelsToAppend.length > 0) {
+  if (!replaceCurrentRecord && labelsToAppend.length > 0) {
     const existingLabels = normalizeLabels(inspectionRecord.labels_added || []);
     inspectionRecord.labels_added = normalizeLabels([
       ...existingLabels,
@@ -5454,6 +5461,7 @@ const updateQC = async (req, res) => {
       inspected_top_LBH,
       inspected_bottom_LBH,
       inspected_weight,
+      qc_rewrite_current_request_record,
     } = req.body;
 
     const qc = await QC.findById(req.params.id)
@@ -5498,6 +5506,11 @@ const updateQC = async (req, res) => {
           .trim()
           .toLowerCase() === "true");
     const allowAdminRewrite = adminRewriteLatestRecord;
+    const qcRewriteCurrentRequestRecord =
+      isQcUser &&
+      (qc_rewrite_current_request_record === true ||
+        String(qc_rewrite_current_request_record || "").trim().toLowerCase() === "true");
+    let allowQcRequestRewrite = false;
     const allowQcFieldEdits = allowAdminRewrite || isQcUser;
     const allowQcSizeFieldEdits =
       allowAdminRewrite || isQcUser || isManager;
@@ -5581,7 +5594,20 @@ const updateQC = async (req, res) => {
           message: "QC cannot change the requested inspector",
         });
       }
+
+      if (qcRewriteCurrentRequestRecord) {
+        if (
+          !qcUserRequestAvailability?.latestInspectionRecord?._id ||
+          Number(qcUserRequestAvailability.currentUpdateCount || 0) <= 0
+        ) {
+          return res.status(400).json({
+            message: "Only an existing inspection record can be rewritten.",
+          });
+        }
+        allowQcRequestRewrite = true;
+      }
     }
+    const allowRecordRewrite = allowAdminRewrite || allowQcRequestRewrite;
 
     if (requestedInspectorId) {
       if (!mongoose.Types.ObjectId.isValid(requestedInspectorId)) {
@@ -6573,10 +6599,9 @@ const updateQC = async (req, res) => {
     let nextCurrentRequestSamplePassed = currentRequestSamplePassedBefore;
     let nextCurrentRequestOffered = currentRequestOfferedBefore;
 
-    if (allowAdminRewrite && hasExplicitQuantityPayload) {
-      // Admin rewrite quantities are replacement values for the target
-      // inspection record. Rebuild QC totals around that row instead of
-      // treating the payload as already-aggregated totals.
+    if (allowRecordRewrite && hasExplicitQuantityPayload) {
+      // Rewrite quantities replace the target inspection record and rebuild
+      // the QC totals around it.
       const otherChecked = Math.max(
         0,
         currentCheckedTotal - currentRequestCheckedBefore,
@@ -6723,7 +6748,7 @@ const updateQC = async (req, res) => {
     let labelsAddedThisVisit = [];
     let labelRangesUsedThisVisit = [];
     let nextLabels = existingNormalizedLabels;
-    if (allowAdminRewrite && hasExplicitLabelsPayload) {
+    if (allowRecordRewrite && hasExplicitLabelsPayload) {
       const directLabels = Array.isArray(labels) ? labels : [];
       const parsedDirectLabels = directLabels.map(Number);
       if (
@@ -6737,9 +6762,11 @@ const updateQC = async (req, res) => {
       }
 
       let generatedFromRanges = [];
+      let normalizedReplacementRanges = [];
       if (Array.isArray(label_ranges)) {
         const rangeResult = buildLabelsFromRanges(label_ranges);
         generatedFromRanges = rangeResult.generatedLabels;
+        normalizedReplacementRanges = rangeResult.normalizedRanges;
       }
 
       const replacementLabels =
@@ -6747,7 +6774,23 @@ const updateQC = async (req, res) => {
           ? parsedDirectLabels
           : generatedFromRanges;
       const normalizedReplacementLabels = normalizeLabels(replacementLabels);
-      nextLabels = normalizedReplacementLabels;
+      const labelsOutsideCurrentRecord = normalizeLabels(
+        beforeInspectionRecords
+          .filter(
+            (record) =>
+              String(record?._id || "") !==
+              String(currentRequestInspectionRecord?._id || ""),
+          )
+          .flatMap((record) =>
+            Array.isArray(record?.labels_added) ? record.labels_added : [],
+          ),
+      );
+      nextLabels = normalizeLabels([
+        ...labelsOutsideCurrentRecord,
+        ...normalizedReplacementLabels,
+      ]);
+      labelsAddedThisVisit = normalizedReplacementLabels;
+      labelRangesUsedThisVisit = normalizedReplacementRanges;
     } else if (hasLabelsPayload) {
       const inspectionInspectorUserId = qc.inspector?._id
         ? qc.inspector._id
@@ -6832,11 +6875,13 @@ const updateQC = async (req, res) => {
       labelsAddedThisVisit = incomingNew;
     }
 
-    if (!isCurrentUserLabelExempt && !(allowAdminRewrite && hasExplicitLabelsPayload)) {
-      const currentRequestLabelsAfterUpdate = normalizeLabels([
-        ...currentRequestLabelsBefore,
-        ...labelsAddedThisVisit,
-      ]);
+    if (!isCurrentUserLabelExempt) {
+      const currentRequestLabelsAfterUpdate = allowRecordRewrite && hasExplicitLabelsPayload
+        ? labelsAddedThisVisit
+        : normalizeLabels([
+          ...currentRequestLabelsBefore,
+          ...labelsAddedThisVisit,
+        ]);
       const currentRequestLabelsCountAfterUpdate =
         currentRequestLabelsAfterUpdate.length;
       const requiresBoxSizeForLabels =
@@ -6884,6 +6929,7 @@ const updateQC = async (req, res) => {
       ──────────────────────── */
 
     const isVisitUpdate =
+      allowQcRequestRewrite ||
       addChecked > 0 ||
       addPassed > 0 ||
       addProvision > 0 ||
@@ -7002,6 +7048,7 @@ const updateQC = async (req, res) => {
         addProvision: isVisitUpdate ? addProvision : 0,
         appendLabelRanges: isVisitUpdate ? labelRangesUsedThisVisit : [],
         appendLabels: isVisitUpdate ? labelsAddedThisVisit : [],
+        replaceCurrentRecord: allowQcRequestRewrite,
         replaceCbmSnapshot: hasCbmUpdate || isVisitUpdate,
         explicitStatus: isQcUser ? INSPECTION_RECORD_STATUS.DONE : "",
         currentSizeSource: inspectionSizeSource,
@@ -7056,6 +7103,12 @@ const updateQC = async (req, res) => {
         }).lean();
         recalculateQcAggregateQuantities(qc, persistedInspectionRecords);
         qc.markModified("quantities");
+        qc.labels = normalizeLabels(
+          persistedInspectionRecords.flatMap((record) =>
+            Array.isArray(record?.labels_added) ? record.labels_added : [],
+          ),
+        );
+        qc.markModified("labels");
       }
     }
 

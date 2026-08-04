@@ -1110,19 +1110,22 @@ const UpdateQcModal = ({
     requiresBarcodeValidation && !barcodeValidated;
   const latestInspectionRecord = getLatestInspectionRecord(qc);
   const latestRequestEntry = getLatestRequestEntry(qc);
-  const selectedInspectionRecord = isInspectionRecordUpdate
-    ? inspectionRecord
-    : canRewriteLatestInspectionRecord
-      ? latestInspectionRecord
-      : null;
-  const selectedRecordIsGoodsNotReady = isGoodsNotReadyRecord(selectedInspectionRecord);
-  const barcodePrefillRecord = isInspectionRecordUpdate
-    ? inspectionRecord
-    : latestInspectionRecord || qc;
   const qcUserRequestAvailability = useMemo(
     () => getQcUserUpdateRequestAvailability(qc, { currentUserId }),
     [qc, currentUserId],
   );
+  const qcUserRewriteInspectionRecord =
+    !isInspectionRecordUpdate && isQcUser
+      ? qcUserRequestAvailability.latestInspectionRecord
+      : null;
+  const isQcUserRewriteMode = Boolean(qcUserRewriteInspectionRecord?._id);
+  const selectedInspectionRecord = isInspectionRecordUpdate
+    ? inspectionRecord
+    : canRewriteLatestInspectionRecord
+      ? latestInspectionRecord
+      : qcUserRewriteInspectionRecord;
+  const selectedRecordIsGoodsNotReady = isGoodsNotReadyRecord(selectedInspectionRecord);
+  const barcodePrefillRecord = selectedInspectionRecord || latestInspectionRecord || qc;
   const isQcUpdateBlockedByMissingRequest =
     !isInspectionRecordUpdate && isQcUser && !qcUserRequestAvailability.isAvailable;
   const summaryRequestedQuantity = isInspectionRecordUpdate
@@ -1142,12 +1145,14 @@ const UpdateQcModal = ({
     ? "inspection_record_update"
     : canRewriteLatestInspectionRecord
       ? "qc_latest_rewrite"
-      : "qc_update";
+      : isQcUserRewriteMode
+        ? "qc_current_request_rewrite"
+        : "qc_update";
   const draftRecordId = isInspectionRecordUpdate
     ? String(inspectionRecord?._id || "")
     : canRewriteLatestInspectionRecord
       ? String(latestInspectionRecord?._id || "")
-      : "";
+      : String(qcUserRewriteInspectionRecord?._id || "");
   const draftValue = useMemo(
     () => ({
       form,
@@ -1323,28 +1328,26 @@ const UpdateQcModal = ({
   useEffect(() => {
     if (!qc) return;
     const assignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "");
-    const adminRecord = isInspectionRecordUpdate
+    const recordToPrefill = isInspectionRecordUpdate
       ? inspectionRecord
       : canRewriteLatestInspectionRecord
         ? latestInspectionRecord
-        : null;
+        : qcUserRewriteInspectionRecord;
     const defaultInspectorId = isInspectionRecordUpdate
-      ? String(adminRecord?.inspector?._id || adminRecord?.inspector || "")
+      ? String(recordToPrefill?.inspector?._id || recordToPrefill?.inspector || "")
       : String(
-          adminRecord?.inspector?._id ||
-          adminRecord?.inspector ||
+          recordToPrefill?.inspector?._id ||
+          recordToPrefill?.inspector ||
           assignedInspectorId,
         );
-    const initialLabelRanges = adminRecord
-      ? getInitialLabelRanges(adminRecord)
+    const initialLabelRanges = recordToPrefill
+      ? getInitialLabelRanges(recordToPrefill)
       : [createEmptyLabelRange()];
-    const initialRemarks = adminRecord
-      ? String(adminRecord.remarks || "")
+    const initialRemarks = recordToPrefill
+      ? String(recordToPrefill.remarks || "")
       : String(qc?.remarks || "");
-    const itemMaster = isInspectionRecordUpdate
-      ? buildInspectionRecordMeasurementSource(inspectionRecord)
-      : latestInspectionRecord
-        ? buildInspectionRecordMeasurementSource(latestInspectionRecord, qc?.item_master || {}, {
+    const itemMaster = recordToPrefill
+      ? buildInspectionRecordMeasurementSource(recordToPrefill, qc?.item_master || {}, {
           allowFallback: true,
         })
         : qc?.item_master || {};
@@ -1415,10 +1418,10 @@ const UpdateQcModal = ({
 
     setForm({
       inspector: defaultInspectorId,
-      qc_checked: adminRecord ? toQuantityInputValue(adminRecord?.checked) : "",
-      qc_passed: adminRecord ? toQuantityInputValue(adminRecord?.passed) : "",
-      offeredQuantity: adminRecord
-        ? toQuantityInputValue(adminRecord?.vendor_offered)
+      qc_checked: recordToPrefill ? toQuantityInputValue(recordToPrefill?.checked) : "",
+      qc_passed: recordToPrefill ? toQuantityInputValue(recordToPrefill?.passed) : "",
+      offeredQuantity: recordToPrefill
+        ? toQuantityInputValue(recordToPrefill?.vendor_offered)
         : "",
       barcode:
         canViewStoredBarcodes && isPositiveBarcodeText(storedMasterBarcode)
@@ -1440,7 +1443,7 @@ const UpdateQcModal = ({
       kd: Boolean(itemMaster?.kd),
       mounting_file_needed: Boolean(itemMaster?.mounting_file_needed),
       labelRanges: initialLabelRanges,
-      remarks: isInspectionRecordUpdate || canRewriteLatestInspectionRecord
+      remarks: isInspectionRecordUpdate || canRewriteLatestInspectionRecord || isQcUserRewriteMode
         ? initialRemarks
         : "",
       inspected_weight_top_net: "",
@@ -1486,8 +1489,8 @@ const UpdateQcModal = ({
       ),
       last_inspected_date: toDDMMYYYYInputValue(
         isInspectionRecordUpdate
-          ? adminRecord?.inspection_date
-          : adminRecord?.inspection_date ||
+          ? recordToPrefill?.inspection_date
+          : recordToPrefill?.inspection_date ||
             latestRequestEntry?.request_date ||
             qc.request_date ||
             qc.last_inspected_date,
@@ -1517,9 +1520,11 @@ const UpdateQcModal = ({
     barcodePrefillRecord,
     isInspectionRecordUpdate,
     inspectionRecord,
-      isQcUser,
+    isQcUser,
     latestInspectionRecord,
     latestRequestEntry,
+    qcUserRewriteInspectionRecord,
+    isQcUserRewriteMode,
   ]);
 
   useEffect(() => {
@@ -2309,7 +2314,8 @@ const UpdateQcModal = ({
     const labelsForUpdate = normalizeLabels(labels);
     const isAdminRewriteMode =
       canRewriteLatestInspectionRecord && Boolean(latestInspectionRecord?._id);
-    const isInspectionRewriteMode = isInspectionRecordUpdate || isAdminRewriteMode;
+    const isInspectionRewriteMode =
+      isInspectionRecordUpdate || isAdminRewriteMode || isQcUserRewriteMode;
     const hasQuantityUpdate = isAdminRewriteMode
       ? qcChecked > 0 || qcPassed > 0 || offeredQuantity > 0
       : (
@@ -2792,11 +2798,14 @@ const UpdateQcModal = ({
         if (form.qc_checked !== "") payload.qc_checked = qcChecked;
         if (form.qc_passed !== "") payload.qc_passed = qcPassed;
         if (form.offeredQuantity !== "") payload.vendor_provision = offeredQuantity;
-        if (labelsForUpdate.length > 0) {
+        if (labelsForUpdate.length > 0 || isQcUserRewriteMode) {
           payload.labels = labelsForUpdate;
         }
-        if (normalizedLabelRanges.length > 0) {
+        if (normalizedLabelRanges.length > 0 || isQcUserRewriteMode) {
           payload.label_ranges = normalizedLabelRanges;
+        }
+        if (isQcUserRewriteMode) {
+          payload.qc_rewrite_current_request_record = true;
         }
       }
 
