@@ -37,6 +37,7 @@ import {
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatEan13BarcodeDisplay, toEan13BarcodeValue } from "../utils/barcode";
 import { formatPositiveCbm } from "../utils/cbm";
+import { resolveInspectionRecordCbm } from "../utils/inspectionCbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import { getOptionText } from "../utils/optionText";
 import {
@@ -1655,7 +1656,7 @@ const QcDetails = () => {
         record?.inspection_date,
         record?.createdAt,
       );
-      const inspectionCbm = record?.cbm?.total;
+      const inspectionCbm = resolveInspectionRecordCbm(record, qc);
       const cbmValue = formatPositiveCbm(inspectionCbm, "Not Set");
 
       return {

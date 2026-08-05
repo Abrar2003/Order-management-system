@@ -1,5 +1,5 @@
-import { formatCbm } from "./cbm";
-import { formatNumberInputValue } from "./measurementDisplay";
+import { formatCbm } from "./cbm.js";
+import { formatNumberInputValue } from "./measurementDisplay.js";
 
 export const ITEM_SIZE_ENTRY_LIMIT = 5;
 export const BOX_SIZE_ENTRY_LIMIT = 4;

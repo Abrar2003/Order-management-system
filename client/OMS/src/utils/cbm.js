@@ -1,4 +1,4 @@
-import { formatFixedNumber, formatPositiveFixedNumber } from "./measurementDisplay";
+import { formatFixedNumber, formatPositiveFixedNumber } from "./measurementDisplay.js";
 
 export const formatCbm = (value, fallback = "0.00") =>
   formatFixedNumber(value, fallback);
