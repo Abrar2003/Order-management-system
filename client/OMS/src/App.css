@@ -2538,6 +2538,32 @@ small,
   letter-spacing: 0;
 }
 
+.workflow-dashboard-stat-source-count {
+  position: relative;
+  z-index: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.workflow-dashboard-stat-source-count:hover:not(:disabled),
+.workflow-dashboard-stat-source-count:focus-visible:not(:disabled) {
+  color: var(--bs-link-color);
+  outline: none;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.15em;
+}
+
+.workflow-dashboard-stat-source-count:disabled {
+  cursor: default;
+}
+
 .workflow-dashboard-stat-separator {
   color: var(--om-color-text-muted);
   font-size: 0.8em;

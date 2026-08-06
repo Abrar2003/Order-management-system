@@ -1300,6 +1300,7 @@ const addAndMatch = (match, condition) => {
 const TASK_LIST_NARROWING_FILTER_KEYS = Object.freeze([
   "status",
   "task_type_key",
+  "source",
   "assignee",
   "creator",
   "department",
@@ -1377,6 +1378,12 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
   }
   if (normalizeText(query?.task_type_key)) {
     match.task_type_key = normalizeKey(query.task_type_key);
+  }
+  const sourceFilter = normalizeKey(query?.source);
+  if (sourceFilter === "batch") {
+    match.batch = { $ne: null };
+  } else if (sourceFilter === "individual") {
+    match.batch = null;
   }
   if (normalizeText(query?.batch) && mongoose.Types.ObjectId.isValid(query.batch)) {
     match.batch = new mongoose.Types.ObjectId(query.batch);
@@ -4016,6 +4023,10 @@ const updateWorkflowDepartment = async (id, payload = {}, actor = {}) => {
 };
 
 module.exports = {
+  __test__: {
+    buildTaskListMatch,
+    hasTaskListNarrowingFilter,
+  },
   addWorkflowTaskComment,
   approveWorkflowTaskHold,
   approveWorkflowTask,

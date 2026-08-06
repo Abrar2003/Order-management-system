@@ -301,9 +301,10 @@ const WorkflowDashboard = () => {
   );
 
   const navigateToTaskBoardSummary = useCallback(
-    (status = "") => {
+    (status = "", source = "") => {
       const next = new URLSearchParams();
       if (status) next.set("status", status);
+      if (source) next.set("source", source);
       if (taskTypeFilter) next.set("task_type_key", taskTypeFilter);
       if (departmentFilter) next.set("department", departmentFilter);
       if (brandFilter) next.set("brand", brandFilter);
@@ -716,21 +717,9 @@ const WorkflowDashboard = () => {
           <>
             <div className="workflow-dashboard-grid mb-3">
               {statCards.map((card) => (
-                <button
+                <div
                   key={card.key}
-                  type="button"
-                  className="card om-card workflow-dashboard-stat is-clickable"
-                  disabled={card.disableNavigation}
-                  onClick={() => {
-                    if (!card.disableNavigation) {
-                      navigateToTaskBoardSummary(card.status);
-                    }
-                  }}
-                  title={
-                    card.disableNavigation
-                      ? card.label
-                      : `View ${card.label.toLowerCase()} tasks`
-                  }
+                  className="card om-card workflow-dashboard-stat"
                 >
                   <div className="card-body">
                     <div className="workflow-dashboard-stat-label">{card.label}</div>
@@ -738,14 +727,32 @@ const WorkflowDashboard = () => {
                       className="workflow-dashboard-stat-value workflow-dashboard-stat-value--split"
                       aria-label={`${card.batchValue} batch tasks, ${card.taskValue} individual tasks`}
                     >
-                      <span>{card.batchValue}</span>
+                      <button
+                        type="button"
+                        className="workflow-dashboard-stat-source-count"
+                        disabled={card.disableNavigation}
+                        onClick={() => navigateToTaskBoardSummary(card.status, "batch")}
+                        aria-label={`View ${card.batchValue} ${card.label.toLowerCase()} batch tasks`}
+                        title={`View ${card.label.toLowerCase()} batch tasks`}
+                      >
+                        {card.batchValue}
+                      </button>
                       <span className="workflow-dashboard-stat-separator">/</span>
-                      <span>{card.taskValue}</span>
+                      <button
+                        type="button"
+                        className="workflow-dashboard-stat-source-count"
+                        disabled={card.disableNavigation}
+                        onClick={() => navigateToTaskBoardSummary(card.status, "individual")}
+                        aria-label={`View ${card.taskValue} ${card.label.toLowerCase()} individual tasks`}
+                        title={`View ${card.label.toLowerCase()} individual tasks`}
+                      >
+                        {card.taskValue}
+                      </button>
                     </div>
                     <div className="workflow-dashboard-stat-split-label">Batch Tasks / Individual</div>
                     <div className="workflow-dashboard-stat-note">{card.note}</div>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
 

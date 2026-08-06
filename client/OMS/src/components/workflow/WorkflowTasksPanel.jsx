@@ -143,6 +143,8 @@ const getTaskId = (task = {}) => String(task?._id || task?.taskId || "");
 
 const taskMatchesVisibleFilters = (task = {}, filters = {}) => {
   if (!getTaskId(task)) return false;
+  if (filters.taskSourceFilter === "batch" && !task?.batch) return false;
+  if (filters.taskSourceFilter === "individual" && task?.batch) return false;
   const search = normalizeText(filters.search).toLowerCase();
   if (search) {
     const haystack = [task.task_no, task.title, task.brand, task.task_type_name, task.task_type_key]
@@ -200,6 +202,10 @@ const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
   { value: "complete", label: "complete" },
   { value: "approved", label: "approved" },
   { value: "uploaded", label: "uploaded" },
+]);
+const TASK_SOURCE_FILTER_OPTIONS = Object.freeze([
+  { value: "batch", label: "Batch tasks" },
+  { value: "individual", label: "Individual tasks" },
 ]);
 
 const getTaskActionState = ({
@@ -433,6 +439,7 @@ const WorkflowTasksPanel = ({
     normalizeText(fixedStatusFilter) || normalizeText(searchParams.get("status")),
   );
   const [taskTypeFilter, setTaskTypeFilter] = useState(() => normalizeText(searchParams.get("task_type_key")));
+  const [taskSourceFilter, setTaskSourceFilter] = useState(() => normalizeText(searchParams.get("source")));
   const [assigneeFilter, setAssigneeFilter] = useState(() => {
     const value = normalizeText(searchParams.get("assignee"));
     if (mineOnly) return currentUserId;
@@ -552,6 +559,7 @@ const WorkflowTasksPanel = ({
         limit,
         status: statusFilter || undefined,
         task_type_key: taskTypeFilter || undefined,
+        source: taskSourceFilter || undefined,
         assignee:
           mineOnly && isAdmin
             ? currentUserId || undefined
@@ -601,6 +609,7 @@ const WorkflowTasksPanel = ({
     page,
     search,
     statusFilter,
+    taskSourceFilter,
     taskTypeFilter,
   ]);
 
@@ -608,11 +617,22 @@ const WorkflowTasksPanel = ({
     () => ({
       search,
       statusFilter,
+      taskSourceFilter,
       taskTypeFilter,
       assigneeFilter: mineOnly && isAdmin ? currentUserId : assigneeFilter,
       brandFilter,
     }),
-    [assigneeFilter, brandFilter, currentUserId, isAdmin, mineOnly, search, statusFilter, taskTypeFilter],
+    [
+      assigneeFilter,
+      brandFilter,
+      currentUserId,
+      isAdmin,
+      mineOnly,
+      search,
+      statusFilter,
+      taskSourceFilter,
+      taskTypeFilter,
+    ],
   );
 
   const patchVisibleTask = useCallback((nextTask) => {
@@ -727,6 +747,7 @@ const WorkflowTasksPanel = ({
     if (search) next.set("search", search);
     if (statusFilter && !fixedStatusFilter) next.set("status", statusFilter);
     if (taskTypeFilter) next.set("task_type_key", taskTypeFilter);
+    if (taskSourceFilter) next.set("source", taskSourceFilter);
     if (assigneeFilter && !mineOnly) next.set("assignee", assigneeFilter);
     if (creatorFilter && !mineOnly) next.set("creator", creatorFilter);
     if (departmentFilter) next.set("department", departmentFilter);
@@ -754,6 +775,7 @@ const WorkflowTasksPanel = ({
     searchParams,
     setSearchParams,
     statusFilter,
+    taskSourceFilter,
     taskTypeFilter,
   ]);
 
@@ -1187,6 +1209,24 @@ const WorkflowTasksPanel = ({
 	                  ))}
 	                </select>
 	              </div>
+              <div className="col-md-3 col-lg-2">
+                <label className="form-label">Task Source</label>
+                <select
+                  className="form-select"
+                  value={taskSourceFilter}
+                  onChange={(event) => {
+                    setTaskSourceFilter(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">All</option>
+                  {TASK_SOURCE_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               {canFilterByAssignee && !mineOnly && (
                 <div className="col-md-3 col-lg-2">
                   <label className="form-label">Assignee</label>
@@ -1297,6 +1337,7 @@ const WorkflowTasksPanel = ({
 	                    setSearch("");
 	                    setStatusFilter(normalizeText(fixedStatusFilter));
 	                    setTaskTypeFilter("");
+	                    setTaskSourceFilter("");
 	                    setAssigneeFilter(mineOnly ? currentUserId : "");
 	                    setCreatorFilter("");
 	                    setDepartmentFilter("");
