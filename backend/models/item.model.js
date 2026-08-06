@@ -522,6 +522,7 @@ const itemSchema = new mongoose.Schema(
       type: productDatabaseActorSchema,
       default: undefined,
     },
+
     qc: {
       packed_size: { type: Boolean, default: false },
       finishing: { type: Boolean, default: false },
