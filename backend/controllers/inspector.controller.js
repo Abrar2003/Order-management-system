@@ -224,6 +224,11 @@ const attachUsedLabelHistoryToInspectorRows = async (inspectors = [], user = {})
   return rows;
 };
 
+const getInspectorDisplayName = (inspector = {}, fallback = "Unknown QC") =>
+  String(
+    inspector?.user?.name || inspector?.user?.email || "",
+  ).trim() || fallback;
+
 const collectGlobalInspectorLabelSets = async ({ excludeInspectorIds = [] } = {}) => {
   const excludedIdSet = new Set(
     (Array.isArray(excludeInspectorIds) ? excludeInspectorIds : [excludeInspectorIds])
@@ -232,9 +237,11 @@ const collectGlobalInspectorLabelSets = async ({ excludeInspectorIds = [] } = {}
   );
   const inspectors = await Inspector.find({})
     .select("_id user alloted_labels rejected_labels")
+    .populate("user", "name email")
     .lean();
 
   const allocated = new Set();
+  const allocatedByLabel = new Map();
   const used = new Set();
   const rejected = new Set();
   const excludedUserIdSet = new Set();
@@ -248,7 +255,17 @@ const collectGlobalInspectorLabelSets = async ({ excludeInspectorIds = [] } = {}
     }
 
     const labelState = getInspectorLabelState(inspector);
-    labelState.allocated.forEach((label) => allocated.add(label));
+    labelState.allocated.forEach((label) => {
+      allocated.add(label);
+      const owners = allocatedByLabel.get(label) || [];
+      if (!owners.some((owner) => owner.inspector_id === inspectorId)) {
+        owners.push({
+          inspector_id: inspectorId,
+          qc_name: getInspectorDisplayName(inspector),
+        });
+        allocatedByLabel.set(label, owners);
+      }
+    });
     labelState.rejected.forEach((label) => rejected.add(label));
   });
 
@@ -262,7 +279,7 @@ const collectGlobalInspectorLabelSets = async ({ excludeInspectorIds = [] } = {}
     normalizeInspectorLabels(record?.labels_added || []).forEach((label) => used.add(label));
   });
 
-  return { allocated, used, rejected };
+  return { allocated, allocatedByLabel, used, rejected };
 };
 
 const formatLabelPreview = (labels = [], limit = 10) => {
@@ -272,6 +289,26 @@ const formatLabelPreview = (labels = [], limit = 10) => {
   const preview = normalized.slice(0, limit).join(", ");
   return normalized.length > limit ? `${preview}...` : preview;
 };
+
+const getAllocatedElsewhereDetails = (labels = [], allocatedByLabel = new Map()) => {
+  const allocatedElsewhere = normalizeInspectorLabels(labels);
+  const allocatedTo = allocatedElsewhere.map((label) => ({
+    label,
+    inspectors: allocatedByLabel.get(label) || [],
+  }));
+  const preview = allocatedTo.slice(0, 10).map(({ label, inspectors }) => {
+    const qcNames = inspectors.map((inspector) => inspector.qc_name).filter(Boolean);
+    return `${label} (${qcNames.join(", ") || "another QC"})`;
+  }).join("; ");
+
+  return {
+    message: `Some labels are already allocated to another QC: ${preview}${allocatedTo.length > 10 ? "..." : ""}`,
+    allocated_elsewhere: allocatedElsewhere,
+    allocated_to: allocatedTo,
+  };
+};
+
+exports.__test__ = { getAllocatedElsewhereDetails };
 
 const QC_USER_FILTER = {
   $and: [
@@ -373,9 +410,7 @@ const ensureInspectorRecordsForQcUsers = async ({ search = "" } = {}) => {
 
 const buildInspectorOption = (inspector = {}) => {
   const inspectorId = String(inspector?._id || "").trim();
-  const displayName = String(
-    inspector?.user?.name || inspector?.user?.email || inspectorId,
-  ).trim();
+  const displayName = getInspectorDisplayName(inspector, inspectorId);
 
   return {
     id: inspectorId,
@@ -570,10 +605,12 @@ exports.allocateLabels = async (req, res) => {
       globalLabelSets.allocated.has(label),
     );
     if (allocatedElsewhere.length > 0) {
-      return res.status(400).json({
-        message: `Some labels are already allocated to another inspector: ${formatLabelPreview(allocatedElsewhere)}`,
-        allocated_elsewhere: allocatedElsewhere,
-      });
+      return res.status(400).json(
+        getAllocatedElsewhereDetails(
+          allocatedElsewhere,
+          globalLabelSets.allocatedByLabel,
+        ),
+      );
     }
 
     const usedElsewhere = normalizedLabels.filter((label) =>
@@ -771,10 +808,12 @@ exports.transferLabels = async (req, res) => {
       globalLabelSets.allocated.has(label),
     );
     if (allocatedElsewhere.length > 0) {
-      return res.status(400).json({
-        message: `Some labels are already allocated to another inspector: ${formatLabelPreview(allocatedElsewhere)}`,
-        allocated_elsewhere: allocatedElsewhere,
-      });
+      return res.status(400).json(
+        getAllocatedElsewhereDetails(
+          allocatedElsewhere,
+          globalLabelSets.allocatedByLabel,
+        ),
+      );
     }
 
     const transferSet = new Set(normalizedLabels);
@@ -960,10 +999,12 @@ exports.replaceLabels = async (req, res) => {
       globalLabelSets.allocated.has(label),
     );
     if (allocatedElsewhere.length > 0) {
-      return res.status(400).json({
-        message: `Some labels are already allocated to another inspector: ${formatLabelPreview(allocatedElsewhere)}`,
-        allocated_elsewhere: allocatedElsewhere,
-      });
+      return res.status(400).json(
+        getAllocatedElsewhereDetails(
+          allocatedElsewhere,
+          globalLabelSets.allocatedByLabel,
+        ),
+      );
     }
 
     const usedElsewhere = normalizedLabels.filter((label) =>
