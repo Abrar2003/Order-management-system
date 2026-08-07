@@ -181,32 +181,18 @@ const inferSizeRemark = (value = "") => {
   return "";
 };
 
-const resolveRowMetadata = (row) => {
-  let resolved = null;
-  row.eachCell({ includeEmpty: false }, (cell) => {
-    if (resolved) return;
-    const normalized = normalizeHeader(getCellFormattedText(cell));
-    for (const [type, aliases] of Object.entries(RECOGNIZED_ROW_LABELS)) {
-      if (normalizedAliases(aliases).has(normalized)) {
-        resolved = { type, remark: "" };
-        break;
-      }
-    }
-    if (resolved) return;
+const resolveRowMetadata = (row, labelColumn) => {
+  const normalized = normalizeHeader(getCellFormattedText(row.getCell(labelColumn)));
+  for (const [type, aliases] of Object.entries(RECOGNIZED_ROW_LABELS)) {
+    if (normalizedAliases(aliases).has(normalized)) return { type, remark: "" };
+  }
+  if (/^item[1-4]$/.test(normalized)) return { type: "item", remark: normalized };
 
-    if (/^item[1-4]$/.test(normalized)) {
-      resolved = { type: "item", remark: normalized };
-      return;
-    }
-
-    const remark = inferSizeRemark(normalized);
-    if (normalized.startsWith("boxsizes")) {
-      resolved = remark ? { type: "individual", remark } : { type: "master", remark: "" };
-      return;
-    }
-    if (remark) resolved = { type: "item", remark };
-  });
-  return resolved;
+  const remark = inferSizeRemark(normalized);
+  if (normalized.startsWith("boxsizes")) {
+    return remark ? { type: "individual", remark } : { type: "master", remark: "" };
+  }
+  return remark ? { type: "item", remark } : null;
 };
 
 const readNumericCell = (sheet, rowNumber, columnNumber) => {
@@ -252,7 +238,7 @@ const parseDimensionRows = (sheet, dimensionCell) => {
   const scanEndRow = Math.min(sheet.rowCount, dimensionCell.row + 30);
 
   for (let rowNumber = dimensionCell.row + 1; rowNumber <= scanEndRow; rowNumber += 1) {
-    const rowMetadata = resolveRowMetadata(sheet.getRow(rowNumber));
+    const rowMetadata = resolveRowMetadata(sheet.getRow(rowNumber), dimensionCell.col);
     if (!rowMetadata) continue;
     const { type: rowType, remark: rowRemark } = rowMetadata;
 

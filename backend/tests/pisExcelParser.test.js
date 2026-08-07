@@ -170,6 +170,11 @@ const buildNumberedRemarkWorkbook = () => {
     sheet.getCell(row, 14).value = weight || null;
     sheet.getCell(row, 20).value = quantity || null;
   });
+  sheet.getCell(51, 1).value = "Hardware";
+  sheet.getCell(51, 4).value = "Table top";
+  sheet.getCell(51, 6).value = "legs";
+  sheet.getCell(51, 8).value = "extendable";
+  sheet.getCell(51, 10).value = "Butterfly";
 
   return workbook;
 };
@@ -358,7 +363,7 @@ test("parses wide dept high stool layout with single-quantity box as individual 
   assert.equal(parsed.boxMode, BOX_PACKAGING_MODES.INDIVIDUAL);
 });
 
-test("parses numbered item and part-specific box remarks with a plain weight column", () => {
+test("parses numbered remarks and ignores the following hardware table", () => {
   const parsed = parsePisWorkbook(buildNumberedRemarkWorkbook());
 
   assert.deepEqual(parsed.itemSizes, [
