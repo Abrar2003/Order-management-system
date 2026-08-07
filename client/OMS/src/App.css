@@ -451,6 +451,26 @@ small,
   min-width: 20rem;
 }
 
+.item-file-dropzone {
+  width: 100%;
+  min-width: 9rem;
+  padding: 0.45rem;
+  border: 1px dashed var(--bs-secondary-color);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--bs-secondary-color);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.item-file-dropzone:hover,
+.item-file-dropzone.is-dragging {
+  border-color: var(--bs-primary);
+  background: var(--bs-primary-bg-subtle);
+  color: var(--bs-primary);
+}
+
 .item-files-table .om-size-data-table th,
 .item-files-table .om-size-data-table td {
   padding-block: 0.25rem;

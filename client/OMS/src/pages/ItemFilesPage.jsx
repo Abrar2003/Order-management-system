@@ -348,6 +348,7 @@ const ItemFilesPage = () => {
   });
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [uploadingItemId, setUploadingItemId] = useState("");
+  const [draggingItemId, setDraggingItemId] = useState("");
   const [itemFilePickerItemId, setItemFilePickerItemId] = useState("");
   const [openingFileItemId, setOpeningFileItemId] = useState("");
   const [previewFile, setPreviewFile] = useState(null);
@@ -617,19 +618,13 @@ const ItemFilesPage = () => {
     }, 0);
   }, [activeFileOption, canUploadActiveFile, uploadingItemId]);
 
-  const handleItemFileChange = useCallback(async (event) => {
-    const inputElement = event.target;
-    const selectedFiles = Array.from(inputElement?.files || []);
-
-    if (selectedFiles.length === 0 || !itemFilePickerItemId) {
-      if (inputElement) inputElement.value = "";
-      return;
-    }
+  const uploadItemFiles = useCallback(async (itemId, selectedFiles) => {
+    if (!itemId || selectedFiles.length === 0) return;
 
     try {
       setError("");
       setSuccess("");
-      setUploadingItemId(itemFilePickerItemId);
+      setUploadingItemId(itemId);
 
       for (const selectedFile of selectedFiles) {
         const normalizedName = String(selectedFile.name || "").toLowerCase();
@@ -646,15 +641,11 @@ const ItemFilesPage = () => {
       }
 
       const uploadRequest = buildItemFileUploadRequest({
-        itemId: itemFilePickerItemId,
+        itemId,
         fileType: activeFileType,
         files: activeFileOption.supportsMultiple ? selectedFiles : selectedFiles.slice(0, 1),
       });
-
-      const response = await api.post(
-        uploadRequest.path,
-        uploadRequest.formData,
-      );
+      const response = await api.post(uploadRequest.path, uploadRequest.formData);
 
       setSuccess(
         response?.data?.message || `${activeFileOption.label} uploaded successfully.`,
@@ -668,10 +659,45 @@ const ItemFilesPage = () => {
       );
     } finally {
       setUploadingItemId("");
-      setItemFilePickerItemId("");
-      if (inputElement) inputElement.value = "";
     }
-  }, [activeFileOption, activeFileType, fetchItems, itemFilePickerItemId]);
+  }, [activeFileOption, activeFileType, fetchItems]);
+
+  const handleItemFileChange = useCallback(async (event) => {
+    const inputElement = event.target;
+    const selectedFiles = Array.from(inputElement?.files || []);
+
+    if (selectedFiles.length === 0 || !itemFilePickerItemId) {
+      if (inputElement) inputElement.value = "";
+      return;
+    }
+
+    await uploadItemFiles(itemFilePickerItemId, selectedFiles);
+    setItemFilePickerItemId("");
+    if (inputElement) inputElement.value = "";
+  }, [itemFilePickerItemId, uploadItemFiles]);
+
+  const handleItemFileDrop = useCallback((event, item) => {
+    event.preventDefault();
+    setDraggingItemId("");
+    if (!canUploadActiveFile || uploadingItemId) return;
+    if (!isItemFileOptionAvailableForItem(activeFileOption, item)) {
+      setError(`${activeFileOption.label} is not enabled for this item.`);
+      return;
+    }
+
+    const itemId = String(item?._id || "").trim();
+    const selectedFiles = Array.from(event.dataTransfer?.files || []);
+    void uploadItemFiles(itemId, selectedFiles);
+  }, [activeFileOption, canUploadActiveFile, uploadItemFiles, uploadingItemId]);
+
+  const handleItemFileDragOver = useCallback((event, item) => {
+    if (!canUploadActiveFile || uploadingItemId) return;
+    if (!isItemFileOptionAvailableForItem(activeFileOption, item)) return;
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setDraggingItemId(String(item?._id || "").trim());
+  }, [activeFileOption, canUploadActiveFile, uploadingItemId]);
 
   const handlePreviewFile = useCallback(async (item) => {
     const itemId = String(item?._id || "").trim();
@@ -927,6 +953,9 @@ const ItemFilesPage = () => {
                       const storedFiles = getItemFileValues(item, activeFileOption);
                       const storedFile = storedFiles[0] || null;
                       const hasFile = storedFiles.length > 0;
+                      const canUploadThisItem =
+                        canUploadActiveFile
+                        && isItemFileOptionAvailableForItem(activeFileOption, item);
 
                       return (
                         <tr key={item?._id || item?.code}>
@@ -959,31 +988,46 @@ const ItemFilesPage = () => {
                             />
                           </td>
                           <td data-label={activeFileOption.label}>
-                            {hasFile ? (
-                              <div className="item-file-product-image-cell">
-                                {isProductImageFileType(activeFileType) && (
-                                  <ProductImageThumbnail
-                                    src={item?.product_image_url}
-                                    originalName={storedFile?.originalName}
-                                    alt={`${item?.code || "Item"} product image`}
-                                  />
-                                )}
-                                {!isProductImageFileType(activeFileType) && (
-                                  <span className="badge text-bg-success align-self-start">
-                                    {storedFiles.length > 1
-                                      ? `${storedFiles.length} Uploaded`
-                                      : "Uploaded"}
+                            <div className="d-flex flex-column gap-2">
+                              {hasFile ? (
+                                <div className="item-file-product-image-cell">
+                                  {isProductImageFileType(activeFileType) && (
+                                    <ProductImageThumbnail
+                                      src={item?.product_image_url}
+                                      originalName={storedFile?.originalName}
+                                      alt={`${item?.code || "Item"} product image`}
+                                    />
+                                  )}
+                                  {!isProductImageFileType(activeFileType) && (
+                                    <span className="badge text-bg-success align-self-start">
+                                      {storedFiles.length > 1
+                                        ? `${storedFiles.length} Uploaded`
+                                        : "Uploaded"}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="d-flex flex-column gap-1">
+                                  <span className="text-secondary">Not uploaded</span>
+                                  <span className="badge text-bg-secondary align-self-start">
+                                    Missing
                                   </span>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="d-flex flex-column gap-1">
-                                <span className="text-secondary">Not uploaded</span>
-                                <span className="badge text-bg-secondary align-self-start">
-                                  Missing
-                                </span>
-                              </div>
-                            )}
+                                </div>
+                              )}
+                              {canUploadThisItem && (
+                                <button
+                                  type="button"
+                                  className={`item-file-dropzone${draggingItemId === itemId ? " is-dragging" : ""}`}
+                                  disabled={Boolean(uploadingItemId)}
+                                  onClick={() => handleOpenItemFilePicker(item)}
+                                  onDragOver={(event) => handleItemFileDragOver(event, item)}
+                                  onDragLeave={() => setDraggingItemId("")}
+                                  onDrop={(event) => handleItemFileDrop(event, item)}
+                                >
+                                  {isUploadingThisItem ? "Uploading..." : `Drop ${activeFileOption.buttonLabel} here or click`}
+                                </button>
+                              )}
+                            </div>
                           </td>
                           <td data-label="Action">
                             <div className="dropdown">

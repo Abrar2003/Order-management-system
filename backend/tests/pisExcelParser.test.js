@@ -380,6 +380,27 @@ test("middleware replaces PIS data, saves aliases, and remains idempotent", asyn
   assert.equal(nextCalls, 2);
 });
 
+test("middleware uses a lone PIS barcode for both master aliases", async () => {
+  const item = createFakeItem({ code: "550875" });
+  const middleware = createParseAndSyncPisUpload({
+    ItemModel: { findOne: async () => item },
+    parseUpload: async () => parsePisWorkbook(buildWideDeptHighWorkbook()),
+  });
+
+  await middleware(
+    {
+      file: { originalname: "pis.xlsx", buffer: Buffer.from("test") },
+      params: { itemId: String(item._id) },
+      user: {},
+    },
+    createResponse(),
+    () => {},
+  );
+
+  assert.equal(item.pis_master_barcode, "8721274911619");
+  assert.equal(item.pis_barcode, "8721274911619");
+});
+
 test("route item/article mismatch returns 409 without saving", async () => {
   const item = createFakeItem({ code: "DIFFERENT" });
   const middleware = createParseAndSyncPisUpload({

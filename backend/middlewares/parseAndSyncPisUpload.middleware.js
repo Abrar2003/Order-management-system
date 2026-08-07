@@ -97,9 +97,10 @@ const createParseAndSyncPisUpload = ({
       typeof item.toObject === "function" ? item.toObject() : toPlainValue(item);
     const updatedFields = [];
 
-    if (parsed.masterBarcode) {
-      setWhenChanged(item, "pis_master_barcode", parsed.masterBarcode, updatedFields);
-      setWhenChanged(item, "pis_barcode", parsed.masterBarcode, updatedFields);
+    const masterBarcode = parsed.masterBarcode || parsed.pcsBarcode;
+    if (masterBarcode) {
+      setWhenChanged(item, "pis_master_barcode", masterBarcode, updatedFields);
+      setWhenChanged(item, "pis_barcode", masterBarcode, updatedFields);
     }
     if (parsed.pcsBarcode) {
       setWhenChanged(item, "pis_inner_barcode", parsed.pcsBarcode, updatedFields);
