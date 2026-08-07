@@ -10,6 +10,12 @@ const parsePositiveInteger = (value, fallback) => {
   return parsed;
 };
 
+const getInspectorUserId = (inspector = {}) => {
+  const user = inspector?.user;
+  const userId = user?._id || user?.id || user;
+  return mongoose.isObjectIdOrHexString(userId) ? String(userId) : "";
+};
+
 const normalizeInspectorLabels = (labels = []) =>
   [...new Set(
     (Array.isArray(labels) ? labels : [])
@@ -149,7 +155,7 @@ const getUsedLabelSummaryForInspectorUser = async (inspectorUserId) => {
 const syncInspectorUsedLabelsFromInspectionRecords = async (inspector) => {
   if (!inspector?.user) return inspector;
 
-  const inspectorUserId = String(inspector?.user?._id || inspector.user || "").trim();
+  const inspectorUserId = getInspectorUserId(inspector);
   if (!inspectorUserId) return inspector;
 
   const labelUsageRecords = await Inspection.find({
@@ -176,7 +182,7 @@ const attachUsedLabelHistoryToInspectorRows = async (inspectors = [], user = {})
   const userIds = [
     ...new Set(
       rows
-        .map((inspector) => String(inspector?.user?._id || inspector?.user || "").trim())
+        .map(getInspectorUserId)
         .filter(Boolean),
     ),
   ];
@@ -208,7 +214,7 @@ const attachUsedLabelHistoryToInspectorRows = async (inspectors = [], user = {})
   });
 
   rows.forEach((inspector) => {
-    const inspectorId = String(inspector?.user?._id || inspector?.user || "").trim();
+    const inspectorId = getInspectorUserId(inspector);
     const records = recordsByInspectorId.get(inspectorId) || [];
     inspector.used_labels = normalizeInspectorLabels(
       records.flatMap((entry) =>
@@ -249,7 +255,7 @@ const collectGlobalInspectorLabelSets = async ({ excludeInspectorIds = [] } = {}
   inspectors.forEach((inspector) => {
     const inspectorId = String(inspector?._id || "");
     if (excludedIdSet.has(inspectorId)) {
-      const userId = String(inspector?.user || "").trim();
+      const userId = getInspectorUserId(inspector);
       if (userId) excludedUserIdSet.add(userId);
       return;
     }
@@ -308,7 +314,7 @@ const getAllocatedElsewhereDetails = (labels = [], allocatedByLabel = new Map())
   };
 };
 
-exports.__test__ = { getAllocatedElsewhereDetails };
+exports.__test__ = { getAllocatedElsewhereDetails, getInspectorUserId };
 
 const QC_USER_FILTER = {
   $and: [
@@ -435,7 +441,7 @@ exports.getInspectorOptions = async (req, res) => {
 
     const inspectorByUser = new Map();
     inspectors.forEach((inspector) => {
-      const userId = String(inspector?.user?._id || inspector?.user || "");
+      const userId = getInspectorUserId(inspector);
       if (!userId || inspectorByUser.has(userId)) return;
       inspectorByUser.set(userId, inspector);
     });
@@ -476,7 +482,7 @@ exports.getAllInspectors = async (req, res) => {
 
     const inspectorByUser = new Map();
     inspectors.forEach((inspector) => {
-      const userId = String(inspector?.user?._id || inspector?.user || "");
+      const userId = getInspectorUserId(inspector);
       if (!userId || inspectorByUser.has(userId)) return;
       inspectorByUser.set(userId, inspector);
     });

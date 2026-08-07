@@ -2,8 +2,15 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
-  __test__: { getAllocatedElsewhereDetails },
+  __test__: { getAllocatedElsewhereDetails, getInspectorUserId },
 } = require("../controllers/inspector.controller");
+
+test("uses the inspector user id without stringifying a populated user object", () => {
+  const userId = "66e5f2a0be4b1b8d4f841234";
+
+  assert.equal(getInspectorUserId({ user: { _id: userId, name: "Ashwini" } }), userId);
+  assert.equal(getInspectorUserId({ user: { name: "Ashwini" } }), "");
+});
 
 test("allocated-label conflicts identify the QC holding each label", () => {
   const result = getAllocatedElsewhereDetails(
