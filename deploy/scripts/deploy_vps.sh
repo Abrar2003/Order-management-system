@@ -226,6 +226,8 @@ if is_truthy "$REDIS_JOBS_ENABLED_EFFECTIVE"; then
     exit 1
   fi
 
+  
+
   echo "oms-worker is running with $RUNNING_PM2_WORKER_INSTANCES instance(s)"
 
   RUNNING_PM2_QC_IMAGE_WORKER_INSTANCES="$(count_online_pm2_app oms-qc-image-worker)"
