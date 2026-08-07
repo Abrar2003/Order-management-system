@@ -425,7 +425,7 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
               </div>
 
               <div className="col-md-6">
-                <label className="form-label">Finish Back Image</label>
+                <label className="form-label">Finish Back Image (Optional)</label>
                 <input
                   type="file"
                   className="form-control"
@@ -576,7 +576,6 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
                 || !normalizeCode(form.color_code)
                 || selectedItemCodes.length === 0
                 || !(form.front_image instanceof File || hasStoredImage(initialFinish?.front_image))
-                || !(form.back_image instanceof File || hasStoredImage(initialFinish?.back_image))
               }
             >
               {saving ? "Saving..." : isEditing ? "Update Finish" : "Save Finish"}

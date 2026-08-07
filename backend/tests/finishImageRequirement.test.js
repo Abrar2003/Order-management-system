@@ -16,18 +16,17 @@ const finishData = {
   unique_code: "VND-BLK",
 };
 
-test("finishes require a front and back image", async () => {
-  await assert.rejects(
-    new Finish({
-      ...finishData,
-      front_image: { key: "finish/front.webp" },
-    }).validate(),
-    /back_image/i,
-  );
-
+test("finishes require a front image and allow a temporary back image", async () => {
   await new Finish({
     ...finishData,
     front_image: { key: "finish/front.webp" },
-    back_image: { key: "finish/back.webp" },
   }).validate();
+
+  await assert.rejects(
+    new Finish({
+      ...finishData,
+      back_image: { key: "finish/back.webp" },
+    }).validate(),
+    /front_image/i,
+  );
 });

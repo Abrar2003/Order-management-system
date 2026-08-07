@@ -60,6 +60,13 @@ router.post(
 );
 
 router.delete(
+  "/:id/back-image",
+  auth,
+  requirePermission("finishes", "delete"),
+  finishController.deleteFinishBackImage,
+);
+
+router.delete(
   "/:id",
   auth,
   requirePermission("finishes", "delete"),

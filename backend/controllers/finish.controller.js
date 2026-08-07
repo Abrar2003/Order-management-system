@@ -585,9 +585,6 @@ exports.upsertFinish = async (req, res) => {
     if (!frontImageFile && !hasStoredImage(previousFrontImage)) {
       return res.status(400).json({ success: false, message: "Front image is required" });
     }
-    if (!backImageFile && !hasStoredImage(previousBackImage)) {
-      return res.status(400).json({ success: false, message: "Back image is required" });
-    }
 
     const uploadedFrontImage = frontImageFile
       ? await uploadFinishImage(frontImageFile, uniqueCode)
@@ -609,7 +606,7 @@ exports.upsertFinish = async (req, res) => {
     finishDoc.unique_code = uniqueCode;
     finishDoc.item_codes = [...selectedItemCodes].sort((left, right) => left.localeCompare(right));
     finishDoc.front_image = nextFrontImage;
-    finishDoc.back_image = nextBackImage;
+    finishDoc.back_image = hasStoredImage(nextBackImage) ? nextBackImage : undefined;
     finishDoc.image = undefined;
     await finishDoc.save();
     saved = true;
@@ -683,6 +680,42 @@ exports.upsertFinish = async (req, res) => {
       message: duplicateKeyError
         ? "A finish with this unique code already exists"
         : error?.message || "Failed to save finish",
+    });
+  }
+};
+
+exports.deleteFinishBackImage = async (req, res) => {
+  try {
+    const finishId = normalizeText(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(finishId)) {
+      return res.status(400).json({ success: false, message: "Invalid finish id" });
+    }
+
+    const finish = await Finish.findById(finishId);
+    if (!finish) {
+      return res.status(404).json({ success: false, message: "Finish not found" });
+    }
+
+    const backImage = toStoredImage(finish.back_image);
+    if (!hasStoredImage(backImage)) {
+      return res.status(404).json({ success: false, message: "Back image not found" });
+    }
+
+    finish.back_image = undefined;
+    await finish.save();
+    if (backImage.key) {
+      await deleteObject(backImage.key).catch(() => undefined);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Back image deleted",
+    });
+  } catch (error) {
+    console.error("Delete Finish Back Image Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to delete back image",
     });
   }
 };

@@ -135,6 +135,45 @@ const buildWideDeptHighWorkbook = () => {
   return workbook;
 };
 
+const buildNumberedRemarkWorkbook = () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Tables");
+
+  sheet.getCell("F4").value = "article number";
+  sheet.getCell("J4").value = "57841";
+  [
+    ["A40", "Dimension in cm"],
+    ["D40", "length"],
+    ["F40", "wide"],
+    ["H40", "dept"],
+    ["J40", "high"],
+    ["L40", "thickness"],
+    ["N40", "weight"],
+    ["R40", "K.D."],
+    ["T40", "quantities in box"],
+  ].forEach(([address, value]) => {
+    sheet.getCell(address).value = value;
+  });
+
+  [
+    [41, "Item1", 34, 34, 45, 4, 0],
+    [42, "Item2", 45, 45, 52, 4.5, 0],
+    [43, "Table top", 0, 0, 0, 0, 0],
+    [44, "Legs", 0, 0, 0, 0, 0],
+    [47, "Box sizes top", 52, 52, 59, 12, 1],
+    [48, "Box sizes legs", 0, 0, 0, 0, 0],
+  ].forEach(([row, label, L, B, H, weight, quantity]) => {
+    sheet.getCell(row, 1).value = label;
+    sheet.getCell(row, 4).value = L || null;
+    sheet.getCell(row, 6).value = B || null;
+    sheet.getCell(row, 10).value = H || null;
+    sheet.getCell(row, 14).value = weight || null;
+    sheet.getCell(row, 20).value = quantity || null;
+  });
+
+  return workbook;
+};
+
 const createResponse = () => ({
   statusCode: 200,
   payload: null,
@@ -312,6 +351,27 @@ test("parses wide dept high stool layout with single-quantity box as individual 
     net_weight: 0,
     gross_weight: 0,
     remark: "box",
+    box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
+    item_count_in_inner: 0,
+    box_count_in_master: 0,
+  }]);
+  assert.equal(parsed.boxMode, BOX_PACKAGING_MODES.INDIVIDUAL);
+});
+
+test("parses numbered item and part-specific box remarks with a plain weight column", () => {
+  const parsed = parsePisWorkbook(buildNumberedRemarkWorkbook());
+
+  assert.deepEqual(parsed.itemSizes, [
+    { L: 34, B: 34, H: 45, net_weight: 4, gross_weight: 0, remark: "item1" },
+    { L: 45, B: 45, H: 52, net_weight: 4.5, gross_weight: 0, remark: "item2" },
+  ]);
+  assert.deepEqual(parsed.boxSizes, [{
+    L: 52,
+    B: 52,
+    H: 59,
+    net_weight: 0,
+    gross_weight: 12,
+    remark: "top",
     box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
     item_count_in_inner: 0,
     box_count_in_master: 0,

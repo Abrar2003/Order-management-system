@@ -31,7 +31,7 @@ const finishSchema = new mongoose.Schema(
     color: { type: String, required: true, trim: true },
     color_code: { type: String, required: true, trim: true, uppercase: true },
     front_image: requiredFinishImage("Front"),
-    back_image: requiredFinishImage("Back"),
+    back_image: { type: finishImageSchema, default: undefined },
     image: { type: finishImageSchema, default: undefined },
     vendor: {
       type: embeddedVendorSchema,

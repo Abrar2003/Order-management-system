@@ -25,6 +25,7 @@ const DIMENSION_HEADER_ALIASES = Object.freeze({
   dia: ["dia", "diameter"],
   net_weight: ["netto weight kg", "net weight kg", "netto weight", "net weight"],
   gross_weight: ["gross weight kg", "gross weight"],
+  weight: ["weight"],
   quantity: ["quantities in box", "quantity in box", "pcs in box"],
 });
 
@@ -169,17 +170,41 @@ const findHeaderColumns = (sheet, dimensionCell) => {
   return columns;
 };
 
-const resolveRowType = (row) => {
-  let resolved = "";
+const inferSizeRemark = (value = "") => {
+  const normalized = normalizeHeader(value);
+  if (normalized.includes("top")) return "top";
+  if (normalized.includes("legs") || normalized.includes("base") || normalized.includes("bottom")) {
+    return "base";
+  }
+  if (normalized.includes("pedestal")) return "pedestal";
+  if (normalized.includes("stretcher")) return "stretcher";
+  return "";
+};
+
+const resolveRowMetadata = (row) => {
+  let resolved = null;
   row.eachCell({ includeEmpty: false }, (cell) => {
     if (resolved) return;
     const normalized = normalizeHeader(getCellFormattedText(cell));
     for (const [type, aliases] of Object.entries(RECOGNIZED_ROW_LABELS)) {
       if (normalizedAliases(aliases).has(normalized)) {
-        resolved = type;
+        resolved = { type, remark: "" };
         break;
       }
     }
+    if (resolved) return;
+
+    if (/^item[1-4]$/.test(normalized)) {
+      resolved = { type: "item", remark: normalized };
+      return;
+    }
+
+    const remark = inferSizeRemark(normalized);
+    if (normalized.startsWith("boxsizes")) {
+      resolved = remark ? { type: "individual", remark } : { type: "master", remark: "" };
+      return;
+    }
+    if (remark) resolved = { type: "item", remark };
   });
   return resolved;
 };
@@ -227,8 +252,9 @@ const parseDimensionRows = (sheet, dimensionCell) => {
   const scanEndRow = Math.min(sheet.rowCount, dimensionCell.row + 30);
 
   for (let rowNumber = dimensionCell.row + 1; rowNumber <= scanEndRow; rowNumber += 1) {
-    const rowType = resolveRowType(sheet.getRow(rowNumber));
-    if (!rowType) continue;
+    const rowMetadata = resolveRowMetadata(sheet.getRow(rowNumber));
+    if (!rowMetadata) continue;
+    const { type: rowType, remark: rowRemark } = rowMetadata;
 
     const lengthField = readNumericField(sheet, rowNumber, columns.L);
     const breadthField = readNumericField(sheet, rowNumber, columns.B);
@@ -240,6 +266,7 @@ const parseDimensionRows = (sheet, dimensionCell) => {
     ];
     const netWeightField = readNumericField(sheet, rowNumber, columns.net_weight);
     const grossWeightField = readNumericField(sheet, rowNumber, columns.gross_weight);
+    const weightField = readNumericField(sheet, rowNumber, columns.weight);
     const quantityField = readNumericField(sheet, rowNumber, columns.quantity);
     const numericFields = [
       lengthField,
@@ -247,6 +274,7 @@ const parseDimensionRows = (sheet, dimensionCell) => {
       ...thirdDimensionFields,
       netWeightField,
       grossWeightField,
+      weightField,
       quantityField,
     ];
     const hasAnyRowInput = numericFields.some((field) => field.hasInput);
@@ -269,28 +297,30 @@ const parseDimensionRows = (sheet, dimensionCell) => {
     const H =
       thirdDimension ??
       (rowType === "item" && L > 0 && B > 0 && !hasThirdDimensionInput ? 1 : null);
+    const plainWeight = toNonNegativeNumber(weightField.value);
 
     const entry = {
       L,
       B,
       H: toNonNegativeNumber(H),
-      net_weight: toNonNegativeNumber(netWeightField.value),
-      gross_weight: toNonNegativeNumber(grossWeightField.value),
+      net_weight: toNonNegativeNumber(netWeightField.value) || (rowType === "item" ? plainWeight : 0),
+      gross_weight: toNonNegativeNumber(grossWeightField.value) || (rowType === "item" ? 0 : plainWeight),
     };
 
     if (rowType === "item") {
-      itemSizes.push({ ...entry, remark: "Item" });
+      itemSizes.push({ ...entry, remark: rowRemark || "Item" });
       continue;
     }
 
     const quantity = toNonNegativeNumber(quantityField.value);
     const isInner = rowType === "inner";
+    const isMaster = rowType === "master";
     boxSizes.push({
       ...entry,
-      remark: isInner ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER,
-      box_type: isInner ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER,
+      remark: isInner ? BOX_ENTRY_TYPES.INNER : isMaster ? BOX_ENTRY_TYPES.MASTER : rowRemark || "box",
+      box_type: isInner ? BOX_ENTRY_TYPES.INNER : isMaster ? BOX_ENTRY_TYPES.MASTER : BOX_ENTRY_TYPES.INDIVIDUAL,
       item_count_in_inner: isInner ? quantity : 0,
-      box_count_in_master: isInner ? 0 : quantity,
+      box_count_in_master: isMaster ? quantity : 0,
     });
   }
 
@@ -315,6 +345,7 @@ const parseDimensionRows = (sheet, dimensionCell) => {
 
   const normalizedBoxSizes =
     boxSizes.length === 1 &&
+    boxSizes[0]?.box_type === BOX_ENTRY_TYPES.MASTER &&
     Number(boxSizes[0]?.box_count_in_master || boxSizes[0]?.item_count_in_inner || 0) === 1
       ? [{
           ...boxSizes[0],

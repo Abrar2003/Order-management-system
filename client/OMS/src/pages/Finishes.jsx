@@ -116,6 +116,25 @@ const Finishes = () => {
     }
   };
 
+  const handleDeleteBackImage = async (finish) => {
+    const finishId = normalizeText(finish?._id);
+    if (!finishId || !window.confirm("Delete this temporary back image?")) return;
+
+    try {
+      setError("");
+      setSuccess("");
+      await api.delete(`/finishes/${encodeURIComponent(finishId)}/back-image`);
+      setSuccess("Back image deleted.");
+      fetchFinishes();
+    } catch (deleteError) {
+      setError(
+        deleteError?.response?.data?.message
+          || deleteError?.message
+          || "Failed to delete back image.",
+      );
+    }
+  };
+
   return (
     <>
       <Navbar />
@@ -208,6 +227,13 @@ const Finishes = () => {
                     {rows.map((finish) => {
                       const items = Array.isArray(finish?.items) ? finish.items : [];
                       const visibleItems = items.slice(0, 4);
+                      const hasBackImage = Boolean(
+                        normalizeText(
+                          finish?.back_image_url
+                          || finish?.back_image?.key
+                          || finish?.back_image?.link,
+                        ),
+                      );
                       return (
                         <tr key={finish?._id || finish?.unique_code}>
                           <td data-label="Images">
@@ -218,12 +244,14 @@ const Finishes = () => {
                               alt={`${finish?.unique_code || "Finish"} front`}
                               size="sm"
                             />
-                            <ProductImageThumbnail
-                              src={getFinishImageSrc(finish?.back_image_url || finish?.back_image?.link)}
-                              originalName={finish?.back_image?.originalName}
-                              alt={`${finish?.unique_code || "Finish"} back`}
-                              size="sm"
-                            />
+                            {hasBackImage && (
+                              <ProductImageThumbnail
+                                src={getFinishImageSrc(finish?.back_image_url || finish?.back_image?.link)}
+                                originalName={finish?.back_image?.originalName}
+                                alt={`${finish?.unique_code || "Finish"} back`}
+                                size="sm"
+                              />
+                            )}
                             </div>
                           </td>
                           <td data-label="Unique Code" className="fw-semibold">
@@ -272,6 +300,17 @@ const Finishes = () => {
                                   >
                                     Edit
                                   </button>
+                                )}
+                                {canDeleteFinishes && (
+                                  hasBackImage && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-danger btn-sm"
+                                      onClick={() => handleDeleteBackImage(finish)}
+                                    >
+                                      Delete Back Image
+                                    </button>
+                                  )
                                 )}
                                 {canDeleteFinishes && (
                                   <button
