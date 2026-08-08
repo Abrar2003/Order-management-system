@@ -518,7 +518,16 @@ const Home = () => {
                           >
                             {summary.totalDelayedOrders}
                           </td>
-                          <td>{toNumber(summary.totalPacked)}</td>
+                          <td
+                            className="table-clickable"
+                            onClick={() =>
+                              navigate(
+                                `/orders/${brandPath}/${vendorPath}/Packed`,
+                              )
+                            }
+                          >
+                            {toNumber(summary.totalPacked)}
+                          </td>
                           <td
                             className="table-clickable"
                             onClick={() =>

@@ -6998,6 +6998,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       normalizedStatus === "on-time" ||
       normalizedStatus === "on time" ||
       normalizedStatus === "ontime";
+    const isPackedStatus = normalizedStatus === "packed";
     const isDelayedStatus = normalizedStatus === "delayed";
     const isDelayedFilter =
       String(isDelayed || "")
@@ -7033,6 +7034,15 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
         }
       } else if (exactOrderStatus && totalStatus !== exactOrderStatus) {
         return false;
+      }
+
+      if (isPackedStatus) {
+        return (
+          Number(row?.total_quantity || 0) > 0 &&
+          Number(row?.total_pending_inspection_quantity || 0) <= 0 &&
+          Number(row?.total_shipped_quantity || 0) <
+            Number(row?.total_quantity || 0)
+        );
       }
 
       if (isOnTimeStatus) {
