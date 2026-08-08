@@ -5,6 +5,7 @@ const Inspection = require("../models/inspection.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
 const Order = require("../models/order.model");
+const Vendor = require("../models/vendor.model");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   getMonthlyShipmentsDrilldownData,
@@ -20,6 +21,7 @@ const {
 } = require("../helpers/commonInspectionErrors");
 const {
   buildVendorFilter,
+  normalizeVendorName,
   normalizeVendorText,
 } = require("../helpers/vendorRef");
 const { isManagerLikeRole, normalizeUserRoleKey } = require("../helpers/userRole");
@@ -495,8 +497,64 @@ const sortInspectedItemsRows = (left = {}, right = {}) => {
   );
 };
 
-const buildInspectedItemsReportRow = (item = {}) => {
+const getVendorCodesForInspectedItem = (vendor = {}, brands = []) => {
+  const brandKeys = new Set(
+    (Array.isArray(brands) ? brands : [])
+      .map(normalizeVendorName)
+      .filter(Boolean),
+  );
+  const codes = (Array.isArray(vendor?.vendor_code) ? vendor.vendor_code : [])
+    .map((entry) => ({
+      brand: normalizeText(entry?.brand),
+      code: normalizeText(entry?.code),
+    }))
+    .filter((entry) => entry.code);
+  const matchingCodes = codes.filter((entry) =>
+    brandKeys.has(normalizeVendorName(entry.brand)),
+  );
+
+  return (matchingCodes.length > 0 ? matchingCodes : codes)
+    .map((entry) => entry.code)
+    .filter((code, index, entries) => entries.indexOf(code) === index)
+    .join(", ");
+};
+
+const getVendorContactDetailsForInspectedItem = (vendor = {}) =>
+  (Array.isArray(vendor?.contact_person) ? vendor.contact_person : [])
+    .map((contact) =>
+      [
+        normalizeText(contact?.name),
+        normalizeText(contact?.type),
+        normalizeText(contact?.email),
+        normalizeText(contact?.phone),
+      ]
+        .filter(Boolean)
+        .join(" | "),
+    )
+    .filter(Boolean)
+    .join("\n");
+
+const buildInspectedItemsVendorDetails = (item = {}, vendorsByName = new Map()) => {
+  const brands = normalizeDistinctTextValues([
+    item?.brand,
+    item?.brand_name,
+    ...(Array.isArray(item?.brands) ? item.brands : []),
+  ]);
+
+  return normalizeDistinctTextValues(item?.vendors).map((name) => {
+    const vendor = vendorsByName.get(normalizeVendorName(name)) || {};
+    return {
+      name,
+      code: getVendorCodesForInspectedItem(vendor, brands),
+      contact_details: getVendorContactDetailsForInspectedItem(vendor),
+    };
+  });
+};
+
+const buildInspectedItemsReportRow = (item = {}, vendorsByName = new Map()) => {
   const flags = buildInspectedItemsReportFlags(item);
+  const vendors = Array.isArray(item?.vendors) ? item.vendors.filter(Boolean) : [];
+  const vendor_details = buildInspectedItemsVendorDetails(item, vendorsByName);
   return {
     id: String(item?._id || ""),
     code: normalizeText(item?.code),
@@ -504,7 +562,8 @@ const buildInspectedItemsReportRow = (item = {}) => {
     description: normalizeText(item?.description),
     brand: normalizeText(item?.brand || item?.brand_name || (Array.isArray(item?.brands) ? item.brands[0] : "")),
     brands: Array.isArray(item?.brands) ? item.brands.filter(Boolean) : [],
-    vendors: Array.isArray(item?.vendors) ? item.vendors.filter(Boolean) : [],
+    vendors,
+    vendor_details,
     country_of_origin: normalizeText(item?.country_of_origin),
     last_inspected_date: normalizeText(item?.qc?.last_inspected_date),
     flags,
@@ -604,8 +663,24 @@ const getInspectedItemsReportDataset = async ({
       .lean(),
   ]);
 
-  const allRows = mergeInspectedItemsSources(items, orders)
-    .map(buildInspectedItemsReportRow);
+  const mergedSources = mergeInspectedItemsSources(items, orders);
+  const vendorNames = normalizeDistinctTextValues(
+    mergedSources.flatMap((item) => item?.vendors || []),
+  );
+  const vendorDocs = vendorNames.length > 0
+    ? await Vendor.find({
+        name: { $in: vendorNames },
+        $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
+      })
+        .select("name vendor_code contact_person")
+        .lean()
+    : [];
+  const vendorsByName = new Map(
+    vendorDocs.map((vendor) => [normalizeVendorName(vendor?.name), vendor]),
+  );
+  const allRows = mergedSources.map((item) =>
+    buildInspectedItemsReportRow(item, vendorsByName),
+  );
   const baseRows = allRows.filter((row) =>
     matchesInspectedItemsReportFilters(row, { search, brand, vendor, country }),
   );
@@ -2020,7 +2095,20 @@ exports.exportInspectedItemsReport = async (req, res) => {
       { header: "Item Code", value: (row) => row.code || "N/A" },
       { header: "Description", value: (row) => row.description || row.name || "N/A" },
       { header: "Brand", value: (row) => row.brand || (row.brands || []).join(", ") || "N/A" },
-      { header: "Vendors", value: (row) => (row.vendors || []).join(", ") || "N/A" },
+      {
+        header: "Vendor Code",
+        value: (row) =>
+          (row.vendor_details || []).map((vendor) => vendor.code).filter(Boolean).join("\n") || "N/A",
+      },
+      { header: "Vendors", value: (row) => (row.vendors || []).join("\n") || "N/A" },
+      {
+        header: "Contact Person Details",
+        value: (row) =>
+          (row.vendor_details || [])
+            .map((vendor) => vendor.contact_details)
+            .filter(Boolean)
+            .join("\n") || "N/A",
+      },
       { header: "Country of Origin", value: (row) => row.country_of_origin || "N/A" },
       { header: "Inspected", value: (row) => (row.flags?.inspected ? "Yes" : "No") },
       { header: "CAD", value: (row) => (row.flags?.cad ? "Yes" : "No") },
@@ -3069,6 +3157,7 @@ exports.getMonthlyShipmentsDrilldown = async (req, res) => {
 
 exports.__test__ = {
   buildInspectedItemsReportRow,
+  buildInspectedItemsVendorDetails,
   buildInspectedItemsSummary,
   buildOrderItemReportGroups,
   canCreateQcMismatchComment,

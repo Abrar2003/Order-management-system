@@ -105,6 +105,22 @@ const FlagBadge = ({ value, applicable = true }) => (
   </span>
 );
 
+const VendorCell = ({ details = [], vendors = [] }) => {
+  const entries = Array.isArray(details) ? details.filter((vendor) => vendor?.name) : [];
+  if (entries.length === 0) return (vendors || []).join(", ") || "N/A";
+
+  return (
+    <div className="d-flex flex-column gap-2">
+      {entries.map((vendor, index) => (
+        <div key={`${vendor.name}-${index}`}>
+          {vendor.code && <div className="small fw-semibold text-secondary">{vendor.code}</div>}
+          <div>{vendor.name}</div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const InspectedItemsReport = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "inspected-items-report");
@@ -481,7 +497,7 @@ const InspectedItemsReport = () => {
                         </td>
                         <td>{row.description || row.name || "N/A"}</td>
                         <td>{row.brand || (row.brands || []).join(", ") || "N/A"}</td>
-                        <td>{(row.vendors || []).join(", ") || "N/A"}</td>
+                        <td><VendorCell details={row.vendor_details} vendors={row.vendors} /></td>
                         <td><FlagBadge value={row.flags?.inspected} /></td>
                         <td><FlagBadge value={row.flags?.cad} /></td>
                         <td><FlagBadge value={row.flags?.pis} applicable={normalizeText(row.brand).toLowerCase() !== "giga"} /></td>

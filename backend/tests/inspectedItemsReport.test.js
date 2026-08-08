@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   __test__: {
     buildInspectedItemsReportRow,
+    buildInspectedItemsVendorDetails,
     buildInspectedItemsSummary,
     buildOrderItemReportGroups,
     matchesInspectedItemsDateRange,
@@ -164,6 +165,38 @@ test("merged report filters search, brand, vendor, and country values", () => {
     matchesInspectedItemsReportFilters(row, { country: "China" }),
     false,
   );
+});
+
+test("inspected items include brand-matched vendor codes and contact details", () => {
+  const vendorDetails = buildInspectedItemsVendorDetails(
+    {
+      brand: "Brand A",
+      vendors: ["Vendor One"],
+    },
+    new Map([[
+      "vendor one",
+      {
+        vendor_code: [
+          { brand: "Brand A", code: "BA-001" },
+          { brand: "Brand B", code: "BB-001" },
+        ],
+        contact_person: [
+          {
+            name: "Jane Doe",
+            type: "merchant",
+            email: "jane@example.com",
+            phone: "+91 1234567890",
+          },
+        ],
+      },
+    ]]),
+  );
+
+  assert.deepEqual(vendorDetails, [{
+    name: "Vendor One",
+    code: "BA-001",
+    contact_details: "Jane Doe | merchant | jane@example.com | +91 1234567890",
+  }]);
 });
 
 test("satin label summary counts only items that require a label", () => {
