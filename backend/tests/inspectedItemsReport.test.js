@@ -195,7 +195,8 @@ test("inspected items include brand-matched vendor codes and contact details", (
   assert.deepEqual(vendorDetails, [{
     name: "Vendor One",
     code: "BA-001",
-    contact_details: "Jane Doe | merchant | jane@example.com | +91 1234567890",
+    contact_person_name: "Jane Doe",
+    contact_person_email: "jane@example.com",
   }]);
 });
 

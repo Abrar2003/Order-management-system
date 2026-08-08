@@ -519,20 +519,16 @@ const getVendorCodesForInspectedItem = (vendor = {}, brands = []) => {
     .join(", ");
 };
 
-const getVendorContactDetailsForInspectedItem = (vendor = {}) =>
-  (Array.isArray(vendor?.contact_person) ? vendor.contact_person : [])
-    .map((contact) =>
-      [
-        normalizeText(contact?.name),
-        normalizeText(contact?.type),
-        normalizeText(contact?.email),
-        normalizeText(contact?.phone),
-      ]
-        .filter(Boolean)
-        .join(" | "),
-    )
-    .filter(Boolean)
-    .join("\n");
+const getVendorContactsForInspectedItem = (vendor = {}) => {
+  const contacts = Array.isArray(vendor?.contact_person)
+    ? vendor.contact_person
+    : [];
+
+  return {
+    names: contacts.map((contact) => normalizeText(contact?.name)).filter(Boolean).join("\n"),
+    emails: contacts.map((contact) => normalizeText(contact?.email)).filter(Boolean).join("\n"),
+  };
+};
 
 const buildInspectedItemsVendorDetails = (item = {}, vendorsByName = new Map()) => {
   const brands = normalizeDistinctTextValues([
@@ -543,10 +539,12 @@ const buildInspectedItemsVendorDetails = (item = {}, vendorsByName = new Map()) 
 
   return normalizeDistinctTextValues(item?.vendors).map((name) => {
     const vendor = vendorsByName.get(normalizeVendorName(name)) || {};
+    const contacts = getVendorContactsForInspectedItem(vendor);
     return {
       name,
       code: getVendorCodesForInspectedItem(vendor, brands),
-      contact_details: getVendorContactDetailsForInspectedItem(vendor),
+      contact_person_name: contacts.names,
+      contact_person_email: contacts.emails,
     };
   });
 };
@@ -2102,10 +2100,18 @@ exports.exportInspectedItemsReport = async (req, res) => {
       },
       { header: "Vendors", value: (row) => (row.vendors || []).join("\n") || "N/A" },
       {
-        header: "Contact Person Details",
+        header: "Contact Person Name",
         value: (row) =>
           (row.vendor_details || [])
-            .map((vendor) => vendor.contact_details)
+            .map((vendor) => vendor.contact_person_name)
+            .filter(Boolean)
+            .join("\n") || "N/A",
+      },
+      {
+        header: "Contact Person Email",
+        value: (row) =>
+          (row.vendor_details || [])
+            .map((vendor) => vendor.contact_person_email)
             .filter(Boolean)
             .join("\n") || "N/A",
       },
