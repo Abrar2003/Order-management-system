@@ -6690,8 +6690,7 @@ exports.getVendorSummaryByBrand = async (req, res) => {
       if (
         Number(row?.total_quantity || 0) > 0 &&
         Number(row?.total_pending_inspection_quantity || 0) <= 0 &&
-        Number(row?.total_shipped_quantity || 0) <
-          Number(row?.total_quantity || 0)
+        Number(row?.total_shipped_quantity || 0) <= 0
       ) {
         vendorEntry.packedOrders.add(orderId);
       }
@@ -7040,8 +7039,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
         return (
           Number(row?.total_quantity || 0) > 0 &&
           Number(row?.total_pending_inspection_quantity || 0) <= 0 &&
-          Number(row?.total_shipped_quantity || 0) <
-            Number(row?.total_quantity || 0)
+          Number(row?.total_shipped_quantity || 0) <= 0
         );
       }
 

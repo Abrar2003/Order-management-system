@@ -29,7 +29,7 @@ const response = () => ({
   },
 });
 
-test("vendor summary packed count includes fully inspected POs that are not fully shipped", async (t) => {
+test("vendor summary packed count includes only fully inspected POs with no shipments", async (t) => {
   const poOneItem = {
     order_id: "PO-1",
     brand: "Brand",
@@ -78,10 +78,10 @@ test("vendor summary packed count includes fully inspected POs that are not full
   }, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.data[0].totalPacked, 2);
+  assert.equal(res.body.data[0].totalPacked, 1);
 });
 
-test("packed order filter includes partially shipped, fully inspected POs", async (t) => {
+test("packed order filter excludes partially shipped POs", async (t) => {
   const order = {
     brand: "Brand",
     vendor: "Vendor",
@@ -119,6 +119,6 @@ test("packed order filter includes partially shipped, fully inspected POs", asyn
   assert.equal(res.statusCode, 200);
   assert.deepEqual(
     res.body.data.map((row) => row.order_id),
-    ["PO-INSPECTED", "PO-PARTIAL-SHIPPED"],
+    ["PO-INSPECTED"],
   );
 });
