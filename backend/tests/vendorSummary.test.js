@@ -26,7 +26,7 @@ const response = () => ({
   },
 });
 
-test("vendor summary packed count includes only fully inspected, unshipped POs", async (t) => {
+test("vendor summary packed count includes fully inspected POs that are not fully shipped", async (t) => {
   const poOneItem = {
     order_id: "PO-1",
     brand: "Brand",
@@ -56,6 +56,12 @@ test("vendor summary packed count includes only fully inspected, unshipped POs",
       item: { item_code: "ITEM-4" },
       shipment: [{ quantity: 1 }],
     },
+    {
+      ...poOneItem,
+      order_id: "PO-4",
+      item: { item_code: "ITEM-5" },
+      shipment: [{ quantity: 10 }],
+    },
   ];
 
   t.mock.method(Order, "find", () => asQuery(orders));
@@ -69,5 +75,5 @@ test("vendor summary packed count includes only fully inspected, unshipped POs",
   }, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.data[0].totalPacked, 1);
+  assert.equal(res.body.data[0].totalPacked, 2);
 });
