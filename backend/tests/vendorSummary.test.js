@@ -26,7 +26,7 @@ const response = () => ({
   },
 });
 
-test("vendor summary counts only POs whose every item quantity passed QC", async (t) => {
+test("vendor summary packed count includes only fully inspected, unshipped POs", async (t) => {
   const poOneItem = {
     order_id: "PO-1",
     brand: "Brand",
@@ -49,6 +49,12 @@ test("vendor summary counts only POs whose every item quantity passed QC", async
       order_id: "PO-2",
       item: { item_code: "ITEM-3" },
       qc_record: { quantities: { qc_passed: 9 } },
+    },
+    {
+      ...poOneItem,
+      order_id: "PO-3",
+      item: { item_code: "ITEM-4" },
+      shipment: [{ quantity: 1 }],
     },
   ];
 
