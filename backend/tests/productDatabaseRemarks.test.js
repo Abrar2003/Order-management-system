@@ -60,6 +60,23 @@ test("Product Database rejects blank writes and requires mode-specific barcodes"
   assert.throws(
     () => assertProductDatabaseBarcodes(
       { pd_box_mode: "individual_master", pd_master_barcode: "123" },
+    ),
+    /inner barcode is required/,
+  );
+  assert.throws(
+    () => assertProductDatabaseBarcodes(
+      {
+        pd_box_mode: "individual_master",
+        pd_master_barcode: "123",
+        pd_inner_barcode: "456",
+      },
+      { pis_master_barcode: "123" },
+    ),
+    /PIS inner barcode is required/,
+  );
+  assert.throws(
+    () => assertProductDatabaseBarcodes(
+      { pd_box_mode: "individual_master", pd_master_barcode: "123" },
       {},
     ),
     /PIS master barcode is required/,
@@ -74,6 +91,18 @@ test("Product Database defaults required barcodes from PIS", () => {
     ),
     {
       pd_box_mode: "carton",
+      pd_barcode: "123",
+      pd_master_barcode: "123",
+      pd_inner_barcode: "456",
+    },
+  );
+  assert.deepEqual(
+    applyProductDatabaseBarcodeDefaults(
+      { pd_box_mode: "individual_master" },
+      { pis_master_barcode: "123", pis_inner_barcode: "456" },
+    ),
+    {
+      pd_box_mode: "individual_master",
       pd_barcode: "123",
       pd_master_barcode: "123",
       pd_inner_barcode: "456",

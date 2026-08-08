@@ -6671,6 +6671,7 @@ exports.getVendorSummaryByBrand = async (req, res) => {
           orders: new Set(),
           delayedOrders: new Set(),
           pendingOrders: new Set(),
+          packedOrders: new Set(),
           partialShippedOrders: new Set(),
           shippedOrders: new Set(),
           onTimeOrders: new Set(),
@@ -6685,6 +6686,13 @@ exports.getVendorSummaryByBrand = async (req, res) => {
       const isDelayEligible = DELAY_ELIGIBLE_STATUSES.has(totalStatus);
 
       vendorEntry.orders.add(orderId);
+
+      if (
+        Number(row?.total_quantity || 0) > 0 &&
+        Number(row?.total_pending_inspection_quantity || 0) <= 0
+      ) {
+        vendorEntry.packedOrders.add(orderId);
+      }
 
       if (
         ["Pending", "Under Inspection", "Inspection Done"].includes(totalStatus)
@@ -6719,6 +6727,7 @@ exports.getVendorSummaryByBrand = async (req, res) => {
         totalOrders: entry.orders.size,
         totalDelayedOrders: entry.delayedOrders.size,
         totalPending: entry.pendingOrders.size,
+        totalPacked: entry.packedOrders.size,
         totalPartialShipped: entry.partialShippedOrders.size,
         totalShipped: entry.shippedOrders.size,
         totalOnTime: entry.onTimeOrders.size,

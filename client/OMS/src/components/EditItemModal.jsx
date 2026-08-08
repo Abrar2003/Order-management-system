@@ -168,8 +168,11 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       calculatedInspectedItemCbm,
     );
   }, [calculatedInspectedBoxCbm, calculatedInspectedItemCbm]);
-  const isInspectedCartonMode =
+  const requiresInspectedInnerBarcode =
     requiresInnerBarcode(form.inspected_box_mode, form.inspected_box_sizes);
+  const isInspectedCartonMode =
+    detectBoxPackagingMode(form.inspected_box_mode, form.inspected_box_sizes) ===
+    BOX_PACKAGING_MODES.CARTON;
   const isInspectedMasterMode = requiresMasterBarcode(
     form.inspected_box_mode,
     form.inspected_box_sizes,
@@ -215,7 +218,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       qc: {
         ...prev.qc,
         inner_barcode:
-          nextMode === BOX_PACKAGING_MODES.CARTON ? prev.qc.inner_barcode : "0",
+          requiresInnerBarcode(nextMode) ? prev.qc.inner_barcode : "0",
       },
       inspected_box_sizes: ensureMeasuredSizeEntryCount(
         prev.inspected_box_sizes,
@@ -270,8 +273,8 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
             : "QC barcode is required.",
         );
       }
-      if (isInspectedCartonMode && Number(form.qc.inner_barcode) <= 0) {
-        throw new Error("QC inner barcode is required for carton packaging.");
+      if (requiresInspectedInnerBarcode && Number(form.qc.inner_barcode) <= 0) {
+        throw new Error("QC inner barcode is required for this box mode.");
       }
 
       const inspectedItemPayload = parseMeasuredSizeEntries({
@@ -339,7 +342,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
         payload.qc.barcode = parsedMasterBarcode;
         payload.qc.master_barcode = parsedMasterBarcode;
       }
-      if (isInspectedCartonMode) {
+      if (requiresInspectedInnerBarcode) {
         payload.qc.inner_barcode = parseNonNegativeNumber(
           form.qc.inner_barcode,
           "QC inner barcode",
@@ -576,7 +579,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                   </button>
                 </div>
               </div>
-              <div className={isInspectedCartonMode ? "col-md-3" : "col-md-6"}>
+              <div className={requiresInspectedInnerBarcode ? "col-md-3" : "col-md-6"}>
                 <label className="form-label">
                   {isInspectedCartonMode
                     ? "Master Carton Barcode"
@@ -594,9 +597,11 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                   disabled={saving}
                 />
               </div>
-              {isInspectedCartonMode && (
+              {requiresInspectedInnerBarcode && (
                 <div className="col-md-3">
-                  <label className="form-label">Inner Carton Barcode</label>
+                  <label className="form-label">
+                    {isInspectedCartonMode ? "Inner Carton Barcode" : "Inner Barcode"}
+                  </label>
                   <input
                     type="number"
                     min="0"

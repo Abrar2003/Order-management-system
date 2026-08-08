@@ -124,8 +124,13 @@ const requiresMasterBarcode = (mode = "", entries = []) => {
   );
 };
 
-const requiresInnerBarcode = (mode = "", entries = []) =>
-  detectBoxPackagingMode(mode, entries) === BOX_PACKAGING_MODES.CARTON;
+const requiresInnerBarcode = (mode = "", entries = []) => {
+  const resolvedMode = detectBoxPackagingMode(mode, entries);
+  return (
+    resolvedMode === BOX_PACKAGING_MODES.CARTON ||
+    resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+  );
+};
 
 const normalizeIndividualRemark = (value = "") => {
   const normalized = normalizeText(value);

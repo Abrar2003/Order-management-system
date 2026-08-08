@@ -114,8 +114,13 @@ export const requiresMasterBarcode = (mode = "", entries = []) => {
   );
 };
 
-export const requiresInnerBarcode = (mode = "", entries = []) =>
-  detectBoxPackagingMode(mode, entries) === BOX_PACKAGING_MODES.CARTON;
+export const requiresInnerBarcode = (mode = "", entries = []) => {
+  const resolvedMode = detectBoxPackagingMode(mode, entries);
+  return (
+    resolvedMode === BOX_PACKAGING_MODES.CARTON ||
+    resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+  );
+};
 
 const createCartonEntry = (
   boxType = BOX_ENTRY_TYPES.INNER,

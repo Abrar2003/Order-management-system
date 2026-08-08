@@ -32,11 +32,11 @@ test("detects master-only box entries as individual packing plus master", () => 
   );
 });
 
-test("requires master and inner barcodes only for their box modes", () => {
+test("requires master and inner barcodes for master box modes", () => {
   assert.equal(requiresMasterBarcode(BOX_PACKAGING_MODES.INDIVIDUAL), false);
   assert.equal(requiresInnerBarcode(BOX_PACKAGING_MODES.INDIVIDUAL), false);
   assert.equal(requiresMasterBarcode(BOX_PACKAGING_MODES.INDIVIDUAL_MASTER), true);
-  assert.equal(requiresInnerBarcode(BOX_PACKAGING_MODES.INDIVIDUAL_MASTER), false);
+  assert.equal(requiresInnerBarcode(BOX_PACKAGING_MODES.INDIVIDUAL_MASTER), true);
   assert.equal(requiresMasterBarcode(BOX_PACKAGING_MODES.CARTON), true);
   assert.equal(requiresInnerBarcode(BOX_PACKAGING_MODES.CARTON), true);
 });

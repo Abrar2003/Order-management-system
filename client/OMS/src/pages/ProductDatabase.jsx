@@ -1723,16 +1723,14 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
 
         return {
           ...currentForm,
-          barcodeMode:
-            nextBoxModeForBarcode === BOX_PACKAGING_MODES.CARTON
-              ? BARCODE_MODES.INNER_MASTER
-              : BARCODE_MODES.SINGLE,
+          barcodeMode: requiresInnerBarcode(nextBoxModeForBarcode)
+            ? BARCODE_MODES.INNER_MASTER
+            : BARCODE_MODES.SINGLE,
           singleBarcode: currentMasterBarcode,
           masterBarcode: currentMasterBarcode,
-          innerBarcode:
-            nextBoxModeForBarcode === BOX_PACKAGING_MODES.CARTON
-              ? currentForm.innerBarcode
-              : "",
+          innerBarcode: requiresInnerBarcode(nextBoxModeForBarcode)
+            ? currentForm.innerBarcode
+            : "",
         };
       });
     }
@@ -1876,7 +1874,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
         requiresInnerBarcode(currentBoxMode) &&
         !normalizeTextValue(currentPayload.pd_inner_barcode)
       ) {
-        setError("Product Database inner barcode is required for carton packaging.");
+        setError("Product Database inner barcode is required for this box mode.");
         return;
       }
 
@@ -1920,6 +1918,10 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
   const isProductDatabaseCartonMode =
     detectBoxPackagingMode(measuredSizeForm.boxMode, measuredSizeForm.boxEntries) ===
     BOX_PACKAGING_MODES.CARTON;
+  const requiresProductDatabaseInnerBarcode = requiresInnerBarcode(
+    measuredSizeForm.boxMode,
+    measuredSizeForm.boxEntries,
+  );
   const isProductDatabaseMasterMode = requiresMasterBarcode(
     measuredSizeForm.boxMode,
     measuredSizeForm.boxEntries,
@@ -2020,9 +2022,13 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
                             }
                           />
                         </div>
-                        {isProductDatabaseCartonMode && (
+                        {requiresProductDatabaseInnerBarcode && (
                           <div className="col-lg-4">
-                            <label className="form-label">Inner Carton Barcode</label>
+                            <label className="form-label">
+                              {isProductDatabaseCartonMode
+                                ? "Inner Carton Barcode"
+                                : "Inner Barcode"}
+                            </label>
                             <input
                               type="text"
                               className="form-control"

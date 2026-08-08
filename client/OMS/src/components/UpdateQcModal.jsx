@@ -26,6 +26,7 @@ import {
   ensureMeasuredSizeEntryCount as ensureMeasuredSizeEntryCountUtil,
   ITEM_SIZE_ENTRY_LIMIT,
   parseMeasuredSizeEntries as parseMeasuredSizeEntriesUtil,
+  requiresInnerBarcode,
 } from "../utils/measuredSizeForm";
 import { getQcUserUpdateRequestAvailability } from "../utils/qcRequests";
 import { formatNumberInputValue } from "../utils/measurementDisplay";
@@ -1217,9 +1218,11 @@ const UpdateQcModal = ({
           restoredBarcodeValidationType,
         );
         if (
-          restoredBarcodeValidationType === "individual" &&
-          (nextForm.inspected_box_mode === BOX_PACKAGING_MODES_UTIL.INDIVIDUAL ||
-            nextForm.inspected_box_mode === BOX_PACKAGING_MODES_UTIL.INDIVIDUAL_MASTER)
+          restoredBarcodeValidationType === "inner_master" &&
+          requiresInnerBarcode(
+            nextForm.inspected_box_mode,
+            nextForm.inspected_box_sizes,
+          )
         ) {
           requiredMode = nextForm.inspected_box_mode;
         }
@@ -1229,6 +1232,8 @@ const UpdateQcModal = ({
           inspected_box_count:
             requiredMode === BOX_PACKAGING_MODES.CARTON
               ? "2"
+              : requiredMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+                ? "1"
               : String(normalizeSizeCount(
                   nextForm.inspected_box_count,
                   1,
@@ -1238,6 +1243,8 @@ const UpdateQcModal = ({
             convertMeasuredBoxEntriesMode(nextForm.inspected_box_sizes, requiredMode),
             requiredMode === BOX_PACKAGING_MODES.CARTON
               ? 2
+              : requiredMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+                ? 1
               : nextForm.inspected_box_count,
             { mode: requiredMode, singleRemark: "box", limit: BOX_SIZE_ENTRY_LIMIT },
           ),
@@ -1288,21 +1295,27 @@ const UpdateQcModal = ({
   const applyInspectedBoxMode = (nextModeValue) => {
     setForm((prev) => {
       const nextMode = detectBoxPackagingMode(nextModeValue, prev.inspected_box_sizes);
-      if (nextMode !== BOX_PACKAGING_MODES.CARTON) {
+      const requiresInner = requiresInnerBarcode(nextMode);
+      if (!requiresInner) {
         setInnerBarcodeScannedInSession(false);
       }
       return {
         ...prev,
         inspected_box_mode: nextMode,
-        inner_barcode:
-          nextMode === BOX_PACKAGING_MODES.CARTON ? prev.inner_barcode : "",
+        inner_barcode: requiresInner ? prev.inner_barcode : "",
         inspected_box_count:
           nextMode === BOX_PACKAGING_MODES.CARTON
             ? "2"
-            : String(normalizeSizeCount(prev.inspected_box_count, 1, BOX_SIZE_ENTRY_LIMIT)),
+            : nextMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+              ? "1"
+              : String(normalizeSizeCount(prev.inspected_box_count, 1, BOX_SIZE_ENTRY_LIMIT)),
         inspected_box_sizes: ensureMeasuredSizeEntryCount(
           convertMeasuredBoxEntriesMode(prev.inspected_box_sizes, nextMode),
-          nextMode === BOX_PACKAGING_MODES.CARTON ? 2 : prev.inspected_box_count,
+          nextMode === BOX_PACKAGING_MODES.CARTON
+            ? 2
+            : nextMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+              ? 1
+              : prev.inspected_box_count,
           { mode: nextMode, singleRemark: "box", limit: BOX_SIZE_ENTRY_LIMIT },
         ),
       };
@@ -1393,8 +1406,8 @@ const UpdateQcModal = ({
       ? normalizeSizeCount(inspectedItemSizeEntries.length, 1)
       : 1;
     const enforcedInspectedBoxMode = isQcUser
-      ? (inspectedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
-        ? BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+      ? (requiresInnerBarcode(inspectedBoxMode, inspectedBoxSizeEntries)
+        ? inspectedBoxMode
         : getBoxModeForQcBarcodeValidationType("individual"))
       : inspectedBoxMode;
     const enforcedInspectedBoxSizeEntries =
@@ -1404,7 +1417,9 @@ const UpdateQcModal = ({
     const initialInspectedBoxCount =
       enforcedInspectedBoxMode === BOX_PACKAGING_MODES.CARTON
         ? 2
-        : hasStoredInspectedBoxSizes
+        : enforcedInspectedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+          ? 1
+          : hasStoredInspectedBoxSizes
           ? normalizeSizeCount(
               enforcedInspectedBoxSizeEntries.length,
               1,
@@ -1506,7 +1521,11 @@ const UpdateQcModal = ({
     setBarcodeUploadLoading(false);
     setBarcodeUploadError("");
     setBarcodeUploadStatus("");
-    setBarcodeValidationType("individual");
+    setBarcodeValidationType(
+      requiresInnerBarcode(enforcedInspectedBoxMode, enforcedInspectedBoxSizeEntries)
+        ? "inner_master"
+        : "individual",
+    );
     setBarcodeValidated(false);
     setBarcodeValidationError("");
     setBarcodeValidationStatus("");
@@ -1552,13 +1571,14 @@ const UpdateQcModal = ({
   ]);
 
   useEffect(() => {
+    const innerBarcodeScannerUnavailable =
+      !requiresBarcodeValidation &&
+      !requiresInnerBarcode(form.inspected_box_mode, form.inspected_box_sizes);
     const shouldCloseScanner =
       barcodeScannerOpen &&
       ((barcodeScannerTarget === "barcode" && lockBarcodeField) ||
         (barcodeScannerTarget === "inner_barcode" &&
-          (lockInnerBarcodeField ||
-            (!requiresBarcodeValidation &&
-              form.inspected_box_mode !== BOX_PACKAGING_MODES.CARTON))));
+          (lockInnerBarcodeField || innerBarcodeScannerUnavailable)));
 
     if (shouldCloseScanner) {
       setBarcodeScannerOpen(false);
@@ -2656,29 +2676,29 @@ const UpdateQcModal = ({
       return;
     }
 
-    const isCartonPackagingMode =
-      form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON;
+    const requiresInnerBarcodeForMode = requiresInnerBarcode(
+      form.inspected_box_mode,
+      form.inspected_box_sizes,
+    );
     const selectedBarcodeValidationOption =
       getQcBarcodeValidationOption(barcodeValidationType);
-    const isIndividualOrIndividualMasterMode =
-      form.inspected_box_mode === BOX_PACKAGING_MODES.INDIVIDUAL ||
-      form.inspected_box_mode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
+    const isIndividualMode =
+      form.inspected_box_mode === BOX_PACKAGING_MODES.INDIVIDUAL;
 
     const isValidBoxModeForBarcode =
       selectedBarcodeValidationOption.value === "inner_master"
-        ? isCartonPackagingMode
-        : isIndividualOrIndividualMasterMode;
+        ? requiresInnerBarcodeForMode
+        : isIndividualMode;
 
     if (requiresBarcodeValidation && !isValidBoxModeForBarcode) {
       setError(
         selectedBarcodeValidationOption.value === "inner_master"
-          ? "Inner + Master barcode validation requires Inner + Master Carton box mode."
-          : "Individual barcode validation requires Individual Boxes or Individual packing + master mode.",
+          ? "Inner + Master barcode validation requires Inner + Master Carton or Individual packing + master box mode."
+          : "Individual barcode validation requires Individual Boxes box mode.",
       );
       return;
     }
-    const shouldReadInnerBarcode =
-      isCartonPackagingMode || selectedBarcodeValidationOption.value === "inner_master";
+    const shouldReadInnerBarcode = requiresInnerBarcodeForMode;
     const barcodeValue = form.barcode.trim();
     const innerBarcodeValue = shouldReadInnerBarcode
       ? form.inner_barcode.trim()
@@ -2724,7 +2744,7 @@ const UpdateQcModal = ({
             master_barcode: barcodeParsed,
           }
         : {}),
-      ...(isCartonPackagingMode && innerBarcodeParsed !== null
+      ...(shouldReadInnerBarcode && innerBarcodeParsed !== null
         ? { inner_barcode: innerBarcodeParsed }
         : {}),
     };
@@ -3388,15 +3408,15 @@ const UpdateQcModal = ({
             value: BOX_PACKAGING_MODES.CARTON,
             label: "Inner + Master Carton",
           },
+          {
+            value: BOX_PACKAGING_MODES.INDIVIDUAL_MASTER,
+            label: "Individual packing + master",
+          },
         ]
         : [
           {
             value: BOX_PACKAGING_MODES.INDIVIDUAL,
             label: "Individual Boxes",
-          },
-          {
-            value: BOX_PACKAGING_MODES.INDIVIDUAL_MASTER,
-            label: "Individual packing + master",
           },
         ])
       : [
@@ -3810,10 +3830,13 @@ const UpdateQcModal = ({
 	                            onClick={() => {
                               setBarcodeValidationType(option.value);
                               const targetMode = option.value === "inner_master"
-                                ? BOX_PACKAGING_MODES.CARTON
-                                : (form.inspected_box_mode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
-                                    ? BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
-                                    : BOX_PACKAGING_MODES.INDIVIDUAL);
+                                ? (requiresInnerBarcode(
+                                    form.inspected_box_mode,
+                                    form.inspected_box_sizes,
+                                  )
+                                    ? form.inspected_box_mode
+                                    : BOX_PACKAGING_MODES.CARTON)
+                                : BOX_PACKAGING_MODES.INDIVIDUAL;
                               applyInspectedBoxMode(targetMode);
                               setBarcodeScannerTarget(
                                 getQcBarcodeValidationRequirements(option.value)[0].inputKey,
@@ -4017,10 +4040,11 @@ const UpdateQcModal = ({
 	              {!requiresBarcodeValidation && (
 	                <div className="col-md-6">
 	                  <label className="form-label">
-	                    {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON ||
-                        form.inspected_box_mode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+	                    {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON
 	                      ? "Master Carton Barcode"
-	                      : "Barcode"}
+	                      : form.inspected_box_mode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+	                        ? "Master Barcode"
+	                        : "Barcode"}
 	                  </label>
 	                  <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
 	                    <div className="input-group flex-grow-1">
@@ -4101,9 +4125,13 @@ const UpdateQcModal = ({
 	                </div>
 	              )}
 	              {!requiresBarcodeValidation &&
-	                form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
+	                requiresInnerBarcode(form.inspected_box_mode, form.inspected_box_sizes) && (
                 <div className="col-md-6">
-                  <label className="form-label">Inner Carton Barcode</label>
+                  <label className="form-label">
+                    {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON
+                      ? "Inner Carton Barcode"
+                      : "Inner Barcode"}
+                  </label>
                   <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
                     <div className="input-group flex-grow-1">
                     <input
@@ -4120,8 +4148,8 @@ const UpdateQcModal = ({
                         lockInnerBarcodeField
                           ? "Already set"
                           : isQcUser
-                            ? "Scan inner carton barcode"
-                            : "Enter inner carton barcode"
+                            ? "Scan inner barcode"
+                            : "Enter inner barcode"
                       }
                     />
                     <button
@@ -4167,7 +4195,7 @@ const UpdateQcModal = ({
                   )}
                   {isQcUser && !lockInnerBarcodeField && (
                     <div className="small text-secondary mt-2">
-                      Inner carton barcode is optional for QC update.
+                      Inner barcode is optional for QC update.
                     </div>
                   )}
                 </div>

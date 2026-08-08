@@ -7395,7 +7395,7 @@ exports.updateItemPis = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "PIS inner barcode is required for carton packaging.",
+        message: "PIS inner barcode is required for this box mode.",
       });
     }
 

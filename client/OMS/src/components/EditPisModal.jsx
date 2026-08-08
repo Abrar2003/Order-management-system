@@ -440,10 +440,13 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     form.pis_box_mode,
     form.pis_box_sizes,
   );
-  const isPisCartonMode = requiresInnerBarcode(
+  const requiresPisInnerBarcode = requiresInnerBarcode(
     form.pis_box_mode,
     form.pis_box_sizes,
   );
+  const isPisCartonMode =
+    detectBoxPackagingMode(form.pis_box_mode, form.pis_box_sizes) ===
+    BOX_PACKAGING_MODES.CARTON;
 
   useEffect(() => {
     if (!showInspectedReference || !itemCode || itemCode === "N/A") {
@@ -522,7 +525,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       pis_box_mode: nextMode,
       pis_box_count: nextCount,
       inner_barcode:
-        nextMode === BOX_PACKAGING_MODES.CARTON ? prev.inner_barcode : "",
+        requiresInnerBarcode(nextMode) ? prev.inner_barcode : "",
       pis_box_sizes: ensureMeasuredSizeEntryCount(prev.pis_box_sizes, nextCount, {
         mode: nextMode,
         singleRemark: "box",
@@ -652,10 +655,10 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       }
       if (
         !form.barcode_exempted &&
-        isPisCartonMode &&
+        requiresPisInnerBarcode &&
         !toText(form.inner_barcode)
       ) {
-        throw new Error("PIS inner barcode is required for carton packaging.");
+        throw new Error("PIS inner barcode is required for this box mode.");
       }
 
       const pisItemPayload = parseMeasuredSizeEntries({
@@ -701,7 +704,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
           payload.pis_master_barcode = barcode;
         }
       }
-      if (isPisCartonMode) {
+      if (requiresPisInnerBarcode) {
         payload.pis_inner_barcode = toText(form.inner_barcode);
       }
       payload.kd = Boolean(form.kd);
@@ -884,7 +887,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             </div>
 
             <div className="row g-2">
-              <div className={isPisCartonMode ? "col-md-6" : "col-md-12"}>
+              <div className={requiresPisInnerBarcode ? "col-md-6" : "col-md-12"}>
                 <label className="form-label">
                   {isPisCartonMode
                     ? "Master Carton Barcode"
@@ -900,9 +903,11 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                   disabled={saving}
                 />
               </div>
-              {isPisCartonMode && (
+              {requiresPisInnerBarcode && (
                 <div className="col-md-6">
-                  <label className="form-label">Inner Carton Barcode</label>
+                  <label className="form-label">
+                    {isPisCartonMode ? "Inner Carton Barcode" : "Inner Barcode"}
+                  </label>
                   <input
                     type="text"
                     className="form-control"

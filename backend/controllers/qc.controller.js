@@ -6338,22 +6338,22 @@ const updateQC = async (req, res) => {
         });
       }
 
-      const isCartonMode = parsedInspectedBoxMode === BOX_PACKAGING_MODES.CARTON;
-      const isIndividualOrIndividualMasterMode =
-        parsedInspectedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL ||
-        parsedInspectedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
+      const requiresInnerBarcodeForValidation =
+        requiresInnerBarcode(parsedInspectedBoxMode);
+      const isIndividualMode =
+        parsedInspectedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL;
 
       const isValidBoxModeForBarcode =
         selectedBarcodeValidationType === "inner_master"
-          ? isCartonMode
-          : isIndividualOrIndividualMasterMode;
+          ? requiresInnerBarcodeForValidation
+          : isIndividualMode;
 
       if (!isValidBoxModeForBarcode) {
         return res.status(400).json({
           message:
             selectedBarcodeValidationType === "inner_master"
-              ? "Inner + Master barcode validation requires Inner + Master Carton box mode."
-              : "Individual barcode validation requires Individual Boxes or Individual packing + master mode.",
+              ? "Inner + Master barcode validation requires Inner + Master Carton or Individual packing + master box mode."
+              : "Individual barcode validation requires Individual Boxes box mode.",
         });
       }
       const barcodeValidationConfig =
@@ -12726,8 +12726,7 @@ exports.editInspectionRecords = async (req, res) => {
 	        row?.inner_barcode,
 	        "Inner barcode",
 	        {
-	          allowBlankDefault:
-	            parsedInspectedBoxMode === BOX_PACKAGING_MODES.CARTON,
+          allowBlankDefault: requiresInnerBarcode(parsedInspectedBoxMode),
 	        },
 	      );
 	      const parsedInspectedItemSizes = parseInspectionSizeEntries(

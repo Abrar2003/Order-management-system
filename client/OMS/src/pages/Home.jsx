@@ -122,6 +122,7 @@ const Home = () => {
         (acc, summary) => {
           acc.totalOrders += toNumber(summary?.totalOrders);
           acc.totalPending += toNumber(summary?.totalPending);
+          acc.totalPacked += toNumber(summary?.totalPacked);
           acc.totalOnTime += toNumber(summary?.totalOnTime);
           acc.totalDelayedOrders += toNumber(summary?.totalDelayedOrders);
           acc.totalShipped += toNumber(summary?.totalShipped);
@@ -131,6 +132,7 @@ const Home = () => {
         {
           totalOrders: 0,
           totalPending: 0,
+          totalPacked: 0,
           totalOnTime: 0,
           totalDelayedOrders: 0,
           totalPartialShipped: 0,
@@ -437,6 +439,7 @@ const Home = () => {
                       <th>Vendor</th>
                       <th>Total Orders</th>
                       <th>Pending</th>
+                      <th>Packed</th>
                       <th>On Time</th>
                       <th>Delayed</th>
                       <th>Partial Shipped</th>
@@ -463,6 +466,7 @@ const Home = () => {
                         >
                           {toNumber(summary.totalPending)}
                         </td>
+                        <td>{toNumber(summary.totalPacked)}</td>
                         <td
                           className="table-clickable"
                           onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/on-time`)}
@@ -493,7 +497,7 @@ const Home = () => {
 
                     {visibleVendorSummary.length === 0 && (
                       <tr>
-                        <td colSpan="7" className="text-center py-4">
+                        <td colSpan="8" className="text-center py-4">
                           No {vendorScope === "active" ? "active " : ""}vendors found for {selectedBrand}
                         </td>
                       </tr>
@@ -505,6 +509,7 @@ const Home = () => {
                         <td>Total</td>
                         <td>{vendorTotals.totalOrders}</td>
                         <td>{vendorTotals.totalPending}</td>
+                        <td>{vendorTotals.totalPacked}</td>
                         <td>{vendorTotals.totalOnTime}</td>
                         <td>{vendorTotals.totalDelayedOrders}</td>
                         <td>{vendorTotals.totalPartialShipped}</td>

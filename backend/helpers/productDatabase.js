@@ -968,14 +968,14 @@ const assertProductDatabaseBarcodes = (state = {}, item = null) => {
     item &&
     !pisInnerBarcode
   ) {
-    throw new ProductDatabaseError("PIS inner barcode is required for carton packaging");
+    throw new ProductDatabaseError("PIS inner barcode is required for this box mode");
   }
   if (
     requiresInnerBarcode(boxMode) &&
     !normalizeText(state?.pd_inner_barcode)
   ) {
     throw new ProductDatabaseError(
-      "Product Database inner barcode is required for carton packaging",
+      "Product Database inner barcode is required for this box mode",
     );
   }
 };

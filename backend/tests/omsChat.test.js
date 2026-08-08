@@ -652,7 +652,7 @@ test("packaging-aware missing-PIS-barcode pipeline is accepted", () => {
             masterMissing,
             {
               $and: [
-                { $eq: ["$pis_box_mode", "carton"] },
+                { $in: ["$pis_box_mode", ["carton", "individual_master"]] },
                 blank("pis_inner_barcode"),
               ],
             },
@@ -676,7 +676,7 @@ test("packaging-aware missing-PIS-barcode pipeline is accepted", () => {
   assert.equal(validated.stageCount, 2);
   const instructions = buildSystemInstructions(new Date("2026-07-23T12:00:00Z"));
   assert.match(instructions, /exclude barcode_exempted == true/);
-  assert.match(instructions, /carton requires both master and inner barcodes/);
+  assert.match(instructions, /individual_master and carton require both master and inner barcodes/);
   assert.match(instructions, /first search the whole items collection/i);
 });
 
