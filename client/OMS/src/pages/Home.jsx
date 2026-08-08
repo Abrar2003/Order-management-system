@@ -14,22 +14,30 @@ import "../App.css";
 const DEFAULT_TODAY_ETD_SORT_BY = "ETD";
 
 const parseTodayEtdSortBy = (value) => {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
   if (normalized === "order_id") return "order_id";
   if (normalized === "etd") return "ETD";
   return DEFAULT_TODAY_ETD_SORT_BY;
 };
 
 const parseTodayEtdSortOrder = (value, sortBy = DEFAULT_TODAY_ETD_SORT_BY) => {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
   if (normalized === "asc" || normalized === "desc") return normalized;
   return sortBy === "order_id" ? "asc" : "desc";
 };
 
 const getBrandName = (brandObj) =>
   String(brandObj?.name || brandObj?.brand || "").trim();
-const getBrandKey = (value) => String(value || "").trim().toLowerCase();
-const getVendorSummaryName = (summary = {}) => getOptionText(summary?.vendor) || "N/A";
+const getBrandKey = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+const getVendorSummaryName = (summary = {}) =>
+  getOptionText(summary?.vendor) || "N/A";
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -52,7 +60,9 @@ const Home = () => {
     initialTodayEtdSortBy,
   );
   const [todayEtdSortBy, setTodayEtdSortBy] = useState(initialTodayEtdSortBy);
-  const [todayEtdSortOrder, setTodayEtdSortOrder] = useState(initialTodayEtdSortOrder);
+  const [todayEtdSortOrder, setTodayEtdSortOrder] = useState(
+    initialTodayEtdSortOrder,
+  );
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -69,7 +79,10 @@ const Home = () => {
       .filter(Boolean);
     if (availableBrandNames.length === 0) return "";
 
-    if (selectedBrandParam && availableBrandNames.includes(selectedBrandParam)) {
+    if (
+      selectedBrandParam &&
+      availableBrandNames.includes(selectedBrandParam)
+    ) {
       return selectedBrandParam;
     }
     return availableBrandNames[0];
@@ -145,10 +158,14 @@ const Home = () => {
   const sortedVendorSummary = useMemo(
     () =>
       [...visibleVendorSummary].sort((a, b) =>
-        getVendorSummaryName(a).localeCompare(getVendorSummaryName(b), undefined, {
-          sensitivity: "base",
-          numeric: true,
-        }),
+        getVendorSummaryName(a).localeCompare(
+          getVendorSummaryName(b),
+          undefined,
+          {
+            sensitivity: "base",
+            numeric: true,
+          },
+        ),
       ),
     [visibleVendorSummary],
   );
@@ -187,8 +204,7 @@ const Home = () => {
   useEffect(() => {
     const fetchBrands = async () => {
       try {
-        const res = await axios.get("/brands/", {
-        });
+        const res = await axios.get("/brands/", {});
 
         if (res.data.data && res.data.data.length > 0) {
           setBrands(res.data.data);
@@ -202,17 +218,21 @@ const Home = () => {
   }, []);
 
   useEffect(() => {
-    const nextTodayEtdSortBy = parseTodayEtdSortBy(searchParams.get("today_sort_by"));
+    const nextTodayEtdSortBy = parseTodayEtdSortBy(
+      searchParams.get("today_sort_by"),
+    );
     const nextTodayEtdSortOrder = parseTodayEtdSortOrder(
       searchParams.get("today_sort_order"),
       nextTodayEtdSortBy,
     );
     const currentQuery = searchParams.toString();
 
-    setTodayEtdSortBy((prev) => (prev === nextTodayEtdSortBy ? prev : nextTodayEtdSortBy));
-    setTodayEtdSortOrder((prev) => (
-      prev === nextTodayEtdSortOrder ? prev : nextTodayEtdSortOrder
-    ));
+    setTodayEtdSortBy((prev) =>
+      prev === nextTodayEtdSortBy ? prev : nextTodayEtdSortBy,
+    );
+    setTodayEtdSortOrder((prev) =>
+      prev === nextTodayEtdSortOrder ? prev : nextTodayEtdSortOrder,
+    );
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams]);
 
@@ -249,8 +269,10 @@ const Home = () => {
     const fetchVendorSummary = async () => {
       try {
         setLoading(true);
-        const res = await axios.get(`/orders/${selectedBrand}/vendor-summary`, {
-        });
+        const res = await axios.get(
+          `/orders/${selectedBrand}/vendor-summary`,
+          {},
+        );
 
         if (!isMounted) return;
         setVendorSummary(res.data.data);
@@ -288,8 +310,7 @@ const Home = () => {
 
         const response = await axios.get(
           `/brands/${encodeURIComponent(selectedBrand)}/calendar`,
-          {
-          },
+          {},
         );
 
         if (!isMounted) return;
@@ -335,18 +356,15 @@ const Home = () => {
           .toISOString()
           .slice(0, 10);
 
-        const response = await axios.get(
-          "/orders/today-etd-orders",
-          {
-            params: {
-              brand: selectedBrand,
-              sort_by: todayEtdSortBy,
-              sort_order: todayEtdSortOrder,
-              date: todayLocalIso,
-              tz_offset_minutes: now.getTimezoneOffset(),
-            },
+        const response = await axios.get("/orders/today-etd-orders", {
+          params: {
+            brand: selectedBrand,
+            sort_by: todayEtdSortBy,
+            sort_order: todayEtdSortOrder,
+            date: todayLocalIso,
+            tz_offset_minutes: now.getTimezoneOffset(),
           },
-        );
+        });
 
         if (!isMounted) return;
         setTodayEtdOrders(
@@ -382,26 +400,30 @@ const Home = () => {
             {brands.map((brand) => {
               const brandName = getBrandName(brand);
               return (
-              <button
-                key={brand._id}
-                type="button"
-                className={`btn brand-logo-btn ${selectedBrand === brandName ? "btn-primary" : "btn-outline-secondary"}`}
-                onClick={() => {
-                  setPage(1);
-                  const next = new URLSearchParams(searchParams);
-                  next.set("brand", brandName);
-                  if (!areSearchParamsEquivalent(next, searchParams)) {
-                    setSearchParams(next, { replace: true });
-                  }
-                }}
-                title={brandName}
-              >
-                {brandLogosById.get(brand._id) ? (
-                  <img src={brandLogosById.get(brand._id)} alt={brandName} className="brand-logo-img" />
-                ) : (
-                  <span className="small fw-semibold">{brandName}</span>
-                )}
-              </button>
+                <button
+                  key={brand._id}
+                  type="button"
+                  className={`btn brand-logo-btn ${selectedBrand === brandName ? "btn-primary" : "btn-outline-secondary"}`}
+                  onClick={() => {
+                    setPage(1);
+                    const next = new URLSearchParams(searchParams);
+                    next.set("brand", brandName);
+                    if (!areSearchParamsEquivalent(next, searchParams)) {
+                      setSearchParams(next, { replace: true });
+                    }
+                  }}
+                  title={brandName}
+                >
+                  {brandLogosById.get(brand._id) ? (
+                    <img
+                      src={brandLogosById.get(brand._id)}
+                      alt={brandName}
+                      className="brand-logo-img"
+                    />
+                  ) : (
+                    <span className="small fw-semibold">{brandName}</span>
+                  )}
+                </button>
               );
             })}
           </div>
@@ -411,7 +433,11 @@ const Home = () => {
           <div className="card-body">
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
               <h3 className="h5 mb-0">Orders for {selectedBrand}</h3>
-              <div className="btn-group btn-group-sm" role="group" aria-label="Vendor order filter">
+              <div
+                className="btn-group btn-group-sm"
+                role="group"
+                aria-label="Vendor order filter"
+              >
                 {[
                   ["active", "Active"],
                   ["all", "All"],
@@ -439,9 +465,9 @@ const Home = () => {
                       <th>Vendor</th>
                       <th>Total Orders</th>
                       <th>Pending</th>
-                      <th>Packed</th>
                       <th>On Time</th>
                       <th>Delayed</th>
+                      <th>Packed</th>
                       <th>Partial Shipped</th>
                       <th>Shipped</th>
                     </tr>
@@ -452,53 +478,76 @@ const Home = () => {
                       const brandPath = encodeURIComponent(selectedBrand);
                       const vendorPath = encodeURIComponent(vendorName);
                       return (
-                      <tr key={vendorName}>
-                        <td>{vendorName}</td>
-                        <td
-                          className="table-clickable"
-                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/all`)}
-                        >
-                          {summary.totalOrders}
-                        </td>
-                        <td
-                          className="table-clickable"
-                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/Pending`)}
-                        >
-                          {toNumber(summary.totalPending)}
-                        </td>
-                        <td>{toNumber(summary.totalPacked)}</td>
-                        <td
-                          className="table-clickable"
-                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/on-time`)}
-                        >
-                          {summary.totalOnTime ?? 0}
-                        </td>
-                        <td
-                          className="table-clickable"
-                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/delayed`)}
-                        >
-                          {summary.totalDelayedOrders}
-                        </td>
-                        <td
-                          className="table-clickable"
-                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/Partial%20Shipped`)}
-                        >
-                          {summary.totalPartialShipped ?? 0}
-                        </td>
-                        <td
-                          className="table-clickable"
-                          onClick={() => navigate(`/orders/${brandPath}/${vendorPath}/Shipped`)}
-                        >
-                          {summary.totalShipped ?? 0}
-                        </td>
-                      </tr>
+                        <tr key={vendorName}>
+                          <td>{vendorName}</td>
+                          <td
+                            className="table-clickable"
+                            onClick={() =>
+                              navigate(`/orders/${brandPath}/${vendorPath}/all`)
+                            }
+                          >
+                            {summary.totalOrders}
+                          </td>
+                          <td
+                            className="table-clickable"
+                            onClick={() =>
+                              navigate(
+                                `/orders/${brandPath}/${vendorPath}/Pending`,
+                              )
+                            }
+                          >
+                            {toNumber(summary.totalPending)}
+                          </td>
+                          <td
+                            className="table-clickable"
+                            onClick={() =>
+                              navigate(
+                                `/orders/${brandPath}/${vendorPath}/on-time`,
+                              )
+                            }
+                          >
+                            {summary.totalOnTime ?? 0}
+                          </td>
+                          <td
+                            className="table-clickable"
+                            onClick={() =>
+                              navigate(
+                                `/orders/${brandPath}/${vendorPath}/delayed`,
+                              )
+                            }
+                          >
+                            {summary.totalDelayedOrders}
+                          </td>
+                          <td>{toNumber(summary.totalPacked)}</td>
+                          <td
+                            className="table-clickable"
+                            onClick={() =>
+                              navigate(
+                                `/orders/${brandPath}/${vendorPath}/Partial%20Shipped`,
+                              )
+                            }
+                          >
+                            {summary.totalPartialShipped ?? 0}
+                          </td>
+                          <td
+                            className="table-clickable"
+                            onClick={() =>
+                              navigate(
+                                `/orders/${brandPath}/${vendorPath}/Shipped`,
+                              )
+                            }
+                          >
+                            {summary.totalShipped ?? 0}
+                          </td>
+                        </tr>
                       );
                     })}
 
                     {visibleVendorSummary.length === 0 && (
                       <tr>
                         <td colSpan="8" className="text-center py-4">
-                          No {vendorScope === "active" ? "active " : ""}vendors found for {selectedBrand}
+                          No {vendorScope === "active" ? "active " : ""}vendors
+                          found for {selectedBrand}
                         </td>
                       </tr>
                     )}
@@ -509,9 +558,9 @@ const Home = () => {
                         <td>Total</td>
                         <td>{vendorTotals.totalOrders}</td>
                         <td>{vendorTotals.totalPending}</td>
-                        <td>{vendorTotals.totalPacked}</td>
                         <td>{vendorTotals.totalOnTime}</td>
                         <td>{vendorTotals.totalDelayedOrders}</td>
+                        <td>{vendorTotals.totalPacked}</td>
                         <td>{vendorTotals.totalPartialShipped}</td>
                         <td>{vendorTotals.totalShipped}</td>
                       </tr>
@@ -549,9 +598,7 @@ const Home = () => {
 
         <div className="card om-card mt-3">
           <div className="card-body p-0">
-            <h3 className="h5 m-3">
-              Orders With Today&apos;s ETD
-            </h3>
+            <h3 className="h5 m-3">Orders With Today&apos;s ETD</h3>
 
             {todayEtdLoading ? (
               <div className="text-center py-4">Loading...</div>
@@ -588,13 +635,17 @@ const Home = () => {
                   </thead>
                   <tbody>
                     {todayEtdOrders.map((order) => {
-                      const brandLogo = brandLogosByName.get(getBrandKey(order?.brand));
+                      const brandLogo = brandLogosByName.get(
+                        getBrandKey(order?.brand),
+                      );
                       return (
                         <tr
                           key={`${order?.order_id || "order"}-${order?.ETD || ""}`}
                           className="table-clickable"
                           onClick={() =>
-                            navigate(`/orders?order_id=${encodeURIComponent(order?.order_id || "")}`)
+                            navigate(
+                              `/orders?order_id=${encodeURIComponent(order?.order_id || "")}`,
+                            )
                           }
                         >
                           <td>
@@ -605,7 +656,9 @@ const Home = () => {
                                 className="home-order-brand-logo"
                               />
                             ) : (
-                              <span className="small fw-semibold">{order?.brand || "N/A"}</span>
+                              <span className="small fw-semibold">
+                                {order?.brand || "N/A"}
+                              </span>
                             )}
                           </td>
                           <td>{getOptionText(order?.vendor) || "N/A"}</td>
@@ -614,7 +667,9 @@ const Home = () => {
                             <OrderEtdWithHistory
                               orderId={order?.order_id}
                               etd={order?.ETD}
-                              revisedEtd={order?.effective_ETD || order?.revised_ETD}
+                              revisedEtd={
+                                order?.effective_ETD || order?.revised_ETD
+                              }
                             />
                           </td>
                           <td>{Number(order?.itemCount || 0)}</td>
@@ -659,7 +714,9 @@ const Home = () => {
 
         <div className="card om-card mt-3">
           <div className="card-body">
-            <h3 className="h5 mb-3">Calendar for {selectedBrand || "Selected Brand"}</h3>
+            <h3 className="h5 mb-3">
+              Calendar for {selectedBrand || "Selected Brand"}
+            </h3>
             {calendarLoading ? (
               <div className="text-center py-4">Loading calendar...</div>
             ) : calendarEmbedUrl ? (

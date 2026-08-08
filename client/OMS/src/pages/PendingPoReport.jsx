@@ -13,6 +13,7 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 import { exportElementToPdf } from "../services/pdfExport.service";
 
