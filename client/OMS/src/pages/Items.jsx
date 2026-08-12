@@ -26,7 +26,7 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
-import { formatCbm } from "../utils/cbm";
+import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
 import { formatFixedNumber } from "../utils/measurementDisplay";
 import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -134,13 +134,16 @@ const getPisItemLbh = (item) =>
   getPrimaryMeasurementLbh(item?.pis_item_sizes);
 const getPisBoxLbh = (item) =>
   getPrimaryMeasurementLbh(item?.pis_box_sizes);
-const getCalculatedInspectedCbm = (item) =>
-  item?.cbm?.calculated_inspected_total
-  ?? item?.cbm?.inspected_total
-  ?? item?.cbm?.calculated_total
-  ?? item?.cbm?.qc_total
-  ?? item?.cbm?.total
-  ?? "0";
+const getAvailableCalculatedCbm = (item) =>
+  resolvePreferredCbm(
+    item?.cbm?.calculated_inspected_total,
+    item?.cbm?.calculated_pis_total,
+    item?.cbm?.calculated_master_total,
+    item?.cbm?.calculated_total,
+    item?.cbm?.inspected_total,
+    item?.cbm?.qc_total,
+    item?.cbm?.total,
+  );
 
 const buildInspectedSizeRows = (item = {}) => {
   const itemEntries = normalizeMeasurementEntries(
@@ -685,7 +688,7 @@ const Items = () => {
           if (column === "name") return item?.name;
           if (column === "brand") return item?.brand_name || item?.brand;
           if (column === "vendor") return getVendorNames(item);
-          if (column === "cbm") return Number(getCalculatedInspectedCbm(item) || 0);
+          if (column === "cbm") return getAvailableCalculatedCbm(item);
           if (column === "inspectedSize") {
             const firstSizeRow = buildInspectedSizeRows(item)[0] || {};
             return [
@@ -1193,7 +1196,7 @@ const Items = () => {
                                 : "N/A")}
                           </td>
                           <td data-label="Vendor">{getVendorNames(item)}</td>
-                          <td data-label="CBM">{formatCbm(getCalculatedInspectedCbm(item))}</td>
+                          <td data-label="CBM">{formatCbm(getAvailableCalculatedCbm(item))}</td>
                           <td className="items-size-column" data-label="Inspected Size">
                             <InspectedSizeCell item={item} />
                           </td>
