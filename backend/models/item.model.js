@@ -639,34 +639,48 @@ itemSchema.index({ "product_specs.fields.value_number": 1 });
 itemSchema.index({ "product_specs.fields.value_boolean": 1 });
 
 itemSchema.pre("validate", function syncBarcodeAliases() {
-  const normalizedPisMasterBarcode = String(
-    this.pis_master_barcode || this.pis_barcode || "",
-  ).trim();
-  this.pis_master_barcode = normalizedPisMasterBarcode;
-  this.pis_barcode = normalizedPisMasterBarcode;
-  this.pis_inner_barcode = String(this.pis_inner_barcode || "").trim();
+  const hasSelectedPath = (...paths) =>
+    paths.some((path) => this.isSelected(path));
 
-  const normalizedMasterBarcode = String(
-    this.master_master_barcode || this.master_barcode || "",
-  ).trim();
-  this.master_master_barcode = normalizedMasterBarcode;
-  this.master_barcode = normalizedMasterBarcode;
-  this.master_inner_barcode = String(this.master_inner_barcode || "").trim();
-  this.master_country_of_origin = String(
-    this.master_country_of_origin || "",
-  ).trim();
-
-  if (!this.qc || typeof this.qc !== "object") {
-    this.qc = {};
+  if (hasSelectedPath("pis_master_barcode", "pis_barcode")) {
+    const normalizedPisMasterBarcode = String(
+      this.pis_master_barcode || this.pis_barcode || "",
+    ).trim();
+    this.pis_master_barcode = normalizedPisMasterBarcode;
+    this.pis_barcode = normalizedPisMasterBarcode;
+  }
+  if (hasSelectedPath("pis_inner_barcode")) {
+    this.pis_inner_barcode = String(this.pis_inner_barcode || "").trim();
   }
 
-  const resolvedQcMasterBarcode = String(
-    this.qc.master_barcode || this.qc.barcode || "",
-  ).trim();
-  this.qc.master_barcode = resolvedQcMasterBarcode;
-  this.qc.barcode = this.qc.master_barcode;
+  if (hasSelectedPath("master_master_barcode", "master_barcode")) {
+    const normalizedMasterBarcode = String(
+      this.master_master_barcode || this.master_barcode || "",
+    ).trim();
+    this.master_master_barcode = normalizedMasterBarcode;
+    this.master_barcode = normalizedMasterBarcode;
+  }
+  if (hasSelectedPath("master_inner_barcode")) {
+    this.master_inner_barcode = String(this.master_inner_barcode || "").trim();
+  }
+  if (hasSelectedPath("master_country_of_origin")) {
+    this.master_country_of_origin = String(
+      this.master_country_of_origin || "",
+    ).trim();
+  }
 
-  this.qc.inner_barcode = String(this.qc.inner_barcode || "").trim();
+  if (hasSelectedPath("qc.master_barcode", "qc.barcode")) {
+    if (!this.qc || typeof this.qc !== "object") this.qc = {};
+    const resolvedQcMasterBarcode = String(
+      this.qc.master_barcode || this.qc.barcode || "",
+    ).trim();
+    this.qc.master_barcode = resolvedQcMasterBarcode;
+    this.qc.barcode = resolvedQcMasterBarcode;
+  }
+  if (hasSelectedPath("qc.inner_barcode")) {
+    if (!this.qc || typeof this.qc !== "object") this.qc = {};
+    this.qc.inner_barcode = String(this.qc.inner_barcode || "").trim();
+  }
 
   if (this.product_type && typeof this.product_type === "object") {
     this.product_type.key = String(this.product_type.key || "")
