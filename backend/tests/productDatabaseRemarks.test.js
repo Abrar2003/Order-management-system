@@ -8,6 +8,7 @@ const {
   getProductDatabaseCompletionRange,
   normalizeProductDatabaseInput,
   applyProductDatabaseBarcodeDefaults,
+  applyProductDatabaseApprove,
   applyProductDatabaseSave,
   assertProductDatabaseBarcodes,
 } = require("../helpers/productDatabase");
@@ -127,6 +128,32 @@ test("Product Database admin override accepts intentionally blank barcodes", () 
     user: { role: "admin" },
   });
   assert.equal(item.pd_barcode, "");
+});
+
+test("Product Database does not require barcodes for barcode-exempt items", () => {
+  const item = {
+    barcode_exempted: true,
+    pd_checked: "",
+    pd_box_mode: "individual_master",
+    pd_history: [],
+  };
+
+  assert.doesNotThrow(() =>
+    assertProductDatabaseBarcodes({ pd_box_mode: "individual_master" }, item),
+  );
+
+  applyProductDatabaseSave({
+    item,
+    payload: { kd: true },
+    user: { id: "creator", role: "manager" },
+  });
+  item.pd_checked = "checked";
+  applyProductDatabaseApprove({
+    item,
+    user: { id: "approver", role: "admin" },
+  });
+
+  assert.equal(item.pd_checked, "approved");
 });
 
 test("Product Database defaults required barcodes from PIS", () => {

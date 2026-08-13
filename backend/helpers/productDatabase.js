@@ -946,7 +946,7 @@ const assertProductDatabaseBarcodes = (
   item = null,
   { allowMissingRequiredFields = false } = {},
 ) => {
-  if (allowMissingRequiredFields) return;
+  if (allowMissingRequiredFields || item?.barcode_exempted === true) return;
   const boxMode = detectBoxPackagingMode(
     state?.pd_box_mode,
     state?.pd_box_sizes,
@@ -1315,6 +1315,7 @@ const buildProductDatabaseRow = (item = {}, user = {}) => {
     pd_barcode: state.pd_barcode,
     pd_master_barcode: state.pd_master_barcode,
     pd_inner_barcode: state.pd_inner_barcode,
+    barcode_exempted: item?.barcode_exempted === true,
     pis_barcode: normalizeText(item?.pis_barcode),
     pis_master_barcode: normalizeText(item?.pis_master_barcode),
     pis_inner_barcode: normalizeText(item?.pis_inner_barcode),

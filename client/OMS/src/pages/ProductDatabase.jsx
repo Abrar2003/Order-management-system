@@ -1604,7 +1604,9 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
     currentPayload.pd_box_mode,
     currentPayload.pd_box_sizes,
   );
+  const isBarcodeExempt = item?.barcode_exempted === true;
   const getMissingRequiredBarcodeFields = (payload = currentPayload) => {
+    if (isBarcodeExempt) return [];
     const missing = [];
     const pisMasterBarcode = normalizeTextValue(
       item?.pis_master_barcode || item?.pis_barcode,
