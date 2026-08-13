@@ -1612,6 +1612,9 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
     const pisInnerBarcode = normalizeTextValue(item?.pis_inner_barcode);
     if (!pisMasterBarcode) {
       missing.push({
+        label: requiresMasterBarcode(currentBoxMode)
+          ? "PIS master barcode"
+          : "PIS barcode",
         message: requiresMasterBarcode(currentBoxMode)
           ? "PIS master barcode is required for this box mode."
           : "PIS barcode is required.",
@@ -1620,6 +1623,9 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
     }
     if (!normalizeTextValue(payload.pd_barcode || payload.pd_master_barcode)) {
       missing.push({
+        label: requiresMasterBarcode(currentBoxMode)
+          ? "Product Database master barcode"
+          : "Product Database barcode",
         message: requiresMasterBarcode(currentBoxMode)
           ? "Product Database master barcode is required."
           : "Product Database barcode is required.",
@@ -1631,12 +1637,14 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
       !normalizeTextValue(payload.pd_inner_barcode)
     ) {
       missing.push({
+        label: "Product Database inner barcode",
         message: "Product Database inner barcode is required for this box mode.",
         storedValue: getProductDatabaseInnerBarcode(item),
       });
     }
     if (requiresInnerBarcode(currentBoxMode) && !pisInnerBarcode) {
       missing.push({
+        label: "PIS inner barcode",
         message: "PIS inner barcode is required for this box mode.",
         storedValue: "",
       });
@@ -2037,6 +2045,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
               <div className="mb-3">
                 <AdminRequiredFieldsWarning
                   canUseStoredValue={canUseStoredRequiredBarcodeValues}
+                  missingFields={missingRequiredBarcodeFields.map((field) => field.label)}
                   onUseStoredValue={() =>
                     runMutation("save", { useStoredRequiredBarcodeValues: true })
                   }

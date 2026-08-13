@@ -4,9 +4,17 @@ const AdminRequiredFieldsWarning = ({
   onUpdateAnyway,
   onGoBack,
   disabled = false,
+  missingFields = [],
 }) => (
-  <div className="alert alert-warning mb-0" role="alert">
-    <div>This necessary field is missing. Do you want to update anyway?</div>
+  <div className="alert alert-danger mb-0" role="alert">
+    <div>The following mandatory fields are missing. Do you want to update anyway?</div>
+    {missingFields.length > 0 && (
+      <ul className="mb-0 mt-2">
+        {missingFields.map((field) => (
+          <li key={field}>{field}</li>
+        ))}
+      </ul>
+    )}
     <div className="d-flex flex-wrap gap-2 mt-2">
       {canUseStoredValue && (
         <button

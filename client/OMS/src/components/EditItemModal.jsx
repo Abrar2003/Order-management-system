@@ -193,6 +193,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
     const missing = [];
     if (Number(masterBarcode) <= 0) {
       missing.push({
+        label: isInspectedMasterMode ? "QC master barcode" : "QC barcode",
         message: isInspectedMasterMode
           ? "QC master barcode is required for this box mode."
           : "QC barcode is required.",
@@ -201,6 +202,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
     }
     if (requiresInspectedInnerBarcode && Number(innerBarcode) <= 0) {
       missing.push({
+        label: "QC inner barcode",
         message: "QC inner barcode is required for this box mode.",
         storedValue: Number(storedInnerBarcode) > 0 ? storedInnerBarcode : "",
       });
@@ -755,6 +757,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
             {showRequiredFieldsWarning && (
               <AdminRequiredFieldsWarning
                 canUseStoredValue={canUseStoredRequiredBarcodeValues}
+                missingFields={missingRequiredBarcodeFields.map((field) => field.label)}
                 onUseStoredValue={() => handleSave({ useStoredRequiredBarcodeValues: true })}
                 onUpdateAnyway={() => handleSave({ allowMissingRequiredFields: true })}
                 onGoBack={() => setShowRequiredFieldsWarning(false)}

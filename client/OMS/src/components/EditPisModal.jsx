@@ -465,6 +465,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     const missing = [];
     if (!masterBarcode) {
       missing.push({
+        label: isPisMasterMode ? "PIS master barcode" : "PIS barcode",
         message: isPisMasterMode
           ? "PIS master barcode is required for this box mode."
           : "PIS barcode is required.",
@@ -473,6 +474,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     }
     if (requiresPisInnerBarcode && !innerBarcode) {
       missing.push({
+        label: "PIS inner barcode",
         message: "PIS inner barcode is required for this box mode.",
         storedValue: storedInnerBarcode,
       });
@@ -1136,6 +1138,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             {showRequiredFieldsWarning && (
               <AdminRequiredFieldsWarning
                 canUseStoredValue={canUseStoredRequiredBarcodeValues}
+                missingFields={missingRequiredBarcodeFields.map((field) => field.label)}
                 onUseStoredValue={() => handleSave({ useStoredRequiredBarcodeValues: true })}
                 onUpdateAnyway={() => handleSave({ allowMissingRequiredFields: true })}
                 onGoBack={() => setShowRequiredFieldsWarning(false)}
