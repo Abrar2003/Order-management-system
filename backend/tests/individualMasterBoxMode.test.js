@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
+  BOX_SIZE_REMARK_OPTIONS,
   buildBoxMeasurementCbmSummary,
   calculateEffectiveBoxEntriesCbmTotal,
   detectBoxPackagingMode,
@@ -13,6 +14,9 @@ const {
 const {
   calculateTotalPoCbm,
 } = require("../services/orderCbm.service");
+const {
+  __test__: { parseSizeEntriesPayload },
+} = require("../controllers/item.controller");
 
 const masterEntry = {
   remark: BOX_ENTRY_TYPES.MASTER,
@@ -39,6 +43,24 @@ test("requires master and inner barcodes for master box modes", () => {
   assert.equal(requiresInnerBarcode(BOX_PACKAGING_MODES.INDIVIDUAL_MASTER), true);
   assert.equal(requiresMasterBarcode(BOX_PACKAGING_MODES.CARTON), true);
   assert.equal(requiresInnerBarcode(BOX_PACKAGING_MODES.CARTON), true);
+});
+
+test("preserves pieces in master when PIS uses individual plus master packing", () => {
+  const [entry] = parseSizeEntriesPayload(
+    [{ ...masterEntry, box_count_in_master: 2 }],
+    {
+      fieldLabel: "pis_box_sizes",
+      remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+      weightKey: "gross_weight",
+      weightLabel: "gross_weight",
+      mode: BOX_PACKAGING_MODES.INDIVIDUAL_MASTER,
+      allowIncomplete: true,
+    },
+  );
+
+  assert.equal(entry.remark, BOX_ENTRY_TYPES.MASTER);
+  assert.equal(entry.box_type, BOX_ENTRY_TYPES.MASTER);
+  assert.equal(entry.box_count_in_master, 2);
 });
 
 test("calculates individual packing plus master CBM per piece from master box", () => {

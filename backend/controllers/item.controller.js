@@ -575,6 +575,18 @@ const parseSizeEntriesPayload = (
         ) {
           throw new Error(`${entryLabel}.box_count_in_master must be greater than 0`);
         }
+      } else if (resolvedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+        parsedEntry.remark = "master";
+        parsedEntry.box_type = "master";
+        parsedEntry.item_count_in_inner = 0;
+        parsedEntry.box_count_in_master = toNonNegativeNumber(
+          entry?.box_count_in_master,
+          `${entryLabel}.box_count_in_master`,
+        );
+
+        if (!allowIncomplete && parsedEntry.box_count_in_master <= 0) {
+          throw new Error(`${entryLabel}.box_count_in_master must be greater than 0`);
+        }
       } else {
         parsedEntry.box_type = "individual";
         parsedEntry.item_count_in_inner = 0;
@@ -2772,6 +2784,7 @@ exports.__test__ = {
   buildItemMatch,
   buildFinalPisCheckAccessMatch,
   buildFinalPisCheckMatch,
+  parseSizeEntriesPayload,
   requiresPisBarcodes,
 };
 
