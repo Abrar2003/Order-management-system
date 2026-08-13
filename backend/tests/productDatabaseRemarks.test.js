@@ -8,6 +8,7 @@ const {
   getProductDatabaseCompletionRange,
   normalizeProductDatabaseInput,
   applyProductDatabaseBarcodeDefaults,
+  applyProductDatabaseSave,
   assertProductDatabaseBarcodes,
 } = require("../helpers/productDatabase");
 
@@ -81,6 +82,51 @@ test("Product Database rejects blank writes and requires mode-specific barcodes"
     ),
     /PIS master barcode is required/,
   );
+});
+
+test("Product Database admin override accepts intentionally blank barcodes", () => {
+  const input = normalizeProductDatabaseInput(
+    { pd_barcode: "", pd_inner_barcode: "" },
+    { allowBlankBarcodes: true },
+  );
+
+  assert.deepEqual(input.data, {
+    pd_barcode: "",
+    pd_master_barcode: "",
+    pd_inner_barcode: "",
+  });
+  assert.doesNotThrow(() =>
+    assertProductDatabaseBarcodes(
+      { pd_box_mode: "carton", ...input.data },
+      {},
+      { allowMissingRequiredFields: true },
+    ),
+  );
+
+  const buildItem = () => ({
+    pd_checked: "created",
+    pd_box_mode: "individual",
+    pd_barcode: "123",
+    pd_master_barcode: "123",
+    pd_history: [],
+  });
+  assert.throws(
+    () =>
+      applyProductDatabaseSave({
+        item: buildItem(),
+        payload: { admin_override_required_fields: true, pd_barcode: "" },
+        user: { role: "manager" },
+      }),
+    /Only Admin or Super Admin/,
+  );
+
+  const item = buildItem();
+  applyProductDatabaseSave({
+    item,
+    payload: { admin_override_required_fields: true, pd_barcode: "" },
+    user: { role: "admin" },
+  });
+  assert.equal(item.pd_barcode, "");
 });
 
 test("Product Database defaults required barcodes from PIS", () => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import useFormDraft from "../hooks/useFormDraft";
+import AdminRequiredFieldsWarning from "./AdminRequiredFieldsWarning";
 import MeasuredSizeSection from "./MeasuredSizeSection";
 import ProductImageThumbnail from "./ProductImageThumbnail";
 import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
@@ -363,6 +364,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [showRequiredFieldsWarning, setShowRequiredFieldsWarning] = useState(false);
   const [latestInspectionContext, setLatestInspectionContext] = useState(null);
   const [latestInspectionContextLoading, setLatestInspectionContextLoading] = useState(false);
   const [latestInspectionContextLoaded, setLatestInspectionContextLoaded] = useState(false);
@@ -447,6 +449,43 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const isPisCartonMode =
     detectBoxPackagingMode(form.pis_box_mode, form.pis_box_sizes) ===
     BOX_PACKAGING_MODES.CARTON;
+  const storedMasterBarcode = toText(
+    isPisDiffUpdate
+      ? item?.master_master_barcode || item?.master_barcode || item?.pis_master_barcode || item?.pis_barcode
+      : item?.pis_master_barcode || item?.pis_barcode,
+  );
+  const storedInnerBarcode = toText(
+    isPisDiffUpdate
+      ? item?.master_inner_barcode || item?.pis_inner_barcode
+      : item?.pis_inner_barcode,
+  );
+  const getMissingRequiredBarcodeFields = (masterBarcode, innerBarcode) => {
+    if (form.barcode_exempted) return [];
+
+    const missing = [];
+    if (!masterBarcode) {
+      missing.push({
+        message: isPisMasterMode
+          ? "PIS master barcode is required for this box mode."
+          : "PIS barcode is required.",
+        storedValue: storedMasterBarcode,
+      });
+    }
+    if (requiresPisInnerBarcode && !innerBarcode) {
+      missing.push({
+        message: "PIS inner barcode is required for this box mode.",
+        storedValue: storedInnerBarcode,
+      });
+    }
+    return missing;
+  };
+  const missingRequiredBarcodeFields = getMissingRequiredBarcodeFields(
+    toText(form.master_barcode),
+    toText(form.inner_barcode),
+  );
+  const canUseStoredRequiredBarcodeValues =
+    missingRequiredBarcodeFields.length > 0 &&
+    missingRequiredBarcodeFields.every((field) => field.storedValue);
 
   useEffect(() => {
     if (!showInspectedReference || !itemCode || itemCode === "N/A") {
@@ -489,6 +528,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   }, [itemCode, showInspectedReference]);
 
   const updateField = (path, value) => {
+    setShowRequiredFieldsWarning(false);
     setForm((prev) => {
       const next = { ...prev };
       const chunks = path.split(".");
@@ -518,6 +558,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   };
 
   const handleBoxModeChange = (value) => {
+    setShowRequiredFieldsWarning(false);
     const nextMode = detectBoxPackagingMode(value, form.pis_box_sizes);
     const nextCount = String(getFixedBoxEntryCount(nextMode) ?? form.pis_box_count);
     setForm((prev) => ({
@@ -641,25 +682,36 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     });
   };
 
-  const handleSave = async () => {
+  const handleSave = async ({
+    useStoredRequiredBarcodeValues = false,
+    allowMissingRequiredFields = false,
+  } = {}) => {
+    const enteredMasterBarcode = toText(form.master_barcode);
+    const enteredInnerBarcode = toText(form.inner_barcode);
+    const masterBarcode = useStoredRequiredBarcodeValues
+      ? enteredMasterBarcode || storedMasterBarcode
+      : enteredMasterBarcode;
+    const innerBarcode = useStoredRequiredBarcodeValues
+      ? enteredInnerBarcode || storedInnerBarcode
+      : enteredInnerBarcode;
+    const missingRequiredFields = getMissingRequiredBarcodeFields(
+      masterBarcode,
+      innerBarcode,
+    );
+
+    if (missingRequiredFields.length > 0 && !allowMissingRequiredFields) {
+      if (canToggleBarcodeExemption) {
+        setShowRequiredFieldsWarning(true);
+      } else {
+        setError(missingRequiredFields[0].message);
+      }
+      return;
+    }
+
     try {
       setSaving(true);
       setError("");
-
-      if (!form.barcode_exempted && !toText(form.master_barcode)) {
-        throw new Error(
-          isPisMasterMode
-            ? "PIS master barcode is required for this box mode."
-            : "PIS barcode is required.",
-        );
-      }
-      if (
-        !form.barcode_exempted &&
-        requiresPisInnerBarcode &&
-        !toText(form.inner_barcode)
-      ) {
-        throw new Error("PIS inner barcode is required for this box mode.");
-      }
+      setShowRequiredFieldsWarning(false);
 
       const pisItemPayload = parseMeasuredSizeEntries({
         entries: form.pis_item_sizes,
@@ -697,15 +749,16 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         pis_box_sizes: pisBoxPayload.value,
       };
       payload.country_of_origin = toText(form.country_of_origin);
-      const barcode = toText(form.master_barcode);
-      if (barcode) {
+      if (masterBarcode || allowMissingRequiredFields) {
+        const barcode = masterBarcode;
         payload.pis_barcode = barcode;
-        if (isPisMasterMode) {
-          payload.pis_master_barcode = barcode;
-        }
+        payload.pis_master_barcode = barcode;
       }
       if (requiresPisInnerBarcode) {
-        payload.pis_inner_barcode = toText(form.inner_barcode);
+        payload.pis_inner_barcode = innerBarcode;
+      }
+      if (allowMissingRequiredFields) {
+        payload.admin_override_required_fields = true;
       }
       payload.kd = Boolean(form.kd);
       payload.mounting_file_needed = Boolean(form.mounting_file_needed);
@@ -1080,6 +1133,15 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
               </div>
             </div>
 
+            {showRequiredFieldsWarning && (
+              <AdminRequiredFieldsWarning
+                canUseStoredValue={canUseStoredRequiredBarcodeValues}
+                onUseStoredValue={() => handleSave({ useStoredRequiredBarcodeValues: true })}
+                onUpdateAnyway={() => handleSave({ allowMissingRequiredFields: true })}
+                onGoBack={() => setShowRequiredFieldsWarning(false)}
+                disabled={saving}
+              />
+            )}
             {error && <div className="alert alert-danger mb-0">{error}</div>}
           </div>
 
@@ -1103,7 +1165,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={handleSave}
+              onClick={() => handleSave()}
               disabled={saving}
             >
               {saving ? "Saving..." : `Save ${editScopeLabel}`}

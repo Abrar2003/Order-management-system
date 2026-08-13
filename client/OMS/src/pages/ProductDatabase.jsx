@@ -5,10 +5,12 @@ import { getUserFromToken } from "../auth/auth.service";
 import {
   isAdminLikeRole,
   isManagerLikeRole,
+  isStrictAdminRole,
   normalizeUserRole,
 } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
+import AdminRequiredFieldsWarning from "../components/AdminRequiredFieldsWarning";
 import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import ProductTypeDynamicForm from "../components/ProductTypeDynamicForm";
 import {
@@ -1294,6 +1296,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
   const normalizedRole = normalizeUserRole(user?.role);
   const isAdmin = isAdminLikeRole(normalizedRole);
   const isManager = isManagerLikeRole(normalizedRole) && !isAdmin;
+  const canOverrideRequiredFields = isStrictAdminRole(normalizedRole);
   const canViewProductTypeTemplates = hasPermission("product_type_templates", "view");
   const canEdit = Boolean(item?.permissions?.can_edit);
   const draftPayload = draft?.payload || null;
@@ -1373,6 +1376,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
   );
   const [savingAction, setSavingAction] = useState("");
   const [error, setError] = useState("");
+  const [showRequiredFieldsWarning, setShowRequiredFieldsWarning] = useState(false);
   const [draftMessage, setDraftMessage] = useState("");
   const countryOfOriginOptions = useMemo(
     () => getCountryOfOriginOptions(form.countryOfOrigin),
@@ -1596,6 +1600,53 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
   const hasChanges = !arePayloadsEqualForCompare(currentPayload, initialPayload);
   const canCheck = Boolean(item?.permissions?.can_check) && !hasChanges;
   const canApprove = isAdmin && (item?.pd_checked === "checked" || hasChanges);
+  const currentBoxMode = detectBoxPackagingMode(
+    currentPayload.pd_box_mode,
+    currentPayload.pd_box_sizes,
+  );
+  const getMissingRequiredBarcodeFields = (payload = currentPayload) => {
+    const missing = [];
+    const pisMasterBarcode = normalizeTextValue(
+      item?.pis_master_barcode || item?.pis_barcode,
+    );
+    const pisInnerBarcode = normalizeTextValue(item?.pis_inner_barcode);
+    if (!pisMasterBarcode) {
+      missing.push({
+        message: requiresMasterBarcode(currentBoxMode)
+          ? "PIS master barcode is required for this box mode."
+          : "PIS barcode is required.",
+        storedValue: "",
+      });
+    }
+    if (!normalizeTextValue(payload.pd_barcode || payload.pd_master_barcode)) {
+      missing.push({
+        message: requiresMasterBarcode(currentBoxMode)
+          ? "Product Database master barcode is required."
+          : "Product Database barcode is required.",
+        storedValue: getProductDatabaseMasterBarcode(item),
+      });
+    }
+    if (
+      requiresInnerBarcode(currentBoxMode) &&
+      !normalizeTextValue(payload.pd_inner_barcode)
+    ) {
+      missing.push({
+        message: "Product Database inner barcode is required for this box mode.",
+        storedValue: getProductDatabaseInnerBarcode(item),
+      });
+    }
+    if (requiresInnerBarcode(currentBoxMode) && !pisInnerBarcode) {
+      missing.push({
+        message: "PIS inner barcode is required for this box mode.",
+        storedValue: "",
+      });
+    }
+    return missing;
+  };
+  const missingRequiredBarcodeFields = getMissingRequiredBarcodeFields();
+  const canUseStoredRequiredBarcodeValues =
+    missingRequiredBarcodeFields.length > 0 &&
+    missingRequiredBarcodeFields.every((field) => field.storedValue);
 
   const clearDraftMessage = () => {
     if (draftMessage) setDraftMessage("");
@@ -1603,6 +1654,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
 
   const handleBarcodeFieldChange = (fieldName, value) => {
     clearDraftMessage();
+    setShowRequiredFieldsWarning(false);
     setForm((prev) => {
       if (fieldName === "singleBarcode") {
         return {
@@ -1848,37 +1900,67 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
     setDraftMessage("Draft saved on this page only. Nothing was sent to the backend.");
   };
 
-  const runMutation = async (action) => {
+  const runMutation = async (
+    action,
+    {
+      useStoredRequiredBarcodeValues = false,
+      allowMissingRequiredFields = false,
+    } = {},
+  ) => {
+    const missingRequiredFields = getMissingRequiredBarcodeFields();
+    if (missingRequiredFields.length > 0 && !allowMissingRequiredFields) {
+      if (action === "save" && canOverrideRequiredFields) {
+        if (!useStoredRequiredBarcodeValues) {
+          setShowRequiredFieldsWarning(true);
+          return;
+        }
+      } else {
+        setError(missingRequiredFields[0].message);
+        return;
+      }
+    }
+
     try {
       setSavingAction(action);
       setError("");
+      setShowRequiredFieldsWarning(false);
       setProductTypeErrors(cloneProductTypeValidation());
 
       if (normalizeTemplateKey(form.productTypeKey) && !templateReady) {
         setError("Please wait for the selected product type template to finish loading.");
         return;
       }
-      const currentBoxMode = detectBoxPackagingMode(
-        currentPayload.pd_box_mode,
-        currentPayload.pd_box_sizes,
-      );
-      if (!normalizeTextValue(currentPayload.pd_barcode || currentPayload.pd_master_barcode)) {
-        setError(
-          requiresMasterBarcode(currentBoxMode)
-            ? "Product Database master barcode is required."
-            : "Product Database barcode is required.",
-        );
-        return;
-      }
-      if (
-        requiresInnerBarcode(currentBoxMode) &&
-        !normalizeTextValue(currentPayload.pd_inner_barcode)
-      ) {
-        setError("Product Database inner barcode is required for this box mode.");
-        return;
-      }
-
-      const requestPayload = buildProductDatabaseRequestPayload(currentPayload);
+      const primaryBarcode = useStoredRequiredBarcodeValues
+        ? normalizeTextValue(
+            currentPayload.pd_barcode ||
+              currentPayload.pd_master_barcode ||
+              getProductDatabaseMasterBarcode(item),
+          )
+        : normalizeTextValue(currentPayload.pd_barcode || currentPayload.pd_master_barcode);
+      const innerBarcode = useStoredRequiredBarcodeValues
+        ? normalizeTextValue(
+            currentPayload.pd_inner_barcode || getProductDatabaseInnerBarcode(item),
+          )
+        : normalizeTextValue(currentPayload.pd_inner_barcode);
+      const payloadWithRequiredFields = {
+        ...currentPayload,
+        ...(primaryBarcode || allowMissingRequiredFields
+          ? {
+              pd_barcode: primaryBarcode,
+              ...(requiresMasterBarcode(currentBoxMode)
+                ? { pd_master_barcode: primaryBarcode }
+                : {}),
+            }
+          : {}),
+        ...(requiresInnerBarcode(currentBoxMode) &&
+        (innerBarcode || allowMissingRequiredFields)
+          ? { pd_inner_barcode: innerBarcode }
+          : {}),
+        ...(allowMissingRequiredFields
+          ? { admin_override_required_fields: true }
+          : {}),
+      };
+      const requestPayload = buildProductDatabaseRequestPayload(payloadWithRequiredFields);
       let response;
       if (action === "check") {
         response = await api.post(`/items/${item.id}/product-database/check`, requestPayload);
@@ -1951,6 +2033,21 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
           </div>
 
           <div className="modal-body">
+            {showRequiredFieldsWarning && (
+              <div className="mb-3">
+                <AdminRequiredFieldsWarning
+                  canUseStoredValue={canUseStoredRequiredBarcodeValues}
+                  onUseStoredValue={() =>
+                    runMutation("save", { useStoredRequiredBarcodeValues: true })
+                  }
+                  onUpdateAnyway={() =>
+                    runMutation("save", { allowMissingRequiredFields: true })
+                  }
+                  onGoBack={() => setShowRequiredFieldsWarning(false)}
+                  disabled={savingAction !== ""}
+                />
+              </div>
+            )}
             {error && <div className="alert alert-danger mb-3">{error}</div>}
             {draftMessage && <div className="alert alert-success mb-3">{draftMessage}</div>}
             {!draftMessage && draft && (

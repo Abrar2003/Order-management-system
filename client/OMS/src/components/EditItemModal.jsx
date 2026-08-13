@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import api from "../api/axios";
+import AdminRequiredFieldsWarning from "./AdminRequiredFieldsWarning";
 import MeasuredSizeSection from "./MeasuredSizeSection";
 import {
   BOX_PACKAGING_MODES,
@@ -18,6 +19,8 @@ import {
   requiresMasterBarcode,
   resolvePreferredMeasuredSizeCbm,
 } from "../utils/measuredSizeForm";
+import { getUserFromToken } from "../auth/auth.utils";
+import { isStrictAdminRole, normalizeUserRole } from "../auth/permissions";
 import "../App.css";
 
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
@@ -129,6 +132,11 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
   const [form, setForm] = useState(() => buildInitialForm(item));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [showRequiredFieldsWarning, setShowRequiredFieldsWarning] = useState(false);
+  const user = getUserFromToken();
+  const canOverrideRequiredFields = isStrictAdminRole(
+    normalizeUserRole(user?.role),
+  );
 
   const itemCode = useMemo(() => toText(item?.code, "N/A"), [item?.code]);
   const brandLabel = useMemo(() => getBrandLabel(item), [item]);
@@ -177,8 +185,38 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
     form.inspected_box_mode,
     form.inspected_box_sizes,
   );
+  const storedMasterBarcode = toText(
+    item?.qc?.master_barcode || item?.qc?.barcode || item?.pis_master_barcode || item?.pis_barcode,
+  );
+  const storedInnerBarcode = toText(item?.qc?.inner_barcode || item?.pis_inner_barcode);
+  const getMissingRequiredBarcodeFields = (masterBarcode, innerBarcode) => {
+    const missing = [];
+    if (Number(masterBarcode) <= 0) {
+      missing.push({
+        message: isInspectedMasterMode
+          ? "QC master barcode is required for this box mode."
+          : "QC barcode is required.",
+        storedValue: Number(storedMasterBarcode) > 0 ? storedMasterBarcode : "",
+      });
+    }
+    if (requiresInspectedInnerBarcode && Number(innerBarcode) <= 0) {
+      missing.push({
+        message: "QC inner barcode is required for this box mode.",
+        storedValue: Number(storedInnerBarcode) > 0 ? storedInnerBarcode : "",
+      });
+    }
+    return missing;
+  };
+  const missingRequiredBarcodeFields = getMissingRequiredBarcodeFields(
+    form.qc.master_barcode,
+    form.qc.inner_barcode,
+  );
+  const canUseStoredRequiredBarcodeValues =
+    missingRequiredBarcodeFields.length > 0 &&
+    missingRequiredBarcodeFields.every((field) => field.storedValue);
 
   const updateField = (path, value) => {
+    setShowRequiredFieldsWarning(false);
     setForm((prev) => {
       const next = { ...prev };
       const chunks = path.split(".");
@@ -208,6 +246,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
   };
 
   const handleInspectedBoxModeChange = (value) => {
+    setShowRequiredFieldsWarning(false);
     const nextMode = detectBoxPackagingMode(value, form.inspected_box_sizes);
     const nextCount =
       String(getFixedBoxEntryCount(nextMode) ?? form.inspected_box_count);
@@ -261,21 +300,36 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
     }));
   };
 
-  const handleSave = async () => {
+  const handleSave = async ({
+    useStoredRequiredBarcodeValues = false,
+    allowMissingRequiredFields = false,
+  } = {}) => {
+    const enteredMasterBarcode = toText(form.qc.master_barcode);
+    const enteredInnerBarcode = toText(form.qc.inner_barcode);
+    const masterBarcode = useStoredRequiredBarcodeValues
+      ? enteredMasterBarcode || storedMasterBarcode
+      : enteredMasterBarcode;
+    const innerBarcode = useStoredRequiredBarcodeValues
+      ? enteredInnerBarcode || storedInnerBarcode
+      : enteredInnerBarcode;
+    const missingRequiredFields = getMissingRequiredBarcodeFields(
+      masterBarcode,
+      innerBarcode,
+    );
+
+    if (missingRequiredFields.length > 0 && !allowMissingRequiredFields) {
+      if (canOverrideRequiredFields) {
+        setShowRequiredFieldsWarning(true);
+      } else {
+        setError(missingRequiredFields[0].message);
+      }
+      return;
+    }
+
     try {
       setSaving(true);
       setError("");
-
-      if (Number(form.qc.master_barcode) <= 0) {
-        throw new Error(
-          isInspectedMasterMode
-            ? "QC master barcode is required for this box mode."
-            : "QC barcode is required.",
-        );
-      }
-      if (requiresInspectedInnerBarcode && Number(form.qc.inner_barcode) <= 0) {
-        throw new Error("QC inner barcode is required for this box mode.");
-      }
+      setShowRequiredFieldsWarning(false);
 
       const inspectedItemPayload = parseMeasuredSizeEntries({
         entries: form.inspected_item_sizes,
@@ -330,7 +384,6 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
           from_qc: Boolean(form.source.from_qc),
         },
       };
-      const masterBarcode = toText(form.qc.master_barcode);
       if (masterBarcode) {
         const parsedMasterBarcode = parseNonNegativeNumber(
           masterBarcode,
@@ -341,12 +394,17 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
         }
         payload.qc.barcode = parsedMasterBarcode;
         payload.qc.master_barcode = parsedMasterBarcode;
+      } else if (allowMissingRequiredFields) {
+        payload.qc.barcode = "";
+        payload.qc.master_barcode = "";
       }
       if (requiresInspectedInnerBarcode) {
-        payload.qc.inner_barcode = parseNonNegativeNumber(
-          form.qc.inner_barcode,
-          "QC inner barcode",
-        );
+        payload.qc.inner_barcode = innerBarcode
+          ? parseNonNegativeNumber(innerBarcode, "QC inner barcode")
+          : "";
+      }
+      if (allowMissingRequiredFields) {
+        payload.admin_override_required_fields = true;
       }
 
       await api.patch(`/items/${item?._id}`, payload);
@@ -694,6 +752,15 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
               </div>
             </div>
 
+            {showRequiredFieldsWarning && (
+              <AdminRequiredFieldsWarning
+                canUseStoredValue={canUseStoredRequiredBarcodeValues}
+                onUseStoredValue={() => handleSave({ useStoredRequiredBarcodeValues: true })}
+                onUpdateAnyway={() => handleSave({ allowMissingRequiredFields: true })}
+                onGoBack={() => setShowRequiredFieldsWarning(false)}
+                disabled={saving}
+              />
+            )}
             {error && <div className="alert alert-danger mb-0">{error}</div>}
           </div>
 
@@ -709,7 +776,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={handleSave}
+              onClick={() => handleSave()}
               disabled={saving}
             >
               {saving ? "Saving..." : "Save Item"}

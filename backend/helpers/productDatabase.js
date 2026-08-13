@@ -600,7 +600,10 @@ const extractProductDatabaseFields = (item = {}) => {
   };
 };
 
-const normalizeProductDatabaseInput = (payload = {}) => {
+const normalizeProductDatabaseInput = (
+  payload = {},
+  { allowBlankBarcodes = false } = {},
+) => {
   const hasCountryOfOrigin = hasOwn(payload, "country_of_origin");
   const hasPdBarcode = hasOwn(payload, "pd_barcode");
   const hasPdMasterBarcode = hasOwn(payload, "pd_master_barcode");
@@ -619,9 +622,12 @@ const normalizeProductDatabaseInput = (payload = {}) => {
   }
 
   if (
-    (hasPdBarcode && !normalizeText(payload.pd_barcode)) ||
-    (hasPdMasterBarcode && !normalizeText(payload.pd_master_barcode)) ||
-    (hasPdInnerBarcode && !normalizeText(payload.pd_inner_barcode))
+    !allowBlankBarcodes &&
+    (
+      (hasPdBarcode && !normalizeText(payload.pd_barcode)) ||
+      (hasPdMasterBarcode && !normalizeText(payload.pd_master_barcode)) ||
+      (hasPdInnerBarcode && !normalizeText(payload.pd_inner_barcode))
+    )
   ) {
     throw new ProductDatabaseError("Barcode fields cannot be blank");
   }
@@ -935,7 +941,12 @@ const applyProductDatabaseBarcodeDefaults = (state = {}, item = {}) => {
   };
 };
 
-const assertProductDatabaseBarcodes = (state = {}, item = null) => {
+const assertProductDatabaseBarcodes = (
+  state = {},
+  item = null,
+  { allowMissingRequiredFields = false } = {},
+) => {
+  if (allowMissingRequiredFields) return;
   const boxMode = detectBoxPackagingMode(
     state?.pd_box_mode,
     state?.pd_box_sizes,
@@ -1080,12 +1091,25 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
   const actor = buildPdAuditActor(user);
   const previousStatus = normalizePdStatus(item?.pd_checked);
   const currentState = extractProductDatabaseFields(item);
-  const input = normalizeProductDatabaseInput(payload);
-  const nextState = applyProductDatabaseBarcodeDefaults(
-    mergeProductDatabaseFields(currentState, input.data),
-    item,
-  );
-  assertProductDatabaseBarcodes(nextState, item);
+  const adminOverrideRequiredFields =
+    payload?.admin_override_required_fields === true;
+  const isStrictAdmin = ["admin", "super_admin"].includes(role);
+  if (adminOverrideRequiredFields && !isStrictAdmin) {
+    throw new ProductDatabaseError(
+      "Only Admin or Super Admin can override required fields.",
+      403,
+    );
+  }
+  const input = normalizeProductDatabaseInput(payload, {
+    allowBlankBarcodes: adminOverrideRequiredFields,
+  });
+  const mergedState = mergeProductDatabaseFields(currentState, input.data);
+  const nextState = adminOverrideRequiredFields
+    ? mergedState
+    : applyProductDatabaseBarcodeDefaults(mergedState, item);
+  assertProductDatabaseBarcodes(nextState, item, {
+    allowMissingRequiredFields: adminOverrideRequiredFields,
+  });
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (!input.hasInput) {
