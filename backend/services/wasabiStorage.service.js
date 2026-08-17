@@ -12,6 +12,7 @@ const {
   PutBucketCorsCommand,
 } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { logStorageDeletion } = require("./storageDeletionAudit.service");
 
 const normalizeValue = (value) => String(value || "").trim();
 
@@ -445,12 +446,22 @@ const deleteObject = async (key) => {
   const config = getConfig();
 
   try {
-    await client.send(
+    const result = await client.send(
       new DeleteObjectCommand({
         Bucket: config.bucket,
         Key: key,
       }),
     );
+    logStorageDeletion({
+      key,
+      versionId: result?.VersionId,
+      deleteMarker: result?.DeleteMarker,
+    }).catch((error) => {
+      console.warn("[storage] deletion audit log failed", {
+        key,
+        message: error?.message || String(error),
+      });
+    });
   } catch (error) {
     throw new Error(
       `Wasabi delete failed: ${error?.message || String(error)}`,

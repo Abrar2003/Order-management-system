@@ -409,9 +409,24 @@ const SecurityDashboard = () => {
               <div className="card-body">
                 <div className="d-flex flex-wrap justify-content-between gap-3 align-items-center mb-3">
                   <h2 className="h5 mb-0">Activity</h2>
-                  <span className="text-secondary small">
-                    {activityPagination?.total ?? activity.length} records
-                  </span>
+                  <div className="d-flex align-items-center gap-2">
+                    <span className="text-secondary small">
+                      {activityPagination?.total ?? activity.length} records
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary btn-sm"
+                      onClick={() =>
+                        setActivityFilters((prev) => ({
+                          ...prev,
+                          action: "delete",
+                          resource_type: "storage_object",
+                        }))
+                      }
+                    >
+                      Storage deletes
+                    </button>
+                  </div>
                 </div>
                 <div className="security-filter-grid mb-3">
                   <input
@@ -461,6 +476,8 @@ const SecurityDashboard = () => {
                         <th>User</th>
                         <th>Action</th>
                         <th>Resource</th>
+                        <th>Object key</th>
+                        <th>Delete marker</th>
                         <th>IP</th>
                         <th>Score</th>
                         <th>Reasons</th>
@@ -469,7 +486,7 @@ const SecurityDashboard = () => {
                     <tbody>
                       {activity.length === 0 ? (
                         <tr>
-                          <td colSpan="7" className="text-center text-secondary py-4">
+                          <td colSpan="9" className="text-center text-secondary py-4">
                             No activity found.
                           </td>
                         </tr>
@@ -488,6 +505,10 @@ const SecurityDashboard = () => {
                             </td>
                             <td>{row.action}</td>
                             <td>{row.resource_type || "-"}</td>
+                            <td className="small text-break">{row.resource_id || "-"}</td>
+                            <td className="small text-break">
+                              {row.metadata?.delete_marker_version_id || "-"}
+                            </td>
                             <td>{row.ip || "-"}</td>
                             <td>{row.risk_score || 0}</td>
                             <td>{(row.risk_reasons || []).join(", ") || "-"}</td>

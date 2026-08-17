@@ -49,6 +49,9 @@ const { closePdfRenderer } = require("./services/pdfRenderer");
 const {
   closeOmsChatConnection,
 } = require("./services/omsChatQuery.service");
+const {
+  withStorageDeletionContext,
+} = require("./services/storageDeletionAudit.service");
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
@@ -120,6 +123,7 @@ app.use(
     limit: String(process.env.URLENCODED_BODY_LIMIT || "10mb"),
   }),
 );
+app.use(withStorageDeletionContext);
 
 app.use("/orders", orderRouter);
 app.use("/auth", authRouter);
