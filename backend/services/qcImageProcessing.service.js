@@ -502,35 +502,8 @@ const processDirectSourceImage = async ({
         [`${imageField}.$[image].processing.completed_at`]: now,
         [`${imageField}.$[image].processing.lock_until`]: null,
         [`${imageField}.$[image].processing.error`]: "",
-      },
-    },
-    {
-      arrayFilters: [{ "image._id": image._id }],
-    },
-  );
-
-  let sourceCleanupStatus = "completed";
-  let sourceDeletedAt = new Date();
-  try {
-    await deleteObject(sourceKey);
-  } catch (error) {
-    sourceCleanupStatus = "pending";
-    sourceDeletedAt = null;
-    console.warn("[qc-image-processing] source cleanup failed", {
-      qcId,
-      imageField,
-      imageId,
-      sourceKey,
-      message: error?.message || String(error),
-    });
-  }
-
-  await Model.updateOne(
-    query,
-    {
-      $set: {
-        [`${imageField}.$[image].storage.source_cleanup_status`]: sourceCleanupStatus,
-        [`${imageField}.$[image].storage.source_deleted_at`]: sourceDeletedAt,
+        [`${imageField}.$[image].storage.source_cleanup_status`]: "retained",
+        [`${imageField}.$[image].storage.source_deleted_at`]: null,
       },
     },
     {
@@ -549,7 +522,7 @@ const processDirectSourceImage = async ({
     thumbnailKey,
     previewSize: preview.size,
     thumbnailSize: thumbnail.size,
-    sourceCleanupStatus,
+    sourceCleanupStatus: "retained",
   };
 };
 

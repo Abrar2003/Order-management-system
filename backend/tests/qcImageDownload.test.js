@@ -6,7 +6,12 @@ const test = require("node:test");
 const AdmZip = require("adm-zip");
 
 const {
-  __test__: { createQcImagesArchiveFile, streamQcImagesArchive },
+  __test__: {
+    buildArchiveEntryName,
+    createQcImagesArchiveFile,
+    fetchQcImageContent,
+    streamQcImagesArchive,
+  },
 } = require("../services/qcImageDownload.service");
 
 const createTempZipPath = () =>
@@ -94,6 +99,55 @@ test("creates a complete QC image archive file before download response", async 
   } finally {
     if (archivePath) fs.rmSync(archivePath, { force: true });
   }
+});
+
+test("downloads a retained source image instead of its WebP preview", async () => {
+  const sourceKey = "qc-images/qc/inspection/record/qc_images/image/source/original.jpg";
+  const previewKey = "qc-images/qc/inspection/record/qc_images/image/preview/v1.webp";
+  let fetchedKey = "";
+
+  const result = await fetchQcImageContent(
+    {
+      key: previewKey,
+      storage: { source_key: sourceKey },
+    },
+    {
+      objectExistsFn: async (key) => key === sourceKey,
+      getObjectBufferFn: async (key) => {
+        fetchedKey = key;
+        return { buffer: Buffer.from("original"), contentType: "image/jpeg", size: 8 };
+      },
+    },
+  );
+
+  assert.equal(fetchedKey, sourceKey);
+  assert.equal(result.storageKey, sourceKey);
+  assert.equal(
+    buildArchiveEntryName({ originalName: "IMG_20260714_121734.jpg" }, 0, result.storageKey),
+    "IMG_20260714_121734.jpg",
+  );
+
+  const fallback = await fetchQcImageContent(
+    {
+      key: previewKey,
+      storage: { source_key: sourceKey },
+      originalName: "IMG_20260714_121734.jpg",
+    },
+    {
+      objectExistsFn: async () => false,
+      getObjectBufferFn: async (key) => ({ buffer: Buffer.from(key), size: key.length }),
+    },
+  );
+
+  assert.equal(fallback.storageKey, previewKey);
+  assert.equal(
+    buildArchiveEntryName(
+      { originalName: "IMG_20260714_121734.jpg" },
+      0,
+      fallback.storageKey,
+    ),
+    "IMG_20260714_121734.webp",
+  );
 });
 
 test("does not create a download file when every selected QC image fails", async () => {

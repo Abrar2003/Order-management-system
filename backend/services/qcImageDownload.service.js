@@ -4,7 +4,7 @@ const fsp = require("fs/promises");
 const os = require("os");
 const axios = require("axios");
 const archiver = require("archiver");
-const { getObjectBuffer } = require("./wasabiStorage.service");
+const { getObjectBuffer, objectExists } = require("./wasabiStorage.service");
 
 const ZIP_COMPRESSION_LEVEL = Math.max(
   0,
@@ -44,13 +44,15 @@ const sanitizeFileExtension = (value = "", fallback = ".jpg") => {
   return safeExtension.slice(0, 10);
 };
 
-const buildArchiveEntryName = (image = {}, index = 0) => {
+const buildArchiveEntryName = (image = {}, index = 0, storageKey = "") => {
   const originalName = normalizeText(image?.originalName);
-  const storageKeyName = path.basename(normalizeText(image?.key || ""));
+  const storageKeyName = path.basename(
+    normalizeText(storageKey || image?.key || ""),
+  );
   const candidateName =
     originalName || storageKeyName || `qc-image-${index + 1}.jpg`;
   const candidateExtension =
-    path.extname(candidateName) || path.extname(storageKeyName) || ".jpg";
+    path.extname(storageKeyName) || path.extname(candidateName) || ".jpg";
 
   return `${sanitizeFileBaseName(candidateName, `qc-image-${index + 1}`)}${sanitizeFileExtension(candidateExtension)}`;
 };
@@ -141,17 +143,33 @@ const getLegacyUrlBuffer = async (url = "") => {
   };
 };
 
-const fetchQcImageContent = async (image = {}) => {
+const fetchQcImageContent = async (
+  image = {},
+  {
+    objectExistsFn = objectExists,
+    getObjectBufferFn = getObjectBuffer,
+  } = {},
+) => {
+  const sourceKey = normalizeText(image?.storage?.source_key || "");
+  if (sourceKey && await objectExistsFn(sourceKey)) {
+    return {
+      ...(await getObjectBufferFn(sourceKey)),
+      storageKey: sourceKey,
+    };
+  }
+
   const storageKey = normalizeText(
     image?.key ||
-      image?.storage?.source_key ||
       image?.preview?.key ||
       image?.thumbnail?.key ||
       image?.thumbnail_key ||
       "",
   );
   if (storageKey) {
-    return getObjectBuffer(storageKey);
+    return {
+      ...(await getObjectBufferFn(storageKey)),
+      storageKey,
+    };
   }
 
   const legacyUrl = normalizeText(image?.url || image?.link || "");
@@ -226,9 +244,6 @@ const streamQcImagesArchive = async ({
     zlib: { level: ZIP_COMPRESSION_LEVEL },
   });
   const usedNames = new Set();
-  const archiveEntryNames = safeImages.map((image, index) =>
-    ensureUniqueArchiveEntryName(buildArchiveEntryName(image, index), usedNames),
-  );
   const failures = [];
   let downloadedCount = 0;
   const safeConcurrency = Math.max(1, Number(concurrency) || DOWNLOAD_CONCURRENCY);
@@ -243,10 +258,14 @@ const streamQcImagesArchive = async ({
     safeImages,
     safeConcurrency,
     async (image, index) => {
-      const uniqueArchiveEntryName = archiveEntryNames[index];
+      const fallbackArchiveEntryName = buildArchiveEntryName(image, index);
 
       try {
         const objectData = await fetchImageContent(image);
+        const uniqueArchiveEntryName = ensureUniqueArchiveEntryName(
+          buildArchiveEntryName(image, index, objectData?.storageKey),
+          usedNames,
+        );
         archive.append(objectData.buffer, {
           name: uniqueArchiveEntryName,
           store: true,
@@ -254,7 +273,7 @@ const streamQcImagesArchive = async ({
         downloadedCount += 1;
       } catch (error) {
         failures.push(
-          `${uniqueArchiveEntryName}: ${error?.message || "Failed to load image from storage"}`,
+          `${fallbackArchiveEntryName}: ${error?.message || "Failed to load image from storage"}`,
         );
       }
     },
@@ -338,6 +357,7 @@ module.exports = {
     buildArchiveEntryName,
     createQcImagesArchiveFile,
     ensureUniqueArchiveEntryName,
+    fetchQcImageContent,
     streamQcImagesArchive,
   },
 };

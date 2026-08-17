@@ -190,16 +190,9 @@ db.qcs.updateOne(
 )
 ```
 
-## Source Cleanup
+## Source Retention
 
-Source objects are temporary. The worker deletes the source only after:
-
-1. preview WebP upload succeeds
-2. thumbnail WebP upload succeeds
-3. both objects pass HEAD verification
-4. MongoDB canonical fields are updated to the preview
-
-If source deletion fails, processing remains `ready` and `storage.source_cleanup_status` stays `pending` for later cleanup.
+Source objects are retained so QC-image downloads use the original upload. The preview and thumbnail WebP objects remain the gallery assets.
 
 ## Rollback
 
