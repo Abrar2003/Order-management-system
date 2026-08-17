@@ -270,6 +270,18 @@ const formatClaimPercentage = (value) => {
   return parsed.toFixed(2).replace(/\.?0+$/, "");
 };
 
+const toDateInputValue = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+};
+
+const createClaimTenure = (value = {}) => ({
+  from_date: toDateInputValue(value?.from_date),
+  to_date: toDateInputValue(value?.to_date),
+  delivered_quantity: value?.delivered_quantity ?? "",
+  rejected_quantity: value?.rejected_quantity ?? "",
+});
+
 const hasUploadedItemFile = (item, option) =>
   getItemFileValues(item, option).length > 0;
 
@@ -278,15 +290,44 @@ const ClaimPercentageModal = ({
   onClose,
   onSaved,
 }) => {
-  const [value, setValue] = useState(() => String(Number(item?.claim_percentage || 0)));
+  const [tenures, setTenures] = useState(() => {
+    const existing = Array.isArray(item?.claim_tenures) ? item.claim_tenures : [];
+    return existing.length > 0 ? existing.map(createClaimTenure) : [createClaimTenure()];
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const totals = useMemo(
+    () =>
+      tenures.reduce(
+        (summary, tenure) => ({
+          delivered: summary.delivered + (Number(tenure.delivered_quantity) || 0),
+          rejected: summary.rejected + (Number(tenure.rejected_quantity) || 0),
+        }),
+        { delivered: 0, rejected: 0 },
+      ),
+    [tenures],
+  );
+  const calculatedPercentage =
+    totals.delivered > 0 ? (totals.rejected / totals.delivered) * 100 : 0;
+
+  const updateTenure = (index, field, value) => {
+    setTenures((current) =>
+      current.map((tenure, tenureIndex) =>
+        tenureIndex === index ? { ...tenure, [field]: value } : tenure,
+      ),
+    );
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
-    const parsedValue = Number(value);
-    if (!Number.isFinite(parsedValue) || parsedValue < 0 || parsedValue > 100) {
-      setError("Enter a percentage between 0 and 100.");
+    if (tenures.some((tenure) =>
+      !tenure.from_date ||
+      !tenure.to_date ||
+      tenure.delivered_quantity === "" ||
+      tenure.rejected_quantity === "",
+    )) {
+      setError("Complete every tenure row before saving.");
       return;
     }
 
@@ -294,11 +335,12 @@ const ClaimPercentageModal = ({
       setSaving(true);
       setError("");
       const response = await api.patch(`/items/${encodeURIComponent(item._id)}`, {
-        claim_percentage: parsedValue,
+        claim_tenures: tenures,
       });
       onSaved(response?.data?.data || {
         ...item,
-        claim_percentage: parsedValue,
+        claim_tenures: tenures,
+        claim_percentage: calculatedPercentage,
       });
     } catch (saveError) {
       setError(
@@ -331,22 +373,57 @@ const ClaimPercentageModal = ({
             />
           </div>
           <div className="modal-body">
-            <label className="form-label" htmlFor="item-claim-percentage">
-              Claim percentage
-            </label>
-            <div className="input-group">
-              <input
-                id="item-claim-percentage"
-                type="number"
-                className="form-control"
-                min="0"
-                max="100"
-                step="0.01"
-                value={value}
-                autoFocus
-                onChange={(event) => setValue(event.target.value)}
-              />
-              <span className="input-group-text">%</span>
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <label className="form-label mb-0">Claim tenures</label>
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                disabled={saving}
+                onClick={() => setTenures((current) => [...current, createClaimTenure()])}
+              >
+                Add tenure
+              </button>
+            </div>
+            <div className="d-grid gap-3">
+              {tenures.map((tenure, index) => (
+                <div className="border rounded p-3" key={`claim-tenure-${index}`}>
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <span className="fw-semibold">Tenure {index + 1}</span>
+                    {tenures.length > 1 && (
+                      <button
+                        type="button"
+                        className="btn btn-link text-danger btn-sm p-0"
+                        disabled={saving}
+                        onClick={() => setTenures((current) => current.filter((_, row) => row !== index))}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <div className="row g-2">
+                    <div className="col-md-6">
+                      <label className="form-label small">From date</label>
+                      <input type="date" className="form-control" value={tenure.from_date} disabled={saving} autoFocus={index === 0} onChange={(event) => updateTenure(index, "from_date", event.target.value)} />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label small">To date</label>
+                      <input type="date" className="form-control" value={tenure.to_date} disabled={saving} onChange={(event) => updateTenure(index, "to_date", event.target.value)} />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label small">Delivered quantity</label>
+                      <input type="number" min="1" step="1" className="form-control" value={tenure.delivered_quantity} disabled={saving} onChange={(event) => updateTenure(index, "delivered_quantity", event.target.value)} />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label small">Rejected quantity</label>
+                      <input type="number" min="0" step="1" className="form-control" value={tenure.rejected_quantity} disabled={saving} onChange={(event) => updateTenure(index, "rejected_quantity", event.target.value)} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="alert alert-light border mt-3 mb-0">
+              <div>Delivered: <strong>{totals.delivered}</strong> pcs · Rejected: <strong>{totals.rejected}</strong> pcs</div>
+              <div>Calculated claim percentage: <strong>{formatClaimPercentage(calculatedPercentage)}%</strong></div>
             </div>
             {error && <div className="alert alert-danger mt-3 mb-0">{error}</div>}
           </div>
@@ -360,7 +437,7 @@ const ClaimPercentageModal = ({
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? "Saving..." : "Save percentage"}
+              {saving ? "Saving..." : "Save claim history"}
             </button>
           </div>
         </form>

@@ -113,6 +113,15 @@ const productSpecBoxSizeEntrySchema = new mongoose.Schema(
   },
   { _id: false },
 );
+const claimTenureSchema = new mongoose.Schema(
+  {
+    from_date: { type: Date, required: true },
+    to_date: { type: Date, required: true },
+    delivered_quantity: { type: Number, required: true, min: 1 },
+    rejected_quantity: { type: Number, required: true, min: 0 },
+  },
+  { _id: true },
+);
 const finishAssignmentSchema = new mongoose.Schema(
   {
     finish_id: {
@@ -619,6 +628,7 @@ const itemSchema = new mongoose.Schema(
       type: [formDraftSchema],
       default: [],
     },
+    claim_tenures: { type: [claimTenureSchema], default: [] },
     claim_percentage: { type: Number, default: 0, min: 0, max: 100 },
   },
   { timestamps: true },

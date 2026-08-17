@@ -113,6 +113,9 @@ const {
   cleanupLegacyItemSizeFields,
 } = require("../helpers/itemLegacySizeCleanup");
 const {
+  normalizeClaimTenures,
+} = require("../helpers/claimPercentage");
+const {
   buildFormDraftCleanupPipeline,
   buildFormDraftDeletePipeline,
   buildFormDraftUpsertPipeline,
@@ -6784,18 +6787,12 @@ exports.updateItem = async (req, res) => {
     }
 
     if (hasOwn(payload, "claim_percentage")) {
-      const claimPercentage = Number(payload.claim_percentage);
-      if (
-        !Number.isFinite(claimPercentage)
-        || claimPercentage < 0
-        || claimPercentage > 100
-      ) {
-        throw createHttpError(
-          400,
-          "claim_percentage must be a number between 0 and 100",
-        );
-      }
-      setPath("claim_percentage", claimPercentage);
+      throw createHttpError(400, "claim_percentage is calculated from claim_tenures");
+    }
+    if (hasOwn(payload, "claim_tenures")) {
+      const claim = normalizeClaimTenures(payload.claim_tenures);
+      setPath("claim_tenures", claim.tenures);
+      setPath("claim_percentage", claim.claim_percentage);
     }
 
     if (productTypeContext.productTypeSnapshot) {
