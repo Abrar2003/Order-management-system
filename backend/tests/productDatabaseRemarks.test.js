@@ -5,6 +5,7 @@ const {
   buildProductDatabaseCompletion,
   buildProductDatabaseCompletionRangeSummary,
   buildProductDatabaseCompletionSummary,
+  getProductDatabaseMaterialOptions,
   getProductDatabaseCompletionRange,
   normalizeProductDatabaseInput,
   applyProductDatabaseBarcodeDefaults,
@@ -183,7 +184,7 @@ test("Product Database defaults required barcodes from PIS", () => {
   );
 });
 
-test("Product Database completion buckets count filled Table fields", () => {
+test("Product Database completion counts unset booleans as false", () => {
   const templateFields = [
     { key: "item_number", input_type: "text", value_type: "string" },
     { key: "description", input_type: "textarea", value_type: "string" },
@@ -225,14 +226,36 @@ test("Product Database completion buckets count filled Table fields", () => {
     items.map((item) => item.pd_completion),
     [
       { filled: 4, total: 4, percentage: 100, bucket: 100 },
+      { filled: 3, total: 4, percentage: 75, bucket: 75 },
       { filled: 2, total: 4, percentage: 50, bucket: 50 },
-      { filled: 1, total: 4, percentage: 25, bucket: 25 },
     ],
   );
 
   assert.deepEqual(
     buildProductDatabaseCompletionSummary(items, templateFields).buckets,
-    { 25: 1, 50: 1, 75: 0, 100: 1 },
+    { 25: 0, 50: 1, 75: 1, 100: 1 },
+  );
+});
+
+test("Product Database material options reuse saved material values", () => {
+  assert.deepEqual(
+    getProductDatabaseMaterialOptions([
+      {
+        product_specs: {
+          fields: [
+            { key: "material_top", value_text: "Oak" },
+            { key: "material_leg", value_text: "Steel" },
+            { key: "top_color", value_text: "Walnut" },
+          ],
+        },
+      },
+      {
+        product_specs: {
+          fields: [{ key: "material_1", value_text: "oak" }],
+        },
+      },
+    ]),
+    ["Oak", "Steel"],
   );
 });
 

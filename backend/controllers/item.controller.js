@@ -81,6 +81,7 @@ const {
   buildProductDatabaseCompletion,
   buildProductDatabaseCompletionRangeSummary,
   buildProductDatabaseRow,
+  getProductDatabaseMaterialOptions,
   normalizeProductDatabaseCompletionRange,
   normalizePdStatus,
   productDatabaseCompletionMatchesRange,
@@ -3184,6 +3185,7 @@ exports.getProductDatabaseItems = async (req, res) => {
       brandNamesRaw,
       brandsPrimaryRaw,
       vendorsRaw,
+      materialItemsRaw,
     ] = await Promise.all([
       Item.find(baseMatch)
         .select(PRODUCT_DATABASE_ITEM_SELECT)
@@ -3194,6 +3196,9 @@ exports.getProductDatabaseItems = async (req, res) => {
       Item.distinct("brand_name", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
       Item.distinct("brand", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
       Item.distinct("vendors", applyItemDataAccess(buildItemMatch({ search, brand }), req.user)),
+      Item.find(
+        applyItemDataAccess({ "product_specs.fields.key": /material/i }, req.user),
+      ).select("product_specs.fields").lean(),
     ]);
 
     const baseItems = attachProductDatabaseCompletion(
@@ -3253,6 +3258,7 @@ exports.getProductDatabaseItems = async (req, res) => {
           ...(brandNamesRaw || []),
         ]),
         vendor_options: normalizeVendorDisplayList(vendorsRaw),
+        material_options: getProductDatabaseMaterialOptions(materialItemsRaw),
       },
       pagination: {
         page,

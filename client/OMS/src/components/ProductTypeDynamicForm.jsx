@@ -193,11 +193,15 @@ const DynamicField = ({
   value,
   error = "",
   disabled = false,
+  materialOptions = [],
   onChange,
 }) => {
   const fieldKey = normalizeTemplateKey(field?.key);
   const inputType = normalizeTemplateKey(field?.input_type);
   const options = Array.isArray(field?.options) ? field.options : [];
+  const isMaterialField = fieldKey.includes("material");
+  const materialDatalistId = `product-type-material-${fieldKey}`;
+  const hasMaterialOptions = isMaterialField && materialOptions.length > 0;
 
   if (inputType === "textarea") {
     return (
@@ -414,6 +418,7 @@ const DynamicField = ({
       </label>
       <input
         type={inputType === "number" ? "number" : inputType === "date" ? "date" : "text"}
+        list={hasMaterialOptions ? materialDatalistId : undefined}
         min={inputType === "number" ? "0" : undefined}
         step={inputType === "number" ? "0.001" : undefined}
         className={`form-control ${error ? "is-invalid" : ""}`}
@@ -421,6 +426,13 @@ const DynamicField = ({
         disabled={disabled}
         onChange={(event) => onChange?.(fieldKey, event.target.value)}
       />
+      {hasMaterialOptions && (
+        <datalist id={materialDatalistId}>
+          {materialOptions.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
+      )}
       {field?.unit && <div className="form-text">Unit: {field.unit}</div>}
       {field?.description && <div className="form-text">{field.description}</div>}
       {error && <div className="invalid-feedback d-block">{error}</div>}
@@ -436,6 +448,7 @@ const ProductTypeDynamicForm = ({
   errors = {},
   disabled = false,
   hideSizeFields = false,
+  materialOptions = [],
   onFieldChange,
   onItemSizeChange,
   onBoxSizeChange,
@@ -551,6 +564,7 @@ const ProductTypeDynamicForm = ({
                         value={fieldValues?.[fieldKey]}
                         error={errors?.fields?.[fieldKey] || ""}
                         disabled={disabled}
+                        materialOptions={materialOptions}
                         onChange={onFieldChange}
                       />
                     );

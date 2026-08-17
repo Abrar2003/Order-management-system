@@ -178,6 +178,25 @@ const hasMeaningfulStoredSpecField = (entry = {}) => {
   }
 };
 
+const getProductDatabaseMaterialOptions = (items = []) => {
+  const options = new Map();
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const fields = Array.isArray(item?.product_specs?.fields)
+      ? item.product_specs.fields
+      : [];
+    fields.forEach((field) => {
+      if (!normalizeTemplateKey(field?.key).includes("material")) return;
+      const value = normalizeText(field?.value_text);
+      if (!value) return;
+      const key = value.toLowerCase();
+      if (!options.has(key)) options.set(key, value);
+    });
+  });
+
+  return [...options.values()].sort((left, right) => left.localeCompare(right));
+};
+
 const hasMeaningfulStoredSizeEntry = (entry = {}, { isBoxSize = false } = {}) => {
   const fields = isBoxSize
     ? ["L", "B", "H", "net_weight", "gross_weight", "item_count_in_inner", "box_count_in_master"]
@@ -215,6 +234,9 @@ const hasProductDatabaseFieldValue = (item = {}, field = {}) => {
   }
 
   const inputType = normalizeTemplateKey(field?.input_type);
+  // Unset legacy switches are displayed as off, so they are complete false values too.
+  if (inputType === "boolean") return true;
+
   if (inputType === "item_size") {
     return [
       ...(Array.isArray(productSpecs?.item_sizes) ? productSpecs.item_sizes : []),
@@ -1357,6 +1379,7 @@ module.exports = {
   buildProductDatabaseCompletion,
   buildProductDatabaseCompletionSummary,
   buildProductDatabaseCompletionRangeSummary,
+  getProductDatabaseMaterialOptions,
   getProductDatabaseCompletionRange,
   productDatabaseCompletionMatchesRange,
   applyProductDatabaseSave,

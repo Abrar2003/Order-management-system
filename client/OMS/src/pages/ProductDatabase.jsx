@@ -1290,7 +1290,14 @@ const parseTemplateOptionValue = (value = "") => {
   };
 };
 
-export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraft }) => {
+export const ProductDatabaseModal = ({
+  item,
+  draft = null,
+  materialOptions = [],
+  onClose,
+  onSaved,
+  onSaveDraft,
+}) => {
   const { hasPermission } = usePermissions();
   const user = getUserFromToken();
   const normalizedRole = normalizeUserRole(user?.role);
@@ -2320,6 +2327,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
                   errors={productTypeErrors}
                   disabled={!canEdit}
                   hideSizeFields
+                  materialOptions={materialOptions}
                   onFieldChange={handleProductTypeFieldChange}
                   onItemSizeChange={handleItemSizeChange}
                   onBoxSizeChange={handleBoxSizeChange}
@@ -2487,6 +2495,7 @@ const ProductDatabase = () => {
   const [success, setSuccess] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
   const [productDatabaseDrafts, setProductDatabaseDrafts] = useState({});
+  const [materialOptions, setMaterialOptions] = useState([]);
   const [syncedQuery, setSyncedQuery] = useState(null);
 
   const fetchRows = useCallback(async () => {
@@ -2507,6 +2516,11 @@ const ProductDatabase = () => {
       setRows(Array.isArray(data?.rows) ? data.rows : []);
       setSummary(data?.summary || {});
       setFilters(data?.filters || {});
+      setMaterialOptions(
+        Array.isArray(data?.filters?.material_options)
+          ? data.filters.material_options
+          : [],
+      );
       setPagination(data?.pagination || {});
     } catch (err) {
       setRows([]);
@@ -2953,6 +2967,7 @@ const ProductDatabase = () => {
         <ProductDatabaseModal
           item={selectedItem}
           draft={selectedDraft}
+          materialOptions={materialOptions}
           onClose={() => setSelectedItem(null)}
           onSaved={handleSaved}
           onSaveDraft={handleDraftSaved}
