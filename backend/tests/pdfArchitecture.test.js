@@ -84,3 +84,8 @@ test("permission-protected PDF routes delegate to the central renderer", () => {
     assert.match(source, /requirePermission/);
   });
 });
+
+test("shipping pending PDFs are permitted by the central renderer", () => {
+  const { PDF_REPORT_KEYS } = require("../controllers/pdf.controller");
+  assert.equal(PDF_REPORT_KEYS.has("shipping-pending"), true);
+});

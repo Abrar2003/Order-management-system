@@ -21,7 +21,7 @@ The validator accepts aggregation only. It rejects writes, raw commands, JavaScr
 - 20 entries per nested/supporting result array (aggregate counts/groups should run before this cap)
 - 8 seconds of MongoDB execution time
 - `allowDiskUse: false`
-- at most two database tool calls for one question
+- at most four model-requested database tool calls for one question (in addition to bounded server-side entity-resolution queries)
 - bounded question and generated-pipeline sizes
 - an overall abort timeout for Groq calls, with bounded retries for transient rate limits and upstream failures
 

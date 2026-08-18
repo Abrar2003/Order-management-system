@@ -337,7 +337,7 @@ const Navbar = () => {
         "Monthly Shipments Reports",
         "/reports/monthly-shipments",
       ),
-      routeMenuItem("packed-goods", "Packed Goods", "/packed-goods"),
+      routeMenuItem("packed-goods", "Shipping Pending", "/packed-goods"),
       routeMenuItem("archived-orders", "Archived", "/archived-orders"),
     ];
 

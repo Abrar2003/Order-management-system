@@ -9719,7 +9719,7 @@ const buildPackedGoodsDataset = async ({
       : ACTIVE_ORDER_MATCH;
   const orders = await Order.find(applyDataAccessMatch(orderMatch, user))
     .select(
-      "order_id item brand vendor quantity shipment qc_record order_date updatedAt total_po_cbm",
+      "order_id item brand vendor quantity shipment qc_record order_date ETD revised_ETD updatedAt",
     )
     .populate({
       path: "qc_record",
@@ -9728,138 +9728,46 @@ const buildPackedGoodsDataset = async ({
     .sort({ order_date: -1, updatedAt: -1, order_id: 1 })
     .lean();
 
-  const itemCodes = [
-    ...new Set(
-      orders
-        .map((orderEntry) => normalizeLooseString(orderEntry?.item?.item_code))
-        .filter(Boolean),
-    ),
-  ];
-
-  const itemDocs =
-    itemCodes.length > 0
-      ? await Item.find(
-          applyDataAccessMatch({ code: { $in: itemCodes } }, user, {
-            brandFields: ["brand", "brand_name", "brands"],
-            vendorFields: ["vendors"],
-          }),
-        )
-          .select(
-            [
-              "code",
-              "cbm",
-              "inspected_item_sizes",
-              "inspected_item_LBH",
-              "inspected_item_top_LBH",
-              "inspected_item_bottom_LBH",
-              "inspected_box_sizes",
-              "inspected_box_mode",
-              "inspected_box_LBH",
-              "inspected_box_top_LBH",
-              "inspected_box_bottom_LBH",
-              "inspected_top_LBH",
-              "inspected_bottom_LBH",
-              "pis_item_sizes",
-              "pis_item_LBH",
-              "pis_item_top_LBH",
-              "pis_item_bottom_LBH",
-              "pis_box_sizes",
-              "pis_box_mode",
-              "pis_box_LBH",
-              "pis_box_top_LBH",
-              "pis_box_bottom_LBH",
-            ].join(" "),
-          )
-          .lean()
-      : [];
-
-  const itemMap = new Map(
-    itemDocs.map((itemDoc) => [
-      normalizeLooseString(itemDoc?.code).toLowerCase(),
-      itemDoc,
-    ]),
-  );
-
-  const poPendingQuantityMap = new Map();
-
-  for (const orderEntry of Array.isArray(orders) ? orders : []) {
-    const progress = deriveOrderProgress({ orderEntry });
-    const poKey = [
-      normalizeOrderKey(orderEntry?.order_id) || "N/A",
-      normalizeLooseString(orderEntry?.brand) || "N/A",
-      normalizeLooseString(orderEntry?.vendor) || "N/A",
-    ].join("__");
-
-    poPendingQuantityMap.set(
-      poKey,
-      (poPendingQuantityMap.get(poKey) || 0) +
-        Math.max(0, Number(progress?.pending_inspection_quantity || 0)),
-    );
-  }
-
   const allRows = (Array.isArray(orders) ? orders : [])
     .map((orderEntry) => {
       const progress = deriveOrderProgress({ orderEntry });
+      const orderQuantity = Math.max(0, Number(orderEntry?.quantity || 0));
+      const shippedQuantity = Math.max(
+        0,
+        Number(progress?.shipped_quantity || 0),
+      );
+      const openQuantity = Math.max(0, orderQuantity - shippedQuantity);
+      if (openQuantity <= 0) {
+        return null;
+      }
       const packedQuantity = Math.max(
         0,
         Number(progress?.inspected_unshipped_quantity || 0),
       );
-      if (packedQuantity <= 0) {
-        return null;
-      }
 
       const brand = normalizeLooseString(orderEntry?.brand);
       const vendorValue = normalizeLooseString(orderEntry?.vendor);
       const itemCode = normalizeLooseString(orderEntry?.item?.item_code);
-      const itemDoc = itemMap.get(itemCode.toLowerCase()) || null;
-      const storedPoCbm = toPositiveCbmNumber(orderEntry?.total_po_cbm);
-      const orderQuantity = Math.max(0, Number(orderEntry?.quantity || 0));
-      const cbmSummary = resolveOrderRowCbmSummary(itemDoc, packedQuantity);
-      const calculatedPackedCbm = toPositiveCbmNumber(cbmSummary?.total);
-      const storedPerItemCbm =
-        storedPoCbm > 0 && orderQuantity > 0
-          ? toRoundedCbmValue(storedPoCbm / orderQuantity)
-          : 0;
-      const perItemCbm =
-        calculatedPackedCbm > 0 && packedQuantity > 0
-          ? toRoundedCbmValue(calculatedPackedCbm / packedQuantity)
-          : storedPerItemCbm || Number(cbmSummary?.per_item || 0);
-      const totalCbm =
-        calculatedPackedCbm > 0
-          ? toRoundedCbmValue(calculatedPackedCbm)
-          : toRoundedCbmValue(perItemCbm * packedQuantity);
-      const cbmSource =
-        calculatedPackedCbm > 0
-          ? cbmSummary?.source || null
-          : storedPoCbm > 0
-            ? "total_po_cbm"
-            : cbmSummary?.source || null;
       const normalizedOrderId =
         normalizeOrderKey(orderEntry?.order_id) || "N/A";
-      const poKey = [
-        normalizedOrderId,
-        brand || "N/A",
-        vendorValue || "N/A",
-      ].join("__");
-
       return {
         id: String(orderEntry?._id || ""),
+        qc_id: String(orderEntry?.qc_record?._id || "").trim(),
         order_id: normalizedOrderId,
         order_date: toISODateString(orderEntry?.order_date),
+        etd: toISODateString(resolveEffectiveOrderEtdDate(orderEntry)),
         item_code: itemCode || "N/A",
         brand: brand || "N/A",
         vendor: vendorValue || "N/A",
         order_quantity: orderQuantity,
+        open_quantity: openQuantity,
         packed_quantity: packedQuantity,
+        shipped_quantity: shippedQuantity,
+        status: progress.status,
         pending_quantity: Math.max(
           0,
           Number(progress?.pending_inspection_quantity || 0),
         ),
-        po_has_no_pending_quantity:
-          Number(poPendingQuantityMap.get(poKey) || 0) <= 0,
-        total_cbm: Number.isFinite(totalCbm) ? totalCbm : 0,
-        per_item_cbm: Number.isFinite(perItemCbm) ? perItemCbm : 0,
-        cbm_source: cbmSource,
       };
     })
     .filter(Boolean);
@@ -9905,9 +9813,6 @@ const buildPackedGoodsDataset = async ({
       total_packed_quantity: rows.reduce(
         (sum, row) => sum + Number(row?.packed_quantity || 0),
         0,
-      ),
-      total_cbm: toRoundedCbmValue(
-        rows.reduce((sum, row) => sum + Number(row?.total_cbm || 0), 0),
       ),
     },
   };
@@ -9960,26 +9865,20 @@ exports.exportPackedGoods = async (req, res) => {
 
     const columns = [
       { key: "order_id", header: "PO" },
-      { key: "brand", header: "Brand" },
-      { key: "vendor", header: "Vendor" },
       { key: "item_code", header: "Item Code" },
-      { key: "order_quantity", header: "Order Quantity" },
+      { key: "status", header: "Status" },
+      { key: "open_quantity", header: "Open Quantity" },
       { key: "packed_quantity", header: "Packed Quantity" },
-      { key: "pending_quantity", header: "Pending Quantity" },
-      { key: "total_cbm", header: "Total CBM" },
-      { key: "po_pending_clear", header: "PO Pending Cleared" },
+      { key: "shipped_quantity", header: "Shipped Quantity" },
     ];
 
     const exportRows = dataset.rows.map((row) => ({
       order_id: String(row?.order_id || "").trim(),
-      brand: String(row?.brand || "").trim(),
-      vendor: normalizeLooseString(row?.vendor),
       item_code: String(row?.item_code || "").trim(),
-      order_quantity: Number(row?.order_quantity || 0),
+      status: String(row?.status || "").trim(),
+      open_quantity: Number(row?.open_quantity || 0),
       packed_quantity: Number(row?.packed_quantity || 0),
-      pending_quantity: Number(row?.pending_quantity || 0),
-      total_cbm: Number(row?.total_cbm || 0),
-      po_pending_clear: row?.po_has_no_pending_quantity ? "Yes" : "No",
+      shipped_quantity: Number(row?.shipped_quantity || 0),
     }));
 
     const headerRow = columns.map((column) => column.header);
@@ -9997,13 +9896,13 @@ exports.exportPackedGoods = async (req, res) => {
     });
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Packed Goods");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Shipping Pending");
     const fileBuffer = XLSX.write(workbook, {
       type: "buffer",
       bookType: exportFormat,
     });
     const fileDate = new Date().toISOString().slice(0, 10);
-    const fileName = `packed-goods-${fileDate}.${exportFormat}`;
+    const fileName = `shipping-pending-${fileDate}.${exportFormat}`;
 
     res.setHeader(
       "Content-Type",
