@@ -6,7 +6,7 @@ Use this file when changing the OMS Assistant. It explains the current implement
 
 OMS Assistant is an authenticated, read-only reporting chat for OMS data. The browser sends a plain-language question to the Express backend. The backend, not the model, owns authentication, permission checks, conversation ownership, rate limiting, database access, validation, audit logging, and every response sent to the browser.
 
-It uses Groq's OpenAI-compatible **Responses API** with a single tool, `query_oms_database`. Groq can decide which safe aggregation to run and turns the validated result into a concise answer. It never receives application credentials, cookies, JWTs, database URIs, or direct database access.
+It uses Groq's OpenAI-compatible **Responses API** as a bounded planner and synthesizer. Three backend-owned tools are available: `inspect_oms_schema` returns catalogue metadata without record values, `query_oms_database` runs a validated aggregation, and `analyze_oms_business_data` runs a strict enum of deterministic lead-time/readiness analyses. Groq never receives application credentials, cookies, JWTs, database URIs, or direct database access.
 
 ```text
 React chat page
@@ -15,8 +15,10 @@ React chat page
     -> controller validates the request body
     -> service resolves entities/date and handles supported deterministic reports
     -> Groq Responses API (only when no deterministic report handles it)
+    -> bounded schema/query/analytics investigation loop
     -> validated aggregation on a separate read-only MongoDB connection
-    -> answer + bounded supporting rows + metadata
+    -> backend forecast calculations where requested
+    -> answer + bounded supporting rows + factual/forecast metadata
     -> React renders Markdown as text/components, never raw HTML
 ```
 
@@ -33,7 +35,9 @@ Two report families have programmatic answers instead of relying on model prose:
 - Shipment quantity, shipment count, or shipped-order questions that include a resolved brand, item, vendor, PO, or container.
 - PO/container CBM breakdown questions mentioning CBM, a PO/order, and a container/stuffing. The service groups shipment rows and uses the existing `shipmentCbmAllocation.service` calculation.
 
-Everything else goes through Groq tool calling. The model must call the tool for factual numbers or records; it must not invent them.
+Everything else goes through bounded Groq tool calling. The model must use validated queries for factual numbers/records and the forecasting service for predictions; it must not invent either.
+
+Forecasting supports historical inspection lead time, open-order readiness, brand-ready CBM, and a vendor's likely next shipment readiness. It groups brands separately, reuses the existing packaging-aware CBM calculation, combines current inspected/unshipped quantities with open PO contributions, and returns the first cumulative date that reaches the configured container target. The written answer must distinguish stored facts, derived arithmetic, forecasts, and unknowns.
 
 The assistant does **not** write OMS data, create reports/files, expose aggregation pipelines, or serve as a bulk export. It returns at most 100 top-level supporting rows, with nested arrays capped at 20 entries. Use the existing OMS export/report routes for full datasets.
 
@@ -50,11 +54,12 @@ The assistant does **not** write OMS data, create reports/files, expose aggregat
 | Rate limit | 10 requests per user per fixed 5-minute MongoDB bucket, shared across instances |
 | Model | `openai/gpt-oss-120b` by default; override with `OMS_CHAT_LLM_MODEL` |
 | Model timeout | 90 seconds; transient 429/5xx Groq responses retry up to twice |
-| Model tool calls | At most 4 model-requested query calls per question |
+| Model investigation | At most 8 tool iterations and 8 total tool calls |
+| Total database calls | At most 10 including entity resolution; schema inspection uses none |
 | Aggregation | Max 12 user stages (including lookup stages), lookup nesting depth 2, max 10,000 skip |
 | Database | Separate `OMS_CHAT_MONGO_URI`, 8-second query timeout, `allowDiskUse: false`, 100 returned rows / 128 KiB serialized result |
 
-Entity resolution performs its own safe queries before a model call. Therefore the "four tool calls" row is specifically the Groq tool-call limit, not a total database-query count for the HTTP request. This is more current than the older two-call wording in `docs/OMS_ASSISTANT.md`.
+When a limit is reached after useful evidence was collected, the service removes tools and requests one final best-evidence answer. It marks `partialResults` instead of discarding the completed work.
 
 ## Security boundaries that must remain intact
 
@@ -65,6 +70,16 @@ Entity resolution performs its own safe queries before a model call. Therefore t
 - The backend appends generated normalization fields such as `__oms_vendor_name`, `__oms_vendor_names`, and `__oms_has_pis_file` after validating model-provided stages. They handle legacy vendor shapes and PIS-file presence; do not expose them as arbitrary client-controlled fields.
 - Answers are rejected if they contain provider IDs, tool/pipeline details, prompts, secret environment variable names, or other server-only patterns.
 - Security audit records save question text and query summary metadata, but not pipelines, credentials, provider payloads, or result documents.
+
+## Forecast definitions
+
+- A historical lead-time sample is calendar days from PO `order_date` to the first successful `Inspection Done` record for the PO/item. The record must have a positive passed quantity and the order must be inspection-complete, partially shipped, shipped, or otherwise have packed/shipped evidence.
+- Rejected, transferred, reworked, zero-pass, negative, future, and over-730-day records are invalid. Multiple valid inspections for one PO/item are de-duplicated to the earliest successful inspection.
+- Obvious outliers use the deterministic 1.5×IQR rule. Statistics retain original count, used count, outlier count, median/P50, P75, P90, mean, range, standard deviation, IQR, and recent-12-month median/trend.
+- Every fallback level needs at least three samples: same item+vendor, same item across vendors, same product type+vendor, vendor-wide, then available OMS baseline. No unsupported "similar item" relationship is invented.
+- Current ready CBM is `qc_passed - shipped`, bounded by order quantity. Pending inspection quantity can contribute later only when its CBM can be calculated by `shipmentCbmAllocation.service.js` or prorated from stored `total_po_cbm`.
+- Forecast earliest dates use historical median; planning uses the later of historical P75 and effective revised/original ETD; P90 supplies the conservative window end. The container target comes from the request or `OMS_CHAT_CONTAINER_TARGET_CBM`, with a documented 65-CBM fallback.
+- Confidence score components are sample depth (35), fallback specificity (30), consistency/dispersion (20), recency (10), and completeness (5). Brand shipment confidence also weights evidence by forecast CBM coverage. High requires score ≥75, at least five samples, and at least 80% evidence coverage; Moderate is ≥50; otherwise Low.
 
 ## File map
 
@@ -77,10 +92,11 @@ Entity resolution performs its own safe queries before a model call. Therefore t
 | Core prompt, entity/date resolution, deterministic reports, conversation loop | `backend/services/omsChat.service.js` | Main behaviour file. |
 | Collection catalogue, business definitions/data relationships given to the model | `backend/services/omsChatCatalog.service.js` | Update this when a model/schema relationship changes. |
 | Aggregation validation, normalization stages, read-only Mongo connection, result limits | `backend/services/omsChatQuery.service.js` | Treat changes here as security-sensitive. |
+| Historical lead-time, confidence, PO readiness, brand CBM timeline, controlled analytics queries | `backend/services/omsForecast.service.js` | Deterministic and reusable; keep model arithmetic out of this path. |
 | Conversation TTL/history model | `backend/models/omsChatConversation.model.js` | Stored in the primary application database. |
 | Per-user limiter | `backend/middlewares/omsChatRateLimit.middleware.js`, `backend/models/omsChatRateBucket.model.js` | TTL bucket model. |
 | Permission module and role lock | `backend/helpers/permissions.js`, `backend/helpers/userRole.js` | `oms_assistant.view` is locked to admin-like roles. |
-| Feature tests | `backend/tests/omsChat.test.js`, `client/OMS/src/utils/omsAssistantState.test.js` | Backend tests cover security and report behaviour. |
+| Feature tests | `backend/tests/omsChat.test.js`, `backend/tests/omsForecast.test.js`, `client/OMS/src/utils/omsAssistantState.test.js` | Backend tests cover security, agent bounds, and forecasts. |
 
 ## How a request is coded
 
@@ -88,9 +104,10 @@ Entity resolution performs its own safe queries before a model call. Therefore t
 2. `omsChat.routes.js` logs success/failure metadata, authenticates the user, checks `oms_assistant.view`, then rate-limits the request.
 3. The controller allows only `message` and `conversationId`, limits the body, maps internal errors to safe public messages, and removes internal audit data from the HTTP response.
 4. `askOmsAssistant()` validates the question/configuration, creates or verifies a user-owned conversation, then resolves live entities and simple date phrases.
-5. If a deterministic shipment/CBM handler applies, it returns its programmatic answer. Otherwise Groq receives the system instructions, recent text-only history, current question, resolved context, and the one read-only tool definition.
-6. Each tool call is parsed from JSON and executed by `executeOmsQuery()`. The model gets only returned rows and safe metadata, then gives its final answer.
-7. The service saves the compact conversation history with optimistic revision checking, merges bounded rows/metadata, and returns the response. The page renders the answer and optionally expandable supporting rows.
+5. If a deterministic shipment/CBM handler applies, it returns its programmatic answer. Otherwise Groq receives the system instructions, recent text-only history, current question, resolved context, and the three bounded tool definitions.
+6. The service iterates at most eight times. Schema arguments are restricted to catalogue collection names; general aggregations go through `executeOmsQuery()`; controlled analytics query via the same executor and calculate in `omsForecast.service.js`.
+7. The model receives only safe schema metadata, bounded rows/metadata, or compact analysis results. If the budget is exhausted, a no-tools call must synthesize the evidence already gathered.
+8. The service saves compact history with optimistic revision checking and returns safe factual/forecast metadata. The page renders the complete answer, optional forecast pills, and optional supporting rows.
 
 ## Where to make common changes
 
@@ -99,6 +116,8 @@ Entity resolution performs its own safe queries before a model call. Therefore t
 | Reword the assistant's general behaviour or business definitions | `buildSystemInstructions()` in `omsChat.service.js` | Keep the "read-only, factual answers require tool, do not reveal internals" rules. |
 | Add a collection/field/relationship the model should understand | `omsChatCatalog.service.js` and relevant Mongoose model | The catalogue asserts that listed physical fields still exist. Add a test for the report. |
 | Add a reliable, repeatable report format | Add a small recognizer/handler near the existing deterministic shipment helpers in `omsChat.service.js` | Reuse `executeOmsQuery`; do not put MongoDB access in the controller or frontend. |
+| Change lead-time, confidence, ready-CBM, or shipment forecast rules | `omsForecast.service.js` and `omsForecast.test.js` | Reuse order-status and CBM helpers; add deterministic fixtures before changing the prompt. |
+| Add a controlled analytical capability | `ANALYSIS_TYPES`, validator, and runner in `omsForecast.service.js`; tool schema in `omsChat.service.js` | Keep a strict enum and fixed backend-built pipelines. |
 | Support more aggregation syntax | `omsChatQuery.service.js` | Add the narrowest validator rule and a rejection/acceptance test. Do not enable writes, JS, raw commands, or unbounded output. |
 | Change visible wording, examples, table presentation, or loading state | `OmsAssistant.jsx` | Preserve the 2,000 character client maximum and safe Markdown rendering. |
 | Change access or role policy | `permissions.js` / `userRole.js` plus route tests | Do not rely solely on hiding the navbar item. |
@@ -113,6 +132,7 @@ The backend needs these production-only environment variables:
 GROQ_API_KEY=<Groq API key>
 OMS_CHAT_LLM_MODEL=openai/gpt-oss-120b
 OMS_CHAT_MONGO_URI=mongodb+srv://oms_chat_reader:<encoded-password>@cluster.example.mongodb.net/OMS?retryWrites=false
+OMS_CHAT_CONTAINER_TARGET_CBM=65
 ```
 
 `OMS_CHAT_LLM_MODEL` is optional. `OMS_CHAT_MONGO_URI` must be a different, read-only credential from the application `MONGO_URI`. Never put any of these in the frontend environment.
@@ -122,6 +142,7 @@ Run the focused checks after assistant work:
 ```bash
 cd backend
 node --test tests/omsChat.test.js
+node --test tests/omsForecast.test.js
 
 cd ../client/OMS
 node --test src/utils/omsAssistantState.test.js

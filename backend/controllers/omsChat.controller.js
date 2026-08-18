@@ -40,6 +40,10 @@ const ask = async (req, res) => {
     durationMs: 0,
     returnedRows: 0,
     truncated: false,
+    answerType: "",
+    forecastConfidence: "",
+    toolCallCount: 0,
+    analysisType: "",
     failureCategory: "",
   };
   res.locals.omsChatAudit = audit;
@@ -76,6 +80,10 @@ const ask = async (req, res) => {
       durationMs: result.audit.durationMs,
       returnedRows: result.audit.returnedRows,
       truncated: result.audit.truncated,
+      answerType: result.audit.answerType,
+      forecastConfidence: result.audit.forecastConfidence,
+      toolCallCount: result.audit.toolCallCount,
+      analysisType: result.audit.analysisType,
     });
     res.locals.omsChatConversationId = result.conversationId;
 

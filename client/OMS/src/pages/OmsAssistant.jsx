@@ -22,6 +22,16 @@ const displayValue = (value) => {
   return String(value);
 };
 
+const displayForecastDate = (value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return displayValue(value);
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00Z`));
+};
+
 const Answer = ({ children }) => (
   <ReactMarkdown
     remarkPlugins={[remarkGfm]}
@@ -86,7 +96,8 @@ const ResultRows = ({ rows = [] }) => {
 const AnswerMetadata = ({ metadata = {} }) => {
   const filters =
     metadata.filters && typeof metadata.filters === "object"
-      ? Object.entries(metadata.filters)
+      ? Object.entries(metadata.filters).filter(([, value]) =>
+        !Array.isArray(value) || value.length > 0)
       : [];
   const rawDateRange =
     metadata.dateRange && typeof metadata.dateRange === "object"
@@ -97,16 +108,48 @@ const AnswerMetadata = ({ metadata = {} }) => {
     (rawDateRange.start || rawDateRange.from || rawDateRange.end || rawDateRange.to)
       ? rawDateRange
       : null;
+  const forecast = metadata.forecast && typeof metadata.forecast === "object"
+    ? metadata.forecast
+    : null;
+  const confidence = metadata.confidence && typeof metadata.confidence === "object"
+    ? metadata.confidence
+    : null;
+  const evidence = metadata.evidence && typeof metadata.evidence === "object"
+    ? metadata.evidence
+    : null;
+  const forecastStart = forecast?.windowStart || forecast?.earliestDate;
+  const forecastEnd = forecast?.windowEnd || forecast?.planningDate;
   const hasSummary =
     dateRange ||
     filters.length ||
     Number.isFinite(metadata.returnedRows) ||
-    metadata.truncated;
+    metadata.truncated ||
+    forecast ||
+    confidence ||
+    evidence ||
+    metadata.partialResults;
 
   if (!hasSummary) return null;
 
   return (
     <div className="oms-assistant-metadata mt-3" aria-label="Answer details">
+      {forecastStart && (
+        <span>
+          Forecast: {displayForecastDate(forecastStart)}
+          {forecastEnd && forecastEnd !== forecastStart
+            ? ` – ${displayForecastDate(forecastEnd)}`
+            : ""}
+        </span>
+      )}
+      {confidence?.label && (
+        <span>Confidence: {String(confidence.label).replace(/^./, (letter) => letter.toUpperCase())}</span>
+      )}
+      {Number.isFinite(evidence?.historicalSampleCount) && (
+        <span>Based on: {evidence.historicalSampleCount} historical samples</span>
+      )}
+      {evidence?.leadTimeSource && evidence.leadTimeSource !== "none" && (
+        <span>Evidence: {String(evidence.leadTimeSource).replaceAll("_", " ")}</span>
+      )}
       {dateRange && (
         <span>
           Date: {displayValue(dateRange.start || dateRange.from)} to{" "}
@@ -121,6 +164,7 @@ const AnswerMetadata = ({ metadata = {} }) => {
         <span>Rows: {metadata.returnedRows}</span>
       )}
       {metadata.truncated && <span>Results limited</span>}
+      {metadata.partialResults && <span>Partial evidence</span>}
     </div>
   );
 };

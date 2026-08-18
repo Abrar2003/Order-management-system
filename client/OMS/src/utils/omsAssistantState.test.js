@@ -20,7 +20,12 @@ test("OMS Assistant state covers submit, success, and error", () => {
       id: "assistant-1",
       answer: "There are 4 delayed orders.",
       conversationId: "conversation-1",
-      metadata: { returnedRows: 1 },
+      metadata: {
+        returnedRows: 1,
+        answerType: "forecast",
+        confidence: { label: "moderate", score: 68 },
+        forecast: { windowStart: "2026-09-05", windowEnd: "2026-09-10" },
+      },
       rows: [{ count: 4 }],
     },
   });
@@ -28,6 +33,7 @@ test("OMS Assistant state covers submit, success, and error", () => {
   assert.equal(success.status, "success");
   assert.equal(success.conversationId, "conversation-1");
   assert.equal(success.messages[1].text, "There are 4 delayed orders.");
+  assert.equal(success.messages[1].metadata.confidence.label, "moderate");
   assert.deepEqual(success.messages[1].rows, [{ count: 4 }]);
 
   const failure = omsAssistantReducer(loading, {

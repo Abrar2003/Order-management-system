@@ -303,6 +303,44 @@ const buildCatalogPrompt = () =>
     )
     .join("\n");
 
+const inspectOmsSchema = ({ collections = [] } = {}) => {
+  if (!Array.isArray(collections) || collections.length > 10) {
+    throw new TypeError("collections must be an array of at most 10 names");
+  }
+  const requested = [...new Set(
+    collections.map((value) => String(value || "").trim()).filter(Boolean),
+  )];
+  const selected = requested.length
+    ? requested.map((collection) => CATALOG[collection]).filter(Boolean)
+    : catalogEntries;
+  if (requested.length && selected.length !== requested.length) {
+    throw new TypeError("Only catalogued OMS business collections may be inspected");
+  }
+
+  return {
+    collections: selected.map(({ collection, description, fields, access, model }) => ({
+      collection,
+      description,
+      access,
+      fields: fields.map((name) => ({
+        name,
+        type: name.startsWith("__oms_")
+          ? "Derived"
+          : model.schema.path(name)?.instance || "Nested",
+      })),
+    })),
+    relationships: [
+      "orders.qc_record -> qcs._id",
+      "qcs.order -> orders._id",
+      "qcs.inspection_record[] -> inspections._id",
+      "inspections.qc -> qcs._id",
+      "orders.item.item_code -> items.code",
+      "qcs.item.item_code -> items.code",
+      "vendors.brands.brand_id -> brands._id",
+    ],
+  };
+};
+
 const assertCatalogMatchesModels = () => {
   for (const { model, collection, fields } of catalogEntries) {
     if (!collection || collection !== model.collection.name) {
@@ -337,4 +375,5 @@ module.exports = {
   buildCatalogPrompt,
   formatIstDate,
   getPreviousCalendarMonthRange,
+  inspectOmsSchema,
 };

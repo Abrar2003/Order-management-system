@@ -115,7 +115,8 @@ const calculateLeadTimeStatistics = (samples = [], { now = new Date() } = {}) =>
   const lowerFence = q1 - 1.5 * iqr;
   const upperFence = q3 + 1.5 * iqr;
   const kept = normalized.filter((sample) => {
-    if (normalized.length < 4 || iqr === 0) return true;
+    if (normalized.length < 4) return true;
+    if (iqr === 0) return sample.days === q1;
     return sample.days >= lowerFence && sample.days <= upperFence;
   });
   const values = kept.map((sample) => Number(sample.days)).sort((a, b) => a - b);
@@ -227,7 +228,10 @@ const forecastOrderInspectionDate = ({ order, samples, now = new Date() } = {}) 
   const orderDate = dateParser(order?.order_date);
   const effectiveEtd = dateParser(order?.revised_ETD || order?.revised_etd || order?.ETD || order?.etd);
   if (!orderDate || !estimate) {
-    const fallbackDate = laterDate(now, effectiveEtd);
+    const currentDate = dateParser(now);
+    const fallbackDate = effectiveEtd && currentDate && effectiveEtd >= currentDate
+      ? effectiveEtd
+      : null;
     return {
       estimate,
       earliestDate: isoDate(fallbackDate),
@@ -267,7 +271,7 @@ const getReadyShipmentCbm = (orders = []) => toRoundedCbmValue(
 const getRemainingContainerCbm = (readyCbm, targetCbm) =>
   toRoundedCbmValue(Math.max(0, getContainerTargetCbm(targetCbm) - number(readyCbm)));
 
-const buildExpectedCbmTimeline = ({ currentReadyCbm = 0, targetCbm, contributions = [] } = {}) => {
+const buildExpectedCbmTimeline = ({ currentReadyCbm = 0, targetCbm, contributions = [], now = new Date() } = {}) => {
   const target = getContainerTargetCbm(targetCbm);
   const grouped = new Map();
   for (const contribution of Array.isArray(contributions) ? contributions : []) {
@@ -285,7 +289,7 @@ const buildExpectedCbmTimeline = ({ currentReadyCbm = 0, targetCbm, contribution
   }
 
   let runningCbm = toRoundedCbmValue(currentReadyCbm);
-  let thresholdCrossingDate = runningCbm >= target ? isoDate(new Date()) : null;
+  let thresholdCrossingDate = runningCbm >= target ? isoDate(now) : null;
   const timeline = [...grouped.values()]
     .sort((left, right) => left.date.localeCompare(right.date))
     .map((entry) => {
@@ -368,11 +372,18 @@ const forecastVendorNextShipment = ({
         forecast,
       }];
     });
-    const readiness = buildExpectedCbmTimeline({ currentReadyCbm: readyCbm, targetCbm: target, contributions });
+    const readiness = buildExpectedCbmTimeline({ currentReadyCbm: readyCbm, targetCbm: target, contributions, now });
+    const earliestReadiness = buildExpectedCbmTimeline({
+      currentReadyCbm: readyCbm,
+      targetCbm: target,
+      now,
+      contributions: contributions.map((entry) => ({ ...entry, date: entry.forecast.earliestDate })),
+    });
     return {
       brand: group.brand,
       readyCbm,
       remainingCbm: readiness.remainingCbm,
+      earliestThresholdCrossingDate: earliestReadiness.thresholdCrossingDate,
       thresholdCrossingDate: readiness.thresholdCrossingDate,
       projectedCbm: readiness.projectedCbm,
       timeline: readiness.timeline,
@@ -412,7 +423,14 @@ const forecastVendorNextShipment = ({
   const sampleCounts = nextShipment?.contributingOrders
     ?.map((entry) => entry.forecast.sampleCount) || [];
   const planningDate = nextShipment?.thresholdCrossingDate || null;
-  const timelineEnd = nextShipment?.timeline?.at(-1)?.date || planningDate;
+  const earliestDate = nextShipment?.earliestThresholdCrossingDate || planningDate;
+  const crossingForecasts = nextShipment?.contributingOrders?.filter(
+    (entry) => planningDate && entry.forecast.planningDate <= planningDate,
+  ) || [];
+  const windowEnd = isoDate(laterDate(
+    planningDate,
+    ...crossingForecasts.map((entry) => entry.forecast.windowEnd),
+  ));
 
   return {
     analysisType: "vendor_next_shipment_forecast",
@@ -430,10 +448,10 @@ const forecastVendorNextShipment = ({
     nextShipment,
     confidence: nextShipment?.confidence || confidenceForEstimate(),
     forecast: {
-      earliestDate: planningDate,
+      earliestDate,
       planningDate,
-      windowStart: planningDate,
-      windowEnd: timelineEnd,
+      windowStart: earliestDate,
+      windowEnd,
     },
     evidence: {
       historicalSampleCount: Math.max(0, ...sampleCounts),
@@ -644,11 +662,19 @@ const runOmsForecastAnalysis = async (
     return { analysisType: args.analysisType, analysis: grouped, databaseCalls: 1, audit: combineQueryAudit(results) };
   }
 
-  const history = await query({
-    collection: "orders",
-    pipeline: buildHistoricalInspectionPipeline(),
-    purpose: "Calculate historical evidence for open-order forecasting",
-  });
+  let history;
+  let historyFailure = null;
+  try {
+    history = await query({
+      collection: "orders",
+      pipeline: buildHistoricalInspectionPipeline(),
+      purpose: "Calculate historical evidence for open-order forecasting",
+    });
+  } catch (error) {
+    if (!["database_timeout", "chat_database_unavailable"].includes(error?.category)) throw error;
+    historyFailure = error;
+    history = { rows: [] };
+  }
   const analysis = args.analysisType === "open_order_inspection_forecast"
     ? forecastOpenOrderInspectionDates({ orders: currentOrders, historicalRows: history.rows, now })
     : forecastVendorNextShipment({
@@ -658,7 +684,19 @@ const runOmsForecastAnalysis = async (
         targetCbm: args.targetCbm,
         now,
       });
-  return { analysisType: args.analysisType, analysis, databaseCalls: 2, audit: combineQueryAudit(results) };
+  return {
+    analysisType: args.analysisType,
+    analysis,
+    databaseCalls: 2,
+    partialResults: Boolean(historyFailure),
+    limitations: historyFailure
+      ? ["Historical inspection evidence was unavailable; only current order and future ETD evidence could be used."]
+      : [],
+    audit: combineQueryAudit([
+      ...results,
+      ...(historyFailure?.audit ? [{ audit: historyFailure.audit }] : []),
+    ]),
+  };
 };
 
 module.exports = {

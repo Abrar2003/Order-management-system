@@ -28,6 +28,7 @@ const {
 } = require("../services/omsChat.service");
 const {
   getPreviousCalendarMonthRange,
+  inspectOmsSchema,
 } = require("../services/omsChatCatalog.service");
 
 const USER = {
@@ -376,7 +377,7 @@ test("generic shipment reports include all vendors instead of reporting a missin
   assert.match(openai.calls[0].body.instructions, /include all of them/);
 });
 
-test("complex reports can use up to four bounded data calls", async (t) => {
+test("complex reports retain the existing four-call flow inside the expanded bounds", async (t) => {
   configureAssistant(t);
   const reportSection = (purpose) => functionResponse({
     collection: "orders",
@@ -405,7 +406,7 @@ test("complex reports can use up to four bounded data calls", async (t) => {
 
   assert.equal(result.answer, "The complete report is ready.");
   assert.equal(openai.calls.length, 5);
-  assert.match(openai.calls[0].body.instructions, /at most 4 database calls/);
+  assert.match(openai.calls[0].body.instructions, /at most 8 tool iterations, 8 total tool calls, and 10 database calls/);
 });
 
 test("PO container CBM breakdowns bypass the model and calculate safe container shares", async (t) => {
@@ -1589,6 +1590,208 @@ test("multiple tool date ranges merge into an outer coverage envelope", () => {
     end: "2026-07-31T18:30:00.000Z",
     timezone: "Asia/Kolkata",
   });
+});
+
+test("schema discovery exposes catalogued structure without records or denied collections", () => {
+  const schema = inspectOmsSchema({ collections: ["orders"] });
+
+  assert.equal(schema.collections.length, 1);
+  assert.equal(schema.collections[0].collection, "orders");
+  assert.ok(schema.collections[0].fields.some((field) => field.name === "order_id"));
+  assert.equal(Object.hasOwn(schema.collections[0], "model"), false);
+  assert.equal(Object.hasOwn(schema.collections[0], "rows"), false);
+  assert.throws(
+    () => inspectOmsSchema({ collections: ["users"] }),
+    /catalogued OMS business collections/,
+  );
+  assert.throws(
+    () => serviceInternals.parseBoundedJsonArguments(
+      '{"analysisType":"brand_ready_cbm","__proto__":{"polluted":true}}',
+    ),
+    (error) => error instanceof OmsChatServiceError && error.category === "invalid_tool_call",
+  );
+});
+
+test("schema discovery can guide a later safe query without a database schema scan", async (t) => {
+  configureAssistant(t);
+  const openai = fakeOpenAi(
+    functionResponse(
+      { collections: ["orders"] },
+      { name: "inspect_oms_schema", call_id: "schema-call" },
+    ),
+    functionResponse({
+      collection: "orders",
+      purpose: "Count active orders after inspecting approved metadata",
+      pipeline: [{ $match: { archived: { $ne: true } } }, { $count: "total" }],
+    }, { call_id: "query-after-schema" }),
+    finalResponse("There are 12 active orders."),
+  );
+  let reportQueries = 0;
+
+  const result = await askOmsAssistant(
+    { message: "Inspect the order fields and count active orders.", user: USER },
+    {
+      groqClient: openai,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: withEntityResolver(async () => {
+        reportQueries += 1;
+        return queryResult([{ total: 12 }]);
+      }),
+    },
+  );
+
+  assert.equal(result.answer, "There are 12 active orders.");
+  assert.equal(reportQueries, 1);
+  assert.equal(result.metadata.toolCallCount, 2);
+  const schemaOutput = openai.calls[1].body.input.find(
+    (entry) => entry.type === "function_call_output" && entry.call_id === "schema-call",
+  );
+  assert.match(schemaOutput.output, /order_id/);
+  assert.doesNotMatch(schemaOutput.output, /test-key-not-sent-anywhere|mongodb:\/\//i);
+});
+
+test("tool and database limits return a final answer from partial evidence", async (t) => {
+  configureAssistant(t);
+  const reportCall = (index) => functionResponse({
+    collection: "orders",
+    purpose: `Bounded report section ${index}`,
+    pipeline: [{ $count: "total" }],
+  }, { call_id: `bounded-call-${index}` });
+  const openai = fakeOpenAi(
+    ...Array.from({ length: 7 }, (_unused, index) => reportCall(index + 1)),
+    finalResponse("From the available evidence, six sections were completed; the remaining section is unknown."),
+  );
+  let reportQueries = 0;
+
+  const result = await askOmsAssistant(
+    { message: "Investigate a very large multi-part report.", user: USER },
+    {
+      groqClient: openai,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: withEntityResolver(async () => {
+        reportQueries += 1;
+        return queryResult([{ total: reportQueries }]);
+      }),
+    },
+  );
+
+  assert.equal(reportQueries, 6);
+  assert.equal(result.metadata.toolCallCount, 6);
+  assert.equal(result.metadata.partialResults, true);
+  assert.match(result.answer, /available evidence/i);
+  assert.equal(openai.calls.at(-1).body.tools, undefined);
+  assert.match(openai.calls.at(-1).body.instructions, /Answer the user's OMS question now/);
+});
+
+test("an optional timed-out query preserves earlier evidence for the final answer", async (t) => {
+  configureAssistant(t);
+  const openai = fakeOpenAi(
+    functionResponse({
+      collection: "orders",
+      purpose: "First available section",
+      pipeline: [{ $count: "total" }],
+    }, { call_id: "available-call" }),
+    functionResponse({
+      collection: "inspections",
+      purpose: "Optional historical section",
+      pipeline: [{ $count: "total" }],
+    }, { call_id: "timed-out-call" }),
+    finalResponse("The available order count is 4. Inspection history timed out, so that part remains unknown."),
+  );
+  let reportQueries = 0;
+
+  const result = await askOmsAssistant(
+    { message: "Compare current orders with optional inspection history.", user: USER },
+    {
+      groqClient: openai,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: withEntityResolver(async () => {
+        reportQueries += 1;
+        if (reportQueries === 1) return queryResult([{ total: 4 }]);
+        const error = new OmsChatQueryError("The optional report timed out", {
+          statusCode: 504,
+          category: "database_timeout",
+        });
+        error.audit = {
+          collection: "inspections",
+          stageCount: 1,
+          durationMs: 8_000,
+          returnedRows: 0,
+          truncated: false,
+        };
+        throw error;
+      }),
+    },
+  );
+
+  assert.equal(reportQueries, 2);
+  assert.equal(result.metadata.partialResults, true);
+  assert.deepEqual(result.rows, [{ total: 4 }]);
+  assert.match(result.answer, /timed out/i);
+  const unavailable = openai.calls[2].body.input.find(
+    (entry) => entry.type === "function_call_output" && entry.call_id === "timed-out-call",
+  );
+  assert.match(unavailable.output, /unavailable/);
+});
+
+test("vendor shipment forecasts use controlled analytics and return public-safe metadata", async (t) => {
+  configureAssistant(t);
+  const openai = fakeOpenAi(
+    functionResponse(
+      { analysisType: "vendor_next_shipment_forecast", vendor: "Boranada", targetCbm: 65 },
+      { name: "analyze_oms_business_data", call_id: "forecast-call" },
+    ),
+    finalResponse("Boranada's Brand A is likely to reach shipment readiness on 5 September 2026. Confidence is moderate."),
+  );
+  const historyRows = [28, 30, 32].map((days, index) => ({
+    order_id: `H-${index}`,
+    item_code: "CHAIR-1",
+    vendor: "Boranada",
+    brand: "Brand A",
+    product_type: "Chair",
+    order_date: `2026-0${index + 1}-01`,
+    inspection_date: new Date(Date.UTC(2026, index, 1 + days)).toISOString().slice(0, 10),
+    inspection_status: "Inspection Done",
+    order_status: "Shipped",
+    passed: 10,
+  }));
+
+  const result = await askOmsAssistant(
+    { message: "When will Boranada ship its next shipment?", user: USER },
+    {
+      now: new Date("2026-08-18T00:00:00Z"),
+      groqClient: openai,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: async (request) => {
+        if (/^Resolve /i.test(request.purpose)) return emptyEntityQuery(request);
+        if (/historical/i.test(request.purpose)) return queryResult(historyRows);
+        return queryResult([{
+          order_id: "OPEN-1",
+          item_code: "CHAIR-1",
+          vendor: "Boranada",
+          brand: "Brand A",
+          product_type: "Chair",
+          order_date: "2026-08-01",
+          revised_ETD: "2026-09-05",
+          quantity: 100,
+          total_po_cbm: 100,
+          shipment: [],
+          qc_passed: 40,
+          qc_request_history: [],
+        }]);
+      },
+    },
+  );
+
+  assert.equal(result.metadata.answerType, "forecast");
+  assert.equal(result.metadata.analysisType, "vendor_next_shipment_forecast");
+  assert.equal(result.metadata.forecast.planningDate, "2026-09-05");
+  assert.equal(result.metadata.confidence.label, "moderate");
+  assert.equal(result.metadata.evidence.leadTimeSource, "same_item_same_vendor");
+  assert.equal(result.metadata.toolCallCount, 1);
+  assert.deepEqual(result.rows, []);
+  const sent = JSON.stringify(openai.calls);
+  assert.doesNotMatch(sent, /executedPipeline|OMS_CHAT_MONGO_URI|test-key-not-sent-anywhere/);
 });
 
 test("prompt injection cannot turn an unsafe model tool request into a DB call", async (t) => {

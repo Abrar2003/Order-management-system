@@ -7,10 +7,10 @@ OMS Assistant is an authenticated, read-only chat interface for questions across
 1. An authenticated browser sends a plain-text question and, for a follow-up, a server-issued `conversationId`.
 2. The backend verifies the `oms_assistant.view` permission and applies a per-user rate limit.
 3. The backend sends the question and a curated OMS schema catalogue to Groq. It never sends cookies, JWTs, authorization headers, database URIs, API keys, or unrestricted user records.
-4. Groq may request the `query_oms_database` tool with a business collection, aggregation pipeline, and purpose.
-5. The backend recursively validates the request and executes it through `OMS_CHAT_MONGO_URI`.
-6. Limited rows and safe metadata return to Groq. Groq then produces a concise answer grounded in those results.
-7. The browser receives the answer, interpreted date range and filters, row count/truncation metadata, and optional supporting rows. It never receives the generated aggregation pipeline or a provider response ID.
+4. Groq can request backend-generated schema metadata, a general read-only aggregation, or one of the approved deterministic business analyses.
+5. The backend recursively validates database requests and executes them through `OMS_CHAT_MONGO_URI`; schema inspection never reads records.
+6. The bounded loop can investigate in several steps. Forecast arithmetic remains in backend code, while Groq plans and summarizes the validated evidence.
+7. The browser receives the answer, compact factual/forecast metadata, and optional supporting rows. It never receives aggregation pipelines, hidden reasoning, or provider response IDs.
 
 All fields in OMS business collections are readable. The schema catalogue advertises the common collections `orders`, `items`, `qcs`, `inspections`, `samples`, `brands`, and `vendors`; other non-system collections can be queried by exact name. Authentication, users, role permissions, sessions, security logs, assistant state, audit internals, and MongoDB system collections remain denied.
 
@@ -21,11 +21,24 @@ The validator accepts aggregation only. It rejects writes, raw commands, JavaScr
 - 20 entries per nested/supporting result array (aggregate counts/groups should run before this cap)
 - 8 seconds of MongoDB execution time
 - `allowDiskUse: false`
-- at most four model-requested database tool calls for one question (in addition to bounded server-side entity-resolution queries)
+- at most 8 model tool iterations and 8 model-requested tool calls
+- at most 10 database calls including bounded server-side entity resolution (schema inspection does not consume a database call)
 - bounded question and generated-pipeline sizes
 - an overall abort timeout for Groq calls, with bounded retries for transient rate limits and upstream failures
 
 Dates are interpreted in `Asia/Kolkata`. “Last month” means the previous calendar month, not the previous 30 days. Business definitions and legacy aliases in the schema catalogue are based on the Mongoose models; for example, missing PIS barcode reports account for packaging mode, the legacy/master barcode aliases, and `barcode_exempted`.
+
+## Deterministic forecasting
+
+`analyze_oms_business_data` exposes a strict analysis enum for historical inspection lead time, open-order inspection dates, ready CBM by brand, and vendor next-shipment readiness. `omsForecast.service.js` owns all calculations; the model cannot invent dates, confidence percentages, or CBM formulas.
+
+Historical lead time is the calendar-day difference between PO order date and the first successful completed inspection for the same PO/item. Evidence requires a completed/packed/shipped order state and a positive passed quantity. Rejected, transferred, reworked, zero-pass, future, negative, and over-two-year samples are excluded. Severe outliers use the 1.5×IQR rule and are counted in metadata rather than silently disappearing.
+
+The fallback order is: same item and vendor, same item across vendors, same product type and vendor, vendor-wide history, then the available OMS baseline. Each level requires at least three valid samples. Statistics include mean, median/P50, P75, P90, min/max, standard deviation, IQR, outlier count, and recent-12-month median/trend.
+
+Shipment readiness is calculated separately per brand. Current ready CBM is inspected/passed but unshipped quantity, using the existing packaging-aware CBM service and stored PO CBM fallback. Open quantities are forecast with historical lead time and effective revised/original ETD; P75 is the planning date and P90 supplies the conservative window end. The service accumulates CBM by date until the configurable target is reached. If no target is supplied, `OMS_CHAT_CONTAINER_TARGET_CBM` is used, defaulting to 65 CBM.
+
+Confidence is deterministic: sample depth, fallback specificity, historical dispersion, recency, missing evidence, and CBM evidence coverage contribute to the score. Labels are High, Moderate, or Low; High additionally requires at least five samples and strong evidence coverage. A readiness forecast is not a promise that a container will actually depart.
 
 ## API contract
 
@@ -62,7 +75,22 @@ Successful response:
     },
     "filters": {},
     "returnedRows": 0,
-    "truncated": false
+    "truncated": false,
+    "answerType": "forecast",
+    "analysisType": "vendor_next_shipment_forecast",
+    "confidence": { "label": "moderate", "score": 68 },
+    "forecast": {
+      "earliestDate": "2026-09-05",
+      "planningDate": "2026-09-08",
+      "windowStart": "2026-09-05",
+      "windowEnd": "2026-09-12"
+    },
+    "evidence": {
+      "historicalSampleCount": 8,
+      "leadTimeSource": "same_item_same_vendor"
+    },
+    "partialResults": false,
+    "toolCallCount": 1
   },
   "rows": []
 }
@@ -95,12 +123,14 @@ Set the key and read-only database URI in `backend/.env.production`. The model o
 GROQ_API_KEY=<secret Groq API key>
 OMS_CHAT_LLM_MODEL=openai/gpt-oss-120b
 OMS_CHAT_MONGO_URI=mongodb+srv://oms_chat_reader:<percent-encoded-password>@cluster.example.mongodb.net/OMS?retryWrites=false
+OMS_CHAT_CONTAINER_TARGET_CBM=65
 ```
 
 Requirements:
 
 - Do not prefix these names with `VITE_` or place them in `client/OMS/.env.production`.
 - `OMS_CHAT_MONGO_URI` must use a separate database user with only the built-in `read` role on the OMS database.
+- `OMS_CHAT_CONTAINER_TARGET_CBM` is optional and must be a positive CBM value; 65 is the documented fallback when no formal target is configured.
 - It must not reuse the application credential or `MONGO_URI`. The backend has no fallback to `MONGO_URI`.
 - The URI must select the intended OMS database. Percent-encode reserved characters in the password.
 - Keep `backend/.env.production` outside source control with mode `600` on the VPS.
@@ -196,7 +226,7 @@ The expected output is `PASS: write denied`. Do not deploy the credential if the
 
 ## Auditing and operations
 
-Each authenticated assistant execution records the user ID, timestamp, question, selected reporting collection, stage count, query duration, returned row count, truncation flag, and a success/failure category where those values are available. Requests rejected before execution, such as authentication or permission failures, follow the application's existing security logging policy. Audit records omit credentials, authorization data, provider payloads, generated pipelines, and complete result documents.
+Each authenticated assistant execution records the user ID, timestamp, question, selected reporting collection, stage count, query duration, returned row count, truncation flag, answer type, forecast confidence label, tool-call count, analysis type, and a success/failure category where those values are available. Requests rejected before execution, such as authentication or permission failures, follow the application's existing security logging policy. Audit records omit credentials, authorization data, provider payloads, generated pipelines, hidden reasoning, and complete result documents.
 
 Operational caveats:
 
@@ -221,7 +251,7 @@ Operational caveats:
    npm run build
    ```
 
-3. Add the three backend-only variables to `/var/www/order-management-system/backend/.env.production`, validate the backend environment, then secure the file:
+3. Add the required backend-only variables and optional container target to `/var/www/order-management-system/backend/.env.production`, validate the backend environment, then secure the file:
 
    ```bash
    cd /var/www/order-management-system/backend

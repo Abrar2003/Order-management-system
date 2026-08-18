@@ -33,6 +33,10 @@ const omsChatAuditLogger = securityLog("oms_assistant_query", "oms_assistant", {
       query_duration_ms: Number(details.durationMs || 0),
       returned_rows: Number(details.returnedRows || 0),
       truncated: Boolean(details.truncated),
+      answer_type: String(details.answerType || ""),
+      forecast_confidence: String(details.forecastConfidence || ""),
+      tool_call_count: Number(details.toolCallCount || 0),
+      analysis_type: String(details.analysisType || ""),
       success: statusCode >= 200 && statusCode < 400,
       failure_category: inferFailureCategory(
         statusCode,

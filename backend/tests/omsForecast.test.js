@@ -6,8 +6,10 @@ const {
   forecastVendorNextShipment,
   getHistoricalInspectionLeadTime,
   normalizeHistoricalSamples,
+  runOmsForecastAnalysis,
   selectLeadTimeEstimate,
 } = require("../services/omsForecast.service");
+const { OmsChatQueryError } = require("../services/omsChatQuery.service");
 
 const completedHistory = ({
   orderId,
@@ -36,6 +38,24 @@ test("lead-time statistics use robust percentiles and remove severe outliers", (
   assert.equal(statistics.medianDays, 11.5);
   assert.equal(statistics.p75Days, 12.3);
   assert.equal(statistics.p90Days, 12.7);
+
+  const zeroIqr = calculateLeadTimeStatistics([10, 10, 10, 10, 100]);
+  assert.equal(zeroIqr.sampleCount, 4);
+  assert.equal(zeroIqr.outlierCount, 1);
+});
+
+test("lead-time statistics retain full history and report the recent performance trend", () => {
+  const statistics = calculateLeadTimeStatistics([
+    { days: 60, inspectionDate: new Date("2024-01-01T00:00:00Z") },
+    { days: 55, inspectionDate: new Date("2024-02-01T00:00:00Z") },
+    { days: 40, inspectionDate: new Date("2026-06-01T00:00:00Z") },
+    { days: 42, inspectionDate: new Date("2026-07-01T00:00:00Z") },
+  ], { now: new Date("2026-08-18T00:00:00Z") });
+
+  assert.equal(statistics.sampleCount, 4);
+  assert.equal(statistics.recentSampleCount, 2);
+  assert.equal(statistics.recentMedianDays, 41);
+  assert.equal(statistics.recentTrendDays, -7.5);
 });
 
 test("historical samples require successful completed evidence and de-duplicate a PO item", () => {
@@ -178,4 +198,51 @@ test("forecast reports ready-now and no-history outcomes without inventing dates
   assert.equal(noHistory.status, "threshold_not_reached");
   assert.equal(noHistory.confidence.label, "low");
   assert.equal(noHistory.forecast.planningDate, null);
+  assert.equal(noHistory.nextShipment.projectedCbm, 0);
+  assert.deepEqual(noHistory.nextShipment.contributingOrders, []);
+});
+
+test("controlled forecast returns a low-confidence ETD-only result when optional history times out", async () => {
+  let calls = 0;
+  const result = await runOmsForecastAnalysis(
+    { analysisType: "vendor_next_shipment_forecast", vendor: "Boranada", targetCbm: 65 },
+    {
+      now: new Date("2026-08-18T00:00:00Z"),
+      user: { _id: "user-1" },
+      queryExecutor: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            rows: [{
+              order_id: "OPEN-ETD",
+              item_code: "CHAIR-1",
+              vendor: "Boranada",
+              brand: "Brand A",
+              order_date: "2026-08-01",
+              revised_ETD: "2026-09-10",
+              quantity: 100,
+              total_po_cbm: 100,
+              shipment: [],
+              qc_passed: 60,
+              qc_request_history: [],
+            }],
+            audit: { collection: "orders", stageCount: 7, durationMs: 4, returnedRows: 1, truncated: false },
+          };
+        }
+        const error = new OmsChatQueryError("Historical query timed out", {
+          statusCode: 504,
+          category: "database_timeout",
+        });
+        error.audit = { collection: "orders", stageCount: 10, durationMs: 8_000, returnedRows: 0, truncated: false };
+        throw error;
+      },
+    },
+  );
+
+  assert.equal(calls, 2);
+  assert.equal(result.partialResults, true);
+  assert.equal(result.analysis.status, "forecast_ready");
+  assert.equal(result.analysis.forecast.planningDate, "2026-09-10");
+  assert.equal(result.analysis.confidence.label, "low");
+  assert.match(result.limitations[0], /Historical inspection evidence was unavailable/);
 });

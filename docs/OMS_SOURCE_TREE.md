@@ -230,6 +230,7 @@ oms/
 |   |   |-- omsChat.service.js
 |   |   |-- omsChatCatalog.service.js
 |   |   |-- omsChatQuery.service.js
+|   |   |-- omsForecast.service.js
 |   |   |-- orderCbm.service.js
 |   |   |-- pdfPrintStyles.js
 |   |   |-- pdfRectifyParser.service.js
@@ -272,6 +273,7 @@ oms/
 |   |   |-- masterSizeRemarks.test.js
 |   |   |-- monthlyShipmentsReport.test.js
 |   |   |-- omsChat.test.js
+|   |   |-- omsForecast.test.js
 |   |   |-- orderItemFilterStatus.test.js
 |   |   |-- pdfArchitecture.test.js
 |   |   |-- pdfPrintStyles.test.js
