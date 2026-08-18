@@ -389,6 +389,16 @@ const PoStatusReport = () => {
           title: "PO Status Report",
           subtitle: `Status: ${statusFilter} · Vendor: ${vendorFilter} · Brand: ${brandFilter}`,
         },
+        extraCss: `
+          .pdf-report .po-status-report-table th,
+          .pdf-report .po-status-report-table td {
+            padding: 2mm !important;
+          }
+          .pdf-report .po-status-vendor-header {
+            margin: 2mm !important;
+            padding: 2mm 3mm !important;
+          }
+        `,
       });
     } catch (err) {
       console.error("PO status report export failed:", err);
@@ -596,7 +606,7 @@ const PoStatusReport = () => {
                 return (
                   <div key={vendorKey} className="card om-card">
                     <div className="card-body p-0">
-                      <div className="px-3 py-2 border-bottom d-flex flex-wrap gap-2">
+                      <div className="po-status-vendor-header px-3 py-2 border-bottom d-flex flex-wrap gap-2">
                         <span className="fw-semibold">Vendor: {vendorName}</span>
                         <span className="om-summary-chip">
                           POs: {vendorEntry.po_count ?? pos.length}
@@ -626,46 +636,47 @@ const PoStatusReport = () => {
                         <table className="table table-sm table-striped align-middle mb-0 po-status-report-table">
                           <thead>
                             <tr>
-                              <th>
+                              <ReportColumnHeader exportingPdf={exportingPdf} label="Brand">
                                 <SortHeaderButton
                                   label="Brand"
                                   isActive={sortBy === "brand"}
                                   direction={sortOrder}
                                   onClick={() => handleSortColumn("brand", "asc")}
                                 />
-                              </th>
-                              <th>
+                              </ReportColumnHeader>
+                              <ReportColumnHeader exportingPdf={exportingPdf} label="PO">
                                 <SortHeaderButton
                                   label="PO"
                                   isActive={sortBy === "orderId"}
                                   direction={sortOrder}
                                   onClick={() => handleSortColumn("orderId", "asc")}
                                 />
-                              </th>
-                              <th>
+                              </ReportColumnHeader>
+                              <ReportColumnHeader exportingPdf={exportingPdf} label="Item Code">
                                 <SortHeaderButton
                                   label="Item Code"
                                   isActive={sortBy === "itemCode"}
                                   direction={sortOrder}
                                   onClick={() => handleSortColumn("itemCode", "asc")}
                                 />
-                              </th>
-                              <th>
+                              </ReportColumnHeader>
+                              <th>Status</th>
+                              <ReportColumnHeader exportingPdf={exportingPdf} label="Order Date">
                                 <SortHeaderButton
                                   label="Order Date"
                                   isActive={sortBy === "orderDate"}
                                   direction={sortOrder}
                                   onClick={() => handleSortColumn("orderDate", "desc")}
                                 />
-                              </th>
-                              <th>
+                              </ReportColumnHeader>
+                              <ReportColumnHeader exportingPdf={exportingPdf} label="ETD">
                                 <SortHeaderButton
                                   label="ETD"
                                   isActive={sortBy === "etd"}
                                   direction={sortOrder}
                                   onClick={() => handleSortColumn("etd", "desc")}
                                 />
-                              </th>
+                              </ReportColumnHeader>
                               <th className="po-status-item-count-column">
                                 {isInspectionDoneMode ? "Item Count / Qty" : "Item Count / Order Qty"}
                               </th>
@@ -674,7 +685,7 @@ const PoStatusReport = () => {
                           <tbody>
                             {sortedPos.length === 0 ? (
                               <tr>
-                                <td colSpan="6" className="text-center py-3">
+                                <td colSpan="7" className="text-center py-3">
                                   {isInspectionDoneMode
                                     ? "No inspection-done POs for this vendor."
                                     : "No partially inspected POs for this vendor."}
@@ -688,6 +699,7 @@ const PoStatusReport = () => {
                                   handleOpenOrder={handleOpenOrder}
                                   handleOpenQcDetails={handleOpenQcDetails}
                                   isInspectionDoneMode={isInspectionDoneMode}
+                                  exportingPdf={exportingPdf}
                                 />
                               ))
                             )}
@@ -711,6 +723,7 @@ const FragmentLikeGroup = ({
   handleOpenOrder,
   handleOpenQcDetails,
   isInspectionDoneMode = false,
+  exportingPdf = false,
 }) => {
   const detailItems = getPoStatusDetailItems(row, isInspectionDoneMode);
 
@@ -722,18 +735,23 @@ const FragmentLikeGroup = ({
       >
         <td>{row.brand || "N/A"}</td>
         <td>
-          <button
-            type="button"
-            className="btn btn-link p-0 align-baseline text-decoration-none"
-            onClick={(event) => {
-              event.stopPropagation();
-              handleOpenOrder(row.order_id);
-            }}
-          >
-            {row.order_id || "N/A"}
-          </button>
+          {exportingPdf ? (
+            row.order_id || "N/A"
+          ) : (
+            <button
+              type="button"
+              className="btn btn-link p-0 align-baseline text-decoration-none"
+              onClick={(event) => {
+                event.stopPropagation();
+                handleOpenOrder(row.order_id);
+              }}
+            >
+              {row.order_id || "N/A"}
+            </button>
+          )}
         </td>
-        <td />
+        <td>All Items</td>
+        <td>PO Summary</td>
         <td>{formatDateDDMMYYYY(row.order_date)}</td>
         <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
         <td className="po-status-item-count-column">
@@ -754,7 +772,7 @@ const FragmentLikeGroup = ({
           <td>{row.brand || "N/A"}</td>
           <td>{row.order_id || "N/A"}</td>
           <td>
-            {openItem.qc_id ? (
+            {openItem.qc_id && !exportingPdf ? (
               <button
                 type="button"
                 className="btn btn-link p-0 align-baseline text-decoration-none"
@@ -768,8 +786,8 @@ const FragmentLikeGroup = ({
             ) : (
               <div>{openItem.item_code || "N/A"}</div>
             )}
-            <div className="small text-secondary">{openItem.status || "N/A"}</div>
           </td>
+          <td>{openItem.status || "N/A"}</td>
           <td>{formatDateDDMMYYYY(row.order_date)}</td>
           <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
           <td className="po-status-item-count-column">
@@ -783,5 +801,9 @@ const FragmentLikeGroup = ({
     </>
   );
 };
+
+const ReportColumnHeader = ({ exportingPdf, label, children }) => (
+  <th>{exportingPdf ? label : children}</th>
+);
 
 export default PoStatusReport;
