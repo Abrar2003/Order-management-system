@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
@@ -9,9 +9,13 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
+import {
+  buildShippingPendingPoRows,
+  getShippingPendingPoRowClass,
+} from "../utils/shippingPendingReport";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
-import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
+import { formatDateDDMMYYYY } from "../utils/date";
 import { getOptionText } from "../utils/optionText";
 import "../App.css";
 import { exportElementToPdf } from "../services/pdfExport.service";
@@ -21,6 +25,14 @@ const DEFAULT_SORT_ORDER = "asc";
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_BRAND_FILTER = ["all"];
+
+const ShippingPendingLegend = () => (
+  <div className="d-flex flex-wrap align-items-center gap-2 mb-3" aria-label="PO status legend">
+    <span className="small fw-semibold">Legend:</span>
+    <span className="badge text-bg-success">Green: Completely packed PO</span>
+    <span className="badge text-bg-danger">Red: Completely pending PO with ETD passed</span>
+  </div>
+);
 
 const normalizeFilterValue = (value, fallback = "all") => {
   const normalized = String(value || "").trim();
@@ -84,12 +96,11 @@ const parseSortBy = (value) => {
   const normalized = String(value || "").trim();
   const allowed = new Set([
     "po",
-    "brand",
-    "vendor",
     "itemCode",
-    "orderQuantity",
+    "status",
+    "openQuantity",
     "packedQuantity",
-    "totalCbm",
+    "shippedQuantity",
   ]);
   return allowed.has(normalized) ? normalized : DEFAULT_SORT_BY;
 };
@@ -182,9 +193,10 @@ const downloadBlobResponse = (response, fallbackName, fallbackType) => {
   window.URL.revokeObjectURL(url);
 };
 
-const PackedGoods = () => {
+const ShippingPending = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  useRememberSearchParams(searchParams, setSearchParams, "packed-goods");
+  const navigate = useNavigate();
+  useRememberSearchParams(searchParams, setSearchParams, "shipping-pending");
   const { hasPermission } = usePermissions();
 
   const initialFilters = buildFilterStateFromSearchParams(searchParams);
@@ -219,11 +231,11 @@ const PackedGoods = () => {
       setLoading(true);
       setError("");
 
-      const response = await api.get("/orders/packed-goods");
+      const response = await api.get("/orders/shipping-pending");
       setAllRows(Array.isArray(response?.data?.data) ? response.data.data : []);
     } catch (fetchError) {
       setError(
-        fetchError?.response?.data?.message || "Failed to load packed goods.",
+        fetchError?.response?.data?.message || "Failed to load shipping pending report.",
       );
       setAllRows([]);
     } finally {
@@ -348,19 +360,12 @@ const PackedGoods = () => {
         (sum, row) => sum + Number(row?.packed_quantity || 0),
         0,
       ),
-      total_cbm: filteredRows.reduce(
-        (sum, row) =>
-          sum
-          + Number(
-            resolvePreferredCbm(
-              row?.total_cbm,
-              row?.total_po_cbm,
-              row?.top_po_cbm,
-            ) || 0,
-          ),
-        0,
-      ),
     }),
+    [filteredRows],
+  );
+
+  const poRows = useMemo(
+    () => buildShippingPendingPoRows(filteredRows),
     [filteredRows],
   );
 
@@ -371,12 +376,11 @@ const PackedGoods = () => {
         sortOrder,
         getSortValue: (row, column) => {
           if (column === "po") return row?.order_id;
-          if (column === "brand") return row?.brand;
-          if (column === "vendor") return getOptionText(row?.vendor);
           if (column === "itemCode") return row?.item_code;
-          if (column === "orderQuantity") return Number(row?.order_quantity || 0);
+          if (column === "status") return row?.status;
+          if (column === "openQuantity") return Number(row?.open_quantity || 0);
           if (column === "packedQuantity") return Number(row?.packed_quantity || 0);
-          if (column === "totalCbm") return Number(row?.total_cbm || 0);
+          if (column === "shippedQuantity") return Number(row?.shipped_quantity || 0);
           return "";
         },
       }),
@@ -489,6 +493,26 @@ const PackedGoods = () => {
     setAppliedFilters(clearedFilters);
   }, []);
 
+  const handleOpenOrder = useCallback((orderId) => {
+    const normalizedOrderId = String(orderId || "").trim();
+    if (normalizedOrderId) {
+      navigate(`/orders?order_id=${encodeURIComponent(normalizedOrderId)}`);
+    }
+  }, [navigate]);
+
+  const handleOpenQcDetails = useCallback((row) => {
+    const qcId = String(row?.qc_id || "").trim();
+    if (qcId) {
+      navigate(`/qc/${encodeURIComponent(qcId)}`);
+      return;
+    }
+
+    const query = new URLSearchParams();
+    if (row?.order_id) query.set("order", row.order_id);
+    if (row?.item_code) query.set("item_code", row.item_code);
+    navigate(query.size > 0 ? `/qc?${query}` : "/qc");
+  }, [navigate]);
+
   const handleExportXls = useCallback(async () => {
     if (sortedRows.length === 0) return;
 
@@ -497,17 +521,17 @@ const PackedGoods = () => {
       const query = buildPackedGoodsApiQuery(appliedFilters);
       query.set("format", "xls");
       const response = await api.get(
-        `/orders/packed-goods/export?${query.toString()}`,
+        `/orders/shipping-pending/export?${query.toString()}`,
         { responseType: "blob" },
       );
       downloadBlobResponse(
         response,
-        `packed-goods-${new Date().toISOString().slice(0, 10)}.xls`,
+        `shipping-pending-${new Date().toISOString().slice(0, 10)}.xls`,
         "application/vnd.ms-excel",
       );
     } catch (exportError) {
       console.error(exportError);
-      alert("Failed to export packed goods as XLS.");
+      alert("Failed to export shipping pending as XLS.");
     } finally {
       setExportingFormat("");
     }
@@ -521,17 +545,17 @@ const PackedGoods = () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0));
       await exportElementToPdf({
         element: reportRef.current,
-        reportKey: "packed-goods",
-        filename: `packed-goods-${new Date().toISOString().slice(0, 10)}.pdf`,
+        reportKey: "shipping-pending",
+        filename: `shipping-pending-${new Date().toISOString().slice(0, 10)}.pdf`,
         landscape: false,
         repeatHeader: {
-          title: "Packed Goods",
-          subtitle: "Items inspected and packed, but not yet shipped.",
+          title: "Shipping Pending",
+          subtitle: "Open order quantities pending shipment.",
         },
       });
     } catch (pdfError) {
       console.error(pdfError);
-      alert("Failed to export packed goods PDF.");
+      alert("Failed to export shipping pending PDF.");
     } finally {
       setExportingFormat("");
     }
@@ -544,9 +568,9 @@ const PackedGoods = () => {
       <div className="page-shell py-3">
         <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
           <div>
-            <h2 className="h4 mb-1">Packed Goods</h2>
+            <h2 className="h4 mb-1">Shipping Pending</h2>
             <p className="text-secondary mb-0">
-              Items inspected and packed, but not yet shipped.
+              Open order quantities pending shipment.
             </p>
           </div>
           <div className="d-flex flex-column align-items-stretch align-items-md-end gap-2">
@@ -571,24 +595,22 @@ const PackedGoods = () => {
               </div>
             )}
             <div className="d-flex flex-wrap justify-content-end gap-2">
-              <span className="om-summary-chip">Rows: {summary.total_rows}</span>
+              <span className="om-summary-chip">POs: {poRows.length}</span>
+              <span className="om-summary-chip">Items: {summary.total_rows}</span>
               <span className="om-summary-chip">
                 Brands: {appliedFilters.brand && appliedFilters.brand.length > 0 && !appliedFilters.brand.includes("all") ? appliedFilters.brand.join(', ') : "All Brands"}
               </span>
               <span className="om-summary-chip">
                 Packed Qty: {summary.total_packed_quantity}
               </span>
-              <span className="om-summary-chip">
-                Total CBM: {formatCbm(summary.total_cbm)}
-              </span>
             </div>
           </div>
         </div>
 
         <ReportInfoBanner
-          description="Tracks items that have been inspected and packed but are not yet shipped out of the warehouse."
-          dataShown="PO number, brand, vendor, item code, order quantity, packed quantity, and total volume (CBM)."
-          howItWorks="Lists items with packed quantities not yet shipped, filterable by brand list, vendor, and PO, and pageable."
+          description="Tracks open order quantities that are pending shipment."
+          dataShown="PO order date, ETD, item count, status, and item-level open, packed, and shipped quantities."
+          howItWorks="The PO table groups open items by PO; green means completely packed, while red means completely pending with an ETD that has passed."
         />
 
         <div className="card om-card mb-3">
@@ -765,7 +787,7 @@ const PackedGoods = () => {
             <div ref={reportRef} className="packed-goods-pdf-report">
               <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
                 <div>
-                  <h2 className="h4 mb-1">Packed Goods Report</h2>
+                  <h2 className="h4 mb-1">Shipping Pending Report</h2>
                   <p className="text-secondary mb-0">Generated {exportGeneratedAt}</p>
                 </div>
                 <div className="d-flex flex-wrap justify-content-end gap-2">
@@ -782,53 +804,46 @@ const PackedGoods = () => {
               </div>
 
               <div className="d-flex flex-wrap gap-2 mb-3">
-                <span className="om-summary-chip">Rows: {summary.total_rows}</span>
+                <span className="om-summary-chip">POs: {poRows.length}</span>
+                <span className="om-summary-chip">Items: {summary.total_rows}</span>
                 <span className="om-summary-chip">
                   Packed Qty: {summary.total_packed_quantity}
                 </span>
-                <span className="om-summary-chip">
-                  Total CBM: {formatCbm(summary.total_cbm)}
-                </span>
               </div>
 
-              <div className="d-flex flex-wrap align-items-center gap-3 mb-3 px-1" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "16px" }}>
-                <span className="small text-secondary fw-semibold">Status Legend:</span>
-                <div className="d-flex align-items-center gap-2 text-nowrap" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span
-                    className="d-inline-block rounded-circle"
-                    style={{
-                      display: "inline-block",
-                      width: "12px",
-                      height: "12px",
-                      minWidth: "12px",
-                      minHeight: "12px",
-                      flexShrink: 0,
-                      borderRadius: "50%",
-                      backgroundColor: "var(--om-color-packed-success-even, #b8d7a3)",
-                      border: "1.5px solid var(--om-color-success, #5d7354)",
-                    }}
-                  />
-                  <span className="small text-secondary fw-medium">Completely Packed PO</span>
-                </div>
-                <div className="d-flex align-items-center gap-2 text-nowrap" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span
-                    className="d-inline-block rounded-circle"
-                    style={{
-                      display: "inline-block",
-                      width: "12px",
-                      height: "12px",
-                      minWidth: "12px",
-                      minHeight: "12px",
-                      flexShrink: 0,
-                      borderRadius: "50%",
-                      backgroundColor: "var(--om-color-packed-warning-even, #f9da8f)",
-                      border: "1.5px solid var(--om-color-warning, #8a6e4a)",
-                    }}
-                  />
-                  <span className="small text-secondary fw-medium">Not Completely Packed PO</span>
+              <ShippingPendingLegend />
+
+              <h3 className="h5 mb-2">PO Summary</h3>
+              <div className="card om-card mb-3">
+                <div className="card-body p-0">
+                  <div className="table-responsive">
+                    <table className="table align-middle om-table mb-0">
+                      <thead className="table-primary">
+                        <tr>
+                          <th>PO</th>
+                          <th>Order Date</th>
+                          <th>ETD</th>
+                          <th>Total Item Count</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {poRows.map((row) => (
+                          <tr className={getShippingPendingPoRowClass(row)} key={`pdf-po-${row?.order_id}-${row?.brand}-${row?.vendor}`}>
+                            <td>{row?.order_id || "N/A"}</td>
+                            <td>{formatDateDDMMYYYY(row?.order_date, "-")}</td>
+                            <td>{formatDateDDMMYYYY(row?.etd, "-")}</td>
+                            <td>{Number(row?.total_item_count || 0)}</td>
+                            <td>{row?.status || "Pending"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 
+              <h3 className="h5 mb-2">Item Details</h3>
               <div className="card om-card">
                 <div className="card-body p-0">
                   <div className="table-responsive">
@@ -836,35 +851,22 @@ const PackedGoods = () => {
                       <thead className="table-primary">
                         <tr>
                           <th>PO</th>
-                          <th>Brand</th>
-                          <th>Vendor</th>
-                          <th>Item code</th>
-                          <th>Order Quantity</th>
+                          <th>Item Code</th>
+                          <th>Status</th>
+                          <th>Open Quantity</th>
                           <th>Packed Quantity</th>
-                          <th>Total CBM</th>
+                          <th>Shipped Quantity</th>
                         </tr>
                       </thead>
                       <tbody>
                         {sortedRows.map((row) => (
-                          <tr
-                            key={`pdf-${row?.id || `${row?.order_id}-${row?.item_code}`}`}
-                            className={row?.po_has_no_pending_quantity ? "om-report-success-row" : "om-report-warning-row"}
-                          >
+                          <tr key={`pdf-${row?.id || `${row?.order_id}-${row?.item_code}`}`}>
                             <td>{row?.order_id || "N/A"}</td>
-                            <td>{row?.brand || "N/A"}</td>
-                            <td>{getOptionText(row?.vendor) || "N/A"}</td>
                             <td>{row?.item_code || "N/A"}</td>
-                            <td>{Number(row?.order_quantity || 0)}</td>
+                            <td>{row?.status || "Pending"}</td>
+                            <td>{Number(row?.open_quantity || 0)}</td>
                             <td>{Number(row?.packed_quantity || 0)}</td>
-                            <td>
-                              {formatCbm(
-                                resolvePreferredCbm(
-                                  row?.total_cbm,
-                                  row?.total_po_cbm,
-                                  row?.top_po_cbm,
-                                ),
-                              )}
-                            </td>
+                            <td>{Number(row?.shipped_quantity || 0)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -876,47 +878,58 @@ const PackedGoods = () => {
           </div>
         )}
 
-        {!loading && sortedRows.length > 0 && (
-          <div className="d-flex flex-wrap align-items-center gap-3 mb-3 px-1" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "16px" }}>
-            <span className="small text-secondary fw-semibold">Status Legend:</span>
-            <div className="d-flex align-items-center gap-2 text-nowrap" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span
-                className="d-inline-block rounded-circle shadow-sm"
-                style={{
-                  display: "inline-block",
-                  width: "12px",
-                  height: "12px",
-                  minWidth: "12px",
-                  minHeight: "12px",
-                  flexShrink: 0,
-                  borderRadius: "50%",
-                  backgroundColor: "var(--om-color-packed-success-even, #b8d7a3)",
-                  border: "1.5px solid var(--om-color-success, #5d7354)",
-                }}
-              />
-              <span className="small text-secondary fw-medium">Completely Packed PO</span>
+        {!loading && (
+          <section className="mb-3">
+            <ShippingPendingLegend />
+            <h3 className="h5 mb-2">PO Summary</h3>
+            <div className="card om-card">
+              <div className="card-body p-0">
+                <div className="table-responsive">
+                  <table className="table table-hover align-middle om-table mb-0">
+                    <thead className="table-primary">
+                      <tr>
+                        <th>PO</th>
+                        <th>Order Date</th>
+                        <th>ETD</th>
+                        <th>Total Item Count</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {poRows.length === 0 ? (
+                        <tr><td colSpan={5} className="text-center py-4">No shipping-pending POs found.</td></tr>
+                      ) : poRows.map((row) => (
+                        <tr
+                          className={`${getShippingPendingPoRowClass(row)} table-clickable`.trim()}
+                          key={`po-${row?.order_id}-${row?.brand}-${row?.vendor}`}
+                          role="link"
+                          tabIndex={0}
+                          onClick={() => handleOpenOrder(row?.order_id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              handleOpenOrder(row?.order_id);
+                            }
+                          }}
+                        >
+                          <td>{row?.order_id || "N/A"}</td>
+                          <td>{formatDateDDMMYYYY(row?.order_date, "-")}</td>
+                          <td>{formatDateDDMMYYYY(row?.etd, "-")}</td>
+                          <td>{Number(row?.total_item_count || 0)}</td>
+                          <td>{row?.status || "Pending"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-            <div className="d-flex align-items-center gap-2 text-nowrap" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span
-                className="d-inline-block rounded-circle shadow-sm"
-                style={{
-                  display: "inline-block",
-                  width: "12px",
-                  height: "12px",
-                  minWidth: "12px",
-                  minHeight: "12px",
-                  flexShrink: 0,
-                  borderRadius: "50%",
-                  backgroundColor: "var(--om-color-packed-warning-even, #f9da8f)",
-                  border: "1.5px solid var(--om-color-warning, #8a6e4a)",
-                }}
-              />
-              <span className="small text-secondary fw-medium">Not Completely Packed PO</span>
-            </div>
-          </div>
+          </section>
         )}
 
-        <div className="card om-card">
+        <section>
+          <h3 className="h5 mb-2">Item Details</h3>
+          <div className="card om-card">
           <div className="card-body p-0">
             {loading ? (
               <div className="text-center py-4">Loading...</div>
@@ -935,23 +948,7 @@ const PackedGoods = () => {
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="Brand"
-                          isActive={sortBy === "brand"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("brand", "asc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
-                          label="Vendor"
-                          isActive={sortBy === "vendor"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("vendor", "asc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
-                          label="Item code"
+                          label="Item Code"
                           isActive={sortBy === "itemCode"}
                           direction={sortOrder}
                           onClick={() => handleSortColumn("itemCode", "asc")}
@@ -959,10 +956,18 @@ const PackedGoods = () => {
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="Order Quantity"
-                          isActive={sortBy === "orderQuantity"}
+                          label="Status"
+                          isActive={sortBy === "status"}
                           direction={sortOrder}
-                          onClick={() => handleSortColumn("orderQuantity", "desc")}
+                          onClick={() => handleSortColumn("status", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Open Quantity"
+                          isActive={sortBy === "openQuantity"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("openQuantity", "desc")}
                         />
                       </th>
                       <th>
@@ -975,10 +980,10 @@ const PackedGoods = () => {
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="Total CBM"
-                          isActive={sortBy === "totalCbm"}
+                          label="Shipped Quantity"
+                          isActive={sortBy === "shippedQuantity"}
                           direction={sortOrder}
-                          onClick={() => handleSortColumn("totalCbm", "desc")}
+                          onClick={() => handleSortColumn("shippedQuantity", "desc")}
                         />
                       </th>
                     </tr>
@@ -986,31 +991,31 @@ const PackedGoods = () => {
                   <tbody>
                     {paginatedRows.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="text-center py-4">
-                          No packed goods found.
+                        <td colSpan={6} className="text-center py-4">
+                          No shipping-pending items found.
                         </td>
                       </tr>
                     ) : (
                       paginatedRows.map((row) => (
                         <tr
+                          className="table-clickable"
                           key={row?.id || `${row?.order_id}-${row?.item_code}`}
-                          className={row?.po_has_no_pending_quantity ? "om-report-success-row" : "om-report-warning-row"}
+                          role="link"
+                          tabIndex={0}
+                          onClick={() => handleOpenQcDetails(row)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              handleOpenQcDetails(row);
+                            }
+                          }}
                         >
                           <td>{row?.order_id || "N/A"}</td>
-                          <td>{row?.brand || "N/A"}</td>
-                          <td>{getOptionText(row?.vendor) || "N/A"}</td>
                           <td>{row?.item_code || "N/A"}</td>
-                          <td>{Number(row?.order_quantity || 0)}</td>
+                          <td>{row?.status || "Pending"}</td>
+                          <td>{Number(row?.open_quantity || 0)}</td>
                           <td>{Number(row?.packed_quantity || 0)}</td>
-                          <td>
-                            {formatCbm(
-                              resolvePreferredCbm(
-                                row?.total_cbm,
-                                row?.total_po_cbm,
-                                row?.top_po_cbm,
-                              ),
-                            )}
-                          </td>
+                          <td>{Number(row?.shipped_quantity || 0)}</td>
                         </tr>
                       ))
                     )}
@@ -1049,10 +1054,11 @@ const PackedGoods = () => {
               </div>
             </div>
           )}
-        </div>
+          </div>
+        </section>
       </div>
     </>
   );
 };
 
-export default PackedGoods;
+export default ShippingPending;

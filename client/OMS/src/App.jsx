@@ -27,6 +27,7 @@ const CreateVendor = lazy(() => import("./pages/CreateVendor"));
 const VendorDetails = lazy(() => import("./pages/VendorDetails"));
 const OpenOrders = lazy(() => import("./pages/OpenOrders"));
 const PackedGoods = lazy(() => import("./pages/PackedGoods"));
+const ShippingPending = lazy(() => import("./pages/ShippingPending"));
 const DailyReport = lazy(() => import("./pages/DailyReport"));
 const Shipments = lazy(() => import("./pages/Shipments"));
 const Container = lazy(() => import("./pages/Container"));
@@ -338,6 +339,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <VendorWiseQAReport />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/shipping-pending"
+            element={
+              <ProtectedRoute>
+                <ShippingPending />
               </ProtectedRoute>
             }
           />

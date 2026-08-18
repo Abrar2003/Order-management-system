@@ -38,6 +38,8 @@ const {
   getOrderSummary,
   getPackedGoods,
   exportPackedGoods,
+  getShippingPending,
+  exportShippingPending,
   getContainersDb,
   updateContainer,
   getShipmentsDb,
@@ -134,6 +136,16 @@ router.get(
 
 // List order's brands and vendors
 router.get("/brands-and-vendors", authenticate, requirePermission("orders", "view"), cacheRoute("options-v2", MEDIUM_CACHE_TTL), getOrderSummary);
+router.get("/shipping-pending", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getShippingPending);
+router.get(
+  "/shipping-pending/export",
+  authenticate,
+  requirePermission("orders", "export"),
+  securityLog("export_excel", "shipping_pending", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
+  exportShippingPending,
+);
 router.get("/packed-goods", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getPackedGoods);
 router.get(
   "/packed-goods/export",
