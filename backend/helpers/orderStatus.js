@@ -63,6 +63,51 @@ const resolveLatestRequestEntry = (requestHistory = []) => {
   return latestEntry;
 };
 
+const resolveLatestInspectionRecord = (inspectionRecords = []) => {
+  const entries = (Array.isArray(inspectionRecords) ? inspectionRecords : [])
+    .filter((entry) =>
+      entry &&
+      typeof entry === "object" &&
+      (entry?.status ||
+        entry?.inspection_date ||
+        entry?.requested_date ||
+        entry?.createdAt ||
+        entry?.checked ||
+        entry?.passed),
+    );
+  let latestEntry = null;
+  let latestTimestamp = -1;
+
+  entries.forEach((entry, index) => {
+    const entryTimestamp = Math.max(
+      toSortableTimestamp(entry?.inspection_date),
+      toSortableTimestamp(entry?.requested_date),
+      toSortableTimestamp(entry?.createdAt),
+      index,
+    );
+    if (entryTimestamp >= latestTimestamp) {
+      latestEntry = entry;
+      latestTimestamp = entryTimestamp;
+    }
+  });
+
+  return latestEntry;
+};
+
+const isOpenInspectionRecord = (inspectionRecord = null) => {
+  if (!inspectionRecord) return null;
+  if (
+    toNonNegativeNumber(inspectionRecord?.checked, 0) > 0 ||
+    toNonNegativeNumber(inspectionRecord?.passed, 0) > 0
+  ) {
+    return false;
+  }
+
+  const status = String(inspectionRecord?.status || "").trim().toLowerCase();
+  if (!status) return true;
+  return ["pending", "open", "requested", "under inspection", "in progress", "in_progress"].includes(status);
+};
+
 const normalizeOrderStatus = (value = "") => {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return "";
@@ -103,15 +148,21 @@ const hasOpenQcRequest = ({
 } = {}) => {
   if (!qcRecord || remainingInspectionQuantity <= 0) return false;
 
+  const latestInspectionOpen = isOpenInspectionRecord(
+    resolveLatestInspectionRecord(qcRecord?.inspection_record),
+  );
+  if (latestInspectionOpen !== null) return latestInspectionOpen;
+
   const requestHistory = Array.isArray(qcRecord?.request_history)
     ? qcRecord.request_history
     : [];
 
   if (requestHistory.length > 0) {
-    return requestHistory.some((entry) => {
-      if (normalizeRequestHistoryStatus(entry?.status) !== "open") return false;
-      return toNonNegativeNumber(entry?.quantity_requested, 0) > 0;
-    });
+    const latestRequest = resolveLatestRequestEntry(requestHistory);
+    return (
+      normalizeRequestHistoryStatus(latestRequest?.status) === "open" &&
+      toNonNegativeNumber(latestRequest?.quantity_requested, 0) > 0
+    );
   }
 
   return toNonNegativeNumber(qcRecord?.quantities?.quantity_requested, 0) > 0;

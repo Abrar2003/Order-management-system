@@ -32,6 +32,73 @@ const normalizeRequestHistoryStatus = (value = "") => {
   return normalized;
 };
 
+const toStatusTimestamp = (value) => {
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const resolveLatestRequestEntry = (requestHistory = []) => {
+  let latestEntry = null;
+  let latestTimestamp = -1;
+
+  (Array.isArray(requestHistory) ? requestHistory : []).forEach((entry, index) => {
+    const entryTimestamp = Math.max(
+      toStatusTimestamp(entry?.request_date || entry?.requested_date),
+      toStatusTimestamp(entry?.updatedAt || entry?.updated_at),
+      toStatusTimestamp(entry?.createdAt || entry?.created_at),
+      index,
+    );
+    if (entryTimestamp >= latestTimestamp) {
+      latestEntry = entry;
+      latestTimestamp = entryTimestamp;
+    }
+  });
+
+  return latestEntry;
+};
+
+const resolveLatestInspectionRecord = (inspectionRecords = []) => {
+  let latestEntry = null;
+  let latestTimestamp = -1;
+
+  (Array.isArray(inspectionRecords) ? inspectionRecords : []).forEach((entry, index) => {
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      !(entry?.status || entry?.inspection_date || entry?.requested_date || entry?.createdAt || entry?.checked || entry?.passed)
+    ) {
+      return;
+    }
+
+    const entryTimestamp = Math.max(
+      toStatusTimestamp(entry?.inspection_date),
+      toStatusTimestamp(entry?.requested_date),
+      toStatusTimestamp(entry?.createdAt),
+      index,
+    );
+    if (entryTimestamp >= latestTimestamp) {
+      latestEntry = entry;
+      latestTimestamp = entryTimestamp;
+    }
+  });
+
+  return latestEntry;
+};
+
+const isOpenInspectionRecord = (inspectionRecord = null) => {
+  if (!inspectionRecord) return null;
+  if (
+    toSafeOrderNumber(inspectionRecord?.checked, 0) > 0 ||
+    toSafeOrderNumber(inspectionRecord?.passed, 0) > 0
+  ) {
+    return false;
+  }
+
+  const status = String(inspectionRecord?.status || "").trim().toLowerCase();
+  if (!status) return true;
+  return ["pending", "open", "requested", "under inspection", "in progress", "in_progress"].includes(status);
+};
+
 export const getShipmentQuantityTotal = (orderOrShipment = {}) => {
   const shipmentEntries = Array.isArray(orderOrShipment)
     ? orderOrShipment
@@ -49,15 +116,21 @@ export const hasShipmentRecords = (order = {}) =>
 export const hasOpenQcRequest = (qc = {}, remainingInspectionQuantity = 0) => {
   if (!qc || remainingInspectionQuantity <= 0) return false;
 
+  const latestInspectionOpen = isOpenInspectionRecord(
+    resolveLatestInspectionRecord(qc?.inspection_record),
+  );
+  if (latestInspectionOpen !== null) return latestInspectionOpen;
+
   const requestHistory = Array.isArray(qc?.request_history)
     ? qc.request_history
     : [];
 
   if (requestHistory.length > 0) {
-    return requestHistory.some((entry) => {
-      if (normalizeRequestHistoryStatus(entry?.status) !== "open") return false;
-      return toSafeOrderNumber(entry?.quantity_requested, 0) > 0;
-    });
+    const latestRequest = resolveLatestRequestEntry(requestHistory);
+    return (
+      normalizeRequestHistoryStatus(latestRequest?.status) === "open" &&
+      toSafeOrderNumber(latestRequest?.quantity_requested, 0) > 0
+    );
   }
 
   return toSafeOrderNumber(qc?.quantities?.quantity_requested, 0) > 0;

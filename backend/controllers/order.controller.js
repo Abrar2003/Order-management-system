@@ -3081,7 +3081,11 @@ const buildPoBucketDataset = async ({
     .populate({
       path: "qc_record",
       select:
-        "order quantities request_history last_inspected_date inspection_dates",
+        "order quantities request_history last_inspected_date inspection_dates inspection_record",
+      populate: {
+        path: "inspection_record",
+        select: "inspection_date requested_date status checked passed createdAt",
+      },
     })
     .sort({ order_date: -1, order_id: 1 })
     .lean();
@@ -3121,7 +3125,11 @@ const buildPoBucketDataset = async ({
         .populate({
           path: "qc_record",
           select:
-            "order quantities request_history last_inspected_date inspection_dates",
+            "order quantities request_history last_inspected_date inspection_dates inspection_record",
+          populate: {
+            path: "inspection_record",
+            select: "inspection_date requested_date status checked passed createdAt",
+          },
         })
         .sort({ order_date: -1, order_id: 1 })
         .lean();
@@ -3140,8 +3148,12 @@ const buildPoBucketDataset = async ({
     orderObjectIds.length > 0
       ? await QC.find({ order: { $in: orderObjectIds } })
           .select(
-            "order quantities request_history last_inspected_date inspection_dates",
+            "order quantities request_history last_inspected_date inspection_dates inspection_record",
           )
+          .populate({
+            path: "inspection_record",
+            select: "inspection_date requested_date status checked passed createdAt",
+          })
           .lean()
       : [];
 
@@ -6166,10 +6178,16 @@ exports.getOrders = async (req, res) => {
     const orders = await Order.find(scopedMatch)
       .populate({
         path: "qc_record",
-        populate: {
-          path: "inspector",
-          select: "name role",
-        },
+        populate: [
+          {
+            path: "inspector",
+            select: "name role",
+          },
+          {
+            path: "inspection_record",
+            select: "inspection_date requested_date status checked passed createdAt",
+          },
+        ],
       })
       .sort({ order_id: -1 })
       .skip(skip)
@@ -6480,7 +6498,7 @@ exports.getOrderById = async (req, res) => {
           {
             path: "inspection_record",
             select:
-              "request_history_id requested_date inspection_date checked passed createdAt inspector",
+              "request_history_id requested_date inspection_date status checked passed createdAt inspector",
           },
         ],
       })
@@ -7972,7 +7990,11 @@ const buildReformedDelayedPoReportDataset = async ({
     )
     .populate({
       path: "qc_record",
-      select: "quantities request_history last_inspected_date inspection_dates",
+      select: "quantities request_history last_inspected_date inspection_dates inspection_record",
+      populate: {
+        path: "inspection_record",
+        select: "inspection_date requested_date status checked passed createdAt",
+      },
     })
     .sort({ order_date: -1, order_id: 1, "item.item_code": 1 })
     .lean();
