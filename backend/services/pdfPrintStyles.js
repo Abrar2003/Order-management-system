@@ -124,6 +124,13 @@ const buildPdfPrintStyles = ({
       display: table-footer-group;
     }
 
+    .pdf-report thead th {
+      background-color: #f3f0ec !important;
+      color: #2e2925 !important;
+      font-weight: 700 !important;
+      border-bottom: 1.5pt solid #c8c0b5 !important;
+    }
+
     .pdf-report tr,
     .pdf-report td,
     .pdf-report th,
@@ -149,7 +156,32 @@ const buildPdfPrintStyles = ({
     .pdf-hide,
     .no-print,
     button,
-    [role="button"] {
+    [role="button"]:not(th [role="button"]):not(thead [role="button"]):not(.om-sort-header) {
+      display: none !important;
+    }
+
+    .pdf-report th button,
+    .pdf-report thead button,
+    .pdf-report th .om-sort-header,
+    .pdf-report thead .om-sort-header,
+    .pdf-report .om-sort-header {
+      display: inline-block !important;
+      background: transparent !important;
+      border: 0 !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      font: inherit !important;
+      font-weight: inherit !important;
+      color: inherit !important;
+      text-decoration: none !important;
+      box-shadow: none !important;
+      cursor: default !important;
+      appearance: none !important;
+      -webkit-appearance: none !important;
+      width: auto !important;
+    }
+
+    .pdf-report .om-sort-header-arrows {
       display: none !important;
     }
 

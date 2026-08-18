@@ -14,4 +14,7 @@ test("shared PDF print styles provide readable typography and spacing", () => {
   assert.match(styles, /\.pdf-report \.mb-3/);
   assert.match(styles, /\.pdf-report \.om-summary-chip/);
   assert.match(styles, /padding:\s*1\.8mm 1\.5mm/);
+  assert.match(styles, /\.pdf-report th button/);
+  assert.match(styles, /\.pdf-report \.om-sort-header/);
+  assert.match(styles, /\.pdf-report \.om-sort-header-arrows/);
 });

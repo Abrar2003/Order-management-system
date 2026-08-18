@@ -144,9 +144,15 @@ export const exportElementToPdf = async ({
     clone.style.removeProperty("top");
   }
 
-  clone.querySelectorAll("[aria-hidden='true']").forEach((node) => {
-    node.removeAttribute("aria-hidden");
+  clone.querySelectorAll("thead button, th button").forEach((button) => {
+    const span = document.createElement("span");
+    Array.from(button.attributes).forEach((attr) => {
+      span.setAttribute(attr.name, attr.value);
+    });
+    span.innerHTML = button.innerHTML;
+    button.parentNode?.replaceChild(span, button);
   });
+
   if (repeatHeader?.inTable) {
     injectRepeatingHeader(clone, repeatHeader);
   }

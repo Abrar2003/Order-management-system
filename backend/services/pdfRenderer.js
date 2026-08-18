@@ -15,6 +15,15 @@ const escapeHeaderHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 
+const flattenTheadButtons = (html) =>
+  String(html || "").replace(
+    /(<thead[\s\S]*?<\/thead>)/gi,
+    (theadMatch) =>
+      theadMatch
+        .replace(/<button\b([^>]*)>/gi, "<span$1>")
+        .replace(/<\/button>/gi, "</span>"),
+  );
+
 const findSystemBrowser = () => {
   const candidates = process.platform === "win32"
     ? [
@@ -144,7 +153,7 @@ const renderPdf = async ({
       <style>${styles}</style>
       <style>${printCss}</style>
     `;
-    const sourceHtml = String(html || "");
+    const sourceHtml = flattenTheadButtons(html);
     const isFullDocument = /<html[\s>]/i.test(sourceHtml);
     const documentHtml = isFullDocument
       ? sourceHtml
