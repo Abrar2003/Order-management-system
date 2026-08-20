@@ -1,15 +1,15 @@
 # OMS Assistant
 
-OMS Assistant is an authenticated, read-only chat interface for questions across OMS business data. It uses Groq's OpenAI-compatible Responses API for interpretation and answer generation, while the backend retains control of authentication, write prevention, query validation, execution, conversation ownership, and auditing.
+OMS Assistant is an authenticated, read-only chat interface for questions across OMS business data. It uses Google Gemini's Interactions API through `@google/genai` for interpretation and answer generation, while the backend retains control of authentication, write prevention, query validation, execution, conversation ownership, and auditing. The default model is `gemini-3.7-flash`.
 
 ## Security and data flow
 
 1. An authenticated browser sends a plain-text question and, for a follow-up, a server-issued `conversationId`.
 2. The backend verifies the `oms_assistant.view` permission and applies a per-user rate limit.
-3. The backend sends the question and a curated OMS schema catalogue to Groq. It never sends cookies, JWTs, authorization headers, database URIs, API keys, or unrestricted user records.
-4. Groq can request backend-generated schema metadata, a general read-only aggregation, or one of the approved deterministic business analyses.
+3. The backend sends the question and a curated OMS schema catalogue to Gemini. It never sends cookies, JWTs, authorization headers, database URIs, API keys, or unrestricted user records.
+4. Gemini can request backend-generated schema metadata, a general read-only aggregation, or one of the approved deterministic business analyses.
 5. The backend recursively validates database requests and executes them through `OMS_CHAT_MONGO_URI`; schema inspection never reads records.
-6. The bounded loop can investigate in several steps. Forecast arithmetic remains in backend code, while Groq plans and summarizes the validated evidence.
+6. The bounded loop can investigate in several steps. Forecast arithmetic remains in backend code, while Gemini plans and summarizes the validated evidence.
 7. The browser receives the answer, compact factual/forecast metadata, and optional supporting rows. It never receives aggregation pipelines, hidden reasoning, or provider response IDs.
 
 All fields in OMS business collections are readable. The schema catalogue advertises the common collections `orders`, `items`, `qcs`, `inspections`, `samples`, `brands`, and `vendors`; other non-system collections can be queried by exact name. Authentication, users, role permissions, sessions, security logs, assistant state, audit internals, and MongoDB system collections remain denied.
@@ -24,13 +24,15 @@ The validator accepts aggregation only. It rejects writes, raw commands, JavaScr
 - at most 8 model tool iterations and 8 model-requested tool calls
 - at most 10 database calls including bounded server-side entity resolution (schema inspection does not consume a database call)
 - bounded question and generated-pipeline sizes
-- an overall abort timeout for Groq calls, with bounded retries for transient rate limits and upstream failures
+- an overall abort timeout for Gemini calls, with at most two retries for transient rate limits, network failures, and upstream 5xx responses
+
+`backend/services/omsAiProvider.service.js` is the only Gemini-specific layer. It uses `ai.interactions.create`, forces `store: false` on every request, translates OMS tool declarations and results, normalizes Gemini output, and maps SDK failures to provider-independent safe categories. The active stateless loop replays the complete in-request Gemini step history required for function calling, but never persists raw steps or hidden reasoning. OMS remains the authority for bounded cross-request conversation history. High thinking is used and thinking summaries are disabled. There is no automatic Groq fallback.
 
 Dates are interpreted in `Asia/Kolkata`. “Last month” means the previous calendar month, not the previous 30 days. Business definitions and legacy aliases in the schema catalogue are based on the Mongoose models; for example, missing PIS barcode reports account for packaging mode, the legacy/master barcode aliases, and `barcode_exempted`.
 
 ## Deterministic forecasting
 
-`analyze_oms_business_data` exposes a strict analysis enum for historical inspection lead time, open-order inspection dates, ready CBM by brand, and vendor next-shipment readiness. `omsForecast.service.js` owns all calculations; the model cannot invent dates, confidence percentages, or CBM formulas.
+`analyze_oms_business_data` exposes a strict analysis enum for historical inspection lead time, open-order inspection dates, ready CBM by brand, vendor next-shipment readiness, and brand-level next-container vendor comparison. The vendor forecast requires a vendor; the brand comparison derives and ranks vendors from open orders for the resolved brand. `omsForecast.service.js` owns all calculations; the model cannot invent dates, confidence percentages, or CBM formulas.
 
 Historical lead time is the calendar-day difference between PO order date and the first successful completed inspection for the same PO/item. Evidence requires a completed/packed/shipped order state and a positive passed quantity. Rejected, transferred, reworked, zero-pass, future, negative, and over-two-year samples are excluded. Severe outliers use the 1.5×IQR rule and are counted in metadata rather than silently disappearing.
 
@@ -99,7 +101,7 @@ Successful response:
 `dateRange` and `filters` may be empty when they do not apply. `rows` contains no more than 100 supporting records. Answers and rows are rendered as text/React data, never as model-provided HTML.
 When a comparison spans multiple date windows or tool calls, `dateRange` is the outer coverage envelope; the answer can still name the individual periods.
 
-Invalid input, authentication, permission, rate-limit, configuration, upstream, validation, and timeout failures return a non-2xx response with a safe message. Responses do not include provider payloads, credentials, internal pipelines, stack traces, or another user's conversation state. A missing or foreign `conversationId` is not accepted as a continuation.
+Invalid input, authentication, permission, rate-limit, configuration, upstream, validation, and timeout failures return a non-2xx response with a safe message. An expected analytics input mismatch is returned only to Gemini as a bounded safe function result so it can correct its analysis choice; unsafe tool requests and execution failures still fail the request. Responses do not include provider payloads, credentials, internal pipelines, stack traces, or another user's conversation state. A missing or foreign `conversationId` is not accepted as a continuation.
 
 Conversation state also stores a one-way fingerprint of the owner’s current role and profile scope. A profile change invalidates the old continuation so stale context is not reused.
 
@@ -120,8 +122,8 @@ The `oms_assistant.view` permission controls access to the assistant itself. Onc
 Set the key and read-only database URI in `backend/.env.production`. The model override is optional:
 
 ```env
-GROQ_API_KEY=<secret Groq API key>
-OMS_CHAT_LLM_MODEL=openai/gpt-oss-120b
+GEMINI_API_KEY=<secret Gemini API key>
+OMS_CHAT_LLM_MODEL=gemini-3.7-flash
 OMS_CHAT_MONGO_URI=mongodb+srv://oms_chat_reader:<percent-encoded-password>@cluster.example.mongodb.net/OMS?retryWrites=false
 OMS_CHAT_CONTAINER_TARGET_CBM=65
 ```
@@ -228,12 +230,20 @@ The expected output is `PASS: write denied`. Do not deploy the credential if the
 
 Each authenticated assistant execution records the user ID, timestamp, question, selected reporting collection, stage count, query duration, returned row count, truncation flag, answer type, forecast confidence label, tool-call count, analysis type, and a success/failure category where those values are available. Requests rejected before execution, such as authentication or permission failures, follow the application's existing security logging policy. Audit records omit credentials, authorization data, provider payloads, generated pipelines, hidden reasoning, and complete result documents.
 
+Every `/oms-chat/ask` response also has an `X-Request-Id` header. Failed responses include the same `requestId` and a safe `errorCode`. Backend output contains ordered `[oms-assistant]` JSON records for route checks, rate limiting, request validation, conversation state, entity resolution, read-only queries, tool/forecast execution, Gemini attempts and retries, answer validation, persistence, and completion. Find one execution with:
+
+```bash
+pm2 logs oms-backend --lines 1000 | grep '<request-id>'
+```
+
+Failure records include the server-side category, HTTP/provider status, message, and stack. They intentionally exclude credentials, authorization headers, provider bodies, MongoDB pipelines, hidden prompts/reasoning, and result documents.
+
 Operational caveats:
 
-- Questions and the bounded query results needed to answer them are processed by Groq. Do not enter unrelated secrets or personal data in questions.
+- Questions and the bounded query results needed to answer them are processed by Gemini. Do not enter unrelated secrets or personal data in questions.
 - Business fields are readable by default; authentication, security, assistant-state, audit, and MongoDB system collections remain blocked.
 - A maximum of 100 supporting rows is for chat analysis, not bulk export. Use existing OMS export routes for complete datasets.
-- Groq or read-replica/database unavailability produces a safe failure; the assistant does not silently switch to the application's write credential.
+- Gemini or read-replica/database unavailability produces a safe failure; the assistant does not silently switch providers or use the application's write credential. When a transient Gemini failure happens after a deterministic forecast has completed, the backend can return a clearly marked partial forecast summary from that completed calculation.
 - Conversation continuation is backend-owned and expires; it is not a permanent report archive.
 - The per-user limiter uses an atomic MongoDB bucket in the primary application database, so the 10-requests-per-5-minutes ceiling is shared across PM2 instances.
 

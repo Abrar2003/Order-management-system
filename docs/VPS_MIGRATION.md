@@ -5,7 +5,7 @@ This runbook prepares the OMS stack for a Linux VPS deployment:
 - Frontend: Vite build served by nginx
 - Process manager: PM2
 - CI/CD: GitHub Actions triggers remote deploys over SSH
-- Optional OMS Assistant: Groq Responses API + a separate read-only MongoDB credential
+- Optional OMS Assistant: Google Gemini Interactions API + a separate read-only MongoDB credential
 
 ## 1. Pre-Migration Checklist
 
@@ -89,7 +89,7 @@ Set real values for:
 - `MONGO_URI`
 - `JWT_SECRET`
 - `CORS_ORIGIN`
-- `GROQ_API_KEY` and `OMS_CHAT_MONGO_URI` when OMS Assistant is enabled; `OMS_CHAT_LLM_MODEL` optionally overrides the default Groq model
+- `GEMINI_API_KEY` and `OMS_CHAT_MONGO_URI` when OMS Assistant is enabled; `OMS_CHAT_LLM_MODEL` optionally overrides the default Gemini model
 - Google integration keys if those features are used
 
 OMS Assistant values are backend-only. Never add them to a client/Vite env file, never reuse `MONGO_URI` as `OMS_CHAT_MONGO_URI`, and never grant its database user write privileges. Create and test the database user before deployment using [OMS_ASSISTANT.md](OMS_ASSISTANT.md#create-the-read-only-mongodb-user).
@@ -284,7 +284,7 @@ Automated deploy from GitHub Actions:
    - Disable password auth, use SSH keys
    - Keep OS packages updated
    - Rotate JWT/Google secrets periodically
-   - Rotate the Groq key and OMS Assistant database password independently
+   - Rotate the Gemini key and OMS Assistant database password independently
    - Re-test that the OMS Assistant database user cannot write after any MongoDB role change
 4. CI/CD maintenance:
    - Rotate the GitHub Actions deploy key periodically

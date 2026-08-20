@@ -3,11 +3,15 @@ const assert = require("node:assert/strict");
 const {
   buildExpectedCbmTimeline,
   calculateLeadTimeStatistics,
+  forecastBrandNextContainerVendor,
   forecastVendorNextShipment,
   getHistoricalInspectionLeadTime,
   normalizeHistoricalSamples,
+  OmsForecastValidationError,
   runOmsForecastAnalysis,
   selectLeadTimeEstimate,
+  validateAnalyticsRequest,
+  __test__: forecastInternals,
 } = require("../services/omsForecast.service");
 const { OmsChatQueryError } = require("../services/omsChatQuery.service");
 
@@ -42,6 +46,11 @@ test("lead-time statistics use robust percentiles and remove severe outliers", (
   const zeroIqr = calculateLeadTimeStatistics([10, 10, 10, 10, 100]);
   assert.equal(zeroIqr.sampleCount, 4);
   assert.equal(zeroIqr.outlierCount, 1);
+});
+
+test("forecast filters treat common brand separators as equivalent", () => {
+  const brandMatch = forecastInternals.buildOpenOrderPipeline({ brand: "By-Boo" })[0].$match.brand;
+  assert.match("By Boo", new RegExp(brandMatch.$regex, brandMatch.$options));
 });
 
 test("lead-time statistics retain full history and report the recent performance trend", () => {
@@ -200,6 +209,87 @@ test("forecast reports ready-now and no-history outcomes without inventing dates
   assert.equal(noHistory.forecast.planningDate, null);
   assert.equal(noHistory.nextShipment.projectedCbm, 0);
   assert.deepEqual(noHistory.nextShipment.contributingOrders, []);
+});
+
+test("brand vendor forecast chooses a ready vendor and ranks a closest vendor when none reaches target", () => {
+  const readyNow = forecastBrandNextContainerVendor({
+    brand: "By Boo",
+    targetCbm: 65,
+    orders: [
+      {
+        order_id: "READY-VENDOR",
+        vendor: "Vendor Ready",
+        brand: "By Boo",
+        quantity: 100,
+        total_po_cbm: 100,
+        shipment: [],
+        qc_record: { quantities: { qc_passed: 70 }, request_history: [] },
+      },
+      {
+        order_id: "LATER-VENDOR",
+        vendor: "Vendor Later",
+        brand: "By Boo",
+        order_date: "2026-08-01",
+        revised_ETD: "2026-09-05",
+        quantity: 100,
+        total_po_cbm: 100,
+        shipment: [],
+        qc_record: { quantities: { qc_passed: 40 }, request_history: [] },
+      },
+    ],
+    now: new Date("2026-08-18T00:00:00Z"),
+  });
+
+  assert.equal(readyNow.status, "ready_now");
+  assert.equal(readyNow.mostLikelyVendor.vendor, "Vendor Ready");
+  assert.equal(readyNow.mostLikelyVendor.currentReadyCbm, 70);
+  assert.equal(readyNow.evidence.candidateVendorCount, 2);
+
+  const noTarget = forecastBrandNextContainerVendor({
+    brand: "By Boo",
+    targetCbm: 65,
+    orders: [
+      {
+        order_id: "CLOSEST-VENDOR",
+        vendor: "Vendor Near",
+        brand: "By Boo",
+        order_date: "2026-08-01",
+        revised_ETD: "2026-09-05",
+        quantity: 100,
+        total_po_cbm: 40,
+        shipment: [],
+        qc_record: { quantities: { qc_passed: 30 }, request_history: [] },
+      },
+      {
+        order_id: "FARTHER-VENDOR",
+        vendor: "Vendor Far",
+        brand: "By Boo",
+        order_date: "2026-08-01",
+        revised_ETD: "2026-09-05",
+        quantity: 100,
+        total_po_cbm: 20,
+        shipment: [],
+        qc_record: { quantities: { qc_passed: 10 }, request_history: [] },
+      },
+    ],
+    now: new Date("2026-08-18T00:00:00Z"),
+  });
+
+  assert.equal(noTarget.status, "threshold_not_reached");
+  assert.equal(noTarget.mostLikelyVendor.vendor, "Vendor Near");
+  assert.equal(noTarget.mostLikelyVendor.thresholdCrossingDate, null);
+  assert.equal(noTarget.mostLikelyVendor.projectedCbm, 40);
+});
+
+test("vendor and brand vendor forecasts enforce their distinct required entity", () => {
+  assert.throws(
+    () => validateAnalyticsRequest({ analysisType: "vendor_next_shipment_forecast" }),
+    (error) => error instanceof OmsForecastValidationError && error.code === "vendor_required",
+  );
+  assert.throws(
+    () => validateAnalyticsRequest({ analysisType: "brand_next_container_vendor_forecast" }),
+    (error) => error instanceof OmsForecastValidationError && error.code === "brand_required",
+  );
 });
 
 test("controlled forecast returns a low-confidence ETD-only result when optional history times out", async () => {

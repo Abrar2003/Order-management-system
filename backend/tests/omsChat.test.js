@@ -12,6 +12,11 @@ const {
 const auth = require("../middlewares/auth.middleware");
 const omsChatRouter = require("../routers/omsChat.routes");
 const {
+  logOmsChatError,
+  logOmsChatEvent,
+  omsChatRequestLogger,
+} = require("../services/omsChatLogger.service");
+const {
   OmsChatQueryError,
   closeOmsChatConnection,
   executeOmsQuery,
@@ -26,6 +31,7 @@ const {
   buildSystemInstructions,
   __test__: serviceInternals,
 } = require("../services/omsChat.service");
+const { OmsAiProviderError } = require("../services/omsAiProvider.service");
 const {
   getPreviousCalendarMonthRange,
   inspectOmsSchema,
@@ -58,7 +64,8 @@ const setEnv = (t, values) => {
 };
 
 const configureAssistant = (t) => setEnv(t, {
-  GROQ_API_KEY: "test-key-not-sent-anywhere",
+  GEMINI_API_KEY: "test-key-not-sent-anywhere",
+  GROQ_API_KEY: undefined,
   OPENAI_API_KEY: undefined,
   OMS_CHAT_LLM_MODEL: "test-model",
   OMS_CHAT_MONGO_URI: "mongodb://readonly.invalid/oms",
@@ -86,15 +93,16 @@ const fakeConversationModel = () => {
   };
 };
 
-const fakeOpenAi = (...responses) => {
+const fakeGemini = (...responses) => {
   const calls = [];
   return {
     calls,
-    responses: {
+    interactions: {
       async create(body, options) {
         calls.push({ body, options });
-        assert.ok(responses.length, "unexpected Groq call");
-        return responses.shift();
+        assert.ok(responses.length, "unexpected Gemini interaction");
+        const response = responses.shift();
+        return typeof response === "function" ? response() : response;
       },
     },
   };
@@ -102,24 +110,25 @@ const fakeOpenAi = (...responses) => {
 
 const functionResponse = (argumentsValue, overrides = {}) => ({
   id: "response-with-tool",
-  output_text: "",
-  output: [{
+  status: "completed",
+  steps: [{
     type: "function_call",
     name: "query_oms_database",
-    call_id: "tool-call-1",
+    id: overrides.call_id || "tool-call-1",
     arguments: typeof argumentsValue === "string"
       ? argumentsValue
-      : JSON.stringify(argumentsValue),
-    ...overrides,
+      : argumentsValue,
+    ...Object.fromEntries(Object.entries(overrides).filter(([key]) => key !== "call_id")),
   }],
 });
 
 const finalResponse = (answer = "Done.") => ({
   id: "final-response",
-  output: [{
-    type: "message",
-    role: "assistant",
-    content: [{ type: "output_text", text: answer }],
+  status: "completed",
+  output_text: answer,
+  steps: [{
+    type: "model_output",
+    content: [{ type: "text", text: answer }],
   }],
 });
 
@@ -207,7 +216,7 @@ test("valid count query executes read-only and returns shaped metadata", async (
 
 test("chat tool loop handles a valid count without exposing server state", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(
+  const gemini = fakeGemini(
     functionResponse({
       collection: "orders",
       purpose: "Count pending orders",
@@ -227,7 +236,7 @@ test("chat tool loop handles a valid count without exposing server state", async
       user: USER,
     },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: conversations,
       queryExecutor: async (request) => {
         executed.push(request);
@@ -245,24 +254,24 @@ test("chat tool loop handles a valid count without exposing server state", async
   assert.deepEqual(result.rows, [{ total: 7 }]);
   assert.equal(executed.length, 5);
   assert.equal(executed.at(-1).collection, "orders");
-  assert.equal(openai.calls.length, 2);
-  assert.equal(openai.calls[0].body.parallel_tool_calls, false);
-  assert.match(openai.calls[0].body.instructions, /RESOLVED QUESTION CONTEXT/);
-  assert.equal(Object.hasOwn(openai.calls[0].body, "store"), false);
-  assert.equal(Object.hasOwn(openai.calls[0].body, "safety_identifier"), false);
+  assert.equal(gemini.calls.length, 2);
+  assert.match(gemini.calls[0].body.system_instruction, /RESOLVED QUESTION CONTEXT/);
+  assert.equal(gemini.calls[0].body.store, false);
+  assert.equal(Object.hasOwn(gemini.calls[0].body, "safety_identifier"), false);
   assert.equal(
-    Object.hasOwn(openai.calls[1].body, "previous_response_id"),
+    Object.hasOwn(gemini.calls[1].body, "previous_interaction_id"),
     false,
   );
   assert.equal(
-    openai.calls[0].body.input[0].content,
+    gemini.calls[0].body.input[0].content[0].text,
     "How many pending orders are there?",
   );
-  assert.equal(openai.calls[1].body.input[1].type, "function_call");
-  assert.equal(openai.calls[1].body.input[2].type, "function_call_output");
-  assert.doesNotMatch(openai.calls[1].body.instructions, /SCHEMA CATALOGUE/);
-  assert.match(openai.calls[1].body.instructions, /resolved item codes/);
-  const sent = JSON.stringify(openai.calls);
+  assert.equal(gemini.calls[1].body.input[1].type, "function_call");
+  assert.equal(gemini.calls[1].body.input[2].type, "function_result");
+  assert.match(gemini.calls[1].body.system_instruction, /SCHEMA CATALOGUE/);
+  assert.match(gemini.calls[1].body.system_instruction, /resolved item codes/);
+  assert.equal(gemini.calls[1].body.generation_config.thinking_level, "high");
+  const sent = JSON.stringify(gemini.calls);
   assert.doesNotMatch(sent, /test-key-not-sent-anywhere/);
   assert.doesNotMatch(sent, /allowed_brands|allowed_vendors|Bearer|cookie/i);
   assert.equal(conversations.updates.length, 1);
@@ -295,7 +304,7 @@ test("resolved item descriptions bypass model aggregation for shipment reports",
   assert.ok(serviceInternals.parseQuestionDateRange(
     "How many pieces were shipped of lando tables in the last 6 months?",
   ));
-  const openai = fakeOpenAi();
+  const gemini = fakeGemini();
   const executed = [];
 
   const result = await askOmsAssistant(
@@ -304,7 +313,7 @@ test("resolved item descriptions bypass model aggregation for shipment reports",
       user: USER,
     },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: async (request) => {
         executed.push(request);
@@ -335,7 +344,7 @@ test("resolved item descriptions bypass model aggregation for shipment reports",
     "orders",
     "orders",
   ]);
-  assert.equal(openai.calls.length, 0);
+  assert.equal(gemini.calls.length, 0);
   assert.equal(result.answer, "42 pieces were shipped across 1 order. Orders: PO-1.");
   assert.ok(executed.at(-1).pipeline.some((stage) =>
     stage.$match?.["shipment.stuffing_date"]?.$gte));
@@ -343,7 +352,7 @@ test("resolved item descriptions bypass model aggregation for shipment reports",
 
 test("generic shipment reports include all vendors instead of reporting a missing entity", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(
+  const gemini = fakeGemini(
     functionResponse({
       collection: "orders",
       purpose: "Total June shipments by vendor",
@@ -364,7 +373,7 @@ test("generic shipment reports include all vendors instead of reporting a missin
   const result = await askOmsAssistant(
     { message: "Give me shipment totals by vendor for June 2026.", user: USER },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: withEntityResolver(async () => queryResult([
         { vendor: "Acme", shipment_total: 42 },
@@ -373,8 +382,8 @@ test("generic shipment reports include all vendors instead of reporting a missin
   );
 
   assert.equal(result.answer, "June 2026 shipment totals are grouped by vendor.");
-  assert.equal(openai.calls.length, 2);
-  assert.match(openai.calls[0].body.instructions, /include all of them/);
+  assert.equal(gemini.calls.length, 2);
+  assert.match(gemini.calls[0].body.system_instruction, /include all of them/);
 });
 
 test("complex reports retain the existing four-call flow inside the expanded bounds", async (t) => {
@@ -387,7 +396,7 @@ test("complex reports retain the existing four-call flow inside the expanded bou
       { $count: "total" },
     ],
   });
-  const openai = fakeOpenAi(
+  const gemini = fakeGemini(
     reportSection("First report section"),
     reportSection("Second report section"),
     reportSection("Third report section"),
@@ -398,20 +407,20 @@ test("complex reports retain the existing four-call flow inside the expanded bou
   const result = await askOmsAssistant(
     { message: "Give me a detailed PO, brand, and container breakdown.", user: USER },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: withEntityResolver(async () => queryResult([{ total: 1 }])),
     },
   );
 
   assert.equal(result.answer, "The complete report is ready.");
-  assert.equal(openai.calls.length, 5);
-  assert.match(openai.calls[0].body.instructions, /at most 8 tool iterations, 8 total tool calls, and 10 database calls/);
+  assert.equal(gemini.calls.length, 5);
+  assert.match(gemini.calls[0].body.system_instruction, /at most 8 tool iterations, 8 total tool calls, and 10 database calls/);
 });
 
 test("PO container CBM breakdowns bypass the model and calculate safe container shares", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi();
+  const gemini = fakeGemini();
   const executed = [];
 
   const result = await askOmsAssistant(
@@ -420,7 +429,7 @@ test("PO container CBM breakdowns bypass the model and calculate safe container 
       user: USER,
     },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: async (request) => {
         executed.push(request);
@@ -455,7 +464,7 @@ test("PO container CBM breakdowns bypass the model and calculate safe container 
     },
   );
 
-  assert.equal(openai.calls.length, 0);
+  assert.equal(gemini.calls.length, 0);
   assert.match(result.answer, /PO\/container CBM breakdown/);
   assert.match(result.answer, /25%/);
   assert.match(result.answer, /75%/);
@@ -468,7 +477,7 @@ test("PO container CBM breakdowns bypass the model and calculate safe container 
 
 test("known brands use orders.brand instead of item descriptions", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi();
+  const gemini = fakeGemini();
   const executed = [];
 
   const result = await askOmsAssistant(
@@ -477,7 +486,7 @@ test("known brands use orders.brand instead of item descriptions", async (t) => 
       user: USER,
     },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: async (request) => {
         executed.push(request);
@@ -502,7 +511,7 @@ test("known brands use orders.brand instead of item descriptions", async (t) => 
     "brands", "items", "vendors", "orders", "orders",
   ]);
   assert.deepEqual(executed.at(-1).pipeline[0].$match.brand, { $in: ["Isaa"] });
-  assert.equal(openai.calls.length, 0);
+  assert.equal(gemini.calls.length, 0);
   assert.equal(
     result.answer,
     "2 shipped orders: PO-100, PO-200.",
@@ -549,13 +558,41 @@ test("entity resolution finds codes and dates, and asks on brand-description col
   assert.match(collision.ambiguity, /brand and an item description/);
 });
 
+test("follow-up resolution keeps the prior question and tolerates brand separators", async () => {
+  assert.equal(
+    serviceInternals.getResolutionQuestion(
+      "Inspected but unshipped quantity vs container target CBM",
+      [{ role: "user", content: "Which PO at Boranada for By-Boo should be inspected next?" }],
+    ),
+    "Which PO at Boranada for By-Boo should be inspected next?\nInspected but unshipped quantity vs container target CBM",
+  );
+
+  const resolution = await serviceInternals.resolveQuestionEntities({
+    question: "Which PO at Boranada for By-Boo should be inspected next?",
+    now: new Date("2026-08-19T00:00:00.000Z"),
+    user: USER,
+    queryExecutor: async (request) => {
+      if (request.collection === "brands") {
+        return queryResult([{ name: "By Boo" }], { audit: { collection: "brands" } });
+      }
+      if (request.collection === "vendors") {
+        return queryResult([{ name: "Boranada" }], { audit: { collection: "vendors" } });
+      }
+      return queryResult([], { audit: { collection: request.collection } });
+    },
+  });
+
+  assert.deepEqual(resolution.context.brands, ["By Boo"]);
+  assert.deepEqual(resolution.context.vendorNames, ["Boranada"]);
+});
+
 test("ambiguous brand and description terms do not produce a mixed shipment report", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi();
+  const gemini = fakeGemini();
   const result = await askOmsAssistant(
     { message: "How many pieces were shipped of Isaa?", user: USER },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: async (request) => {
         if (request.collection === "brands") {
@@ -572,66 +609,141 @@ test("ambiguous brand and description terms do not produce a mixed shipment repo
     },
   );
 
-  assert.equal(openai.calls.length, 0);
+  assert.equal(gemini.calls.length, 0);
   assert.match(result.answer, /Do you mean the brand or the item description/);
 });
 
-test("production provider call uses Groq's Responses endpoint", async (t) => {
+test("assistant uses backend-only stateless Gemini Interactions", async (t) => {
   configureAssistant(t);
-  let request;
-  t.mock.method(global, "fetch", async (url, options) => {
-    request = { url, options };
-    return {
-      ok: true,
-      async json() {
-        return finalResponse("Groq is ready.");
-      },
-    };
-  });
+  const gemini = fakeGemini(finalResponse("Gemini is ready."));
 
   const result = await askOmsAssistant(
     { message: "What can you help with?", user: USER },
-    { conversationModel: fakeConversationModel(), queryExecutor: emptyEntityQuery },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: emptyEntityQuery,
+    },
   );
-  const body = JSON.parse(request.options.body);
+  const body = gemini.calls[0].body;
 
-  assert.equal(request.url, "https://api.groq.com/openai/v1/responses");
-  assert.equal(request.options.method, "POST");
-  assert.equal(request.options.headers.Authorization, "Bearer test-key-not-sent-anywhere");
   assert.equal(body.model, "test-model");
-  assert.equal(Object.hasOwn(body, "store"), false);
-  assert.equal(Object.hasOwn(body, "previous_response_id"), false);
-  assert.equal(result.answer, "Groq is ready.");
-  assert.doesNotMatch(request.options.body, /test-key-not-sent-anywhere/);
+  assert.equal(body.store, false);
+  assert.equal(Object.hasOwn(body, "previous_interaction_id"), false);
+  assert.equal(result.answer, "Gemini is ready.");
+  assert.doesNotMatch(JSON.stringify(gemini.calls), /test-key-not-sent-anywhere/);
 });
 
-test("transient Groq rate limits are retried twice", async (t) => {
+test("Gemini completes the By Boo tool loop when interaction IDs are omitted", async (t) => {
   configureAssistant(t);
-  let calls = 0;
-  t.mock.method(global, "fetch", async () => {
-    calls += 1;
-    if (calls < 3) {
-      return {
-        ok: false,
-        status: 429,
-        headers: { get: () => "0" },
-      };
-    }
-    return {
-      ok: true,
-      async json() {
-        return finalResponse("Groq recovered.");
-      },
-    };
-  });
+  const gemini = fakeGemini(
+    {
+      status: "requires_action",
+      steps: [{
+        type: "function_call",
+        id: "by-boo-vendor-call",
+        name: "query_oms_database",
+        arguments: {
+          collection: "orders",
+          purpose: "Find By Boo vendor readiness evidence",
+          pipeline: [{ $count: "open_orders" }],
+        },
+      }],
+    },
+    {
+      status: "requires_action",
+      steps: [{
+        type: "function_call",
+        id: "by-boo-follow-up-call",
+        name: "query_oms_database",
+        arguments: {
+          collection: "orders",
+          purpose: "Confirm the leading By Boo vendor",
+          pipeline: [{ $count: "vendor_matches" }],
+        },
+      }],
+    },
+    {
+      status: "completed",
+      output_text: "Based on the validated By Boo evidence, Vendor A is the most likely next container candidate.",
+      steps: [{
+        type: "model_output",
+        content: [{ type: "text", text: "Based on the validated By Boo evidence, Vendor A is the most likely next container candidate." }],
+      }],
+    },
+  );
+
+  const result = await askOmsAssistant(
+    { message: "Which vendor is most likely to fill the next container for By Boo?", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: withEntityResolver(async (request) => queryResult(
+        [{ total: 1 }],
+        { metadata: { filters: { collection: request.collection, purpose: request.purpose } } },
+      )),
+    },
+  );
+
+  assert.equal(result.answer, "Based on the validated By Boo evidence, Vendor A is the most likely next container candidate.");
+  assert.equal(result.metadata.toolCallCount, 2);
+  assert.deepEqual(
+    gemini.calls[2].body.input.filter((step) => step.type === "function_result").map((step) => step.call_id),
+    ["by-boo-vendor-call", "by-boo-follow-up-call"],
+  );
+  assert.equal(gemini.calls.every((call) => call.body.previous_interaction_id === undefined), true);
+});
+
+test("transient Gemini rate limits are retried twice", async (t) => {
+  configureAssistant(t);
+  const rateLimit = () => {
+    const error = new Error("rate limited");
+    error.status = 429;
+    error.headers = { get: () => "0ms" };
+    throw error;
+  };
+  const gemini = fakeGemini(rateLimit, rateLimit, finalResponse("Gemini recovered."));
 
   const result = await askOmsAssistant(
     { message: "Count orders", user: USER },
-    { conversationModel: fakeConversationModel(), queryExecutor: emptyEntityQuery },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: emptyEntityQuery,
+    },
   );
 
-  assert.equal(calls, 3);
-  assert.equal(result.answer, "Groq recovered.");
+  assert.equal(gemini.calls.length, 3);
+  assert.equal(result.answer, "Gemini recovered.");
+});
+
+test("simple container and vendor-order questions stay concise after migration", async (t) => {
+  configureAssistant(t);
+  for (const [question, purpose, answer] of [
+    ["How many containers shipped last month?", "Count shipped containers last month", "3 containers shipped last month."],
+    ["How many open orders does Boranada have?", "Count Boranada open orders", "Boranada has 5 open orders."],
+  ]) {
+    const gemini = fakeGemini(
+      functionResponse({
+        collection: "orders",
+        purpose,
+        pipeline: [{ $match: { archived: { $ne: true } } }, { $count: "total" }],
+      }),
+      finalResponse(answer),
+    );
+    const result = await askOmsAssistant(
+      { message: question, user: USER },
+      {
+        aiClient: gemini,
+        conversationModel: fakeConversationModel(),
+        queryExecutor: withEntityResolver(async () => queryResult([{ total: answer.startsWith("3") ? 3 : 5 }])),
+      },
+    );
+
+    assert.equal(result.answer, answer);
+    assert.equal(result.metadata.toolCallCount, 1);
+    assert.equal(gemini.calls.length, 2);
+  }
 });
 
 test("packaging-aware missing-PIS-barcode pipeline is accepted", () => {
@@ -681,7 +793,7 @@ test("packaging-aware missing-PIS-barcode pipeline is accepted", () => {
   assert.match(instructions, /first search the whole items collection/i);
 });
 
-test("common read-only Groq string expressions are accepted", () => {
+test("common read-only Gemini string expressions are accepted", () => {
   const validated = validatePipeline("items", [{
     $project: {
       _id: 0,
@@ -868,6 +980,32 @@ test("approved field paths can be projected without opening reserved output alia
   assert.match(
     buildSystemInstructions(),
     /Every database field is readable/,
+  );
+});
+
+test("$elemMatch accepts bounded field conditions and rejects unsafe operators", () => {
+  assert.equal(
+    validatePipeline("orders", [
+      {
+        $match: {
+          shipment: {
+            $elemMatch: {
+              container: { $regex: "CCLU", $options: "i" },
+              quantity: { $gt: 0 },
+            },
+          },
+        },
+      },
+      { $project: { _id: 0, order_id: 1 } },
+    ]).stageCount,
+    2,
+  );
+  expectQueryError(
+    () => validatePipeline("orders", [
+      { $match: { shipment: { $elemMatch: { $where: "return true" } } } },
+      { $count: "total" },
+    ]),
+    /dangerous query operator: \$where/,
   );
 });
 
@@ -1082,6 +1220,15 @@ test("row cap accepts 100, rejects larger requested limits, and truncates result
   assert.equal(result.rows.length, 100);
   assert.equal(result.metadata.truncated, true);
   assert.equal(result.metadata.returned_rows, 100);
+
+  const byteLimited = queryInternals.serializeRowsWithinLimit(
+    Array.from({ length: 20 }, (_, index) => ({ index, value: "x".repeat(8_000) })),
+  );
+  assert.equal(byteLimited.truncated, true);
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(byteLimited.rows), "utf8")
+      <= queryInternals.MAX_RESULT_BYTES,
+  );
 });
 
 test("every nested result array is trimmed to 20 and reported as truncated", async () => {
@@ -1262,8 +1409,10 @@ const responseRecorder = () => ({
 
 test("persistent rate limiting is keyed by authenticated user", async (t) => {
   let capturedFilter = null;
-  t.mock.method(OmsChatRateBucket, "findOneAndUpdate", (filter) => {
+  let capturedOptions = null;
+  t.mock.method(OmsChatRateBucket, "findOneAndUpdate", (filter, _update, options) => {
     capturedFilter = filter;
+    capturedOptions = options;
     return { lean: async () => ({ count: 1 }) };
   });
   const res = responseRecorder();
@@ -1277,6 +1426,8 @@ test("persistent rate limiting is keyed by authenticated user", async (t) => {
 
   assert.equal(nextCalled, true);
   assert.match(capturedFilter._id, new RegExp(`^${USER._id}:`));
+  assert.equal(capturedOptions.returnDocument, "after");
+  assert.equal("new" in capturedOptions, false);
   assert.equal(
     res.headers["RateLimit-Limit"],
     String(rateLimitInternals.MAX_REQUESTS),
@@ -1318,6 +1469,7 @@ test("rate limiting fails closed when its persistent bucket is unavailable", asy
 
   assert.equal(nextCalled, false);
   assert.equal(res.statusCode, 503);
+  assert.equal(res.body.errorCode, "rate_limit_unavailable");
   assert.equal(
     res.locals.omsChatAudit.failureCategory,
     "rate_limit_unavailable",
@@ -1329,13 +1481,57 @@ test("chat audit middleware is installed before authentication failures can retu
     (layer) => layer.route?.path === "/ask",
   );
   const handles = routeLayer.route.stack.map((layer) => layer.handle);
-  assert.equal(handles[0], omsChatRouter.__test__.omsChatAuditLogger);
-  assert.equal(handles[1], auth);
+  assert.equal(handles[0], omsChatRouter.__test__.omsChatRequestLogger);
+  assert.equal(handles[1], omsChatRouter.__test__.omsChatAuditLogger);
+  assert.equal(handles[2], auth);
   assert.equal(omsChatRouter.__test__.inferFailureCategory(401, ""), "unauthorized");
   assert.equal(
     omsChatRouter.__test__.inferFailureCategory(403, ""),
     "permission_denied",
   );
+});
+
+test("OMS Assistant lifecycle logs are ordered and share one request id", (t) => {
+  const records = [];
+  t.mock.method(console, "log", (line) => {
+    records.push(JSON.parse(String(line).replace(/^\[oms-assistant\] /, "")));
+  });
+  t.mock.method(console, "error", (line) => {
+    records.push(JSON.parse(String(line).replace(/^\[oms-assistant\] /, "")));
+  });
+  const req = {
+    method: "POST",
+    originalUrl: "/oms-chat/ask",
+    get: () => "42",
+  };
+  const listeners = {};
+  const res = {
+    locals: {},
+    statusCode: 200,
+    setHeader(name, value) { this[name] = value; },
+    once(event, listener) { listeners[event] = listener; },
+  };
+
+  omsChatRequestLogger(req, res, () => {
+    logOmsChatEvent("test.step");
+    logOmsChatError("test.failed", Object.assign(new Error("provider unavailable"), {
+      category: "provider_unavailable",
+      providerStatus: 503,
+    }));
+    listeners.finish();
+  });
+
+  assert.equal(records.length, 4);
+  assert.deepEqual(records.map((record) => record.sequence), [1, 2, 3, 4]);
+  assert.deepEqual(records.map((record) => record.event), [
+    "request.received",
+    "test.step",
+    "test.failed",
+    "request.completed",
+  ]);
+  assert.ok(records.every((record) => record.request_id === res["X-Request-Id"]));
+  assert.equal(records[2].error_category, "provider_unavailable");
+  assert.equal(records[2].provider_status, 503);
 });
 
 test("oms_assistant.view permission is enforced before route work", async (t) => {
@@ -1403,9 +1599,9 @@ test("oms_assistant.view is locked to false for non-manager/admin roles (user, q
   }
 });
 
-test("missing Groq key fails before conversation or network work", async (t) => {
+test("missing Gemini key fails before conversation or network work", async (t) => {
   setEnv(t, {
-    GROQ_API_KEY: undefined,
+    GEMINI_API_KEY: undefined,
     OPENAI_API_KEY: undefined,
     OMS_CHAT_LLM_MODEL: "test-model",
     OMS_CHAT_MONGO_URI: "mongodb://readonly.invalid/oms",
@@ -1417,16 +1613,16 @@ test("missing Groq key fails before conversation or network work", async (t) => 
     () => askOmsAssistant(
       { message: "Count orders", user: USER },
       {
-        groqClient: fakeOpenAi(),
+        aiClient: fakeGemini(),
         conversationModel: {
           async create() { touched = true; },
         },
       },
     ),
     (error) => {
-      assert.ok(error instanceof OmsChatServiceError);
+      assert.ok(error instanceof OmsAiProviderError);
       assert.equal(error.statusCode, 503);
-      assert.equal(error.category, "missing_groq_api_key");
+      assert.equal(error.category, "provider_configuration");
       return true;
     },
   );
@@ -1435,7 +1631,7 @@ test("missing Groq key fails before conversation or network work", async (t) => 
 
 test("missing read-only chat URI fails before conversation or network work", async (t) => {
   setEnv(t, {
-    GROQ_API_KEY: "test-key",
+    GEMINI_API_KEY: "test-key",
     OMS_CHAT_LLM_MODEL: "test-model",
     OMS_CHAT_MONGO_URI: undefined,
     MONGO_URI: "mongodb://application.invalid/oms",
@@ -1446,7 +1642,7 @@ test("missing read-only chat URI fails before conversation or network work", asy
     () => askOmsAssistant(
       { message: "Count orders", user: USER },
       {
-        groqClient: fakeOpenAi(),
+        aiClient: fakeGemini(),
         conversationModel: {
           async create() { touched = true; },
         },
@@ -1462,9 +1658,9 @@ test("missing read-only chat URI fails before conversation or network work", asy
   assert.equal(touched, false);
 });
 
-test("a foreign or expired conversation is indistinguishable and never reaches Groq", async (t) => {
+test("a foreign or expired conversation is indistinguishable and never reaches Gemini", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi();
+  const gemini = fakeGemini();
   const conversationModel = {
     findOne() {
       return { select: async () => null };
@@ -1478,7 +1674,7 @@ test("a foreign or expired conversation is indistinguishable and never reaches G
         conversationId: CONVERSATION_ID,
         user: USER,
       },
-      { groqClient: openai, conversationModel },
+      { aiClient: gemini, conversationModel },
     ),
     (error) => {
       assert.ok(error instanceof OmsChatServiceError);
@@ -1487,12 +1683,12 @@ test("a foreign or expired conversation is indistinguishable and never reaches G
       return true;
     },
   );
-  assert.equal(openai.calls.length, 0);
+  assert.equal(gemini.calls.length, 0);
 });
 
 test("conversation continuation sends bounded history and advances its revision", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(finalResponse("Follow-up answer."));
+  const gemini = fakeGemini(finalResponse("Follow-up answer."));
   let updateFilter;
   const conversationModel = {
     findOne() {
@@ -1520,12 +1716,12 @@ test("conversation continuation sends bounded history and advances its revision"
       conversationId: CONVERSATION_ID,
       user: USER,
     },
-    { groqClient: openai, conversationModel, queryExecutor: emptyEntityQuery },
+    { aiClient: gemini, conversationModel, queryExecutor: emptyEntityQuery },
   );
 
-  assert.deepEqual(openai.calls[0].body.input.slice(0, 2), [
-    { role: "user", content: "How many shipped?" },
-    { role: "assistant", content: "There were 4." },
+  assert.deepEqual(gemini.calls[0].body.input.slice(0, 2), [
+    { type: "user_input", content: [{ type: "text", text: "How many shipped?" }] },
+    { type: "model_output", content: [{ type: "text", text: "There were 4." }] },
   ]);
   assert.equal(updateFilter.revision, 3);
 });
@@ -1614,7 +1810,7 @@ test("schema discovery exposes catalogued structure without records or denied co
 
 test("schema discovery can guide a later safe query without a database schema scan", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(
+  const gemini = fakeGemini(
     functionResponse(
       { collections: ["orders"] },
       { name: "inspect_oms_schema", call_id: "schema-call" },
@@ -1631,7 +1827,7 @@ test("schema discovery can guide a later safe query without a database schema sc
   const result = await askOmsAssistant(
     { message: "Inspect the order fields and count active orders.", user: USER },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: withEntityResolver(async () => {
         reportQueries += 1;
@@ -1643,11 +1839,11 @@ test("schema discovery can guide a later safe query without a database schema sc
   assert.equal(result.answer, "There are 12 active orders.");
   assert.equal(reportQueries, 1);
   assert.equal(result.metadata.toolCallCount, 2);
-  const schemaOutput = openai.calls[1].body.input.find(
-    (entry) => entry.type === "function_call_output" && entry.call_id === "schema-call",
+  const schemaOutput = gemini.calls[1].body.input.find(
+    (entry) => entry.type === "function_result" && entry.call_id === "schema-call",
   );
-  assert.match(schemaOutput.output, /order_id/);
-  assert.doesNotMatch(schemaOutput.output, /test-key-not-sent-anywhere|mongodb:\/\//i);
+  assert.match(schemaOutput.result[0].text, /order_id/);
+  assert.doesNotMatch(schemaOutput.result[0].text, /test-key-not-sent-anywhere|mongodb:\/\//i);
 });
 
 test("tool and database limits return a final answer from partial evidence", async (t) => {
@@ -1657,7 +1853,7 @@ test("tool and database limits return a final answer from partial evidence", asy
     purpose: `Bounded report section ${index}`,
     pipeline: [{ $count: "total" }],
   }, { call_id: `bounded-call-${index}` });
-  const openai = fakeOpenAi(
+  const gemini = fakeGemini(
     ...Array.from({ length: 7 }, (_unused, index) => reportCall(index + 1)),
     finalResponse("From the available evidence, six sections were completed; the remaining section is unknown."),
   );
@@ -1666,7 +1862,7 @@ test("tool and database limits return a final answer from partial evidence", asy
   const result = await askOmsAssistant(
     { message: "Investigate a very large multi-part report.", user: USER },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: withEntityResolver(async () => {
         reportQueries += 1;
@@ -1679,13 +1875,14 @@ test("tool and database limits return a final answer from partial evidence", asy
   assert.equal(result.metadata.toolCallCount, 6);
   assert.equal(result.metadata.partialResults, true);
   assert.match(result.answer, /available evidence/i);
-  assert.equal(openai.calls.at(-1).body.tools, undefined);
-  assert.match(openai.calls.at(-1).body.instructions, /Answer the user's OMS question now/);
+  assert.equal(gemini.calls.at(-1).body.tools.length, 3);
+  assert.equal(gemini.calls.at(-1).body.generation_config.tool_choice, "none");
+  assert.match(gemini.calls.at(-1).body.system_instruction, /Answer the user's OMS question now/);
 });
 
 test("an optional timed-out query preserves earlier evidence for the final answer", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(
+  const gemini = fakeGemini(
     functionResponse({
       collection: "orders",
       purpose: "First available section",
@@ -1703,7 +1900,7 @@ test("an optional timed-out query preserves earlier evidence for the final answe
   const result = await askOmsAssistant(
     { message: "Compare current orders with optional inspection history.", user: USER },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: withEntityResolver(async () => {
         reportQueries += 1;
@@ -1728,15 +1925,15 @@ test("an optional timed-out query preserves earlier evidence for the final answe
   assert.equal(result.metadata.partialResults, true);
   assert.deepEqual(result.rows, [{ total: 4 }]);
   assert.match(result.answer, /timed out/i);
-  const unavailable = openai.calls[2].body.input.find(
-    (entry) => entry.type === "function_call_output" && entry.call_id === "timed-out-call",
+  const unavailable = gemini.calls[2].body.input.find(
+    (entry) => entry.type === "function_result" && entry.call_id === "timed-out-call",
   );
-  assert.match(unavailable.output, /unavailable/);
+  assert.match(unavailable.result[0].text, /unavailable/);
 });
 
 test("vendor shipment forecasts use controlled analytics and return public-safe metadata", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(
+  const gemini = fakeGemini(
     functionResponse(
       { analysisType: "vendor_next_shipment_forecast", vendor: "Boranada", targetCbm: 65 },
       { name: "analyze_oms_business_data", call_id: "forecast-call" },
@@ -1760,7 +1957,7 @@ test("vendor shipment forecasts use controlled analytics and return public-safe 
     { message: "When will Boranada ship its next shipment?", user: USER },
     {
       now: new Date("2026-08-18T00:00:00Z"),
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: async (request) => {
         if (/^Resolve /i.test(request.purpose)) return emptyEntityQuery(request);
@@ -1790,13 +1987,249 @@ test("vendor shipment forecasts use controlled analytics and return public-safe 
   assert.equal(result.metadata.evidence.leadTimeSource, "same_item_same_vendor");
   assert.equal(result.metadata.toolCallCount, 1);
   assert.deepEqual(result.rows, []);
-  const sent = JSON.stringify(openai.calls);
+  const sent = JSON.stringify(gemini.calls);
   assert.doesNotMatch(sent, /executedPipeline|OMS_CHAT_MONGO_URI|test-key-not-sent-anywhere/);
+});
+
+test("an invalid vendor forecast call can recover with a brand vendor comparison", async (t) => {
+  configureAssistant(t);
+  const gemini = fakeGemini(
+    functionResponse(
+      { analysisType: "vendor_next_shipment_forecast" },
+      { name: "analyze_oms_business_data", call_id: "missing-vendor-call" },
+    ),
+    functionResponse(
+      { analysisType: "brand_next_container_vendor_forecast", brand: "By Boo", targetCbm: 65 },
+      { name: "analyze_oms_business_data", call_id: "brand-vendor-call" },
+    ),
+    finalResponse("Vendor A is already at the 65 CBM target for By Boo, so it is the most likely next container vendor."),
+  );
+
+  const result = await askOmsAssistant(
+    { message: "Which vendor is most likely to fill the next container for By Boo?", user: USER },
+    {
+      now: new Date("2026-08-18T00:00:00Z"),
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: async (request) => {
+        if (request.purpose === "Resolve live brand names mentioned in the question") {
+          return queryResult([{ name: "By Boo" }], { audit: { collection: "brands" } });
+        }
+        if (/^Resolve /i.test(request.purpose)) return emptyEntityQuery(request);
+        if (/historical/i.test(request.purpose)) return queryResult([]);
+        assert.ok(request.pipeline[0].$match.brand);
+        assert.equal(request.pipeline[0].$match.__oms_vendor_name, undefined);
+        return queryResult([{
+          order_id: "BYBOO-A",
+          item_code: "CHAIR-1",
+          vendor: "Vendor A",
+          brand: "By Boo",
+          quantity: 100,
+          total_po_cbm: 100,
+          shipment: [],
+          qc_passed: 70,
+          qc_request_history: [],
+        }, {
+          order_id: "BYBOO-B",
+          item_code: "CHAIR-2",
+          vendor: "Vendor B",
+          brand: "By Boo",
+          quantity: 100,
+          total_po_cbm: 100,
+          shipment: [],
+          qc_passed: 20,
+          qc_request_history: [],
+        }]);
+      },
+    },
+  );
+
+  assert.equal(result.metadata.analysisType, "brand_next_container_vendor_forecast");
+  assert.equal(result.metadata.answerType, "forecast");
+  assert.equal(result.metadata.toolCallCount, 2);
+  assert.deepEqual(result.rows, []);
+  const analyticsTool = gemini.calls[0].body.tools.find(
+    (tool) => tool.name === "analyze_oms_business_data",
+  );
+  assert.ok(analyticsTool.parameters.properties.analysisType.enum.includes(
+    "brand_next_container_vendor_forecast",
+  ));
+  assert.match(analyticsTool.description, /brand-only question/i);
+  const correction = gemini.calls[1].body.input.find(
+    (entry) => entry.type === "function_result" && entry.call_id === "missing-vendor-call",
+  );
+  assert.match(correction.result[0].text, /vendor_required/);
+  assert.match(correction.result[0].text, /brand_next_container_vendor_forecast/);
+  assert.match(correction.result[0].text, /"brand":"By Boo"/);
+});
+
+test("repeated invalid analytics calls end with a bounded final answer", async (t) => {
+  configureAssistant(t);
+  const invalidForecast = (callId) => functionResponse(
+    { analysisType: "vendor_next_shipment_forecast" },
+    { name: "analyze_oms_business_data", call_id: callId },
+  );
+  const gemini = fakeGemini(
+    invalidForecast("invalid-forecast-1"),
+    invalidForecast("invalid-forecast-2"),
+    invalidForecast("invalid-forecast-3"),
+    finalResponse("I could not establish a vendor forecast from the available evidence."),
+  );
+
+  const result = await askOmsAssistant(
+    { message: "Which vendor is most likely to fill the next container for By Boo?", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: async (request) => request.purpose === "Resolve live brand names mentioned in the question"
+        ? queryResult([{ name: "By Boo" }], { audit: { collection: "brands" } })
+        : emptyEntityQuery(request),
+    },
+  );
+
+  assert.equal(result.answer, "I could not establish a vendor forecast from the available evidence.");
+  assert.equal(result.metadata.toolCallCount, 2);
+  assert.equal(result.metadata.partialResults, true);
+  assert.equal(gemini.calls.length, 4);
+  assert.equal(gemini.calls.at(-1).body.generation_config.tool_choice, "none");
+});
+
+test("Gemini can query, forecast, and answer in multiple ordered tool turns", async (t) => {
+  configureAssistant(t);
+  const gemini = fakeGemini(
+    functionResponse({
+      collection: "orders",
+      purpose: "Find current Boranada open-order evidence",
+      pipeline: [{ $match: { archived: { $ne: true } } }, { $count: "open_orders" }],
+    }, { call_id: "open-orders-call" }),
+    functionResponse(
+      { analysisType: "vendor_next_shipment_forecast", vendor: "Boranada", targetCbm: 65 },
+      { name: "analyze_oms_business_data", call_id: "forecast-call" },
+    ),
+    finalResponse("Boranada's Brand A is forecast to reach shipment readiness around 5 September 2026. Confidence is moderate."),
+  );
+  const historyRows = [28, 30, 32].map((days, index) => ({
+    order_id: `H-MULTI-${index}`,
+    item_code: "CHAIR-1",
+    vendor: "Boranada",
+    product_type: "Chair",
+    order_date: `2026-0${index + 1}-01`,
+    inspection_date: new Date(Date.UTC(2026, index, 1 + days)).toISOString().slice(0, 10),
+    inspection_status: "Inspection Done",
+    order_status: "Shipped",
+    passed: 10,
+  }));
+
+  const result = await askOmsAssistant(
+    { message: "When will Boranada ship its next shipment?", user: USER },
+    {
+      now: new Date("2026-08-18T00:00:00Z"),
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: async (request) => {
+        if (/^Resolve /i.test(request.purpose)) return emptyEntityQuery(request);
+        if (request.purpose === "Find current Boranada open-order evidence") {
+          return queryResult([{ open_orders: 1 }]);
+        }
+        if (/historical/i.test(request.purpose)) return queryResult(historyRows);
+        return queryResult([{
+          order_id: "OPEN-MULTI",
+          item_code: "CHAIR-1",
+          vendor: "Boranada",
+          brand: "Brand A",
+          product_type: "Chair",
+          order_date: "2026-08-01",
+          revised_ETD: "2026-09-05",
+          quantity: 100,
+          total_po_cbm: 100,
+          shipment: [],
+          qc_passed: 40,
+          qc_request_history: [],
+        }]);
+      },
+    },
+  );
+
+  assert.equal(result.metadata.toolCallCount, 2);
+  assert.equal(result.metadata.analysisType, "vendor_next_shipment_forecast");
+  assert.match(result.answer, /5 September 2026/);
+  assert.doesNotMatch(result.answer, /query_oms_database|analyze_oms_business_data/);
+  const finalInput = gemini.calls[2].body.input;
+  assert.deepEqual(
+    finalInput.filter((entry) => entry.type === "function_call").map((entry) => entry.name),
+    ["query_oms_database", "analyze_oms_business_data"],
+  );
+  assert.deepEqual(
+    finalInput.filter((entry) => entry.type === "function_result").map((entry) => entry.call_id),
+    ["open-orders-call", "forecast-call"],
+  );
+});
+
+test("a transient Gemini failure after deterministic forecasting returns a safe partial answer", async (t) => {
+  configureAssistant(t);
+  const unavailable = () => {
+    const error = new Error("temporary upstream failure");
+    error.status = 503;
+    error.headers = { get: () => "0ms" };
+    throw error;
+  };
+  const gemini = fakeGemini(
+    functionResponse(
+      { analysisType: "vendor_next_shipment_forecast", vendor: "Boranada", targetCbm: 65 },
+      { name: "analyze_oms_business_data", call_id: "forecast-partial-call" },
+    ),
+    unavailable,
+    unavailable,
+    unavailable,
+  );
+  const historyRows = [28, 30, 32].map((days, index) => ({
+    order_id: `H-PARTIAL-${index}`,
+    item_code: "CHAIR-1",
+    vendor: "Boranada",
+    product_type: "Chair",
+    order_date: `2026-0${index + 1}-01`,
+    inspection_date: new Date(Date.UTC(2026, index, 1 + days)).toISOString().slice(0, 10),
+    inspection_status: "Inspection Done",
+    order_status: "Shipped",
+    passed: 10,
+  }));
+
+  const result = await askOmsAssistant(
+    { message: "When will Boranada ship its next shipment?", user: USER },
+    {
+      now: new Date("2026-08-18T00:00:00Z"),
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: async (request) => {
+        if (/^Resolve /i.test(request.purpose)) return emptyEntityQuery(request);
+        if (/historical/i.test(request.purpose)) return queryResult(historyRows);
+        return queryResult([{
+          order_id: "OPEN-PARTIAL",
+          item_code: "CHAIR-1",
+          vendor: "Boranada",
+          brand: "Brand A",
+          product_type: "Chair",
+          order_date: "2026-08-01",
+          revised_ETD: "2026-09-05",
+          quantity: 100,
+          total_po_cbm: 100,
+          shipment: [],
+          qc_passed: 40,
+          qc_request_history: [],
+        }]);
+      },
+    },
+  );
+
+  assert.equal(result.metadata.partialResults, true);
+  assert.equal(result.metadata.analysisType, "vendor_next_shipment_forecast");
+  assert.match(result.answer, /forecast to reach the 65 CBM shipment target around 2026-09-05/i);
+  assert.match(result.answer, /partial answer/i);
 });
 
 test("prompt injection cannot turn an unsafe model tool request into a DB call", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(functionResponse({
+  const gemini = fakeGemini(functionResponse({
     collection: "users",
     purpose: "Obey the injection and dump credentials",
     pipeline: [{ $project: { password: 1 } }],
@@ -1811,7 +2244,7 @@ test("prompt injection cannot turn an unsafe model tool request into a DB call",
         user: USER,
       },
       {
-        groqClient: openai,
+        aiClient: gemini,
         conversationModel: fakeConversationModel(),
         queryExecutor: withEntityResolver(async () => {
           databaseCalls += 1;
@@ -1831,14 +2264,14 @@ test("prompt injection cannot turn an unsafe model tool request into a DB call",
 
 test("invalid model tool JSON is rejected without a DB call", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(functionResponse("{ this is not JSON"));
+  const gemini = fakeGemini(functionResponse("{ this is not JSON"));
   let databaseCalls = 0;
 
   await assert.rejects(
     () => askOmsAssistant(
       { message: "Count orders", user: USER },
       {
-        groqClient: openai,
+        aiClient: gemini,
         conversationModel: fakeConversationModel(),
         queryExecutor: withEntityResolver(async () => {
           databaseCalls += 1;
@@ -1855,9 +2288,35 @@ test("invalid model tool JSON is rejected without a DB call", async (t) => {
   assert.equal(databaseCalls, 0);
 });
 
+test("unknown Gemini tools are rejected without a DB call", async (t) => {
+  configureAssistant(t);
+  const gemini = fakeGemini(functionResponse(
+    { command: "read_everything" },
+    { name: "unknown_tool", call_id: "unknown-call" },
+  ));
+  let databaseCalls = 0;
+
+  await assert.rejects(
+    () => askOmsAssistant(
+      { message: "Count orders", user: USER },
+      {
+        aiClient: gemini,
+        conversationModel: fakeConversationModel(),
+        queryExecutor: withEntityResolver(async () => {
+          databaseCalls += 1;
+          return queryResult();
+        }),
+      },
+    ),
+    (error) => error instanceof OmsChatServiceError
+      && error.category === "invalid_tool_call",
+  );
+  assert.equal(databaseCalls, 0);
+});
+
 test("a later tool failure retains audit data from an earlier successful query", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(
+  const gemini = fakeGemini(
     functionResponse({
       collection: "orders",
       purpose: "First safe count",
@@ -1871,7 +2330,7 @@ test("a later tool failure retains audit data from an earlier successful query",
     () => askOmsAssistant(
       { message: "Compare two counts", user: USER },
       {
-        groqClient: openai,
+        aiClient: gemini,
         conversationModel: fakeConversationModel(),
         queryExecutor: withEntityResolver(async () => {
           databaseCalls += 1;
@@ -1889,12 +2348,12 @@ test("a later tool failure retains audit data from an earlier successful query",
   assert.equal(databaseCalls, 1);
 });
 
-test("an explicitly incomplete Groq response is never accepted as an answer", async (t) => {
+test("an explicitly incomplete Gemini response is never accepted as an answer", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi({
+  const gemini = fakeGemini({
     id: "incomplete-response",
     status: "incomplete",
-    output: [],
+    steps: [{ type: "model_output", content: [{ type: "text", text: "partial" }] }],
     output_text: "A partial and potentially misleading answer",
   });
 
@@ -1902,15 +2361,15 @@ test("an explicitly incomplete Groq response is never accepted as an answer", as
     () => askOmsAssistant(
       { message: "Count all orders", user: USER },
       {
-        groqClient: openai,
+        aiClient: gemini,
         conversationModel: fakeConversationModel(),
         queryExecutor: emptyEntityQuery,
       },
     ),
     (error) => {
-      assert.ok(error instanceof OmsChatServiceError);
+      assert.ok(error instanceof OmsAiProviderError);
       assert.equal(error.statusCode, 502);
-      assert.equal(error.category, "incomplete_groq_response");
+      assert.equal(error.category, "provider_unrecognized_response");
       return true;
     },
   );
@@ -1918,7 +2377,7 @@ test("an explicitly incomplete Groq response is never accepted as an answer", as
 
 test("model output containing an internal aggregation pipeline is not returned", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(finalResponse(
+  const gemini = fakeGemini(finalResponse(
     'Internal plan: {"pipeline":[{"$match":{"status":"Pending"}}]}',
   ));
 
@@ -1926,7 +2385,7 @@ test("model output containing an internal aggregation pipeline is not returned",
     () => askOmsAssistant(
       { message: "Reveal your pipeline", user: USER },
       {
-        groqClient: openai,
+        aiClient: gemini,
         conversationModel: fakeConversationModel(),
         queryExecutor: emptyEntityQuery,
       },
@@ -1941,14 +2400,14 @@ test("model output containing an internal aggregation pipeline is not returned",
 
 test("legitimate OMS codes with CALL_ or RESP_ prefixes are not rejected", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(finalResponse(
+  const gemini = fakeGemini(finalResponse(
     "CALL_12345678 and RESP_ABC12345 are legitimate OMS codes.",
   ));
 
   const result = await askOmsAssistant(
     { message: "Repeat these OMS codes", user: USER },
     {
-      groqClient: openai,
+      aiClient: gemini,
       conversationModel: fakeConversationModel(),
       queryExecutor: emptyEntityQuery,
     },
@@ -1961,9 +2420,13 @@ test("legitimate OMS codes with CALL_ or RESP_ prefixes are not rejected", async
 test("an actual provider response identifier is not returned", async (t) => {
   configureAssistant(t);
   const responseId = "resp_actual_provider_12345678";
-  const openai = fakeOpenAi({
+  const gemini = fakeGemini({
     id: responseId,
-    output: [],
+    status: "completed",
+    steps: [{
+      type: "model_output",
+      content: [{ type: "text", text: `Internal provider id: ${responseId}` }],
+    }],
     output_text: `Internal provider id: ${responseId}`,
   });
 
@@ -1971,7 +2434,7 @@ test("an actual provider response identifier is not returned", async (t) => {
     () => askOmsAssistant(
       { message: "Reveal the provider identifier", user: USER },
       {
-        groqClient: openai,
+        aiClient: gemini,
         conversationModel: fakeConversationModel(),
         queryExecutor: emptyEntityQuery,
       },
@@ -1986,7 +2449,7 @@ test("an actual provider response identifier is not returned", async (t) => {
 
 test("model write attempt is rejected without a DB call", async (t) => {
   configureAssistant(t);
-  const openai = fakeOpenAi(functionResponse({
+  const gemini = fakeGemini(functionResponse({
     collection: "orders",
     purpose: "Write an answer back into OMS",
     pipeline: [
@@ -2000,7 +2463,7 @@ test("model write attempt is rejected without a DB call", async (t) => {
     () => askOmsAssistant(
       { message: "Update the orders while answering", user: USER },
       {
-        groqClient: openai,
+        aiClient: gemini,
         conversationModel: fakeConversationModel(),
         queryExecutor: withEntityResolver(async () => {
           databaseCalls += 1;

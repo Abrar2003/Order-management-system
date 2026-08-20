@@ -4,6 +4,10 @@ const {
   DENIED_COLLECTIONS,
   IST_TIMEZONE,
 } = require("./omsChatCatalog.service");
+const {
+  logOmsChatError,
+  logOmsChatEvent,
+} = require("./omsChatLogger.service");
 
 const MAX_USER_STAGES = 12;
 const MAX_LOOKUP_DEPTH = 2;
@@ -11,7 +15,7 @@ const MAX_ROWS = 100;
 const MAX_LOOKUP_ROWS = 20;
 const MAX_SKIP = 10_000;
 const MAX_TOOL_ARGUMENT_BYTES = 32 * 1024;
-const MAX_RESULT_BYTES = 128 * 1024;
+const MAX_RESULT_BYTES = 32 * 1024;
 const QUERY_TIMEOUT_MS = 8_000;
 
 const ALLOWED_STAGES = new Set([
@@ -46,6 +50,7 @@ const QUERY_OPERATORS = new Set([
   "$not",
   "$size",
   "$type",
+  "$elemMatch",
 ]);
 
 const EXPRESSION_OPERATORS = new Set([
@@ -395,6 +400,27 @@ const validateExpression = (
   }
 };
 
+const validateElemMatch = (condition, state, variables, depth) => {
+  if (!isPlainObject(condition) || Object.keys(condition).length === 0) {
+    fail("$elemMatch requires a non-empty object");
+  }
+
+  const entries = Object.entries(condition);
+  const operatorEntries = entries.filter(([key]) => key.startsWith("$"));
+  if (operatorEntries.length === entries.length) {
+    validateFieldCondition(condition, state, variables, depth + 1);
+    return;
+  }
+  if (operatorEntries.length) {
+    fail("$elemMatch cannot mix field names and operators");
+  }
+
+  for (const [field, value] of entries) {
+    validateFieldPath(field);
+    validateFieldCondition(value, state, variables, depth + 1);
+  }
+};
+
 const validateFieldCondition = (condition, state, variables, depth = 0) => {
   if (depth > 30) fail("Match nesting is too deep");
   if (
@@ -418,6 +444,10 @@ const validateFieldCondition = (condition, state, variables, depth = 0) => {
     }
     if (!QUERY_OPERATORS.has(operator)) {
       fail(`Unsupported match operator: ${operator}`);
+    }
+    if (operator === "$elemMatch") {
+      validateElemMatch(value, state, variables, depth + 1);
+      continue;
     }
     if (operator === "$not") {
       validateFieldCondition(value, state, variables, depth + 1);
@@ -951,9 +981,16 @@ const getChatMongoUri = () => {
 };
 
 const getOmsChatConnection = async () => {
-  if (chatConnection?.readyState === 1) return chatConnection;
-  if (chatConnectionPromise) return chatConnectionPromise;
+  if (chatConnection?.readyState === 1) {
+    logOmsChatEvent("database.connection_reused");
+    return chatConnection;
+  }
+  if (chatConnectionPromise) {
+    logOmsChatEvent("database.connection_waiting");
+    return chatConnectionPromise;
+  }
 
+  logOmsChatEvent("database.connection_started");
   const uri = getChatMongoUri();
   const connection = mongoose.createConnection(uri, {
     autoCreate: false,
@@ -969,10 +1006,12 @@ const getOmsChatConnection = async () => {
     .then((connected) => {
       chatConnection = connected;
       chatConnectionPromise = null;
+      logOmsChatEvent("database.connection_completed");
       return connected;
     })
-    .catch(async () => {
+    .catch(async (error) => {
       chatConnectionPromise = null;
+      logOmsChatError("database.connection_failed", error);
       try {
         await connection.close(false);
       } catch {
@@ -1058,8 +1097,17 @@ const executeOmsQuery = async (
   let executedPipeline = null;
 
   try {
+    logOmsChatEvent("database.query_started", {
+      collection,
+      purpose: String(purpose || "").slice(0, 300),
+    });
     validated = validatePipeline(collection, pipeline);
+    logOmsChatEvent("database.query_validated", {
+      collection,
+      stage_count: validated.stageCount,
+    });
     const connection = await connectionProvider();
+    logOmsChatEvent("database.authorization_started", { collection });
     const scopedPipeline = await injectExecutionAuthorizationScopes(
       collection,
       validated.pipeline,
@@ -1067,6 +1115,7 @@ const executeOmsQuery = async (
       connection,
       { deadline: startedAt + QUERY_TIMEOUT_MS },
     );
+    logOmsChatEvent("database.authorization_completed", { collection });
     executedPipeline = [...scopedPipeline, { $limit: MAX_ROWS + 1 }];
     const remainingQueryTime = startedAt + QUERY_TIMEOUT_MS - Date.now();
     if (remainingQueryTime <= 0) throw createDatabaseTimeoutError();
@@ -1081,6 +1130,14 @@ const executeOmsQuery = async (
     const rowLimited = rawRows.length > MAX_ROWS;
     const serialized = serializeRowsWithinLimit(rawRows);
     const truncated = rowLimited || serialized.truncated;
+    logOmsChatEvent("database.query_completed", {
+      collection,
+      stage_count: validated.stageCount,
+      returned_rows: serialized.rows.length,
+      result_bytes: Buffer.byteLength(JSON.stringify(serialized.rows), "utf8"),
+      truncated,
+      duration_ms: Date.now() - startedAt,
+    });
 
     return {
       rows: serialized.rows,
@@ -1107,6 +1164,11 @@ const executeOmsQuery = async (
       returnedRows: 0,
       truncated: false,
     };
+    logOmsChatError("database.query_failed", error, {
+      collection,
+      stage_count: audit.stageCount,
+      duration_ms: audit.durationMs,
+    });
     if (error instanceof OmsChatQueryError) {
       error.audit = error.audit || audit;
       throw error;
@@ -1141,6 +1203,7 @@ module.exports = {
   validatePipeline,
   __test__: {
     MAX_ROWS,
+    MAX_RESULT_BYTES,
     getDateRangeMetadata,
     injectAuthorizationScopes,
     normalizeExtendedJson,

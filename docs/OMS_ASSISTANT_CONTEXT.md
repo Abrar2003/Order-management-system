@@ -6,15 +6,15 @@ Use this file when changing the OMS Assistant. It explains the current implement
 
 OMS Assistant is an authenticated, read-only reporting chat for OMS data. The browser sends a plain-language question to the Express backend. The backend, not the model, owns authentication, permission checks, conversation ownership, rate limiting, database access, validation, audit logging, and every response sent to the browser.
 
-It uses Groq's OpenAI-compatible **Responses API** as a bounded planner and synthesizer. Three backend-owned tools are available: `inspect_oms_schema` returns catalogue metadata without record values, `query_oms_database` runs a validated aggregation, and `analyze_oms_business_data` runs a strict enum of deterministic lead-time/readiness analyses. Groq never receives application credentials, cookies, JWTs, database URIs, or direct database access.
+It uses Google Gemini's **Interactions API** through `@google/genai` as a bounded planner and synthesizer. The primary model is `gemini-3.7-flash`. Three backend-owned tools are available: `inspect_oms_schema` returns catalogue metadata without record values, `query_oms_database` runs a validated aggregation, and `analyze_oms_business_data` runs a strict enum of deterministic lead-time/readiness analyses. Gemini never receives application credentials, cookies, JWTs, database URIs, or direct database access.
 
 ```text
 React chat page
     -> POST /oms-chat/ask
-    -> audit -> auth -> oms_assistant.view -> per-user rate limit
+    -> request trace -> audit -> auth -> oms_assistant.view -> per-user rate limit
     -> controller validates the request body
     -> service resolves entities/date and handles supported deterministic reports
-    -> Groq Responses API (only when no deterministic report handles it)
+    -> Gemini Interactions API (only when no deterministic report handles it)
     -> bounded schema/query/analytics investigation loop
     -> validated aggregation on a separate read-only MongoDB connection
     -> backend forecast calculations where requested
@@ -28,16 +28,16 @@ The assistant is intended for factual OMS reporting, including orders, shipments
 
 The common schema catalogue advertises the physical collections `orders`, `items`, `qcs`, `inspections`, `samples`, `brands`, and `vendors`. Other exact non-system collection names are technically readable too. The catalogue is guidance for the model, not a field allow-list: the validator permits safe field paths in readable collections.
 
-Before consulting Groq, the service resolves question entities against live brand, item, vendor, and order data. This turns matching item descriptions, barcodes, brands, vendor codes/names, order IDs, containers, and common date phrases into explicit context. It asks for clarification when a brand name collides with an item description.
+Before consulting Gemini, the service resolves question entities against live brand, item, vendor, and order data. This turns matching item descriptions, barcodes, brands, vendor codes/names, order IDs, containers, and common date phrases into explicit context. It asks for clarification when a brand name collides with an item description.
 
 Two report families have programmatic answers instead of relying on model prose:
 
 - Shipment quantity, shipment count, or shipped-order questions that include a resolved brand, item, vendor, PO, or container.
 - PO/container CBM breakdown questions mentioning CBM, a PO/order, and a container/stuffing. The service groups shipment rows and uses the existing `shipmentCbmAllocation.service` calculation.
 
-Everything else goes through bounded Groq tool calling. The model must use validated queries for factual numbers/records and the forecasting service for predictions; it must not invent either.
+Everything else goes through bounded Gemini tool calling. The model must use validated queries for factual numbers/records and the forecasting service for predictions; it must not invent either.
 
-Forecasting supports historical inspection lead time, open-order readiness, brand-ready CBM, and a vendor's likely next shipment readiness. It groups brands separately, reuses the existing packaging-aware CBM calculation, combines current inspected/unshipped quantities with open PO contributions, and returns the first cumulative date that reaches the configured container target. The written answer must distinguish stored facts, derived arithmetic, forecasts, and unknowns.
+Forecasting supports historical inspection lead time, open-order readiness, brand-ready CBM, a vendor's likely next shipment readiness, and brand-level vendor comparison for the next container. The vendor forecast requires a resolved vendor; the brand comparison requires a resolved brand and derives candidate vendors from that brand's open orders. It reuses the existing packaging-aware CBM calculation, combines current inspected/unshipped quantities with open PO contributions, and returns the first cumulative date that reaches the configured container target. Brand candidates rank ready-now first, then forecast threshold date; when none reaches the target, the closest projected CBM is reported as not yet forecast-ready. The written answer must distinguish stored facts, derived arithmetic, forecasts, and unknowns.
 
 The assistant does **not** write OMS data, create reports/files, expose aggregation pipelines, or serve as a bulk export. It returns at most 100 top-level supporting rows, with nested arrays capped at 20 entries. Use the existing OMS export/report routes for full datasets.
 
@@ -52,9 +52,10 @@ The assistant does **not** write OMS data, create reports/files, expose aggregat
 | Permissions | Both UI and API require `oms_assistant.view`; manager/admin-like roles are the only roles that can be granted it |
 | Scope | After access is granted, assistant business queries are not narrowed to the user's brand/vendor scope |
 | Rate limit | 10 requests per user per fixed 5-minute MongoDB bucket, shared across instances |
-| Model | `openai/gpt-oss-120b` by default; override with `OMS_CHAT_LLM_MODEL` |
-| Model timeout | 90 seconds; transient 429/5xx Groq responses retry up to twice |
-| Model investigation | At most 8 tool iterations and 8 total tool calls |
+| Provider | Google Gemini through `@google/genai`; no automatic Groq fallback |
+| Model | `gemini-3.7-flash` by default; override with `OMS_CHAT_LLM_MODEL` |
+| Model timeout | 90 seconds; transient 429/5xx/network Gemini failures retry up to twice |
+| Model investigation | At most 8 tool iterations and 8 total tool calls; at most 2 recoverable analytics validation corrections |
 | Total database calls | At most 10 including entity resolution; schema inspection uses none |
 | Aggregation | Max 12 user stages (including lookup stages), lookup nesting depth 2, max 10,000 skip |
 | Database | Separate `OMS_CHAT_MONGO_URI`, 8-second query timeout, `allowDiskUse: false`, 100 returned rows / 128 KiB serialized result |
@@ -71,6 +72,10 @@ When a limit is reached after useful evidence was collected, the service removes
 - Answers are rejected if they contain provider IDs, tool/pipeline details, prompts, secret environment variable names, or other server-only patterns.
 - Security audit records save question text and query summary metadata, but not pipelines, credentials, provider payloads, or result documents.
 
+Every Gemini request explicitly sets `store: false`. `omsAiProvider.service.js` carries the active interaction steps in memory and replays them on each stateless turn, including function calls and any opaque thought steps required for continuity. A final text turn or a valid function-call turn is successful; an interaction response ID is optional in this stateless flow, but every function call must have its provider-issued call ID. Raw steps and reasoning are discarded after the request; only the existing bounded user/assistant text history is persisted by OMS. Local response-schema failures are not retried; only transient upstream/network failures are.
+
+An expected deterministic analytics validation error returns a compact, safe function result so Gemini can select the correct approved analysis. This is bounded to two corrections before the service requests a final best-evidence answer. Invalid tool JSON, unsupported tools, unsafe queries, and execution failures remain fatal rather than recoverable.
+
 ## Forecast definitions
 
 - A historical lead-time sample is calendar days from PO `order_date` to the first successful `Inspection Done` record for the PO/item. The record must have a positive passed quantity and the order must be inspection-complete, partially shipped, shipped, or otherwise have packed/shipped evidence.
@@ -78,6 +83,7 @@ When a limit is reached after useful evidence was collected, the service removes
 - Obvious outliers use the deterministic 1.5×IQR rule. Statistics retain original count, used count, outlier count, median/P50, P75, P90, mean, range, standard deviation, IQR, and recent-12-month median/trend.
 - Every fallback level needs at least three samples: same item+vendor, same item across vendors, same product type+vendor, vendor-wide, then available OMS baseline. No unsupported "similar item" relationship is invented.
 - Current ready CBM is `qc_passed - shipped`, bounded by order quantity. Pending inspection quantity can contribute later only when its CBM can be calculated by `shipmentCbmAllocation.service.js` or prorated from stored `total_po_cbm`.
+- The brand-level vendor comparison returns each candidate's ready, remaining, and projected CBM; first forecast threshold date; contributing orders; and deterministic confidence/evidence. It uses the same configurable target as all other shipment forecasts.
 - Forecast earliest dates use historical median; planning uses the later of historical P75 and effective revised/original ETD; P90 supplies the conservative window end. The container target comes from the request or `OMS_CHAT_CONTAINER_TARGET_CBM`, with a documented 65-CBM fallback.
 - Confidence score components are sample depth (35), fallback specificity (30), consistency/dispersion (20), recency (10), and completeness (5). Brand shipment confidence also weights evidence by forecast CBM coverage. High requires score ≥75, at least five samples, and at least 80% evidence coverage; Moderate is ≥50; otherwise Low.
 
@@ -90,23 +96,25 @@ When a limit is reached after useful evidence was collected, the service removes
 | Route and navbar visibility | `client/OMS/src/App.jsx`, `client/OMS/src/components/Navbar.jsx` | Page is lazy-loaded at `/oms-assistant`. |
 | HTTP endpoint and safe public errors | `backend/routers/omsChat.routes.js`, `backend/controllers/omsChat.controller.js` | Mounted at both `/oms-chat` and `/api/oms-chat`. |
 | Core prompt, entity/date resolution, deterministic reports, conversation loop | `backend/services/omsChat.service.js` | Main behaviour file. |
+| Gemini initialization, stateless Interactions requests, response normalization, and provider retries/errors | `backend/services/omsAiProvider.service.js` | Always enforces `store: false`; does not access MongoDB. |
+| Correlated structured lifecycle/error logs | `backend/services/omsChatLogger.service.js` | Every request uses one `request_id`; logs omit credentials, provider payloads, query pipelines, and result documents. |
 | Collection catalogue, business definitions/data relationships given to the model | `backend/services/omsChatCatalog.service.js` | Update this when a model/schema relationship changes. |
 | Aggregation validation, normalization stages, read-only Mongo connection, result limits | `backend/services/omsChatQuery.service.js` | Treat changes here as security-sensitive. |
 | Historical lead-time, confidence, PO readiness, brand CBM timeline, controlled analytics queries | `backend/services/omsForecast.service.js` | Deterministic and reusable; keep model arithmetic out of this path. |
 | Conversation TTL/history model | `backend/models/omsChatConversation.model.js` | Stored in the primary application database. |
 | Per-user limiter | `backend/middlewares/omsChatRateLimit.middleware.js`, `backend/models/omsChatRateBucket.model.js` | TTL bucket model. |
 | Permission module and role lock | `backend/helpers/permissions.js`, `backend/helpers/userRole.js` | `oms_assistant.view` is locked to admin-like roles. |
-| Feature tests | `backend/tests/omsChat.test.js`, `backend/tests/omsForecast.test.js`, `client/OMS/src/utils/omsAssistantState.test.js` | Backend tests cover security, agent bounds, and forecasts. |
+| Feature tests | `backend/tests/omsAiProvider.test.js`, `backend/tests/omsChat.test.js`, `backend/tests/omsForecast.test.js`, `client/OMS/src/utils/omsAssistantState.test.js` | Provider mocks never call the live Gemini API; backend tests cover security, agent bounds, and forecasts. |
 
 ## How a request is coded
 
 1. `OmsAssistant.jsx` posts `{ message, conversationId? }` with the shared Axios client. It stores the returned server `conversationId` for the next question.
-2. `omsChat.routes.js` logs success/failure metadata, authenticates the user, checks `oms_assistant.view`, then rate-limits the request.
-3. The controller allows only `message` and `conversationId`, limits the body, maps internal errors to safe public messages, and removes internal audit data from the HTTP response.
+2. `omsChat.routes.js` assigns a request ID, starts ordered JSON lifecycle logging, records audit metadata, authenticates the user, checks `oms_assistant.view`, then rate-limits the request.
+3. The controller allows only `message` and `conversationId`, limits the body, maps internal errors to safe public messages/codes, and returns the request ID for log correlation without exposing stacks or provider payloads.
 4. `askOmsAssistant()` validates the question/configuration, creates or verifies a user-owned conversation, then resolves live entities and simple date phrases.
-5. If a deterministic shipment/CBM handler applies, it returns its programmatic answer. Otherwise Groq receives the system instructions, recent text-only history, current question, resolved context, and the three bounded tool definitions.
+5. If a deterministic shipment/CBM handler applies, it returns its programmatic answer. Otherwise the provider service sends Gemini the system instructions, recent text-only history, current question, resolved context, and the three bounded tool definitions with `store: false` and high thinking.
 6. The service iterates at most eight times. Schema arguments are restricted to catalogue collection names; general aggregations go through `executeOmsQuery()`; controlled analytics query via the same executor and calculate in `omsForecast.service.js`.
-7. The model receives only safe schema metadata, bounded rows/metadata, or compact analysis results. If the budget is exhausted, a no-tools call must synthesize the evidence already gathered.
+7. The model receives only safe schema metadata, bounded rows/metadata, or compact analysis results. The provider service replays active Gemini steps and function results without using a provider interaction ID. If the budget is exhausted, a final turn repeats the declarations for stateless context but sets `tool_choice: "none"` so Gemini must synthesize the evidence already gathered.
 8. The service saves compact history with optimistic revision checking and returns safe factual/forecast metadata. The page renders the complete answer, optional forecast pills, and optional supporting rows.
 
 ## Where to make common changes
@@ -122,25 +130,26 @@ When a limit is reached after useful evidence was collected, the service removes
 | Change visible wording, examples, table presentation, or loading state | `OmsAssistant.jsx` | Preserve the 2,000 character client maximum and safe Markdown rendering. |
 | Change access or role policy | `permissions.js` / `userRole.js` plus route tests | Do not rely solely on hiding the navbar item. |
 | Change request/database/provider limits | Constants in `omsChat.service.js`, `omsChatQuery.service.js`, controller, or limiter middleware | Update this document and tests with the code. |
-| Change model/provider configuration | `getGroqConfiguration()` and `createResponse()` in `omsChat.service.js` | Credentials stay backend-only; no `VITE_` variables. |
+| Change model/provider configuration or Gemini transport behavior | `omsAiProvider.service.js` | Credentials stay backend-only; no `VITE_` variables. |
 
 ## Configuration and verification
 
 The backend needs these production-only environment variables:
 
 ```env
-GROQ_API_KEY=<Groq API key>
-OMS_CHAT_LLM_MODEL=openai/gpt-oss-120b
+GEMINI_API_KEY=<Gemini API key>
+OMS_CHAT_LLM_MODEL=gemini-3.7-flash
 OMS_CHAT_MONGO_URI=mongodb+srv://oms_chat_reader:<encoded-password>@cluster.example.mongodb.net/OMS?retryWrites=false
 OMS_CHAT_CONTAINER_TARGET_CBM=65
 ```
 
-`OMS_CHAT_LLM_MODEL` is optional. `OMS_CHAT_MONGO_URI` must be a different, read-only credential from the application `MONGO_URI`. Never put any of these in the frontend environment.
+`OMS_CHAT_LLM_MODEL` is optional. `OMS_CHAT_MONGO_URI` must be a different, read-only credential from the application `MONGO_URI`. Never put any of these in the frontend environment. There is no automatic Groq fallback; transient Gemini errors receive only the bounded same-provider retries described above.
 
 Run the focused checks after assistant work:
 
 ```bash
 cd backend
+node --test tests/omsAiProvider.test.js
 node --test tests/omsChat.test.js
 node --test tests/omsForecast.test.js
 

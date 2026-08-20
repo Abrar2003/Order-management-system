@@ -199,6 +199,7 @@ oms/
 |   |   |-- seedWorkflowTaskTypes.js
 |   |   |-- setWasabiCors.js
 |   |   |-- sync-item-country-from-vendors.js
+|   |   |-- syncScriptDbToMongo.js
 |   |   |-- syncItemsInspectedDataFromLatestInspections.js
 |   |   |-- syncPisWorkbooks.js
 |   |   |-- updatePISbarcode.js
@@ -227,8 +228,10 @@ oms/
 |   |   |-- itemSync.js
 |   |   |-- monthlyShipmentsReport.service.js
 |   |   |-- notificationService.js
+|   |   |-- omsAiProvider.service.js
 |   |   |-- omsChat.service.js
 |   |   |-- omsChatCatalog.service.js
+|   |   |-- omsChatLogger.service.js
 |   |   |-- omsChatQuery.service.js
 |   |   |-- omsForecast.service.js
 |   |   |-- orderCbm.service.js
@@ -272,6 +275,7 @@ oms/
 |   |   |-- manualOrderValidation.test.js
 |   |   |-- masterSizeRemarks.test.js
 |   |   |-- monthlyShipmentsReport.test.js
+|   |   |-- omsAiProvider.test.js
 |   |   |-- omsChat.test.js
 |   |   |-- omsForecast.test.js
 |   |   |-- orderItemFilterStatus.test.js
@@ -296,6 +300,7 @@ oms/
 |   |   |-- sampleRemarks.test.js
 |   |   |-- sizeDimensionFormatter.test.js
 |   |   |-- storageDeletionAudit.test.js
+|   |   |-- syncScriptDbToMongo.test.js
 |   |   |-- transactionalController.test.js
 |   |   |-- uploadPisFolderViaApi.test.js
 |   |   |-- uploadShippingMarksFolderViaApi.test.js
@@ -483,6 +488,7 @@ oms/
 |       |   |   |-- Shipments.jsx
 |       |   |   |-- ShippedSamples.jsx
 |       |   |   |-- ShippingDelayReports.jsx
+|       |   |   |-- ShippingPending.jsx
 |       |   |   |-- Signin.jsx
 |       |   |   |-- Signup.jsx
 |       |   |   |-- UpcomingEtdReports.jsx

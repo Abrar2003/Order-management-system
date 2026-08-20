@@ -22,6 +22,14 @@ const SOURCE_SCORES = Object.freeze({
   oms_baseline: 10,
 });
 
+class OmsForecastValidationError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "OmsForecastValidationError";
+    this.code = code;
+  }
+}
+
 const cleanText = (value) => String(value ?? "").trim();
 const key = (value) => cleanText(value).toLowerCase();
 const number = (value) => {
@@ -462,6 +470,104 @@ const forecastVendorNextShipment = ({
 };
 
 const forecastNextContainerReadiness = forecastVendorNextShipment;
+
+const forecastBrandNextContainerVendor = ({
+  brand,
+  orders = [],
+  historicalRows = [],
+  targetCbm,
+  now = new Date(),
+} = {}) => {
+  const target = getContainerTargetCbm(targetCbm);
+  const brandKey = key(brand);
+  const vendorGroups = new Map();
+
+  for (const order of Array.isArray(orders) ? orders : []) {
+    if (brandKey && key(order?.brand) !== brandKey) continue;
+    const vendor = cleanText(order?.vendor) || "Unspecified vendor";
+    const group = vendorGroups.get(vendor) || { vendor, orders: [] };
+    group.orders.push(order);
+    vendorGroups.set(vendor, group);
+  }
+
+  const vendors = [...vendorGroups.values()].map((group) => {
+    const shipment = forecastVendorNextShipment({
+      vendor: group.vendor,
+      orders: group.orders,
+      historicalRows,
+      targetCbm: target,
+      now,
+    });
+    const nextShipment = shipment.nextShipment;
+    return {
+      vendor: group.vendor,
+      status: shipment.status,
+      currentReadyCbm: nextShipment?.readyCbm || 0,
+      remainingCbm: nextShipment?.remainingCbm ?? target,
+      projectedCbm: nextShipment?.projectedCbm || 0,
+      thresholdCrossingDate: nextShipment?.thresholdCrossingDate || null,
+      earliestThresholdCrossingDate: nextShipment?.earliestThresholdCrossingDate || null,
+      contributingOrders: nextShipment?.contributingOrders || [],
+      confidence: shipment.confidence,
+      evidence: shipment.evidence,
+      forecast: shipment.forecast,
+    };
+  });
+
+  vendors.sort((left, right) => {
+    const leftReady = left.currentReadyCbm >= target;
+    const rightReady = right.currentReadyCbm >= target;
+    if (leftReady !== rightReady) return leftReady ? -1 : 1;
+    if (left.thresholdCrossingDate && right.thresholdCrossingDate) {
+      const dateOrder = left.thresholdCrossingDate.localeCompare(right.thresholdCrossingDate);
+      if (dateOrder) return dateOrder;
+    } else if (left.thresholdCrossingDate || right.thresholdCrossingDate) {
+      return left.thresholdCrossingDate ? -1 : 1;
+    } else if (left.projectedCbm !== right.projectedCbm) {
+      return right.projectedCbm - left.projectedCbm;
+    }
+    if (left.confidence.score !== right.confidence.score) {
+      return right.confidence.score - left.confidence.score;
+    }
+    if (left.currentReadyCbm !== right.currentReadyCbm) {
+      return right.currentReadyCbm - left.currentReadyCbm;
+    }
+    if (left.remainingCbm !== right.remainingCbm) {
+      return left.remainingCbm - right.remainingCbm;
+    }
+    return left.vendor.localeCompare(right.vendor);
+  });
+
+  const mostLikelyVendor = vendors[0] || null;
+  return {
+    analysisType: "brand_next_container_vendor_forecast",
+    answerType: "forecast",
+    brand: cleanText(brand),
+    targetCbm: target,
+    status: !mostLikelyVendor
+      ? "no_open_orders"
+      : mostLikelyVendor.currentReadyCbm >= target
+        ? "ready_now"
+        : mostLikelyVendor.thresholdCrossingDate
+          ? "forecast_ready"
+          : "threshold_not_reached",
+    vendors,
+    mostLikelyVendor,
+    confidence: mostLikelyVendor?.confidence || confidenceForEstimate(),
+    forecast: mostLikelyVendor?.forecast || {
+      earliestDate: null,
+      planningDate: null,
+      windowStart: null,
+      windowEnd: null,
+    },
+    evidence: {
+      candidateVendorCount: vendors.length,
+      historicalSampleCount: mostLikelyVendor?.evidence?.historicalSampleCount || 0,
+      leadTimeSource: mostLikelyVendor?.evidence?.leadTimeSource || "none",
+    },
+  };
+};
+
 const forecastOpenOrderInspectionDates = ({ orders = [], historicalRows = [], now = new Date() } = {}) => {
   const samples = normalizeHistoricalSamples(historicalRows, { now });
   return orders.map((order) => ({
@@ -472,7 +578,10 @@ const forecastOpenOrderInspectionDates = ({ orders = [], historicalRows = [], no
 };
 
 const escapeRegex = (value) => cleanText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const exactTextMatch = (value) => ({ $regex: `^${escapeRegex(value)}$`, $options: "i" });
+const exactTextMatch = (value) => ({
+  $regex: `^${cleanText(value).split(/[^\p{L}\p{N}]+/u).filter(Boolean).map(escapeRegex).join("[\\s_\\-/‐-―]+")}$`,
+  $options: "i",
+});
 
 const buildHistoricalInspectionPipeline = () => [
   {
@@ -561,35 +670,43 @@ const ANALYSIS_TYPES = Object.freeze([
   "open_order_inspection_forecast",
   "brand_ready_cbm",
   "vendor_next_shipment_forecast",
+  "brand_next_container_vendor_forecast",
 ]);
 
 const validateAnalyticsRequest = (request = {}) => {
   const allowed = new Set(["analysisType", "vendor", "brand", "itemCode", "productType", "targetCbm"]);
   if (!request || typeof request !== "object" || Array.isArray(request)) {
-    throw new TypeError("Analytics arguments must be an object");
+    throw new OmsForecastValidationError("analytics_arguments_invalid", "Analytics arguments must be an object");
   }
   for (const property of Object.keys(request)) {
-    if (!allowed.has(property)) throw new TypeError(`Unsupported analytics argument: ${property}`);
+    if (!allowed.has(property)) {
+      throw new OmsForecastValidationError("analytics_argument_unsupported", "Analytics request includes an unsupported argument");
+    }
   }
   if (!ANALYSIS_TYPES.includes(request.analysisType)) {
-    throw new TypeError("Unsupported OMS analysis type");
+    throw new OmsForecastValidationError("analysis_type_unsupported", "Unsupported OMS analysis type");
   }
   const normalized = { analysisType: request.analysisType };
   for (const property of ["vendor", "brand", "itemCode", "productType"]) {
     if (request[property] === undefined) continue;
     const value = cleanText(request[property]);
-    if (!value || value.length > 120) throw new TypeError(`${property} is invalid`);
+    if (!value || value.length > 120) {
+      throw new OmsForecastValidationError("analytics_field_invalid", "An analytics text field is invalid");
+    }
     normalized[property] = value;
   }
   if (request.targetCbm !== undefined) {
     const targetCbm = Number(request.targetCbm);
     if (!Number.isFinite(targetCbm) || targetCbm <= 0 || targetCbm > 1000) {
-      throw new TypeError("targetCbm is invalid");
+      throw new OmsForecastValidationError("target_cbm_invalid", "The container target is invalid");
     }
     normalized.targetCbm = targetCbm;
   }
   if (request.analysisType === "vendor_next_shipment_forecast" && !normalized.vendor) {
-    throw new TypeError("vendor is required for a vendor shipment forecast");
+    throw new OmsForecastValidationError("vendor_required", "A vendor is required for a vendor shipment forecast");
+  }
+  if (request.analysisType === "brand_next_container_vendor_forecast" && !normalized.brand) {
+    throw new OmsForecastValidationError("brand_required", "A brand is required for a brand vendor forecast");
   }
   return normalized;
 };
@@ -677,6 +794,14 @@ const runOmsForecastAnalysis = async (
   }
   const analysis = args.analysisType === "open_order_inspection_forecast"
     ? forecastOpenOrderInspectionDates({ orders: currentOrders, historicalRows: history.rows, now })
+    : args.analysisType === "brand_next_container_vendor_forecast"
+      ? forecastBrandNextContainerVendor({
+          brand: args.brand,
+          orders: currentOrders,
+          historicalRows: history.rows,
+          targetCbm: args.targetCbm,
+          now,
+        })
     : forecastVendorNextShipment({
         vendor: args.vendor,
         orders: currentOrders,
@@ -703,10 +828,12 @@ module.exports = {
   ANALYSIS_TYPES,
   DEFAULT_CONTAINER_TARGET_CBM,
   MIN_HISTORY_SAMPLES,
+  OmsForecastValidationError,
   buildExpectedCbmTimeline,
   calculateLeadTimeStatistics,
   confidenceForEstimate,
   forecastNextContainerReadiness,
+  forecastBrandNextContainerVendor,
   forecastOpenOrderInspectionDates,
   forecastOrderInspectionDate,
   forecastVendorNextShipment,

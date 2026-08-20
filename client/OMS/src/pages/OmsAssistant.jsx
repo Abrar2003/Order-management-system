@@ -221,12 +221,17 @@ const OmsAssistant = () => {
         },
       });
     } catch (requestError) {
+      const errorData = requestError?.response?.data || {};
+      const requestId = errorData.requestId
+        || requestError?.response?.headers?.["x-request-id"];
+      const diagnostic = [errorData.errorCode, requestId && `Reference ${requestId}`]
+        .filter(Boolean)
+        .join(" · ");
       dispatch({
         type: "error",
         payload: {
-          message:
-            requestError?.response?.data?.message ||
-            "The OMS Assistant is temporarily unavailable. Please try again.",
+          message: `${errorData.message
+            || "The OMS Assistant is temporarily unavailable. Please try again."}${diagnostic ? ` (${diagnostic})` : ""}`,
         },
       });
     } finally {

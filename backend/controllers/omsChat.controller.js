@@ -3,6 +3,12 @@ const {
   askOmsAssistant,
 } = require("../services/omsChat.service");
 const { OmsChatQueryError } = require("../services/omsChatQuery.service");
+const { OmsAiProviderError } = require("../services/omsAiProvider.service");
+const {
+  logOmsChatError,
+  logOmsChatEvent,
+  updateOmsChatLogContext,
+} = require("../services/omsChatLogger.service");
 
 const MAX_BODY_BYTES = 8 * 1024;
 
@@ -19,7 +25,10 @@ const publicError = (error) => {
   }
   if (
     statusCode === 503 &&
-    String(error?.category || "").startsWith("missing_")
+    (
+      String(error?.category || "").startsWith("missing_")
+      || error?.category === "provider_configuration"
+    )
   ) {
     return "OMS Assistant is not configured";
   }
@@ -33,6 +42,7 @@ const publicError = (error) => {
 };
 
 const ask = async (req, res) => {
+  const requestId = res.locals.omsChatRequestId || "";
   const audit = {
     question: typeof req.body?.message === "string" ? req.body.message : "",
     collections: [],
@@ -49,6 +59,8 @@ const ask = async (req, res) => {
   res.locals.omsChatAudit = audit;
 
   try {
+    logOmsChatEvent("controller.started");
+    logOmsChatEvent("request.validation_started");
     const serializedBody = JSON.stringify(req.body || {});
     if (Buffer.byteLength(serializedBody, "utf8") > MAX_BODY_BYTES) {
       throw new OmsChatServiceError("Request is too large", {
@@ -68,11 +80,22 @@ const ask = async (req, res) => {
         category: "invalid_request",
       });
     }
+    logOmsChatEvent("request.validation_completed", {
+      question_length: String(req.body.message || "").trim().length,
+      continuing_conversation: Boolean(req.body.conversationId),
+    });
 
+    logOmsChatEvent("assistant.execution_started");
     const result = await askOmsAssistant({
       message: req.body.message,
       conversationId: req.body.conversationId,
       user: req.user,
+    });
+    updateOmsChatLogContext({ conversationId: result.conversationId });
+    logOmsChatEvent("assistant.execution_completed", {
+      tool_call_count: Number(result.audit.toolCallCount || 0),
+      returned_rows: Number(result.audit.returnedRows || 0),
+      answer_type: String(result.audit.answerType || ""),
     });
     Object.assign(audit, {
       collections: result.audit.collections,
@@ -88,10 +111,13 @@ const ask = async (req, res) => {
     res.locals.omsChatConversationId = result.conversationId;
 
     const { audit: _audit, ...response } = result;
-    return res.status(200).json(response);
+    logOmsChatEvent("response.sending", { status_code: 200 });
+    return res.status(200).json({ ...response, requestId });
   } catch (error) {
     const safeError =
-      error instanceof OmsChatServiceError || error instanceof OmsChatQueryError
+      error instanceof OmsChatServiceError
+      || error instanceof OmsChatQueryError
+      || error instanceof OmsAiProviderError
         ? error
         : new OmsChatServiceError("OMS Assistant failed", {
             statusCode: 500,
@@ -111,9 +137,17 @@ const ask = async (req, res) => {
       });
     }
     audit.failureCategory = safeError.category || "assistant_failure";
+    logOmsChatError("controller.failed", error, {
+      public_status_code: Number(safeError.statusCode || 500),
+      failure_category: audit.failureCategory,
+    });
     return res
       .status(Number(safeError.statusCode || 500))
-      .json({ message: publicError(safeError) });
+      .json({
+        message: publicError(safeError),
+        errorCode: audit.failureCategory,
+        requestId,
+      });
   }
 };
 

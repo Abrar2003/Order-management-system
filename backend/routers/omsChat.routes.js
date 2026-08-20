@@ -5,6 +5,10 @@ const { securityLog } = require("../middlewares/securityActivityLogger");
 const {
   omsChatRateLimit,
 } = require("../middlewares/omsChatRateLimit.middleware");
+const {
+  omsChatRequestLogger,
+  omsChatRouteStep,
+} = require("../services/omsChatLogger.service");
 const { ask } = require("../controllers/omsChat.controller");
 
 const router = express.Router();
@@ -25,6 +29,7 @@ const omsChatAuditLogger = securityLog("oms_assistant_query", "oms_assistant", {
     const details = res.locals?.omsChatAudit || {};
     const statusCode = Number(res.statusCode || 0);
     return {
+      request_id: String(res.locals?.omsChatRequestId || ""),
       question: String(details.question ?? req.body?.message ?? ""),
       selected_collection: Array.isArray(details.collections)
         ? details.collections.join(",")
@@ -49,9 +54,12 @@ const requireOmsAssistantView = requirePermission("oms_assistant", "view");
 
 router.post(
   "/ask",
+  omsChatRequestLogger,
   omsChatAuditLogger,
   auth,
+  omsChatRouteStep("authentication.completed"),
   requireOmsAssistantView,
+  omsChatRouteStep("authorization.completed"),
   omsChatRateLimit,
   ask,
 );
@@ -59,6 +67,7 @@ router.post(
 module.exports = router;
 module.exports.__test__ = {
   inferFailureCategory,
+  omsChatRequestLogger,
   omsChatAuditLogger,
   requireOmsAssistantView,
 };
