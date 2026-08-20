@@ -5,6 +5,10 @@ const Inspection = require("../models/inspection.model");
 const Sample = require("../models/sample.model");
 const Brand = require("../models/brand.model");
 const Vendor = require("../models/vendor.model");
+const {
+  getCollectionKnowledge,
+  getKnowledgeBase,
+} = require("./omsKnowledgeBase.service");
 
 const IST_OFFSET_MINUTES = 330;
 const IST_TIMEZONE = "Asia/Kolkata";
@@ -317,6 +321,15 @@ const inspectOmsSchema = ({ collections = [] } = {}) => {
     throw new TypeError("Only catalogued OMS business collections may be inspected");
   }
 
+  const knowledgeBase = getKnowledgeBase();
+  const selectedKnowledge = selected.map(({ collection }) => getCollectionKnowledge(collection)).filter(Boolean);
+  const selectedNames = new Set(selectedKnowledge.map((entry) => entry.id));
+  const canonicalNotes = knowledgeBase.sourceOfTruthRules.filter((rule) => {
+    const text = `${rule.description} ${rule.canonicalSource}`.toLowerCase();
+    return [...selectedNames].some((name) => text.includes(name) || text.includes(name.replace(/s$/, "")));
+  }).slice(0, 10);
+  const canonicalNoteIds = new Set(canonicalNotes.map((rule) => rule.id));
+
   return {
     collections: selected.map(({ collection, description, fields, access, model }) => ({
       collection,
@@ -338,6 +351,45 @@ const inspectOmsSchema = ({ collections = [] } = {}) => {
       "qcs.item.item_code -> items.code",
       "vendors.brands.brand_id -> brands._id",
     ],
+    knowledgeBase: {
+      version: knowledgeBase.version,
+      collections: selectedKnowledge.map((entry) => ({
+        id: entry.id,
+        description: entry.description,
+        certainty: entry.certainty,
+        capabilities: entry.capabilities.map((capability) => ({
+          id: capability.id,
+          name: capability.name,
+          description: capability.description,
+          assistantStatus: capability.assistantStatus,
+          sourceKind: capability.sourceOfTruth.kind,
+          sourceLabel: capability.name,
+          rawFactsWarning: capability.sourceOfTruth.rawFactsWarning || "",
+        })),
+        relationships: entry.relationships.map((relationship) => ({
+          id: relationship.id,
+          from: relationship.from,
+          to: relationship.to,
+          description: relationship.description,
+          certainty: relationship.certainty,
+        })),
+      })),
+      canonicalNotes: canonicalNotes.map(({ id, description, certainty }) => ({
+        id,
+        description,
+        certainty,
+      })),
+      businessDefinitions: knowledgeBase.businessDefinitions
+        .filter((definition) => canonicalNoteIds.has(definition.sourceOfTruthRule))
+        .slice(0, 10)
+        .map(({ id, term, definition, sourceOfTruthRule, certainty }) => ({
+          id,
+          term,
+          definition,
+          sourceOfTruthRule,
+          certainty,
+        })),
+    },
   };
 };
 

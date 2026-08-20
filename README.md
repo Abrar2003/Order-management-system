@@ -7,6 +7,10 @@
 - `deploy/` VPS deployment assets (PM2, nginx, deploy script)
 - `docs/` operational documentation
 
+## OMS Assistant Knowledge Integration
+
+The read-only OMS Assistant uses the versioned Knowledge Base to select canonical OMS reports before raw database investigation. Packed Goods and Monthly Shipments are available through an explicit, allowlisted capability layer; other capabilities are explicitly classified as existing Assistant features or documentation-only. See [OMS Knowledge Base](docs/OMS_KNOWLEDGE_BASE.md) and [OMS Assistant change context](docs/OMS_ASSISTANT_CONTEXT.md).
+
 ## Local Development
 
 ### Backend

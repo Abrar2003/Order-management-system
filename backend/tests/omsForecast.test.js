@@ -299,6 +299,15 @@ test("controlled forecast returns a low-confidence ETD-only result when optional
     {
       now: new Date("2026-08-18T00:00:00Z"),
       user: { _id: "user-1" },
+      capabilityExecutor: async () => ({
+        capability: { id: "packed_goods" },
+        grouped: [{ brand: "Brand A", ready_cbm: 60 }],
+        rows: [],
+        databaseCalls: 2,
+        durationMs: 1,
+        truncated: false,
+        audit: { collections: ["orders", "qcs", "items"], stageCount: 0 },
+      }),
       queryExecutor: async () => {
         calls += 1;
         if (calls === 1) {

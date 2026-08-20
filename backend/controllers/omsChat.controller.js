@@ -53,6 +53,12 @@ const ask = async (req, res) => {
     answerType: "",
     forecastConfidence: "",
     toolCallCount: 0,
+    capabilityCount: 0,
+    capabilitiesUsed: [],
+    databaseQueryCallCount: 0,
+    analyticsCallCount: 0,
+    schemaCallCount: 0,
+    invalidToolCallCount: 0,
     analysisType: "",
     failureCategory: "",
   };
@@ -94,6 +100,7 @@ const ask = async (req, res) => {
     updateOmsChatLogContext({ conversationId: result.conversationId });
     logOmsChatEvent("assistant.execution_completed", {
       tool_call_count: Number(result.audit.toolCallCount || 0),
+      capability_count: Number(result.audit.capabilityCount || 0),
       returned_rows: Number(result.audit.returnedRows || 0),
       answer_type: String(result.audit.answerType || ""),
     });
@@ -106,6 +113,12 @@ const ask = async (req, res) => {
       answerType: result.audit.answerType,
       forecastConfidence: result.audit.forecastConfidence,
       toolCallCount: result.audit.toolCallCount,
+      capabilityCount: result.audit.capabilityCount,
+      capabilitiesUsed: result.audit.capabilitiesUsed,
+      databaseQueryCallCount: result.audit.databaseQueryCallCount,
+      analyticsCallCount: result.audit.analyticsCallCount,
+      schemaCallCount: result.audit.schemaCallCount,
+      invalidToolCallCount: result.audit.invalidToolCallCount,
       analysisType: result.audit.analysisType,
     });
     res.locals.omsChatConversationId = result.conversationId;

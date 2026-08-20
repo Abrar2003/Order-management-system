@@ -16,18 +16,28 @@ const {
 
 const copy = () => JSON.parse(JSON.stringify(catalog));
 
-test("OMS Knowledge Base loads as a read-only, valid Step 1 catalog", () => {
+test("OMS Knowledge Base loads as a read-only, valid Step 2 catalog", () => {
   const validation = validateKnowledgeBase();
 
   assert.equal(Object.isFrozen(getKnowledgeBase()), true);
-  assert.equal(catalog.scope.assistantIntegration, "not_wired");
-  assert.equal(catalog.scope.behaviorChange, false);
+  assert.equal(catalog.scope.assistantIntegration, "canonical_first_capability_tool");
+  assert.equal(catalog.scope.behaviorChange, true);
   assert.equal(validation.valid, true, validation.errors.join("\n"));
   assert.ok(validation.stats.domains >= 10);
   assert.ok(validation.stats.collections >= 30);
   assert.ok(validation.stats.capabilities >= 20);
   assert.ok(validation.stats.relationships >= 20);
   assert.ok(catalog.capabilities.every((entry) => entry.safety === "read_only"));
+  assert.deepEqual(
+    listCapabilities({ assistantStatus: "tool_eligible" }).map((entry) => entry.id).sort(),
+    ["monthly_shipments", "packed_goods"],
+  );
+  assert.equal(catalog.capabilities.length, 28);
+  assert.ok(catalog.capabilities.every((entry) => [
+    "tool_eligible",
+    "existing_assistant_feature",
+    "documented_not_tool_eligible",
+  ].includes(entry.assistantStatus)));
 });
 
 test("OMS Knowledge Base rejects duplicate IDs and unknown references", () => {
@@ -85,6 +95,7 @@ test("Packed Goods metadata preserves the exact canonical route, source chain, a
   assert.equal(packedGoods.sourceOfTruth.canonical, "buildPackedGoodsDataset");
   assert.match(packedGoods.sourceOfTruth.rawFactsWarning, /fallback/i);
   assert.ok(sources.includes("backend/controllers/order.controller.js"));
+  assert.ok(sources.includes("backend/services/packedGoods.service.js"));
   assert.ok(sources.includes("backend/services/shipmentCbmAllocation.service.js"));
   assert.ok(sources.includes("client/OMS/src/pages/PackedGoods.jsx"));
   assert.ok(packedGoods.collections.includes("orders"));

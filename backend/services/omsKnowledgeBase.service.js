@@ -78,12 +78,14 @@ const searchCapabilities = (query, { domain, limit = 20 } = {}) => {
       const haystack = fields.join(" ");
       const matchedWords = queryWords.filter((word) => haystack.includes(word)).length;
       const exactAlias = aliasValues.some((alias) => normalizeQuery(alias) === queryText);
+      const containedAlias = aliasValues.some((alias) => queryText.includes(normalizeQuery(alias)));
       const exactName = normalizeQuery(capability.name) === queryText;
       const exactId = normalizeQuery(capability.id) === queryText;
       const phraseMatch = queryText.length > 2 && haystack.includes(queryText);
       const score = (exactId ? 1000 : 0)
         + (exactName ? 900 : 0)
         + (exactAlias ? 800 : 0)
+        + (containedAlias ? 500 : 0)
         + (phraseMatch ? 100 : 0)
         + (matchedWords * 10);
       return { capability, score };

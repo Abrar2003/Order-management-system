@@ -4,6 +4,7 @@ const {
   resolveOrderRowCbmSummaryWithStoredFallback,
   toRoundedCbmValue,
 } = require("./shipmentCbmAllocation.service");
+const { executeOmsCapability } = require("./omsCapabilityExecution.service");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_CONTAINER_TARGET_CBM = 65;
@@ -276,6 +277,13 @@ const getReadyShipmentCbm = (orders = []) => toRoundedCbmValue(
   }, 0),
 );
 
+const readyCbmMap = (rows = [], keyField) => new Map(
+  (Array.isArray(rows) ? rows : []).map((row) => [
+    key(row?.[keyField]),
+    number(row?.ready_cbm ?? row?.currentReadyCbm ?? row?.total_cbm),
+  ]).filter(([entryKey]) => entryKey),
+);
+
 const getRemainingContainerCbm = (readyCbm, targetCbm) =>
   toRoundedCbmValue(Math.max(0, getContainerTargetCbm(targetCbm) - number(readyCbm)));
 
@@ -344,6 +352,7 @@ const forecastVendorNextShipment = ({
   vendor,
   orders = [],
   historicalRows = [],
+  readyCbmByBrand = null,
   targetCbm,
   now = new Date(),
 } = {}) => {
@@ -354,6 +363,9 @@ const forecastVendorNextShipment = ({
     (order) => !vendorKey || key(order?.vendor) === vendorKey,
   );
   const brandGroups = new Map();
+  const canonicalReady = readyCbmByBrand === null
+    ? null
+    : readyCbmMap(readyCbmByBrand, "brand");
 
   for (const order of vendorOrders) {
     const brand = cleanText(order?.brand) || "Unspecified brand";
@@ -362,8 +374,17 @@ const forecastVendorNextShipment = ({
     brandGroups.set(brand, group);
   }
 
+  canonicalReady?.forEach((_readyCbm, brandKey) => {
+    if ([...brandGroups.keys()].some((brand) => key(brand) === brandKey)) return;
+    const source = readyCbmByBrand.find((entry) => key(entry?.brand) === brandKey);
+    const brand = cleanText(source?.brand) || "Unspecified brand";
+    brandGroups.set(brand, { brand, orders: [] });
+  });
+
   const brands = [...brandGroups.values()].map((group) => {
-    const readyCbm = getReadyShipmentCbm(group.orders);
+    const readyCbm = canonicalReady === null
+      ? getReadyShipmentCbm(group.orders)
+      : toRoundedCbmValue(canonicalReady.get(key(group.brand)) || 0);
     const contributions = group.orders.flatMap((order) => {
       const progress = deriveOrderProgress({ orderEntry: order, qcRecord: order?.qc_record });
       if (progress.pending_inspection_quantity <= 0) return [];
@@ -475,12 +496,16 @@ const forecastBrandNextContainerVendor = ({
   brand,
   orders = [],
   historicalRows = [],
+  readyCbmByVendor = null,
   targetCbm,
   now = new Date(),
 } = {}) => {
   const target = getContainerTargetCbm(targetCbm);
   const brandKey = key(brand);
   const vendorGroups = new Map();
+  const canonicalReady = readyCbmByVendor === null
+    ? null
+    : readyCbmMap(readyCbmByVendor, "vendor");
 
   for (const order of Array.isArray(orders) ? orders : []) {
     if (brandKey && key(order?.brand) !== brandKey) continue;
@@ -490,11 +515,24 @@ const forecastBrandNextContainerVendor = ({
     vendorGroups.set(vendor, group);
   }
 
+  canonicalReady?.forEach((_readyCbm, vendorKey) => {
+    if ([...vendorGroups.keys()].some((vendor) => key(vendor) === vendorKey)) return;
+    const source = readyCbmByVendor.find((entry) => key(entry?.vendor) === vendorKey);
+    const vendor = cleanText(source?.vendor) || "Unspecified vendor";
+    vendorGroups.set(vendor, { vendor, orders: [] });
+  });
+
   const vendors = [...vendorGroups.values()].map((group) => {
+    const currentReadyCbm = canonicalReady === null
+      ? null
+      : toRoundedCbmValue(canonicalReady.get(key(group.vendor)) || 0);
     const shipment = forecastVendorNextShipment({
       vendor: group.vendor,
       orders: group.orders,
       historicalRows,
+      readyCbmByBrand: currentReadyCbm === null
+        ? null
+        : [{ brand: cleanText(brand) || "Unspecified brand", ready_cbm: currentReadyCbm }],
       targetCbm: target,
       now,
     });
@@ -742,14 +780,29 @@ const hydrateForecastOrder = (row = {}) => ({
 
 const runOmsForecastAnalysis = async (
   request,
-  { queryExecutor, user, now = new Date() } = {},
+  {
+    queryExecutor,
+    capabilityExecutor = executeOmsCapability,
+    capabilityDependencies,
+    user,
+    now = new Date(),
+  } = {},
 ) => {
   const args = validateAnalyticsRequest(request);
   if (typeof queryExecutor !== "function") throw new TypeError("queryExecutor is required");
   const results = [];
+  const capabilityResults = [];
   const query = async (payload) => {
     const result = await queryExecutor({ ...payload, user });
     results.push(result);
+    return result;
+  };
+  const capability = async (payload) => {
+    const result = await capabilityExecutor(payload, {
+      ...capabilityDependencies,
+      now,
+    });
+    capabilityResults.push(result);
     return result;
   };
 
@@ -763,20 +816,58 @@ const runOmsForecastAnalysis = async (
     return { analysisType: args.analysisType, analysis, databaseCalls: 1, audit: combineQueryAudit(results) };
   }
 
+  if (args.analysisType === "brand_ready_cbm") {
+    const ready = await capability({
+      capability: "packed_goods",
+      filters: args.brand ? { brand: [args.brand] } : {},
+      operation: {
+        type: "group",
+        groupBy: ["brand"],
+        metrics: [{ operation: "sum", field: "total_cbm", as: "ready_cbm" }],
+        sort: [{ field: "ready_cbm", direction: "desc" }],
+        limit: 100,
+      },
+    });
+    return {
+      analysisType: args.analysisType,
+      analysis: ready.grouped.map((entry) => ({ brand: entry.brand, readyCbm: entry.ready_cbm })),
+      databaseCalls: ready.databaseCalls,
+      capabilityCalls: 1,
+      capabilitiesUsed: ["packed_goods"],
+      audit: {
+        collections: ready.audit?.collections || [],
+        stageCount: Number(ready.audit?.stageCount || 0),
+        durationMs: Number(ready.durationMs || 0),
+        returnedRows: ready.grouped.length,
+        truncated: Boolean(ready.truncated),
+      },
+    };
+  }
+
   const current = await query({
     collection: "orders",
     pipeline: buildOpenOrderPipeline(args),
     purpose: "Calculate current open-order inspection and shipment readiness",
   });
   const currentOrders = current.rows.map(hydrateForecastOrder);
-  if (args.analysisType === "brand_ready_cbm") {
-    const grouped = Object.values(currentOrders.reduce((groups, order) => {
-      const brand = cleanText(order?.brand) || "Unspecified brand";
-      groups[brand] ||= { brand, orders: [] };
-      groups[brand].orders.push(order);
-      return groups;
-    }, Object.create(null))).map(({ brand, orders }) => ({ brand, readyCbm: getReadyShipmentCbm(orders) }));
-    return { analysisType: args.analysisType, analysis: grouped, databaseCalls: 1, audit: combineQueryAudit(results) };
+
+  let canonicalReady = null;
+  if (["vendor_next_shipment_forecast", "brand_next_container_vendor_forecast"].includes(args.analysisType)) {
+    const groupField = args.analysisType === "brand_next_container_vendor_forecast" ? "vendor" : "brand";
+    canonicalReady = await capability({
+      capability: "packed_goods",
+      filters: {
+        ...(args.brand ? { brand: [args.brand] } : {}),
+        ...(args.vendor ? { vendor: args.vendor } : {}),
+      },
+      operation: {
+        type: "group",
+        groupBy: [groupField],
+        metrics: [{ operation: "sum", field: "total_cbm", as: "ready_cbm" }],
+        sort: [{ field: "ready_cbm", direction: "desc" }],
+        limit: 100,
+      },
+    });
   }
 
   let history;
@@ -799,6 +890,7 @@ const runOmsForecastAnalysis = async (
           brand: args.brand,
           orders: currentOrders,
           historicalRows: history.rows,
+          readyCbmByVendor: canonicalReady?.grouped || [],
           targetCbm: args.targetCbm,
           now,
         })
@@ -806,21 +898,44 @@ const runOmsForecastAnalysis = async (
         vendor: args.vendor,
         orders: currentOrders,
         historicalRows: history.rows,
+        readyCbmByBrand: canonicalReady?.grouped || [],
         targetCbm: args.targetCbm,
         now,
       });
+  const capabilityDatabaseCalls = capabilityResults.reduce(
+    (sum, result) => sum + number(result?.databaseCalls),
+    0,
+  );
+  const queryAudit = combineQueryAudit([
+    ...results,
+    ...(historyFailure?.audit ? [{ audit: historyFailure.audit }] : []),
+  ]);
   return {
     analysisType: args.analysisType,
     analysis,
-    databaseCalls: 2,
+    databaseCalls: results.length + (historyFailure ? 1 : 0) + capabilityDatabaseCalls,
+    capabilityCalls: capabilityResults.length,
+    capabilitiesUsed: [...new Set(capabilityResults.map((result) => result?.capability?.id).filter(Boolean))],
     partialResults: Boolean(historyFailure),
     limitations: historyFailure
       ? ["Historical inspection evidence was unavailable; only current order and future ETD evidence could be used."]
       : [],
-    audit: combineQueryAudit([
-      ...results,
-      ...(historyFailure?.audit ? [{ audit: historyFailure.audit }] : []),
-    ]),
+    audit: {
+      ...queryAudit,
+      collections: [...new Set([
+        ...queryAudit.collections,
+        ...capabilityResults.flatMap((result) => result?.audit?.collections || []),
+      ])],
+      durationMs: queryAudit.durationMs + capabilityResults.reduce(
+        (sum, result) => sum + number(result?.durationMs),
+        0,
+      ),
+      returnedRows: queryAudit.returnedRows + capabilityResults.reduce(
+        (sum, result) => sum + number(result?.grouped?.length || result?.rows?.length),
+        0,
+      ),
+      truncated: queryAudit.truncated || capabilityResults.some((result) => result?.truncated),
+    },
   };
 };
 

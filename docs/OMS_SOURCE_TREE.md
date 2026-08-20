@@ -232,6 +232,7 @@ oms/
 |   |   |-- monthlyShipmentsReport.service.js
 |   |   |-- notificationService.js
 |   |   |-- omsAiProvider.service.js
+|   |   |-- omsCapabilityExecution.service.js
 |   |   |-- omsChat.service.js
 |   |   |-- omsChatCatalog.service.js
 |   |   |-- omsChatLogger.service.js
@@ -239,6 +240,7 @@ oms/
 |   |   |-- omsForecast.service.js
 |   |   |-- omsKnowledgeBase.service.js
 |   |   |-- orderCbm.service.js
+|   |   |-- packedGoods.service.js
 |   |   |-- pdfPrintStyles.js
 |   |   |-- pdfRectifyParser.service.js
 |   |   |-- pdfRenderer.js
@@ -280,6 +282,7 @@ oms/
 |   |   |-- masterSizeRemarks.test.js
 |   |   |-- monthlyShipmentsReport.test.js
 |   |   |-- omsAiProvider.test.js
+|   |   |-- omsCapabilityExecution.test.js
 |   |   |-- omsChat.test.js
 |   |   |-- omsForecast.test.js
 |   |   |-- omsKnowledgeBase.test.js

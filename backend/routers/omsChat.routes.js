@@ -41,6 +41,14 @@ const omsChatAuditLogger = securityLog("oms_assistant_query", "oms_assistant", {
       answer_type: String(details.answerType || ""),
       forecast_confidence: String(details.forecastConfidence || ""),
       tool_call_count: Number(details.toolCallCount || 0),
+      capability_count: Number(details.capabilityCount || 0),
+      capabilities_used: Array.isArray(details.capabilitiesUsed)
+        ? details.capabilitiesUsed.join(",")
+        : "",
+      database_query_call_count: Number(details.databaseQueryCallCount || 0),
+      analytics_call_count: Number(details.analyticsCallCount || 0),
+      schema_call_count: Number(details.schemaCallCount || 0),
+      invalid_tool_call_count: Number(details.invalidToolCallCount || 0),
       analysis_type: String(details.analysisType || ""),
       success: statusCode >= 200 && statusCode < 400,
       failure_category: inferFailureCategory(

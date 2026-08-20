@@ -2,7 +2,7 @@
 
 ## Scope
 
-This is the Step 1 static OMS knowledge catalog. It records verified repository knowledge so a future integration can select safe, canonical read paths. It does not call models, controllers, databases, APIs, queues, or the Assistant; it changes no OMS or Assistant behavior.
+This is the Step 2 OMS knowledge catalog and Assistant integration contract. The catalog remains static and read-only, while the Assistant uses its metadata to preselect relevant business capabilities and route canonical questions through an explicit server-side adapter registry before considering raw MongoDB.
 
 Machine-readable catalog and lookup service:
 
@@ -10,7 +10,7 @@ Machine-readable catalog and lookup service:
 - `backend/knowledge/omsKnowledgeBase.schema.js`
 - `backend/services/omsKnowledgeBase.service.js`
 
-The catalog is versioned (`1.0.0`), frozen at load time, and validates its identifiers, references, aliases, source-of-truth rules, relationships, certainty values, and repository-relative source paths without importing those source files.
+The catalog is versioned (`1.1.0`), frozen at load time, and validates its identifiers, references, aliases, source-of-truth rules, relationships, certainty values, Assistant status, and repository-relative source paths without importing those source files.
 
 ## Discovery Coverage
 
@@ -51,7 +51,7 @@ The catalog itself covers 14 domains, 34 persistence collections, 28 capabilitie
 
 ## Capability Coverage
 
-All catalogued capabilities are marked `read_only`; `assistantStatus` records whether they are future Step 2 candidates or intentionally documented-only.
+All catalogued capabilities are marked `read_only`; every capability now has one explicit `assistantStatus`: `tool_eligible`, `existing_assistant_feature`, or `documented_not_tool_eligible`.
 
 | Capability group | Catalog capability IDs | Canonical source type |
 | --- | --- | --- |
@@ -64,9 +64,15 @@ All catalogued capabilities are marked `read_only`; `assistantStatus` records wh
 | Workflow and complaints | `workflow_tasks`, `complaints` | live collections/controllers |
 | Report/export infrastructure | `monthly_shipments`, `pdf_exports` | dedicated service |
 | Communication/history | `notifications`, `email_logs`, `audit_logs` | documented; access-sensitive/history caveats |
-| Existing Assistant internals | `assistant_forecasts` | documented only; not rewired |
+| Existing Assistant internals | `assistant_forecasts` | deterministic existing Assistant feature; ready CBM now comes from Packed Goods |
 
 Use `searchCapabilities()` for deterministic metadata lookup across capability IDs, names, descriptions, keywords, domains, and aliases. It has no embedding, network, database, or model dependency.
+
+Explicit Assistant classification:
+
+- `tool_eligible`: `packed_goods`, `monthly_shipments`.
+- `existing_assistant_feature`: `order_list`, `order_progress`, `shipments`, `containers`, `shipment_cbm`, `item_catalog`, `pis_data`, `partner_master_data`, `samples`, `assistant_forecasts`.
+- `documented_not_tool_eligible`: `shipping_pending`, `etd_reports`, `archived_orders`, `qc_list`, `qc_reports`, `inspection_reports`, `product_database`, `product_type_templates`, `sample_workflow`, `workflow_tasks`, `complaints`, `finishes`, `pdf_exports`, `notifications`, `email_logs`, `audit_logs`.
 
 ## Packed Goods: Verified End-to-End Trace
 
@@ -76,7 +82,7 @@ Use `searchCapabilities()` for deterministic metadata lookup across capability I
 | API route | `GET /orders/packed-goods` and `GET /orders/packed-goods/export`; both require authenticated order access (`orders.view` / `orders.export`). |
 | Router | `backend/routers/orders.routes.js` |
 | Controller | `backend/controllers/order.controller.js#getPackedGoods`, `#exportPackedGoods` |
-| Canonical dataset | `buildPackedGoodsDataset` in the same controller. This is shared by the API and XLS/XLSX export but is not a reusable service export. |
+| Canonical dataset | `backend/services/packedGoods.service.js#buildPackedGoodsDataset`, shared by the API, XLS/XLSX export, Assistant adapter, and forecast readiness input. |
 | Data/joins | Active `orders` with populated `qcs`, item lookup in `items`, and `deriveOrderProgress`. |
 | Row condition | Rows exist only where `inspected_unshipped_quantity > 0`. |
 | Filters | brand(s), vendor, PO aliases (`order_id`, `order`, `po`), and inclusive order-date range. |
@@ -91,7 +97,7 @@ The catalog therefore treats Packed Goods as a `canonical_report_query`, not mer
 | --- | --- | --- |
 | Live order facts | `orders` | edit/archive logs are historical evidence only |
 | Current PO progress | `deriveOrderProgress` | do not rely only on stored `orders.status` |
-| Packed Goods | `buildPackedGoodsDataset` | controller-local helper; route/API boundary is currently safest |
+| Packed Goods | `packedGoods.service.js#buildPackedGoodsDataset` | one shared dataset; calculated measurements first and stored CBM only as fallback |
 | Shipment/PO CBM | `shipmentCbmAllocation` + `orderCbm` | stored `total_po_cbm` is cached/fallback |
 | Current QC state | `qcs` + `inspections` | QC edit logs are not live state |
 | PIS/master comparison | Item array-backed fields and documented helpers | master is Final PIS Check reference when present; PIS is fallback |
@@ -112,9 +118,9 @@ Legacy data notes cover vendor-object backfills, barcode aliases, legacy measure
 
 ## Audit Findings
 
-1. Packed Goods’ API and workbook export consistently use one builder, but that builder is controller-local. Step 2 should use a deliberately designed read-only adapter or route contract, not import controller internals.
+1. Packed Goods' API, workbook export, Assistant adapter, and shipment-readiness forecasts now use one shared service builder.
 2. `PackedGoods.jsx` presents the fetched dataset with browser-side filtering/sorting/summary. That is presentation duplication, not a competing source of truth.
-3. A client shipping utility derives grouped PO display status. Any future Assistant path should use `backend/helpers/orderStatus.js` semantics.
+3. A client shipping utility derives grouped PO display status; Assistant canonical paths use `backend/helpers/orderStatus.js` semantics instead.
 4. Stored order CBM can diverge from current measurement-based CBM; generated answers must label fallback use.
 5. `api-map` documentation is a static index; source code settles route and behavior questions.
 
@@ -129,6 +135,13 @@ kb.getCollectionKnowledge("orders");
 kb.getRelationshipsForCollection("qcs");
 kb.getBusinessDefinition("po");
 kb.validateKnowledgeBase();
+
+const { executeOmsCapability } = require("../services/omsCapabilityExecution.service");
+await executeOmsCapability({
+  capability: "packed_goods",
+  filters: { brands: ["By Boo"] },
+  operation: { type: "summary" },
+});
 ```
 
 Available functions are `getKnowledgeBase`, `getDomain`, `getCollectionKnowledge`, `getCapability`, `listCapabilities`, `searchCapabilities`, `getRelationshipsForCollection`, `getBusinessDefinition`, and `validateKnowledgeBase`.
@@ -143,8 +156,21 @@ When adding or changing OMS behavior:
 4. Add an alias only when it is unambiguous; aliases are globally unique after normalization.
 5. Run `npm test` from `backend`; `backend/tests/omsKnowledgeBase.test.js` checks catalog validity, source paths, references, deterministic search, aliases, and Packed Goods metadata.
 
-## Step 2: Explicitly Deferred
+## Step 2 Assistant Integration
 
-Step 2 must first choose permission-aware, read-only adapters for each capability and define response provenance/uncertainty behavior. In particular, it must respect existing data access controls and avoid controller imports for Packed Goods. It must not expose sensitive access/security/notification/email data by default.
+```text
+question
+  -> deterministic Knowledge Base search (top relevant capabilities only)
+  -> Gemini receives compact, server-controlled capability context
+  -> use_oms_capability executes an explicit allowlisted adapter
+  -> optional safe raw MongoDB and deterministic analytics
+  -> concise evidence-based answer
+```
 
-No Assistant tool, prompt, provider, route, UI, model query, deployment setting, or business logic is wired to this Knowledge Base in Step 1.
+`backend/services/omsCapabilityExecution.service.js` is the only capability execution registry. It contains no dynamic module loading from catalog paths. Tool arguments are validated against capability-specific filters, group fields, numeric metrics, sort fields, and a 100-row maximum. Results carry safe filters, summaries, bounded rows/groups, warnings, provenance, and actual internal database-call counts.
+
+Packed Goods and Monthly Shipments are tool-eligible. Existing Assistant query/report/forecast paths remain available for the capabilities they already cover. Communication, audit, export, workflow mutation-adjacent, and other unsuitable capabilities remain metadata-only. `notifications` and `email_logs` cannot be executed through the capability tool, and the raw-query denied-collection policy is unchanged.
+
+For an obvious Packed Goods or Monthly Shipments question, a model attempt to use raw MongoDB is intercepted: the server runs the canonical capability first and returns guidance that MongoDB may only supplement the result. Questions with no strong capability match can still use schema inspection and the existing bounded read-only MongoDB tool.
+
+Schema inspection now includes bounded Knowledge Base relationships, business definitions, capability status, and canonical source-of-truth notes without exposing source file paths or record values. Forecasts use Packed Goods grouped results as current ready CBM and union those vendors/brands with open-order candidates.

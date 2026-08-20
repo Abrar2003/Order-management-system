@@ -158,6 +158,45 @@ const emptyEntityQuery = async (request) => queryResult([], {
   audit: { collection: request.collection },
 });
 
+const fakeCapabilityExecutor = async (request) => {
+  const monthly = request.capability === "monthly_shipments";
+  const groupBy = request.operation?.groupBy?.[0];
+  const grouped = monthly || request.operation?.type !== "group"
+    ? []
+    : groupBy === "vendor"
+      ? [
+          { vendor: "Vendor A", ready_cbm: 70 },
+          { vendor: "Vendor B", ready_cbm: 20 },
+        ]
+      : [{ brand: "Brand A", ready_cbm: 40 }];
+  const rows = request.operation?.type === "rows"
+    ? monthly
+      ? [{ vendor: "All vendors", unique_container_count: 3, total_allocated_cbm: 120 }]
+      : [{ brand: "Brand A", vendor: "Boranada", total_cbm: 40, packed_quantity: 40 }]
+    : [];
+  return {
+    success: true,
+    capability: {
+      id: request.capability,
+      name: monthly ? "Monthly Shipments report" : "Packed Goods",
+      certainty: "verified",
+      sourceKind: monthly ? "canonical_service" : "canonical_report_query",
+    },
+    appliedFilters: request.filters || {},
+    summary: monthly
+      ? { totalUniqueContainers: 3, totalAllocatedCbm: 120, period: null }
+      : { rowCount: 1, totalPackedQuantity: 40, totalCbm: 40 },
+    rows,
+    grouped,
+    warnings: [],
+    provenance: { canonical: true, sourceLabel: monthly ? "Monthly Shipments" : "Packed Goods" },
+    truncated: false,
+    databaseCalls: monthly ? 1 : 2,
+    durationMs: 2,
+    audit: { collections: monthly ? ["orders", "items"] : ["orders", "qcs", "items"], stageCount: 0 },
+  };
+};
+
 const withEntityResolver = (executor) => async (request) =>
   /^Resolve /i.test(request.purpose)
     ? emptyEntityQuery(request)
@@ -736,14 +775,129 @@ test("simple container and vendor-order questions stay concise after migration",
       {
         aiClient: gemini,
         conversationModel: fakeConversationModel(),
+        capabilityExecutor: fakeCapabilityExecutor,
         queryExecutor: withEntityResolver(async () => queryResult([{ total: answer.startsWith("3") ? 3 : 5 }])),
       },
     );
 
     assert.equal(result.answer, answer);
     assert.equal(result.metadata.toolCallCount, 1);
+    assert.equal(result.metadata.capabilityCount, question.includes("containers") ? 1 : 0);
     assert.equal(gemini.calls.length, 2);
   }
+});
+
+test("canonical Packed Goods questions execute the capability instead of raw Mongo", async (t) => {
+  configureAssistant(t);
+  const gemini = fakeGemini(
+    functionResponse({
+      collection: "orders",
+      purpose: "Recalculate ready By Boo CBM",
+      pipeline: [{ $match: { brand: "By Boo" } }, { $count: "total" }],
+    }),
+    finalResponse("By Boo currently has 40 CBM packed and not yet shipped."),
+  );
+  let rawReportQueries = 0;
+
+  const result = await askOmsAssistant(
+    { message: "How much By Boo CBM is currently ready to ship?", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      capabilityExecutor: fakeCapabilityExecutor,
+      queryExecutor: async (request) => {
+        if (request.purpose === "Resolve live brand names mentioned in the question") {
+          return queryResult([{ name: "By Boo" }], { audit: { collection: "brands" } });
+        }
+        if (request.purpose === "Recalculate ready By Boo CBM") {
+          rawReportQueries += 1;
+          return queryResult([{ total: 999 }]);
+        }
+        return emptyEntityQuery(request);
+      },
+    },
+  );
+
+  assert.equal(rawReportQueries, 0);
+  assert.equal(result.metadata.capabilityCount, 1);
+  assert.deepEqual(result.metadata.capabilitiesUsed, ["packed_goods"]);
+  assert.equal(result.metadata.databaseQueryCallCount, 0);
+  assert.equal(result.rows[0].total_cbm, 40);
+  const redirected = gemini.calls[1].body.input.find(
+    (entry) => entry.type === "function_result" && entry.call_id === "tool-call-1",
+  );
+  assert.match(redirected.result[0].text, /canonical_capability_used/);
+  assert.match(redirected.result[0].text, /Packed Goods/);
+});
+
+test("Gemini can call the explicit capability tool directly", async (t) => {
+  configureAssistant(t);
+  const gemini = fakeGemini(
+    functionResponse({
+      capability: "packed_goods",
+      filters: { brands: ["By Boo"] },
+      operation: {
+        type: "group",
+        groupBy: ["vendor"],
+        metrics: [{ operation: "sum", field: "total_cbm", as: "ready_cbm" }],
+      },
+    }, { name: "use_oms_capability", call_id: "packed-goods-call" }),
+    finalResponse("Vendor A has the most ready CBM for By Boo."),
+  );
+
+  const result = await askOmsAssistant(
+    { message: "Which vendor has the most ready CBM for By Boo?", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      capabilityExecutor: fakeCapabilityExecutor,
+      queryExecutor: emptyEntityQuery,
+    },
+  );
+
+  assert.equal(result.metadata.capabilityCount, 1);
+  assert.deepEqual(result.metadata.capabilitiesUsed, ["packed_goods"]);
+  assert.equal(result.metadata.toolCallCount, 1);
+  assert.equal(gemini.calls[0].body.tools.length, 4);
+});
+
+test("raw Mongo remains available after canonical capability evidence", async (t) => {
+  configureAssistant(t);
+  const gemini = fakeGemini(
+    functionResponse({
+      capability: "packed_goods",
+      filters: { brands: ["By Boo"] },
+      operation: { type: "rows", limit: 100 },
+    }, { name: "use_oms_capability", call_id: "ready-items-call" }),
+    functionResponse({
+      collection: "orders",
+      purpose: "Check prior shipment history for the canonical ready items",
+      pipeline: [{ $match: { brand: "By Boo" } }, { $count: "prior_shipments" }],
+    }, { call_id: "history-call" }),
+    finalResponse("The canonical ready-item list was checked against prior shipment history."),
+  );
+  let supplementalQueries = 0;
+
+  const result = await askOmsAssistant(
+    { message: "Which ready By Boo items have never shipped before?", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      capabilityExecutor: fakeCapabilityExecutor,
+      queryExecutor: async (request) => {
+        if (request.purpose === "Check prior shipment history for the canonical ready items") {
+          supplementalQueries += 1;
+          return queryResult([{ prior_shipments: 0 }]);
+        }
+        return emptyEntityQuery(request);
+      },
+    },
+  );
+
+  assert.equal(supplementalQueries, 1);
+  assert.equal(result.metadata.capabilityCount, 1);
+  assert.equal(result.metadata.databaseQueryCallCount, 1);
+  assert.equal(result.metadata.toolCallCount, 2);
 });
 
 test("packaging-aware missing-PIS-barcode pipeline is accepted", () => {
@@ -1796,6 +1950,19 @@ test("schema discovery exposes catalogued structure without records or denied co
   assert.ok(schema.collections[0].fields.some((field) => field.name === "order_id"));
   assert.equal(Object.hasOwn(schema.collections[0], "model"), false);
   assert.equal(Object.hasOwn(schema.collections[0], "rows"), false);
+  assert.equal(schema.knowledgeBase.version, "1.1.0");
+  assert.ok(schema.knowledgeBase.collections[0].capabilities.some(
+    (capability) => capability.id === "packed_goods"
+      && capability.sourceKind === "canonical_report_query"
+      && !Object.hasOwn(capability, "canonicalSource"),
+  ));
+  assert.ok(schema.knowledgeBase.collections[0].relationships.some(
+    (relationship) => relationship.id === "order_qc_record",
+  ));
+  assert.ok(schema.knowledgeBase.canonicalNotes.some(
+    (note) => note.id === "orders_live_state",
+  ));
+  assert.doesNotMatch(JSON.stringify(schema.knowledgeBase), /backend\//);
   assert.throws(
     () => inspectOmsSchema({ collections: ["users"] }),
     /catalogued OMS business collections/,
@@ -1875,7 +2042,7 @@ test("tool and database limits return a final answer from partial evidence", asy
   assert.equal(result.metadata.toolCallCount, 6);
   assert.equal(result.metadata.partialResults, true);
   assert.match(result.answer, /available evidence/i);
-  assert.equal(gemini.calls.at(-1).body.tools.length, 3);
+  assert.equal(gemini.calls.at(-1).body.tools.length, 4);
   assert.equal(gemini.calls.at(-1).body.generation_config.tool_choice, "none");
   assert.match(gemini.calls.at(-1).body.system_instruction, /Answer the user's OMS question now/);
 });
@@ -1959,6 +2126,7 @@ test("vendor shipment forecasts use controlled analytics and return public-safe 
       now: new Date("2026-08-18T00:00:00Z"),
       aiClient: gemini,
       conversationModel: fakeConversationModel(),
+      capabilityExecutor: fakeCapabilityExecutor,
       queryExecutor: async (request) => {
         if (/^Resolve /i.test(request.purpose)) return emptyEntityQuery(request);
         if (/historical/i.test(request.purpose)) return queryResult(historyRows);
@@ -2011,6 +2179,7 @@ test("an invalid vendor forecast call can recover with a brand vendor comparison
       now: new Date("2026-08-18T00:00:00Z"),
       aiClient: gemini,
       conversationModel: fakeConversationModel(),
+      capabilityExecutor: fakeCapabilityExecutor,
       queryExecutor: async (request) => {
         if (request.purpose === "Resolve live brand names mentioned in the question") {
           return queryResult([{ name: "By Boo" }], { audit: { collection: "brands" } });
@@ -2126,6 +2295,7 @@ test("Gemini can query, forecast, and answer in multiple ordered tool turns", as
       now: new Date("2026-08-18T00:00:00Z"),
       aiClient: gemini,
       conversationModel: fakeConversationModel(),
+      capabilityExecutor: fakeCapabilityExecutor,
       queryExecutor: async (request) => {
         if (/^Resolve /i.test(request.purpose)) return emptyEntityQuery(request);
         if (request.purpose === "Find current Boranada open-order evidence") {
@@ -2200,6 +2370,7 @@ test("a transient Gemini failure after deterministic forecasting returns a safe 
       now: new Date("2026-08-18T00:00:00Z"),
       aiClient: gemini,
       conversationModel: fakeConversationModel(),
+      capabilityExecutor: fakeCapabilityExecutor,
       queryExecutor: async (request) => {
         if (/^Resolve /i.test(request.purpose)) return emptyEntityQuery(request);
         if (/historical/i.test(request.purpose)) return queryResult(historyRows);

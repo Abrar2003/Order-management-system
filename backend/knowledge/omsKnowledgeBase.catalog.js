@@ -1,5 +1,36 @@
 const { validateKnowledgeBase } = require("./omsKnowledgeBase.schema");
 
+const CAPABILITY_ASSISTANT_STATUS = Object.freeze({
+  order_list: "existing_assistant_feature",
+  order_progress: "existing_assistant_feature",
+  packed_goods: "tool_eligible",
+  shipping_pending: "documented_not_tool_eligible",
+  shipments: "existing_assistant_feature",
+  containers: "existing_assistant_feature",
+  shipment_cbm: "existing_assistant_feature",
+  etd_reports: "documented_not_tool_eligible",
+  archived_orders: "documented_not_tool_eligible",
+  qc_list: "documented_not_tool_eligible",
+  qc_reports: "documented_not_tool_eligible",
+  inspection_reports: "documented_not_tool_eligible",
+  item_catalog: "existing_assistant_feature",
+  pis_data: "existing_assistant_feature",
+  product_database: "documented_not_tool_eligible",
+  product_type_templates: "documented_not_tool_eligible",
+  partner_master_data: "existing_assistant_feature",
+  samples: "existing_assistant_feature",
+  sample_workflow: "documented_not_tool_eligible",
+  workflow_tasks: "documented_not_tool_eligible",
+  complaints: "documented_not_tool_eligible",
+  finishes: "documented_not_tool_eligible",
+  monthly_shipments: "tool_eligible",
+  pdf_exports: "documented_not_tool_eligible",
+  notifications: "documented_not_tool_eligible",
+  email_logs: "documented_not_tool_eligible",
+  audit_logs: "documented_not_tool_eligible",
+  assistant_forecasts: "existing_assistant_feature",
+});
+
 const src = (path, ...symbols) => ({ path, symbols });
 const freeze = (value) => {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -25,7 +56,7 @@ const capability = (id, name, domain, description, collections, sourceOfTruth, {
   sources = [],
   certainty = "verified",
   safety = "read_only",
-  assistantStatus = "future_step_2_only",
+  assistantStatus = CAPABILITY_ASSISTANT_STATUS[id],
 } = {}) => ({
   id,
   name,
@@ -53,12 +84,12 @@ const relation = (id, from, to, description, sources, certainty = "verified", ex
 });
 
 const catalog = {
-  version: "1.0.0",
+  version: "1.1.0",
   title: "OMS Knowledge Base",
   scope: {
-    step: 1,
-    assistantIntegration: "not_wired",
-    behaviorChange: false,
+    step: 2,
+    assistantIntegration: "canonical_first_capability_tool",
+    behaviorChange: true,
     generatedFrom: "repository discovery; runtime data was not queried",
   },
   domains: [
@@ -116,7 +147,7 @@ const catalog = {
   capabilities: [
     capability("order_list", "Order list and filters", "order_management", "Read active purchase-order lines with order, item, brand, vendor, quantity, ETD, and derived status context.", ["orders", "items", "qcs"], { kind: "collection", canonical: "orders", rawFactsWarning: "Order.status and total_po_cbm include stored state; derived status and CBM rules have separate canonical helpers." }, { keywords: ["orders", "purchase orders", "po list", "open orders", "order filters"], routes: [{ method: "GET", path: "/orders/" }, { method: "GET", path: "/orders/filters" }], inputs: ["brand", "vendor", "status", "date", "search", "pagination"], outputs: ["order rows", "filter options"], sources: [src("backend/controllers/order.controller.js", "getOrders", "getOrdersByFiltersDb"), src("backend/routers/orders.routes.js")]}),
     capability("order_progress", "PO status and order progress", "order_management", "Derive order-level passed, shipped, inspected-unshipped, pending-inspection quantities and lifecycle status.", ["orders", "qcs", "inspections"], { kind: "derived_helper", canonical: "deriveOrderProgress", rawFactsWarning: "Use derived output rather than trusting stored order.status for analytical status questions." }, { keywords: ["po status", "order status", "inspection done", "partial shipped", "pending po"], routes: [{ method: "GET", path: "/orders/po-status-report" }, { method: "GET", path: "/orders/pending-po-report" }], outputs: ["canonical progress quantities", "derived status"], sources: [src("backend/helpers/orderStatus.js", "deriveOrderProgress", "deriveGroupedOrderStatus"), src("backend/controllers/order.controller.js", "getPoStatusReport", "getPendingPoReport")]}),
-    capability("packed_goods", "Packed Goods", "shipment_logistics", "Items inspected and packed but not yet shipped, with calculated CBM and report filters.", ["orders", "qcs", "items"], { kind: "canonical_report_query", canonical: "buildPackedGoodsDataset", rawFactsWarning: "Packed quantity is derived as inspected-unshipped quantity. total_po_cbm is only a fallback when item measurement data cannot produce CBM; do not treat it as raw item measurement." }, { keywords: ["packed goods", "packed", "goods ready", "inspected unshipped", "ready to ship"], routes: [{ method: "GET", path: "/orders/packed-goods", permission: "orders.view" }, { method: "GET", path: "/orders/packed-goods/export", permission: "orders.export" }], inputs: ["brand/brands", "vendor", "order_id/order/po", "from_date/fromDate", "to_date/toDate"], outputs: ["id", "order_id", "order_date", "item_code", "brand", "vendor", "order_quantity", "packed_quantity", "pending_quantity", "total_cbm", "per_item_cbm", "cbm_source", "filters", "summary"], sources: [src("backend/controllers/order.controller.js", "buildPackedGoodsDataset", "getPackedGoods", "exportPackedGoods"), src("backend/routers/orders.routes.js"), src("backend/services/shipmentCbmAllocation.service.js", "resolveOrderRowCbmSummaryWithStoredFallback"), src("backend/helpers/orderStatus.js", "deriveOrderProgress"), src("client/OMS/src/pages/PackedGoods.jsx")]}),
+    capability("packed_goods", "Packed Goods", "shipment_logistics", "Items inspected and packed but not yet shipped, with calculated CBM and report filters.", ["orders", "qcs", "items"], { kind: "canonical_report_query", canonical: "buildPackedGoodsDataset", rawFactsWarning: "Packed quantity is derived as inspected-unshipped quantity. total_po_cbm is only a fallback when item measurement data cannot produce CBM; do not treat it as raw item measurement." }, { keywords: ["packed goods", "packed", "goods ready", "inspected unshipped", "ready to ship"], routes: [{ method: "GET", path: "/orders/packed-goods", permission: "orders.view" }, { method: "GET", path: "/orders/packed-goods/export", permission: "orders.export" }], inputs: ["brand/brands", "vendor", "order_id/order/po", "from_date/fromDate", "to_date/toDate"], outputs: ["id", "order_id", "order_date", "item_code", "brand", "vendor", "order_quantity", "packed_quantity", "pending_quantity", "total_cbm", "per_item_cbm", "cbm_source", "filters", "summary"], sources: [src("backend/services/packedGoods.service.js", "buildPackedGoodsDataset"), src("backend/controllers/order.controller.js", "getPackedGoods", "exportPackedGoods"), src("backend/routers/orders.routes.js"), src("backend/services/shipmentCbmAllocation.service.js", "resolveOrderRowCbmSummaryWithStoredFallback"), src("backend/helpers/orderStatus.js", "deriveOrderProgress"), src("client/OMS/src/pages/PackedGoods.jsx")]}),
     capability("shipping_pending", "Shipping Pending", "shipment_logistics", "Report inspected/available order lines that still need shipment progression.", ["orders", "qcs", "items"], { kind: "canonical_report_query", canonical: "getShippingPending" }, { keywords: ["shipping pending", "pending shipment", "ready for shipping"], routes: [{ method: "GET", path: "/orders/shipping-pending" }, { method: "GET", path: "/orders/shipping-pending/export" }], sources: [src("backend/controllers/order.controller.js", "getShippingPending", "exportShippingPending"), src("backend/routers/orders.routes.js")]}),
     capability("shipments", "Shipment rows", "shipment_logistics", "Read shipment entries flattened from active order records, including checked/export surfaces.", ["orders", "items"], { kind: "canonical_report_query", canonical: "getShipmentsDb" }, { keywords: ["shipments", "shipment records", "shipping rows", "invoice", "stuffing date"], routes: [{ method: "GET", path: "/orders/shipments", permission: "shipments.view" }, { method: "GET", path: "/orders/shipments/export", permission: "shipments.export" }], sources: [src("backend/controllers/order.controller.js", "getShipmentsDb", "exportShipmentsDb"), src("backend/routers/orders.routes.js")]}),
     capability("containers", "Container details", "shipment_logistics", "Read container-focused shipment data from active order shipment entries.", ["orders", "items"], { kind: "canonical_report_query", canonical: "getContainersDb" }, { keywords: ["containers", "container details", "container shipment"], routes: [{ method: "GET", path: "/orders/containers", permission: "containers.view" }], sources: [src("backend/controllers/order.controller.js", "getContainersDb"), src("backend/routers/orders.routes.js")]}),
@@ -138,10 +169,10 @@ const catalog = {
     capability("finishes", "Finishes", "catalog_master_data", "Read finish records, vendor options, item associations, and image availability.", ["finishes", "items", "vendors"], { kind: "collection", canonical: "finishes" }, { keywords: ["finishes", "finish", "finish images"], routes: [{ method: "GET", path: "/finishes" }, { method: "GET", path: "/finishes/vendor-options" }, { method: "GET", path: "/finishes/vendor-items" }], sources: [src("backend/controllers/finish.controller.js", "getFinishes", "getFinishVendorOptions", "getVendorItemsForFinish"), src("backend/routers/finish.routes.js")]}),
     capability("monthly_shipments", "Monthly Shipments report", "reporting_exports", "Read monthly shipment report and drilldown backed by the dedicated monthly shipment service.", ["orders", "items", "vendors", "brands"], { kind: "canonical_service", canonical: "monthlyShipmentsReport.service" }, { keywords: ["monthly shipments", "shipment month", "monthly shipment drilldown"], routes: [{ method: "GET", path: "/reports/monthly-shipments" }, { method: "GET", path: "/reports/monthly-shipments/drilldown" }], sources: [src("backend/services/monthlyShipmentsReport.service.js"), src("backend/controllers/reports.controller.js", "getMonthlyShipmentsReport", "getMonthlyShipmentsDrilldown"), src("backend/routers/reports.routes.js")]}),
     capability("pdf_exports", "Central PDF exports", "reporting_exports", "Render current filtered report markup with the shared Chromium PDF service; this is an export concern, not a reporting source.", [], { kind: "canonical_service", canonical: "pdfRenderer.service" }, { keywords: ["pdf", "export pdf", "report export"], routes: [{ method: "POST", path: "/reports/pdf/render" }, { method: "POST", path: "/items/pdf/render" }, { method: "POST", path: "/qc/pdf/render" }], sources: [src("backend/services/pdfRenderer.js"), src("backend/controllers/pdf.controller.js"), src("docs/PDF_EXPORT_SYSTEM.md")]}),
-    capability("notifications", "Notifications", "communication", "Read user-scoped notifications. This capability is documented but excluded from generic future Assistant analytics because it is user-sensitive.", ["notifications"], { kind: "collection", canonical: "notifications" }, { keywords: ["notifications", "alerts", "notification bell"], routes: [{ method: "GET", path: "/notifications/*" }], sources: [src("backend/models/notification.model.js"), src("backend/routers/notifications.routes.js")], assistantStatus: "documented_not_tool_eligible"}),
-    capability("email_logs", "Email logs", "communication", "Read order-linked email logs through the UI/API only after a dedicated access review; they can contain sensitive communication content.", ["email_logs", "orders"], { kind: "collection", canonical: "emaillogs" }, { keywords: ["email logs", "order emails", "communication log"], routes: [{ method: "GET", path: "/email-logs" }], sources: [src("backend/models/emailLogs.model.js"), src("backend/controllers/emailLogs.controller.js"), src("backend/routers/emailLogs.routes.js")], assistantStatus: "documented_not_tool_eligible", certainty: "strongly_inferred"}),
+    capability("notifications", "Notifications", "communication", "Read user-scoped notifications. This capability is documented but excluded from generic future Assistant analytics because it is user-sensitive.", ["notifications"], { kind: "collection", canonical: "notifications" }, { keywords: ["notifications", "alerts", "notification bell"], routes: [{ method: "GET", path: "/notifications/*" }], sources: [src("backend/models/notification.model.js"), src("backend/routers/notifications.routes.js")]}),
+    capability("email_logs", "Email logs", "communication", "Read order-linked email logs through the UI/API only after a dedicated access review; they can contain sensitive communication content.", ["email_logs", "orders"], { kind: "collection", canonical: "emaillogs" }, { keywords: ["email logs", "order emails", "communication log"], routes: [{ method: "GET", path: "/email-logs" }], sources: [src("backend/models/emailLogs.model.js"), src("backend/controllers/emailLogs.controller.js"), src("backend/routers/emailLogs.routes.js")], certainty: "strongly_inferred"}),
     capability("audit_logs", "OMS audit/history logs", "audit_history", "Document upload, order edit, QC edit, and PIS update history; use only when the user asks for historical audit evidence rather than current business state.", ["upload_logs", "order_edit_logs", "qc_edit_logs", "pis_update_logs"], { kind: "collection", canonical: "respective audit log collections", rawFactsWarning: "Audit records describe changes and may not equal current live state." }, { keywords: ["audit", "upload logs", "order edit logs", "qc edit logs", "pis update logs"], routes: [{ method: "GET", path: "/orders/upload-logs" }, { method: "GET", path: "/orders/edit-logs" }, { method: "GET", path: "/items/pis-update-logs" }], sources: [src("backend/models/uploadLog.model.js"), src("backend/models/orderEditLog.model.js"), src("backend/models/qcEditLog.model.js"), src("backend/models/pisUpdateLog.model.js"), src("backend/routers/orders.routes.js")]}),
-    capability("assistant_forecasts", "Assistant deterministic forecasts", "assistant_platform", "Current Assistant-only deterministic forecast helpers for next-container/vendor and related analytical summaries. Catalogued for future wiring, not exposed by this Knowledge Base.", ["orders", "qcs", "items", "brands", "vendors"], { kind: "canonical_service", canonical: "omsForecast.service" }, { keywords: ["forecast", "next container", "vendor forecast", "assistant analytics"], sources: [src("backend/services/omsForecast.service.js"), src("backend/services/omsChat.service.js")], assistantStatus: "existing_assistant_feature_not_rewired", certainty: "verified"}),
+    capability("assistant_forecasts", "Assistant deterministic forecasts", "assistant_platform", "Current Assistant-only deterministic forecast helpers for next-container/vendor and related analytical summaries. Catalogued for capability-aware planning and kept behind its dedicated analytics tool.", ["orders", "qcs", "items", "brands", "vendors"], { kind: "canonical_service", canonical: "omsForecast.service" }, { keywords: ["forecast", "next container", "vendor forecast", "assistant analytics"], sources: [src("backend/services/omsForecast.service.js"), src("backend/services/omsChat.service.js")], certainty: "verified"}),
   ],
   relationships: [
     relation("order_item_code", { collection: "orders", field: "item.item_code" }, { collection: "items", field: "code" }, "Order item code links an order line to its item master record.", [src("backend/models/order.model.js"), src("backend/models/item.model.js")], "verified", { cardinality: "many_to_one", join: "logical_code" }),
@@ -172,7 +203,7 @@ const catalog = {
   sourceOfTruthRules: [
     { id: "orders_live_state", description: "Live order facts come from orders; edit/archive logs are history only.", canonicalSource: "orders", sources: [src("backend/models/order.model.js"), src("backend/models/orderEditLog.model.js")], certainty: "verified" },
     { id: "order_progress_derivation", description: "Use deriveOrderProgress for current analytical PO progress/status rather than only orders.status.", canonicalSource: "backend/helpers/orderStatus.js#deriveOrderProgress", sources: [src("backend/helpers/orderStatus.js")], certainty: "verified" },
-    { id: "packed_goods_dataset", description: "Packed Goods is the buildPackedGoodsDataset report result; its API/export share the builder. It is controller-local today, not a reusable service.", canonicalSource: "backend/controllers/order.controller.js#buildPackedGoodsDataset", sources: [src("backend/controllers/order.controller.js"), src("backend/routers/orders.routes.js")], certainty: "verified" },
+    { id: "packed_goods_dataset", description: "Packed Goods is the shared buildPackedGoodsDataset service result used by its API, export, forecasts, and Assistant capability adapter.", canonicalSource: "backend/services/packedGoods.service.js#buildPackedGoodsDataset", sources: [src("backend/services/packedGoods.service.js"), src("backend/controllers/order.controller.js"), src("backend/routers/orders.routes.js")], certainty: "verified" },
     { id: "shipment_cbm_calculation", description: "Use shipmentCbmAllocation/orderCbm calculations. Stored orders.total_po_cbm is a final fallback/cache, not preferred raw measurement evidence.", canonicalSource: "backend/services/shipmentCbmAllocation.service.js", sources: [src("backend/services/shipmentCbmAllocation.service.js"), src("backend/services/orderCbm.service.js")], certainty: "verified" },
     { id: "quality_live_state", description: "Current QC and inspection facts come from qcs and inspections; QC edit logs are history only.", canonicalSource: "qcs and inspections", sources: [src("backend/models/qc.model.js"), src("backend/models/inspection.model.js"), src("backend/models/qcEditLog.model.js")], certainty: "verified" },
     { id: "item_measurement_hierarchy", description: "Use array-backed inspected/PIS/master fields for measurement comparison. Master is preferred for Final PIS Check reference; PIS is its fallback.", canonicalSource: "items measurement arrays plus documented comparison helpers", sources: [src("backend/models/item.model.js"), src("backend/helpers/finalPisCheck.js"), src("docs/MEASUREMENT_MISMATCH_COMPARISON_FLOW.md")], certainty: "verified" },
@@ -182,7 +213,7 @@ const catalog = {
   ],
   businessDefinitions: [
     { id: "purchase_order", term: "Purchase order (PO)", definition: "An order line in orders, identified operationally by order_id and item context.", sourceOfTruthRule: "orders_live_state", sources: [src("backend/models/order.model.js")], certainty: "verified" },
-    { id: "packed_goods_definition", term: "Packed Goods", definition: "Order quantity that has passed QC and remains unshipped: the canonical report emits rows only where inspected_unshipped_quantity is greater than zero.", sourceOfTruthRule: "packed_goods_dataset", sources: [src("backend/controllers/order.controller.js", "buildPackedGoodsDataset"), src("backend/helpers/orderStatus.js", "deriveOrderProgress")], certainty: "verified" },
+    { id: "packed_goods_definition", term: "Packed Goods", definition: "Order quantity that has passed QC and remains unshipped: the canonical report emits rows only where inspected_unshipped_quantity is greater than zero.", sourceOfTruthRule: "packed_goods_dataset", sources: [src("backend/services/packedGoods.service.js", "buildPackedGoodsDataset"), src("backend/helpers/orderStatus.js", "deriveOrderProgress")], certainty: "verified" },
     { id: "pending_inspection", term: "Pending inspection quantity", definition: "Order quantity minus passed QC quantity, capped at zero.", sourceOfTruthRule: "order_progress_derivation", sources: [src("backend/helpers/orderStatus.js", "deriveOrderProgress")], certainty: "verified" },
     { id: "inspected_unshipped", term: "Inspected-unshipped quantity", definition: "The passed quantity still not shipped, capped by the remaining order quantity.", sourceOfTruthRule: "order_progress_derivation", sources: [src("backend/helpers/orderStatus.js", "deriveOrderProgress")], certainty: "verified" },
     { id: "order_status", term: "Order status", definition: "Derived lifecycle status: Pending, Under Inspection, Inspection Done, Partial Shipped, or Shipped; Cancelled is only allowed by a zero-quantity compatibility option.", sourceOfTruthRule: "order_progress_derivation", sources: [src("backend/helpers/orderStatus.js")], certainty: "verified" },
@@ -200,7 +231,14 @@ const catalog = {
     { alias: "packed goods", target: { kind: "capability", id: "packed_goods" } },
     { alias: "packed", target: { kind: "capability", id: "packed_goods" } },
     { alias: "goods ready", target: { kind: "capability", id: "packed_goods" } },
+    { alias: "ready goods", target: { kind: "capability", id: "packed_goods" } },
+    { alias: "ready cbm", target: { kind: "capability", id: "packed_goods" } },
     { alias: "ready to ship", target: { kind: "capability", id: "packed_goods" } },
+    { alias: "available to ship", target: { kind: "capability", id: "packed_goods" } },
+    { alias: "inspected but unshipped", target: { kind: "capability", id: "packed_goods" } },
+    { alias: "shipment ready volume", target: { kind: "capability", id: "packed_goods" } },
+    { alias: "containers shipped", target: { kind: "capability", id: "monthly_shipments" } },
+    { alias: "shipped last month", target: { kind: "capability", id: "monthly_shipments" } },
     { alias: "po", target: { kind: "business_definition", id: "purchase_order" } },
     { alias: "purchase order", target: { kind: "business_definition", id: "purchase_order" } },
     { alias: "shipment volume", target: { kind: "capability", id: "shipment_cbm" } },
@@ -218,7 +256,7 @@ const catalog = {
     { id: "historical_inspection_snapshots", description: "Inspection snapshots preserve historical measurement evidence for QC Report Mismatch; they are not automatically equivalent to the current Item inspected fields.", migration: "backend/scripts/backfillInspectionSizeSnapshots.js", sources: [src("backend/helpers/inspectionSizeSnapshot.js"), src("backend/scripts/backfillInspectionSizeSnapshots.js")], certainty: "verified" },
   ],
   auditFindings: [
-    { id: "packed_goods_controller_local", severity: "review", description: "Packed Goods has a canonical shared builder for its API and export, but it remains a controller-local helper. Step 2 needs an explicit read-only adapter rather than importing controller internals.", sources: [src("backend/controllers/order.controller.js", "buildPackedGoodsDataset")], certainty: "verified" },
+    { id: "packed_goods_shared_service", severity: "informational", description: "Packed Goods now has one shared canonical builder used by the API, export, Assistant, and forecast readiness calculations.", sources: [src("backend/services/packedGoods.service.js", "buildPackedGoodsDataset"), src("backend/services/omsCapabilityExecution.service.js", "executePackedGoods")], certainty: "verified" },
     { id: "packed_goods_frontend_presentation", severity: "informational", description: "PackedGoods.jsx fetches the unfiltered API dataset, then filters, sorts, paginates, and recomputes its displayed summary locally. This is presentation duplication, not a second business data source.", sources: [src("client/OMS/src/pages/PackedGoods.jsx")], certainty: "verified" },
     { id: "frontend_shipping_status_derivation", severity: "review", description: "Client shipping-report utilities derive grouped PO presentation status. Step 2 should use backend orderStatus helpers for Assistant-facing semantics.", sources: [src("client/OMS/src/utils/shippingPendingReport.js"), src("backend/helpers/orderStatus.js")], certainty: "strongly_inferred" },
     { id: "stored_cbm_fallback", severity: "warning", description: "Stored total_po_cbm can differ from current measurement-based CBM and must be labelled as fallback/cached when used.", sources: [src("backend/services/shipmentCbmAllocation.service.js")], certainty: "verified" },

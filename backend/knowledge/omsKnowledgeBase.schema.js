@@ -10,6 +10,11 @@ const REQUIRED_SOURCE_OF_TRUTH_KINDS = new Set([
   "frontend_presentation",
   "legacy_compatibility",
 ]);
+const REQUIRED_ASSISTANT_STATUSES = new Set([
+  "tool_eligible",
+  "existing_assistant_feature",
+  "documented_not_tool_eligible",
+]);
 
 const normalize = (value) => String(value || "").trim().toLowerCase();
 const unique = (values) => new Set(values).size === values.length;
@@ -72,6 +77,9 @@ const validateKnowledgeBase = (catalog, {
     add(domains.has(capability?.domain), `capability ${id || index} references unknown domain ${capability?.domain || ""}`);
     if (capabilities.has(id)) errors.push(`duplicate capability id: ${id}`);
     if (!REQUIRED_CERTAINTIES.has(capability?.certainty)) errors.push(`capability ${id || index} has invalid certainty`);
+    if (!REQUIRED_ASSISTANT_STATUSES.has(capability?.assistantStatus)) {
+      errors.push(`capability ${id || index} has invalid Assistant status`);
+    }
     if (!REQUIRED_SOURCE_OF_TRUTH_KINDS.has(capability?.sourceOfTruth?.kind)) {
       errors.push(`capability ${id || index} has invalid source-of-truth kind`);
     }
@@ -157,6 +165,7 @@ const validateKnowledgeBase = (catalog, {
 };
 
 module.exports = {
+  REQUIRED_ASSISTANT_STATUSES,
   REQUIRED_CERTAINTIES,
   REQUIRED_SOURCE_OF_TRUTH_KINDS,
   normalize,

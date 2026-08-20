@@ -972,6 +972,9 @@ const fetchMonthlyShipmentContributionRows = async ({
   period,
   user,
   query = {},
+  OrderModel = Order,
+  allowDiskUse = true,
+  maxTimeMS,
 } = {}) => {
   const match = combineMongoMatches(
     buildShipmentBaseMatch({ period, user }),
@@ -1136,7 +1139,9 @@ const fetchMonthlyShipmentContributionRows = async ({
     { $sort: { container: 1, brand: 1, vendor: 1, order_id: 1 } },
   );
 
-  const rows = await Order.aggregate(pipeline).allowDiskUse(true);
+  const aggregation = OrderModel.aggregate(pipeline).allowDiskUse(allowDiskUse);
+  if (Number(maxTimeMS) > 0) aggregation.option({ maxTimeMS: Number(maxTimeMS) });
+  const rows = await aggregation;
 
   return rows.map((row) => {
     const allocatedCbm = resolveShipmentRowCbm({

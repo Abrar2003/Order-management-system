@@ -2,22 +2,22 @@
 
 Use this file when changing the OMS Assistant. It explains the current implementation, its supported behaviour, and the safe place to make each kind of change. Source code is the authority if this file ever disagrees with it. `docs/OMS_ASSISTANT.md` remains the deployment and operations guide; `docs/OMS_SOURCE_TREE.md` is the repository-wide file tree.
 
-Step 1 also provides `docs/OMS_KNOWLEDGE_BASE.md` and a static backend knowledge catalog for future Assistant work. It is not wired into the current Assistant, prompt, tools, routes, UI, or database query flow.
+The versioned Knowledge Base in `docs/OMS_KNOWLEDGE_BASE.md` is wired into the Assistant as a canonical-first selection layer. The catalog remains static metadata; only an explicit server-side adapter registry can execute eligible capabilities.
 
 ## What it is
 
 OMS Assistant is an authenticated, read-only reporting chat for OMS data. The browser sends a plain-language question to the Express backend. The backend, not the model, owns authentication, permission checks, conversation ownership, rate limiting, database access, validation, audit logging, and every response sent to the browser.
 
-It uses Google Gemini's **Interactions API** through `@google/genai` as a bounded planner and synthesizer. The primary model is `gemini-3.7-flash`. Three backend-owned tools are available: `inspect_oms_schema` returns catalogue metadata without record values, `query_oms_database` runs a validated aggregation, and `analyze_oms_business_data` runs a strict enum of deterministic lead-time/readiness analyses. Gemini never receives application credentials, cookies, JWTs, database URIs, or direct database access.
+It uses Google Gemini's **Interactions API** through `@google/genai` as a bounded planner and synthesizer. The primary model is `gemini-3.7-flash`. Four backend-owned tools are available: `use_oms_capability` executes allowlisted canonical reports, `inspect_oms_schema` returns catalogue and Knowledge Base metadata without record values, `query_oms_database` runs a validated supplemental aggregation, and `analyze_oms_business_data` runs a strict enum of deterministic lead-time/readiness analyses. Gemini never receives application credentials, cookies, JWTs, database URIs, or direct database access.
 
 ```text
 React chat page
     -> POST /oms-chat/ask
     -> request trace -> audit -> auth -> oms_assistant.view -> per-user rate limit
     -> controller validates the request body
-    -> service resolves entities/date and handles supported deterministic reports
+    -> service resolves entities/date and preselects relevant Knowledge Base capabilities
     -> Gemini Interactions API (only when no deterministic report handles it)
-    -> bounded schema/query/analytics investigation loop
+    -> bounded capability/schema/query/analytics investigation loop
     -> validated aggregation on a separate read-only MongoDB connection
     -> backend forecast calculations where requested
     -> answer + bounded supporting rows + factual/forecast metadata
@@ -39,9 +39,19 @@ Two report families have programmatic answers instead of relying on model prose:
 
 Everything else goes through bounded Gemini tool calling. The model must use validated queries for factual numbers/records and the forecasting service for predictions; it must not invent either.
 
-Forecasting supports historical inspection lead time, open-order readiness, brand-ready CBM, a vendor's likely next shipment readiness, and brand-level vendor comparison for the next container. The vendor forecast requires a resolved vendor; the brand comparison requires a resolved brand and derives candidate vendors from that brand's open orders. It reuses the existing packaging-aware CBM calculation, combines current inspected/unshipped quantities with open PO contributions, and returns the first cumulative date that reaches the configured container target. Brand candidates rank ready-now first, then forecast threshold date; when none reaches the target, the closest projected CBM is reported as not yet forecast-ready. The written answer must distinguish stored facts, derived arithmetic, forecasts, and unknowns.
+Forecasting supports historical inspection lead time, open-order readiness, brand-ready CBM, a vendor's likely next shipment readiness, and brand-level vendor comparison for the next container. The vendor forecast requires a resolved vendor; the brand comparison requires a resolved brand. Current ready CBM always comes from the canonical Packed Goods capability; candidate brands/vendors are the union of Packed Goods and open-order evidence. Open POs provide only possible future contribution. The forecast returns the first cumulative date that reaches the configured container target and the written answer distinguishes stored facts, derived arithmetic, forecasts, and unknowns.
 
 The assistant does **not** write OMS data, create reports/files, expose aggregation pipelines, or serve as a bulk export. It returns at most 100 top-level supporting rows, with nested arrays capped at 20 entries. Use the existing OMS export/report routes for full datasets.
+
+## Knowledge-aware canonical-first flow
+
+`searchCapabilities()` ranks a compact set of relevant catalog entries from the resolved question. Only that subset is included in the system instructions; the full 28-capability catalog is not sent on every turn. The model may then call `use_oms_capability`, schema inspection, raw MongoDB, or deterministic analytics.
+
+`backend/services/omsCapabilityExecution.service.js` owns the explicit registry. `packed_goods` calls the same `packedGoods.service.js` builder used by its API and export. `monthly_shipments` calls the existing `monthlyShipmentsReport.service.js`. Both run against models bound to the separate read-only Assistant connection. Adapter filters and operations are allowlisted, grouping/metrics/sorting are server-side, and output is bounded to 100 rows/groups with safe provenance and warnings.
+
+For obvious Packed Goods or Monthly Shipments intent, a raw-query attempt is redirected internally: the canonical adapter runs first, and the model may ask for a raw query only for missing supplemental detail. No-match questions retain the existing schema and raw-Mongo route. Capability results are not cached, so reports retain current application freshness.
+
+Audit/log metadata distinguishes entity-resolution queries, capability calls, raw database tool calls, analytics calls, schema calls, invalid calls, capabilities used, and internal database-operation counts. It never records capability result documents.
 
 ## Runtime behaviour and limits
 
@@ -57,7 +67,7 @@ The assistant does **not** write OMS data, create reports/files, expose aggregat
 | Provider | Google Gemini through `@google/genai`; no automatic Groq fallback |
 | Model | `gemini-3.7-flash` by default; override with `OMS_CHAT_LLM_MODEL` |
 | Model timeout | 90 seconds; transient 429/5xx/network Gemini failures retry up to twice |
-| Model investigation | At most 8 tool iterations and 8 total tool calls; at most 2 recoverable analytics validation corrections |
+| Model investigation | At most 8 tool iterations and 8 total tool calls; at most 2 recoverable analytics corrections and 2 recoverable capability corrections |
 | Total database calls | At most 10 including entity resolution; schema inspection uses none |
 | Aggregation | Max 12 user stages (including lookup stages), lookup nesting depth 2, max 10,000 skip |
 | Database | Separate `OMS_CHAT_MONGO_URI`, 8-second query timeout, `allowDiskUse: false`, 100 returned rows / 128 KiB serialized result |
@@ -76,7 +86,7 @@ When a limit is reached after useful evidence was collected, the service removes
 
 Every Gemini request explicitly sets `store: false`. `omsAiProvider.service.js` carries the active interaction steps in memory and replays them on each stateless turn, including function calls and any opaque thought steps required for continuity. A final text turn or a valid function-call turn is successful; an interaction response ID is optional in this stateless flow, but every function call must have its provider-issued call ID. Raw steps and reasoning are discarded after the request; only the existing bounded user/assistant text history is persisted by OMS. Local response-schema failures are not retried; only transient upstream/network failures are.
 
-An expected deterministic analytics validation error returns a compact, safe function result so Gemini can select the correct approved analysis. This is bounded to two corrections before the service requests a final best-evidence answer. Invalid tool JSON, unsupported tools, unsafe queries, and execution failures remain fatal rather than recoverable.
+Expected analytics and capability validation errors return compact, safe function results so Gemini can correct an approved request. Capability failures such as unknown ID, non-eligible capability, unsupported filter/group/metric, and excessive limit are recoverable and bounded to two corrections. Invalid tool JSON, unsupported tool names, unsafe raw queries, and non-recoverable execution failures remain fatal.
 
 ## Forecast definitions
 
@@ -84,7 +94,7 @@ An expected deterministic analytics validation error returns a compact, safe fun
 - Rejected, transferred, reworked, zero-pass, negative, future, and over-730-day records are invalid. Multiple valid inspections for one PO/item are de-duplicated to the earliest successful inspection.
 - Obvious outliers use the deterministic 1.5×IQR rule. Statistics retain original count, used count, outlier count, median/P50, P75, P90, mean, range, standard deviation, IQR, and recent-12-month median/trend.
 - Every fallback level needs at least three samples: same item+vendor, same item across vendors, same product type+vendor, vendor-wide, then available OMS baseline. No unsupported "similar item" relationship is invented.
-- Current ready CBM is `qc_passed - shipped`, bounded by order quantity. Pending inspection quantity can contribute later only when its CBM can be calculated by `shipmentCbmAllocation.service.js` or prorated from stored `total_po_cbm`.
+- Current ready CBM is the grouped result of `packedGoods.service.js`; packed quantity comes from `deriveOrderProgress`, and measurement-based CBM is preferred before the documented stored `total_po_cbm` fallback. Pending inspection quantity can contribute later only when its CBM can be calculated by `shipmentCbmAllocation.service.js` or prorated from stored `total_po_cbm`.
 - The brand-level vendor comparison returns each candidate's ready, remaining, and projected CBM; first forecast threshold date; contributing orders; and deterministic confidence/evidence. It uses the same configurable target as all other shipment forecasts.
 - Forecast earliest dates use historical median; planning uses the later of historical P75 and effective revised/original ETD; P90 supplies the conservative window end. The container target comes from the request or `OMS_CHAT_CONTAINER_TARGET_CBM`, with a documented 65-CBM fallback.
 - Confidence score components are sample depth (35), fallback specificity (30), consistency/dispersion (20), recency (10), and completeness (5). Brand shipment confidence also weights evidence by forecast CBM coverage. High requires score ≥75, at least five samples, and at least 80% evidence coverage; Moderate is ≥50; otherwise Low.
@@ -98,25 +108,28 @@ An expected deterministic analytics validation error returns a compact, safe fun
 | Route and navbar visibility | `client/OMS/src/App.jsx`, `client/OMS/src/components/Navbar.jsx` | Page is lazy-loaded at `/oms-assistant`. |
 | HTTP endpoint and safe public errors | `backend/routers/omsChat.routes.js`, `backend/controllers/omsChat.controller.js` | Mounted at both `/oms-chat` and `/api/oms-chat`. |
 | Core prompt, entity/date resolution, deterministic reports, conversation loop | `backend/services/omsChat.service.js` | Main behaviour file. |
+| Static OMS domains, capabilities, definitions, aliases, status, and deterministic search | `backend/knowledge/omsKnowledgeBase.*`, `backend/services/omsKnowledgeBase.service.js` | Catalog `1.1.0`; never dynamically executes source metadata. |
+| Capability validation, explicit adapters, bounded grouping, and safe provenance | `backend/services/omsCapabilityExecution.service.js` | Only `packed_goods` and `monthly_shipments` are tool-eligible. |
+| Shared Packed Goods canonical dataset | `backend/services/packedGoods.service.js` | Used unchanged by the API, export, Assistant, and forecast input. |
 | Gemini initialization, stateless Interactions requests, response normalization, and provider retries/errors | `backend/services/omsAiProvider.service.js` | Always enforces `store: false`; does not access MongoDB. |
 | Correlated structured lifecycle/error logs | `backend/services/omsChatLogger.service.js` | Every request uses one `request_id`; logs omit credentials, provider payloads, query pipelines, and result documents. |
-| Collection catalogue, business definitions/data relationships given to the model | `backend/services/omsChatCatalog.service.js` | Update this when a model/schema relationship changes. |
+| Collection catalogue, Knowledge Base definitions/relationships given to the model | `backend/services/omsChatCatalog.service.js` | Returns no record values or source file paths. |
 | Aggregation validation, normalization stages, read-only Mongo connection, result limits | `backend/services/omsChatQuery.service.js` | Treat changes here as security-sensitive. |
 | Historical lead-time, confidence, PO readiness, brand CBM timeline, controlled analytics queries | `backend/services/omsForecast.service.js` | Deterministic and reusable; keep model arithmetic out of this path. |
 | Conversation TTL/history model | `backend/models/omsChatConversation.model.js` | Stored in the primary application database. |
 | Per-user limiter | `backend/middlewares/omsChatRateLimit.middleware.js`, `backend/models/omsChatRateBucket.model.js` | TTL bucket model. |
 | Permission module and role lock | `backend/helpers/permissions.js`, `backend/helpers/userRole.js` | `oms_assistant.view` is locked to admin-like roles. |
-| Feature tests | `backend/tests/omsAiProvider.test.js`, `backend/tests/omsChat.test.js`, `backend/tests/omsForecast.test.js`, `client/OMS/src/utils/omsAssistantState.test.js` | Provider mocks never call the live Gemini API; backend tests cover security, agent bounds, and forecasts. |
+| Feature tests | `backend/tests/omsCapabilityExecution.test.js`, `backend/tests/omsKnowledgeBase.test.js`, `backend/tests/omsAiProvider.test.js`, `backend/tests/omsChat.test.js`, `backend/tests/omsForecast.test.js`, `client/OMS/src/utils/omsAssistantState.test.js` | Provider mocks never call live Gemini; fixtures prove report/capability/forecast equivalence. |
 
 ## How a request is coded
 
 1. `OmsAssistant.jsx` posts `{ message, conversationId? }` with the shared Axios client. It stores the returned server `conversationId` for the next question.
 2. `omsChat.routes.js` assigns a request ID, starts ordered JSON lifecycle logging, records audit metadata, authenticates the user, checks `oms_assistant.view`, then rate-limits the request.
 3. The controller allows only `message` and `conversationId`, limits the body, maps internal errors to safe public messages/codes, and returns the request ID for log correlation without exposing stacks or provider payloads.
-4. `askOmsAssistant()` validates the question/configuration, creates or verifies a user-owned conversation, then resolves live entities and simple date phrases.
-5. If a deterministic shipment/CBM handler applies, it returns its programmatic answer. Otherwise the provider service sends Gemini the system instructions, recent text-only history, current question, resolved context, and the three bounded tool definitions with `store: false` and high thinking.
-6. The service iterates at most eight times. Schema arguments are restricted to catalogue collection names; general aggregations go through `executeOmsQuery()`; controlled analytics query via the same executor and calculate in `omsForecast.service.js`.
-7. The model receives only safe schema metadata, bounded rows/metadata, or compact analysis results. The provider service replays active Gemini steps and function results without using a provider interaction ID. If the budget is exhausted, a final turn repeats the declarations for stateless context but sets `tool_choice: "none"` so Gemini must synthesize the evidence already gathered.
+4. `askOmsAssistant()` validates the question/configuration, creates or verifies a user-owned conversation, resolves live entities/date phrases, and preselects a small ranked Knowledge Base subset.
+5. If a deterministic shipment/CBM handler applies, it returns its programmatic answer. Otherwise the provider sends Gemini the system instructions, recent text history, resolved context, compact capability context, and four bounded tool definitions with `store: false` and high thinking.
+6. The service iterates at most eight times. Canonical capabilities go through the explicit adapter registry; schema arguments are restricted to catalogued business collections; supplemental aggregations go through `executeOmsQuery()`; controlled analytics use the same query executor and canonical Packed Goods readiness.
+7. The model receives only safe Knowledge Base/schema metadata, bounded capability/query rows, or compact analysis results. If a clearly canonical question first requests raw MongoDB, the server executes the canonical capability and returns recoverable guidance. If the budget is exhausted, a final turn sets `tool_choice: "none"` so Gemini must synthesize completed evidence.
 8. The service saves compact history with optimistic revision checking and returns safe factual/forecast metadata. The page renders the complete answer, optional forecast pills, and optional supporting rows.
 
 ## Where to make common changes
@@ -126,6 +139,8 @@ An expected deterministic analytics validation error returns a compact, safe fun
 | Reword the assistant's general behaviour or business definitions | `buildSystemInstructions()` in `omsChat.service.js` | Keep the "read-only, factual answers require tool, do not reveal internals" rules. |
 | Add a collection/field/relationship the model should understand | `omsChatCatalog.service.js` and relevant Mongoose model | The catalogue asserts that listed physical fields still exist. Add a test for the report. |
 | Add a reliable, repeatable report format | Add a small recognizer/handler near the existing deterministic shipment helpers in `omsChat.service.js` | Reuse `executeOmsQuery`; do not put MongoDB access in the controller or frontend. |
+| Make a canonical OMS report Assistant-callable | Classify it in `omsKnowledgeBase.catalog.js`, then add one explicit adapter in `omsCapabilityExecution.service.js` | Reuse/extract the canonical service; never dynamically load a catalog path or import a controller. |
+| Change Packed Goods semantics or filters | `packedGoods.service.js` plus controller/capability regression tests | API, export, Assistant, and forecast must keep using the same builder. |
 | Change lead-time, confidence, ready-CBM, or shipment forecast rules | `omsForecast.service.js` and `omsForecast.test.js` | Reuse order-status and CBM helpers; add deterministic fixtures before changing the prompt. |
 | Add a controlled analytical capability | `ANALYSIS_TYPES`, validator, and runner in `omsForecast.service.js`; tool schema in `omsChat.service.js` | Keep a strict enum and fixed backend-built pipelines. |
 | Support more aggregation syntax | `omsChatQuery.service.js` | Add the narrowest validator rule and a rejection/acceptance test. Do not enable writes, JS, raw commands, or unbounded output. |
@@ -151,9 +166,12 @@ Run the focused checks after assistant work:
 
 ```bash
 cd backend
+node --test tests/omsKnowledgeBase.test.js
+node --test tests/omsCapabilityExecution.test.js
 node --test tests/omsAiProvider.test.js
 node --test tests/omsChat.test.js
 node --test tests/omsForecast.test.js
+npm test
 
 cd ../client/OMS
 node --test src/utils/omsAssistantState.test.js
