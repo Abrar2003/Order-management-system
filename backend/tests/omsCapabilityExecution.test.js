@@ -151,7 +151,7 @@ test("Assistant Packed Goods supports its intentional unscoped null-user read", 
   assert.equal(result.summary.totalCbm, 10);
 });
 
-test("capability registry exactly matches the explicit tool-eligible set", () => {
+test("capability registry contains only the explicit registered adapters", () => {
   assert.doesNotThrow(assertAdapterRegistryMatchesKnowledgeBase);
   assert.deepEqual(Object.keys(CAPABILITY_ADAPTERS).sort(), [
     "monthly_shipments",
@@ -203,4 +203,5 @@ test("knowledge preselection ranks canonical natural-language matches", () => {
   assert.equal(findRelevantCapabilities("How much By Boo goods ready CBM is available to ship?")[0].id, "packed_goods");
   assert.equal(findRelevantCapabilities("How many containers shipped last month?")[0].id, "monthly_shipments");
   assert.ok(findRelevantCapabilities("Count open orders").some((entry) => entry.id === "order_list"));
+  assert.ok(!findRelevantCapabilities("Which POs are delayed today?").some((entry) => entry.id === "delayed_po"));
 });

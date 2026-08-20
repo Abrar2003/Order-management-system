@@ -9,7 +9,6 @@ const {
 const { getOmsChatConnection } = require("./omsChatQuery.service");
 const {
   getCapability,
-  listCapabilities,
   searchCapabilities,
 } = require("./omsKnowledgeBase.service");
 const {
@@ -380,9 +379,14 @@ const CAPABILITY_ADAPTERS = Object.freeze({
 });
 
 const assertAdapterRegistryMatchesKnowledgeBase = () => {
-  const eligible = listCapabilities({ assistantStatus: "tool_eligible" }).map((entry) => entry.id).sort();
   const registered = Object.keys(CAPABILITY_ADAPTERS).sort();
-  if (JSON.stringify(eligible) !== JSON.stringify(registered)) {
+  const invalid = registered.filter((id) => {
+    const capability = getCapability(id);
+    return !capability
+      || capability.assistantRecommendation !== "DIRECT_CAPABILITY"
+      || capability.assistantStatus !== "existing_assistant_feature";
+  });
+  if (invalid.length) {
     throw new Error("OMS capability adapter registry is out of sync with the Knowledge Base");
   }
 };
@@ -395,7 +399,7 @@ const executeOmsCapability = async (request, dependencies = {}) => {
   logOmsChatEvent("capability.requested", { capability_id: capabilityId });
   const capability = getCapability(capabilityId);
   if (!capability) throw new OmsCapabilityError("unknown_capability", "That OMS capability is not available.");
-  if (capability.assistantStatus !== "tool_eligible" || !CAPABILITY_ADAPTERS[capability.id]) {
+  if (!CAPABILITY_ADAPTERS[capability.id]) {
     throw new OmsCapabilityError("capability_not_available", "That OMS capability is not available to the Assistant.");
   }
   logOmsChatEvent("capability.validation_completed", {
@@ -458,7 +462,7 @@ const findRelevantCapabilities = (question, { limit = 5 } = {}) => {
   const preferred = strongIntentCapabilityIds(question).map(getCapability).filter(Boolean);
   const searched = searchCapabilities(question, { limit: 12 });
   return [...new Map([...preferred, ...searched].map((entry) => [entry.id, entry])).values()]
-    .filter((capability) => capability.assistantStatus !== "documented_not_tool_eligible")
+    .filter((capability) => ["existing_assistant_feature", "ready"].includes(capability.assistantStatus))
     .slice(0, Math.max(1, Math.min(6, limit)));
 };
 
@@ -477,7 +481,7 @@ const buildKnowledgeCapabilityContext = (capabilities = []) => (
   capabilities.length
     ? capabilities.map((capability) => {
         const inputs = capability.inputs?.length ? ` Supported filters: ${capability.inputs.join(", ")}.` : "";
-        const priority = capability.assistantStatus === "tool_eligible"
+        const priority = CAPABILITY_ADAPTERS[capability.id]
           ? " Use the canonical capability before rebuilding this concept from raw data."
           : " This capability is already represented by an existing bounded Assistant path.";
         return `- ${capability.id} (${capability.name}): ${capability.description}${inputs}${priority}`;

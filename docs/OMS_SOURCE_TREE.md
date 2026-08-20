@@ -88,6 +88,7 @@ oms/
 |   |   `-- workflow.js
 |   |-- knowledge/
 |   |   |-- omsKnowledgeBase.catalog.js
+|   |   |-- omsKnowledgeBase.capabilities.js
 |   |   `-- omsKnowledgeBase.schema.js
 |   |-- middlewares/
 |   |   |-- auth.middleware.js
@@ -585,6 +586,7 @@ oms/
 |   |-- OMS_ASSISTANT_CONTEXT.md
 |   |-- OMS_ASSISTANT.md
 |   |-- OMS_KNOWLEDGE_BASE.md
+|   |-- OMS_REPORTS_AND_FUNCTIONS_SUMMARY.md
 |   |-- OMS_SOURCE_TREE.md
 |   |-- PDF_EXPORT_SYSTEM.md
 |   |-- PIS_PD_MASTER_ITEM_FLOW.md

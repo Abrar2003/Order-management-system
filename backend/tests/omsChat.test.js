@@ -1979,7 +1979,7 @@ test("schema discovery exposes catalogued structure without records or denied co
   assert.ok(schema.collections[0].fields.some((field) => field.name === "order_id"));
   assert.equal(Object.hasOwn(schema.collections[0], "model"), false);
   assert.equal(Object.hasOwn(schema.collections[0], "rows"), false);
-  assert.equal(schema.knowledgeBase.version, "1.1.0");
+  assert.equal(schema.knowledgeBase.version, "2.0.0");
   assert.ok(schema.knowledgeBase.collections[0].capabilities.some(
     (capability) => capability.id === "packed_goods"
       && capability.sourceKind === "canonical_report_query"

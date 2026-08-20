@@ -2,7 +2,7 @@
 
 Use this file when changing the OMS Assistant. It explains the current implementation, its supported behaviour, and the safe place to make each kind of change. Source code is the authority if this file ever disagrees with it. `docs/OMS_ASSISTANT.md` remains the deployment and operations guide; `docs/OMS_SOURCE_TREE.md` is the repository-wide file tree.
 
-The versioned Knowledge Base in `docs/OMS_KNOWLEDGE_BASE.md` is wired into the Assistant as a canonical-first selection layer. The catalog remains static metadata; only an explicit server-side adapter registry can execute eligible capabilities.
+The versioned Knowledge Base in `docs/OMS_KNOWLEDGE_BASE.md` is wired into the Assistant as a canonical-first selection layer. Knowledge Base V2 now maps all 74 audited OMS capability groups and is ready for the next capability-execution integration phase. This does **not** mean the Assistant can execute all 74 capabilities: the catalog remains static metadata, and only an explicit server-side adapter registry can execute a capability.
 
 ## What it is
 
@@ -45,7 +45,7 @@ The assistant does **not** write OMS data, create reports/files, expose aggregat
 
 ## Knowledge-aware canonical-first flow
 
-`searchCapabilities()` ranks a compact set of relevant catalog entries from the resolved question. Only that subset is included in the system instructions; the full 28-capability catalog is not sent on every turn. The model may then call `use_oms_capability`, schema inspection, raw MongoDB, or deterministic analytics.
+`searchCapabilities()` ranks V2 catalog entries deterministically, but the current Assistant preselection passes through only `existing_assistant_feature`/`ready` entries. `not_ready`, business-blocked, export/presentation, and unsafe entries are not advertised as executable paths. Only a compact selected subset is included in system instructions; the full 74-capability catalog is never sent on every turn. Search exposes audited ambiguity candidates and separate architectural recommendation/runtime readiness metadata for the next phase.
 
 `backend/services/omsCapabilityExecution.service.js` owns the explicit registry. `packed_goods` calls the same `packedGoods.service.js` builder used by its API and export. `monthly_shipments` calls the existing `monthlyShipmentsReport.service.js`. Both run against models bound to the separate read-only Assistant connection. Adapter filters and operations are allowlisted, grouping/metrics/sorting are server-side, and output is bounded to 100 rows/groups with safe provenance and warnings.
 
@@ -108,8 +108,8 @@ Expected analytics and capability validation errors return compact, safe functio
 | Route and navbar visibility | `client/OMS/src/App.jsx`, `client/OMS/src/components/Navbar.jsx` | Page is lazy-loaded at `/oms-assistant`. |
 | HTTP endpoint and safe public errors | `backend/routers/omsChat.routes.js`, `backend/controllers/omsChat.controller.js` | Mounted at both `/oms-chat` and `/api/oms-chat`. |
 | Core prompt, entity/date resolution, deterministic reports, conversation loop | `backend/services/omsChat.service.js` | Main behaviour file. |
-| Static OMS domains, capabilities, definitions, aliases, status, and deterministic search | `backend/knowledge/omsKnowledgeBase.*`, `backend/services/omsKnowledgeBase.service.js` | Catalog `1.1.0`; never dynamically executes source metadata. |
-| Capability validation, explicit adapters, bounded grouping, and safe provenance | `backend/services/omsCapabilityExecution.service.js` | Only `packed_goods` and `monthly_shipments` are tool-eligible. |
+| Static OMS domains, 74 audited capabilities, definitions, ambiguities, status, and deterministic search | `backend/knowledge/omsKnowledgeBase.*`, `backend/services/omsKnowledgeBase.service.js` | Catalog `2.0.0`; never dynamically executes source metadata. |
+| Capability validation, explicit adapters, bounded grouping, and safe provenance | `backend/services/omsCapabilityExecution.service.js` | Only `packed_goods` and `monthly_shipments` have registered capability adapters. |
 | Shared Packed Goods canonical dataset | `backend/services/packedGoods.service.js` | Used unchanged by the API, export, Assistant, and forecast input. |
 | Gemini initialization, stateless Interactions requests, response normalization, and provider retries/errors | `backend/services/omsAiProvider.service.js` | Always enforces `store: false`; does not access MongoDB. |
 | Correlated structured lifecycle/error logs | `backend/services/omsChatLogger.service.js` | Every request uses one `request_id`; logs omit credentials, provider payloads, query pipelines, and result documents. |
