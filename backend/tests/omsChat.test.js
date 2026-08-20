@@ -1184,6 +1184,35 @@ test("$out and $merge write stages are rejected at any depth", () => {
   }
 });
 
+test("bounded read-shape errors are recoverable but denied sources and writes are not", () => {
+  for (const [pipeline, pattern] of [
+    [[{ $group: { _id: "$brand", order_ids: { $addToSet: "$order_id" } } }], /\$addToSet/],
+    [[{ $facet: { orders: [{ $limit: 5 }] } }], /\$facet/],
+  ]) {
+    assert.throws(
+      () => validatePipeline("orders", pipeline),
+      (error) => error instanceof OmsChatQueryError
+        && error.recoverable === true
+        && pattern.test(error.message),
+    );
+  }
+  assert.throws(
+    () => parseToolArguments(JSON.stringify({
+      collection: "users",
+      purpose: "Read denied data",
+      pipeline: [{ $count: "total" }],
+    })),
+    (error) => error instanceof OmsChatQueryError && error.recoverable === false,
+  );
+  assert.throws(
+    () => validatePipeline("orders", [
+      { $project: { order_id: 1 } },
+      { $merge: { into: "orders" } },
+    ]),
+    (error) => error instanceof OmsChatQueryError && error.recoverable === false,
+  );
+});
+
 test("$function, $where, and JavaScript-capable operators are rejected", () => {
   const attempts = [
     [{ $match: { $where: "return true" } }, { $count: "total" }],
@@ -2013,6 +2042,35 @@ test("schema discovery can guide a later safe query without a database schema sc
   assert.doesNotMatch(schemaOutput.result[0].text, /test-key-not-sent-anywhere|mongodb:\/\//i);
 });
 
+test("invalid schema metadata requests recover without exposing denied collections", async (t) => {
+  configureAssistant(t);
+  const gemini = fakeGemini(
+    functionResponse(
+      { collections: ["users"] },
+      { name: "inspect_oms_schema", call_id: "invalid-schema-call" },
+    ),
+    finalResponse("That metadata is unavailable; no OMS records were queried."),
+  );
+
+  const result = await askOmsAssistant(
+    { message: "Inspect a collection that is not in the OMS business catalog.", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: emptyEntityQuery,
+    },
+  );
+
+  assert.equal(result.metadata.invalidToolCallCount, 1);
+  assert.equal(result.metadata.schemaCallCount, 1);
+  assert.match(result.answer, /unavailable/);
+  const rejected = gemini.calls[1].body.input.find(
+    (entry) => entry.type === "function_result" && entry.call_id === "invalid-schema-call",
+  );
+  assert.match(rejected.result[0].text, /tool_validation_failed/);
+  assert.doesNotMatch(rejected.result[0].text, /users/);
+});
+
 test("tool and database limits return a final answer from partial evidence", async (t) => {
   configureAssistant(t);
   const reportCall = (index) => functionResponse({
@@ -2096,6 +2154,82 @@ test("an optional timed-out query preserves earlier evidence for the final answe
     (entry) => entry.type === "function_result" && entry.call_id === "timed-out-call",
   );
   assert.match(unavailable.result[0].text, /unavailable/);
+});
+
+test("unsupported supplemental read aggregation recovers from completed forecast evidence", async (t) => {
+  configureAssistant(t);
+  const gemini = fakeGemini(
+    functionResponse(
+      { analysisType: "open_order_inspection_forecast", vendor: "Rugs Creations" },
+      { name: "analyze_oms_business_data", call_id: "forecast-call" },
+    ),
+    functionResponse({
+      collection: "orders",
+      purpose: "Find active POs near inspection completion",
+      pipeline: [{
+        $group: { _id: "$order_id", item_codes: { $addToSet: "$item.item_code" } },
+      }],
+    }, { call_id: "unsupported-read-call" }),
+    finalResponse("PO-NEAR is 80% inspected and is forecast for completion on 5 September 2026."),
+  );
+  let rawExecutions = 0;
+  const conversations = fakeConversationModel();
+
+  const result = await askOmsAssistant(
+    { message: "Find the POs nearest inspection completion and forecast their completion dates.", user: USER },
+    {
+      now: new Date("2026-08-20T00:00:00Z"),
+      aiClient: gemini,
+      conversationModel: conversations,
+      queryExecutor: async (request) => {
+        if (/^Resolve /i.test(request.purpose)) return emptyEntityQuery(request);
+        if (/current open-order/i.test(request.purpose)) {
+          return queryResult([{
+            order_id: "PO-NEAR",
+            item_code: "RUG-1",
+            vendor: "Rugs Creations",
+            brand: "By Boo",
+            order_date: "2026-08-01",
+            revised_ETD: "2026-09-05",
+            quantity: 100,
+            shipped_quantity: 0,
+            qc_passed: 80,
+          }], { audit: { collection: "orders", stageCount: 7 } });
+        }
+        if (/historical evidence/i.test(request.purpose)) {
+          return queryResult([28, 30, 32].map((days, index) => ({
+            order_id: `H-${index}`,
+            item_code: "RUG-1",
+            vendor: "Rugs Creations",
+            product_type: "Rug",
+            order_date: `2026-0${index + 1}-01`,
+            inspection_date: new Date(Date.UTC(2026, index, 1 + days)).toISOString().slice(0, 10),
+            inspection_status: "Inspection Done",
+            order_status: "Shipped",
+            passed: 10,
+          })), { audit: { collection: "orders", stageCount: 10 } });
+        }
+        validatePipeline(request.collection, request.pipeline);
+        rawExecutions += 1;
+        return queryResult();
+      },
+    },
+  );
+
+  assert.equal(rawExecutions, 0);
+  assert.equal(result.metadata.analysisType, "open_order_inspection_forecast");
+  assert.equal(result.metadata.invalidToolCallCount, 1);
+  assert.equal(result.metadata.partialResults, true);
+  assert.match(result.answer, /PO-NEAR/);
+  const rejected = gemini.calls[2].body.input.find(
+    (entry) => entry.type === "function_result" && entry.call_id === "unsupported-read-call",
+  );
+  assert.match(rejected.result[0].text, /tool_validation_failed/);
+  assert.doesNotMatch(rejected.result[0].text, /addToSet/);
+  assert.equal(
+    conversations.updates[0].update.$set.history.at(-2).content,
+    "Find the POs nearest inspection completion and forecast their completion dates.",
+  );
 });
 
 test("vendor shipment forecasts use controlled analytics and return public-safe metadata", async (t) => {
@@ -2433,30 +2567,38 @@ test("prompt injection cannot turn an unsafe model tool request into a DB call",
   assert.equal(databaseCalls, 0);
 });
 
-test("invalid model tool JSON is rejected without a DB call", async (t) => {
+test("invalid model tool JSON is recoverable without an unsafe DB call", async (t) => {
   configureAssistant(t);
-  const gemini = fakeGemini(functionResponse("{ this is not JSON"));
+  const gemini = fakeGemini(
+    functionResponse("{ this is not JSON"),
+    functionResponse({
+      collection: "orders",
+      purpose: "Count active orders after correcting the tool request",
+      pipeline: [{ $count: "total" }],
+    }, { call_id: "corrected-call" }),
+    finalResponse("There are 4 active orders."),
+  );
   let databaseCalls = 0;
 
-  await assert.rejects(
-    () => askOmsAssistant(
-      { message: "Count orders", user: USER },
-      {
-        aiClient: gemini,
-        conversationModel: fakeConversationModel(),
-        queryExecutor: withEntityResolver(async () => {
-          databaseCalls += 1;
-          return queryResult();
-        }),
-      },
-    ),
-    (error) => {
-      assert.ok(error instanceof OmsChatQueryError);
-      assert.match(error.message, /not valid JSON/);
-      return true;
+  const result = await askOmsAssistant(
+    { message: "Count orders", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: withEntityResolver(async () => {
+        databaseCalls += 1;
+        return queryResult([{ total: 4 }]);
+      }),
     },
   );
-  assert.equal(databaseCalls, 0);
+
+  assert.equal(result.answer, "There are 4 active orders.");
+  assert.equal(result.metadata.invalidToolCallCount, 1);
+  assert.equal(databaseCalls, 1);
+  const correction = gemini.calls[1].body.input.find(
+    (entry) => entry.type === "function_result" && entry.call_id === "tool-call-1",
+  );
+  assert.match(correction.result[0].text, /tool_validation_failed/);
 });
 
 test("unknown Gemini tools are rejected without a DB call", async (t) => {
@@ -2485,7 +2627,7 @@ test("unknown Gemini tools are rejected without a DB call", async (t) => {
   assert.equal(databaseCalls, 0);
 });
 
-test("a later tool failure retains audit data from an earlier successful query", async (t) => {
+test("a later malformed tool call finalizes from earlier successful evidence", async (t) => {
   configureAssistant(t);
   const gemini = fakeGemini(
     functionResponse({
@@ -2494,29 +2636,27 @@ test("a later tool failure retains audit data from an earlier successful query",
       pipeline: [{ $count: "total" }],
     }),
     functionResponse("{ invalid second call"),
+    finalResponse("The available evidence shows a total of 2; the optional comparison could not be completed."),
   );
   let databaseCalls = 0;
 
-  await assert.rejects(
-    () => askOmsAssistant(
-      { message: "Compare two counts", user: USER },
-      {
-        aiClient: gemini,
-        conversationModel: fakeConversationModel(),
-        queryExecutor: withEntityResolver(async () => {
-          databaseCalls += 1;
-          return queryResult([{ total: 2 }]);
-        }),
-      },
-    ),
-    (error) => {
-      assert.ok(error instanceof OmsChatQueryError);
-      assert.equal(error.audit.collections.at(-1), "orders");
-      assert.ok(error.audit.returnedRows >= 1);
-      return true;
+  const result = await askOmsAssistant(
+    { message: "Compare two counts", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: withEntityResolver(async () => {
+        databaseCalls += 1;
+        return queryResult([{ total: 2 }]);
+      }),
     },
   );
+
   assert.equal(databaseCalls, 1);
+  assert.deepEqual(result.rows, [{ total: 2 }]);
+  assert.equal(result.metadata.partialResults, true);
+  assert.equal(result.metadata.invalidToolCallCount, 1);
+  assert.match(result.answer, /available evidence/i);
 });
 
 test("an explicitly incomplete Gemini response is never accepted as an answer", async (t) => {

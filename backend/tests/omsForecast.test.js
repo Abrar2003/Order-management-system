@@ -4,6 +4,7 @@ const {
   buildExpectedCbmTimeline,
   calculateLeadTimeStatistics,
   forecastBrandNextContainerVendor,
+  forecastOpenOrderInspectionDates,
   forecastVendorNextShipment,
   getHistoricalInspectionLeadTime,
   normalizeHistoricalSamples,
@@ -49,8 +50,60 @@ test("lead-time statistics use robust percentiles and remove severe outliers", (
 });
 
 test("forecast filters treat common brand separators as equivalent", () => {
-  const brandMatch = forecastInternals.buildOpenOrderPipeline({ brand: "By-Boo" })[0].$match.brand;
+  const pipeline = forecastInternals.buildOpenOrderPipeline({ brand: "By-Boo" });
+  const brandMatch = pipeline[0].$match.brand;
   assert.match("By Boo", new RegExp(brandMatch.$regex, brandMatch.$options));
+  assert.deepEqual(pipeline[0].$match.status, { $nin: ["Cancelled", "Shipped"] });
+  assert.equal(pipeline[5].$project.shipment, undefined);
+  assert.deepEqual(pipeline[5].$project.shipped_quantity, { $sum: "$shipment.quantity" });
+});
+
+test("open-order forecasts expose and rank inspection progress without a supplemental query", () => {
+  const results = forecastOpenOrderInspectionDates({
+    orders: [
+      {
+        order_id: "PO-FAR",
+        item_code: "ITEM-2",
+        vendor: "Rugs Creations",
+        brand: "By Boo",
+        quantity: 100,
+        qc_record: { quantities: { qc_passed: 40 }, request_history: [] },
+      },
+      {
+        order_id: "PO-NEAR",
+        item_code: "ITEM-1",
+        vendor: "Rugs Creations",
+        brand: "By Boo",
+        quantity: 100,
+        qc_record: { quantities: { qc_passed: 85 }, request_history: [] },
+      },
+      {
+        order_id: "PO-DONE",
+        item_code: "ITEM-3",
+        vendor: "Rugs Creations",
+        brand: "By Boo",
+        quantity: 100,
+        qc_record: { quantities: { qc_passed: 100 }, request_history: [] },
+      },
+      {
+        order_id: "PO-SHIPPED",
+        item_code: "ITEM-4",
+        vendor: "Rugs Creations",
+        brand: "By Boo",
+        quantity: 100,
+        shipment: [{ quantity: 100 }],
+        qc_record: { quantities: { qc_passed: 80 }, request_history: [] },
+      },
+    ],
+  });
+
+  assert.deepEqual(results.map((row) => row.orderId), ["PO-NEAR", "PO-FAR"]);
+  assert.equal(results[0].vendor, "Rugs Creations");
+  assert.equal(results[0].brand, "By Boo");
+  assert.equal(results[0].passedQuantity, 85);
+  assert.equal(results[0].pendingInspectionQuantity, 15);
+  assert.equal(results[0].inspectionCompletionPercent, 85);
+  assert.equal(results[0].planningDate, null);
 });
 
 test("lead-time statistics retain full history and report the recent performance trend", () => {
@@ -344,4 +397,42 @@ test("controlled forecast returns a low-confidence ETD-only result when optional
   assert.equal(result.analysis.forecast.planningDate, "2026-09-10");
   assert.equal(result.analysis.confidence.label, "low");
   assert.match(result.limitations[0], /Historical inspection evidence was unavailable/);
+});
+
+test("forecast analytics report bounded source truncation as partial", async () => {
+  let calls = 0;
+  const result = await runOmsForecastAnalysis(
+    { analysisType: "open_order_inspection_forecast", vendor: "Rugs Creations" },
+    {
+      now: new Date("2026-08-20T00:00:00Z"),
+      user: { _id: "user-1" },
+      queryExecutor: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            rows: [{
+              order_id: "PO-NEAR",
+              item_code: "RUG-1",
+              vendor: "Rugs Creations",
+              brand: "By Boo",
+              quantity: 100,
+              shipped_quantity: 5,
+              qc_passed: 80,
+            }],
+            audit: { collection: "orders", stageCount: 7, durationMs: 3, returnedRows: 1, truncated: true },
+          };
+        }
+        return {
+          rows: [],
+          audit: { collection: "orders", stageCount: 10, durationMs: 3, returnedRows: 0, truncated: false },
+        };
+      },
+    },
+  );
+
+  assert.equal(result.partialResults, true);
+  assert.equal(result.audit.truncated, true);
+  assert.match(result.limitations[0], /truncated/i);
+  assert.equal(result.analysis[0].inspectionCompletionPercent, 80);
+  assert.equal(result.analysis[0].pendingInspectionQuantity, 20);
 });

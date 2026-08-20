@@ -133,19 +133,42 @@ const DANGEROUS_KEYS = new Set([
   "mapReduce",
   "eval",
 ]);
+const NONRECOVERABLE_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+  "$out",
+  "$merge",
+  "$function",
+  "$accumulator",
+  "$where",
+  "$currentOp",
+  "$listSessions",
+  "$listLocalSessions",
+  "mapReduce",
+  "eval",
+]);
 
 class OmsChatQueryError extends Error {
-  constructor(message, { statusCode = 422, category = "unsafe_query" } = {}) {
+  constructor(
+    message,
+    {
+      statusCode = 422,
+      category = "unsafe_query",
+      recoverable = statusCode === 422 && category === "unsafe_query",
+    } = {},
+  ) {
     super(message);
     this.name = "OmsChatQueryError";
     this.statusCode = statusCode;
     this.category = category;
+    this.recoverable = recoverable;
     this.expose = true;
   }
 }
 
-const fail = (message) => {
-  throw new OmsChatQueryError(message);
+const fail = (message, { recoverable = true } = {}) => {
+  throw new OmsChatQueryError(message, { recoverable });
 };
 
 const isReadableCollection = (value) => {
@@ -180,7 +203,9 @@ const scanForDangerousKeys = (value, depth = 0) => {
   }
   for (const [key, nested] of Object.entries(value)) {
     if (DANGEROUS_KEYS.has(key)) {
-      fail(`Unsupported or dangerous query operator: ${key}`);
+      fail(`Unsupported or dangerous query operator: ${key}`, {
+        recoverable: !NONRECOVERABLE_KEYS.has(key),
+      });
     }
     scanForDangerousKeys(nested, depth + 1);
   }
@@ -246,7 +271,9 @@ const parseToolArguments = (rawArguments) => {
 
     const collection = String(parsed.collection || "").trim();
     const purpose = String(parsed.purpose || "").trim();
-    if (!isReadableCollection(collection)) fail("That OMS data source is not available");
+    if (!isReadableCollection(collection)) {
+      fail("That OMS data source is not available", { recoverable: false });
+    }
     if (!purpose || purpose.length > 300) {
       fail("A short query purpose is required");
     }
@@ -306,7 +333,7 @@ const validateFieldPath = (value) => {
     path.startsWith("$")
     || path.split(".").some((part) => DANGEROUS_KEYS.has(part))
   ) {
-    fail(`Unsafe field path: ${path}`);
+    fail(`Unsafe field path: ${path}`, { recoverable: false });
   }
   return path;
 };
@@ -716,7 +743,7 @@ const validatePipelineInternal = (
       }
       const from = String(specification.from || "");
       if (!isReadableCollection(from)) {
-        fail("That lookup data source is not available");
+        fail("That lookup data source is not available", { recoverable: false });
       }
       if (!isSafeOutputName(specification.as)) fail("Unsafe $lookup output name");
       const usesFieldJoin = specification.localField !== undefined
@@ -773,7 +800,9 @@ const validatePipelineInternal = (
 };
 
 const validatePipeline = (collection, pipeline) => {
-  if (!isReadableCollection(collection)) fail("That OMS data source is not available");
+  if (!isReadableCollection(collection)) {
+    fail("That OMS data source is not available", { recoverable: false });
+  }
   scanForDangerousKeys(pipeline);
   const normalized = normalizeExtendedJson(pipeline);
   const counter = { count: 0 };

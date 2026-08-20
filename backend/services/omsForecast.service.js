@@ -9,6 +9,7 @@ const { executeOmsCapability } = require("./omsCapabilityExecution.service");
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_CONTAINER_TARGET_CBM = 65;
 const MIN_HISTORY_SAMPLES = 3;
+const TRUNCATED_EVIDENCE_LIMITATION = "The bounded OMS evidence was truncated; some open orders or historical samples may be missing.";
 const COMPLETED_ORDER_STATUSES = new Set([
   "inspection done",
   "partial shipped",
@@ -608,11 +609,31 @@ const forecastBrandNextContainerVendor = ({
 
 const forecastOpenOrderInspectionDates = ({ orders = [], historicalRows = [], now = new Date() } = {}) => {
   const samples = normalizeHistoricalSamples(historicalRows, { now });
-  return orders.map((order) => ({
-    orderId: cleanText(order?.order_id),
-    itemCode: cleanText(order?.item_code || order?.item?.item_code),
-    ...forecastOrderInspectionDate({ order, samples, now }),
-  }));
+  return orders
+    .map((order) => {
+      const progress = deriveOrderProgress({ orderEntry: order, qcRecord: order?.qc_record });
+      if (progress.status === "Shipped" || progress.pending_inspection_quantity <= 0) return null;
+      return {
+        orderId: cleanText(order?.order_id),
+        itemCode: cleanText(order?.item_code || order?.item?.item_code),
+        vendor: cleanText(order?.vendor),
+        brand: cleanText(order?.brand),
+        inspectionStatus: progress.status,
+        orderQuantity: progress.order_quantity,
+        passedQuantity: progress.passed_quantity,
+        pendingInspectionQuantity: progress.pending_inspection_quantity,
+        inspectionCompletionPercent: progress.order_quantity > 0
+          ? Number(((progress.passed_quantity / progress.order_quantity) * 100).toFixed(1))
+          : 0,
+        ...forecastOrderInspectionDate({ order, samples, now }),
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) =>
+      right.inspectionCompletionPercent - left.inspectionCompletionPercent
+      || left.pendingInspectionQuantity - right.pendingInspectionQuantity
+      || String(left.planningDate || "9999").localeCompare(String(right.planningDate || "9999"))
+      || left.orderId.localeCompare(right.orderId));
 };
 
 const escapeRegex = (value) => cleanText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -661,7 +682,7 @@ const buildHistoricalInspectionPipeline = () => [
 ];
 
 const buildOpenOrderPipeline = ({ vendor, brand, itemCode } = {}) => {
-  const match = { archived: { $ne: true }, status: { $ne: "Cancelled" } };
+  const match = { archived: { $ne: true }, status: { $nin: ["Cancelled", "Shipped"] } };
   if (vendor) match.__oms_vendor_name = exactTextMatch(vendor);
   if (brand) match.brand = exactTextMatch(brand);
   if (itemCode) match["item.item_code"] = exactTextMatch(itemCode);
@@ -686,10 +707,10 @@ const buildOpenOrderPipeline = ({ vendor, brand, itemCode } = {}) => {
         status: 1,
         quantity: 1,
         total_po_cbm: 1,
-        shipment: 1,
+        shipped_quantity: { $sum: "$shipment.quantity" },
         qc_passed: "$qc.quantities.qc_passed",
         qc_quantity_requested: "$qc.quantities.quantity_requested",
-        qc_request_history: "$qc.request_history",
+        qc_latest_request: { $arrayElemAt: ["$qc.request_history", -1] },
         inspected_item_sizes: "$item_doc.inspected_item_sizes",
         pis_item_sizes: "$item_doc.pis_item_sizes",
         inspected_box_sizes: "$item_doc.inspected_box_sizes",
@@ -759,12 +780,15 @@ const combineQueryAudit = (results = []) => ({
 
 const hydrateForecastOrder = (row = {}) => ({
   ...row,
+  shipment: row.shipment || [{ quantity: row.shipped_quantity }],
   qc_record: row.qc_record || {
     quantities: {
       qc_passed: row.qc_passed,
       quantity_requested: row.qc_quantity_requested,
     },
-    request_history: row.qc_request_history,
+    request_history: row.qc_latest_request
+      ? [row.qc_latest_request]
+      : row.qc_request_history,
   },
   item_doc: row.item_doc || {
     inspected_item_sizes: row.inspected_item_sizes,
@@ -813,7 +837,15 @@ const runOmsForecastAnalysis = async (
       purpose: "Calculate validated historical inspection lead-time evidence",
     });
     const analysis = getHistoricalInspectionLeadTime(history.rows, args, { now });
-    return { analysisType: args.analysisType, analysis, databaseCalls: 1, audit: combineQueryAudit(results) };
+    const audit = combineQueryAudit(results);
+    return {
+      analysisType: args.analysisType,
+      analysis,
+      databaseCalls: 1,
+      partialResults: audit.truncated,
+      limitations: audit.truncated ? [TRUNCATED_EVIDENCE_LIMITATION] : [],
+      audit,
+    };
   }
 
   if (args.analysisType === "brand_ready_cbm") {
@@ -834,6 +866,8 @@ const runOmsForecastAnalysis = async (
       databaseCalls: ready.databaseCalls,
       capabilityCalls: 1,
       capabilitiesUsed: ["packed_goods"],
+      partialResults: Boolean(ready.truncated),
+      limitations: ready.truncated ? [TRUNCATED_EVIDENCE_LIMITATION] : [],
       audit: {
         collections: ready.audit?.collections || [],
         stageCount: Number(ready.audit?.stageCount || 0),
@@ -849,7 +883,12 @@ const runOmsForecastAnalysis = async (
     pipeline: buildOpenOrderPipeline(args),
     purpose: "Calculate current open-order inspection and shipment readiness",
   });
-  const currentOrders = current.rows.map(hydrateForecastOrder);
+  const currentOrders = current.rows
+    .map(hydrateForecastOrder)
+    .filter((order) => deriveOrderProgress({
+      orderEntry: order,
+      qcRecord: order.qc_record,
+    }).status !== "Shipped");
 
   let canonicalReady = null;
   if (["vendor_next_shipment_forecast", "brand_next_container_vendor_forecast"].includes(args.analysisType)) {
@@ -910,16 +949,21 @@ const runOmsForecastAnalysis = async (
     ...results,
     ...(historyFailure?.audit ? [{ audit: historyFailure.audit }] : []),
   ]);
+  const evidenceTruncated = queryAudit.truncated
+    || capabilityResults.some((result) => result?.truncated);
   return {
     analysisType: args.analysisType,
     analysis,
     databaseCalls: results.length + (historyFailure ? 1 : 0) + capabilityDatabaseCalls,
     capabilityCalls: capabilityResults.length,
     capabilitiesUsed: [...new Set(capabilityResults.map((result) => result?.capability?.id).filter(Boolean))],
-    partialResults: Boolean(historyFailure),
-    limitations: historyFailure
-      ? ["Historical inspection evidence was unavailable; only current order and future ETD evidence could be used."]
-      : [],
+    partialResults: Boolean(historyFailure) || evidenceTruncated,
+    limitations: [
+      ...(historyFailure
+        ? ["Historical inspection evidence was unavailable; only current order and future ETD evidence could be used."]
+        : []),
+      ...(evidenceTruncated ? [TRUNCATED_EVIDENCE_LIMITATION] : []),
+    ],
     audit: {
       ...queryAudit,
       collections: [...new Set([
@@ -934,7 +978,7 @@ const runOmsForecastAnalysis = async (
         (sum, result) => sum + number(result?.grouped?.length || result?.rows?.length),
         0,
       ),
-      truncated: queryAudit.truncated || capabilityResults.some((result) => result?.truncated),
+      truncated: evidenceTruncated,
     },
   };
 };
