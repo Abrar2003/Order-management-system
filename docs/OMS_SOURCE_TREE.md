@@ -86,6 +86,9 @@ oms/
 |   |   |-- vendorRef.js
 |   |   |-- workbookReport.js
 |   |   `-- workflow.js
+|   |-- knowledge/
+|   |   |-- omsKnowledgeBase.catalog.js
+|   |   `-- omsKnowledgeBase.schema.js
 |   |-- middlewares/
 |   |   |-- auth.middleware.js
 |   |   |-- authorize.middleware.js
@@ -234,6 +237,7 @@ oms/
 |   |   |-- omsChatLogger.service.js
 |   |   |-- omsChatQuery.service.js
 |   |   |-- omsForecast.service.js
+|   |   |-- omsKnowledgeBase.service.js
 |   |   |-- orderCbm.service.js
 |   |   |-- pdfPrintStyles.js
 |   |   |-- pdfRectifyParser.service.js
@@ -278,6 +282,7 @@ oms/
 |   |   |-- omsAiProvider.test.js
 |   |   |-- omsChat.test.js
 |   |   |-- omsForecast.test.js
+|   |   |-- omsKnowledgeBase.test.js
 |   |   |-- orderItemFilterStatus.test.js
 |   |   |-- pdfArchitecture.test.js
 |   |   |-- pdfPrintStyles.test.js
@@ -576,6 +581,7 @@ oms/
 |   |-- MEASUREMENT_MISMATCH_COMPARISON_FLOW.md
 |   |-- OMS_ASSISTANT_CONTEXT.md
 |   |-- OMS_ASSISTANT.md
+|   |-- OMS_KNOWLEDGE_BASE.md
 |   |-- OMS_SOURCE_TREE.md
 |   |-- PDF_EXPORT_SYSTEM.md
 |   |-- PIS_PD_MASTER_ITEM_FLOW.md

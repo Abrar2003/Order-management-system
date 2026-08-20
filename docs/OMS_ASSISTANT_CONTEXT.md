@@ -2,6 +2,8 @@
 
 Use this file when changing the OMS Assistant. It explains the current implementation, its supported behaviour, and the safe place to make each kind of change. Source code is the authority if this file ever disagrees with it. `docs/OMS_ASSISTANT.md` remains the deployment and operations guide; `docs/OMS_SOURCE_TREE.md` is the repository-wide file tree.
 
+Step 1 also provides `docs/OMS_KNOWLEDGE_BASE.md` and a static backend knowledge catalog for future Assistant work. It is not wired into the current Assistant, prompt, tools, routes, UI, or database query flow.
+
 ## What it is
 
 OMS Assistant is an authenticated, read-only reporting chat for OMS data. The browser sends a plain-language question to the Express backend. The backend, not the model, owns authentication, permission checks, conversation ownership, rate limiting, database access, validation, audit logging, and every response sent to the browser.
