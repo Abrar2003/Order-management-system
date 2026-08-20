@@ -35,6 +35,32 @@ const ALLOWED_STAGES = new Set([
   "$replaceWith",
 ]);
 
+const normalizeStageOperator = (operator) => {
+  const alias = /^__(.+)$/.exec(operator)?.[1]
+    || /^Double_Underscore_(.+)$/i.exec(operator)?.[1];
+  if (!alias) return operator;
+  return [...ALLOWED_STAGES].find(
+    (allowed) => allowed.slice(1).toLowerCase() === alias.toLowerCase(),
+  ) || operator;
+};
+
+const normalizePipelineStageAliases = (pipeline) => pipeline.map((stage) => {
+  if (!isPlainObject(stage) || Object.keys(stage).length !== 1) return stage;
+  const [[rawOperator, rawSpecification]] = Object.entries(stage);
+  const operator = normalizeStageOperator(rawOperator);
+  const specification = operator === "$lookup"
+    && isPlainObject(rawSpecification)
+    && Array.isArray(rawSpecification.pipeline)
+    ? {
+      ...rawSpecification,
+      pipeline: normalizePipelineStageAliases(rawSpecification.pipeline),
+    }
+    : rawSpecification;
+  return operator === rawOperator && specification === rawSpecification
+    ? stage
+    : { [operator]: specification };
+});
+
 const QUERY_OPERATORS = new Set([
   "$eq",
   "$ne",
@@ -804,7 +830,7 @@ const validatePipeline = (collection, pipeline) => {
     fail("That OMS data source is not available", { recoverable: false });
   }
   scanForDangerousKeys(pipeline);
-  const normalized = normalizeExtendedJson(pipeline);
+  const normalized = normalizePipelineStageAliases(normalizeExtendedJson(pipeline));
   const counter = { count: 0 };
   const state = validatePipelineInternal(collection, normalized, { counter });
   if (!state.shaped) {

@@ -756,6 +756,39 @@ test("transient Gemini rate limits are retried twice", async (t) => {
   assert.equal(result.answer, "Gemini recovered.");
 });
 
+test("persistent Gemini rate limits preserve completed query evidence", async (t) => {
+  configureAssistant(t);
+  const rateLimit = () => {
+    const error = new Error("rate limited");
+    error.status = 429;
+    error.headers = { get: () => "0ms" };
+    throw error;
+  };
+  const gemini = fakeGemini(
+    functionResponse({
+      collection: "orders",
+      purpose: "Count active orders",
+      pipeline: [{ $count: "total" }],
+    }),
+    rateLimit,
+    rateLimit,
+    rateLimit,
+  );
+
+  const result = await askOmsAssistant(
+    { message: "Count active orders", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: withEntityResolver(async () => queryResult([{ total: 4 }])),
+    },
+  );
+
+  assert.equal(result.metadata.partialResults, true);
+  assert.deepEqual(result.rows, [{ total: 4 }]);
+  assert.match(result.answer, /supporting evidence/i);
+});
+
 test("simple container and vendor-order questions stay concise after migration", async (t) => {
   configureAssistant(t);
   for (const [question, purpose, answer] of [
@@ -1210,6 +1243,24 @@ test("bounded read-shape errors are recoverable but denied sources and writes ar
       { $merge: { into: "orders" } },
     ]),
     (error) => error instanceof OmsChatQueryError && error.recoverable === false,
+  );
+});
+
+test("Gemini dollar-sign stage aliases normalize before read-only validation", () => {
+  const validated = validatePipeline("orders", [
+    { Double_Underscore_match: { archived: { $ne: true } } },
+    { __limit: 5 },
+    { __project: { _id: 0, order_id: 1 } },
+  ]);
+
+  assert.deepEqual(validated.pipeline, [
+    { $match: { archived: { $ne: true } } },
+    { $limit: 5 },
+    { $project: { _id: 0, order_id: 1 } },
+  ]);
+  assert.throws(
+    () => validatePipeline("orders", [{ Double_Underscore_out: "users" }]),
+    /Unsupported pipeline stage/,
   );
 });
 
@@ -2103,6 +2154,37 @@ test("tool and database limits return a final answer from partial evidence", asy
   assert.equal(gemini.calls.at(-1).body.tools.length, 4);
   assert.equal(gemini.calls.at(-1).body.generation_config.tool_choice, "none");
   assert.match(gemini.calls.at(-1).body.system_instruction, /Answer the user's OMS question now/);
+});
+
+test("tool-only Gemini finalization falls back to completed evidence", async (t) => {
+  configureAssistant(t);
+  const reportCall = (index) => functionResponse({
+    collection: "orders",
+    purpose: `Bounded report section ${index}`,
+    pipeline: [{ $count: "total" }],
+  }, { call_id: `tool-only-final-${index}` });
+  const gemini = fakeGemini(
+    ...Array.from({ length: 7 }, (_unused, index) => reportCall(index + 1)),
+    reportCall(8),
+  );
+  let reportQueries = 0;
+
+  const result = await askOmsAssistant(
+    { message: "Investigate a very large multi-part report.", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: withEntityResolver(async () => {
+        reportQueries += 1;
+        return queryResult([{ total: reportQueries }]);
+      }),
+    },
+  );
+
+  assert.equal(reportQueries, 6);
+  assert.equal(result.metadata.partialResults, true);
+  assert.match(result.answer, /supporting evidence/i);
+  assert.equal(gemini.calls.at(-1).body.generation_config.tool_choice, "none");
 });
 
 test("an optional timed-out query preserves earlier evidence for the final answer", async (t) => {

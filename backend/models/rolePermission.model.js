@@ -37,8 +37,6 @@ const rolePermissionSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-rolePermissionSchema.index({ role: 1 }, { unique: true });
-
 rolePermissionSchema.pre("validate", function normalizeRole(next) {
   this.role = normalizeRoleKey(this.role);
   next();

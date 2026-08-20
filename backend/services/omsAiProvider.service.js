@@ -8,7 +8,7 @@ const {
 const PROVIDER_NAME = "gemini";
 const DEFAULT_MODEL = "gemini-3.7-flash";
 const MAX_PROVIDER_ATTEMPTS = 3;
-const RETRY_DELAYS_MS = Object.freeze([250, 500]);
+const RETRY_DELAYS_MS = Object.freeze([2_000, 8_000]);
 const PROTOCOL_ERROR_CATEGORIES = new Set([
   "provider_missing_text_and_tools",
   "provider_missing_tool_call_id",
@@ -131,6 +131,10 @@ const retryAfterMs = (error, attempt) => {
   const numeric = Number.parseFloat(raw);
   if (Number.isFinite(numeric)) {
     return Math.min(20_000, Math.max(100, numeric * (String(raw).endsWith("ms") ? 1 : 1_000)));
+  }
+  const retryAt = Date.parse(raw);
+  if (Number.isFinite(retryAt)) {
+    return Math.min(20_000, Math.max(100, retryAt - Date.now()));
   }
   return RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)];
 };
@@ -402,6 +406,7 @@ module.exports = {
     normalizeInteraction,
     normalizeTools,
     interactionSummary,
+    retryAfterMs,
     textFromSteps,
     toProviderError,
   },

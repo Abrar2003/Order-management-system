@@ -4,6 +4,7 @@ const {
   OmsAiProviderError,
   createOmsAiSession,
   getOmsAiConfiguration,
+  __test__: providerInternals,
 } = require("../services/omsAiProvider.service");
 
 const finalInteraction = (text = "Done.", id = "interaction-final") => ({
@@ -255,6 +256,15 @@ test("Gemini provider normalizes timeout, 429, and 5xx failures", async (t) => {
     );
     assert.equal(client.calls.length, 3);
   }
+});
+
+test("Gemini retries missing Retry-After headers with bounded backoff", () => {
+  assert.equal(providerInternals.retryAfterMs({}, 0), 2_000);
+  assert.equal(providerInternals.retryAfterMs({}, 1), 8_000);
+  assert.equal(
+    providerInternals.retryAfterMs({ headers: { "retry-after": "250ms" } }, 0),
+    250,
+  );
 });
 
 test("Gemini provider rejects malformed protocol responses without retrying", async () => {
