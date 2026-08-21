@@ -1138,7 +1138,34 @@ const TRANSIENT_PROVIDER_CATEGORIES = new Set([
   "provider_unavailable",
 ]);
 
-const formatForecastPartialAnswer = (result) => {
+const formatForecastPartialAnswer = (results) => {
+  const completedResults = Array.isArray(results) ? results : [results];
+  const inspectionForecast = completedResults.find(
+    (result) => result?.analysisType === "open_order_inspection_forecast"
+      && Array.isArray(result.analysis)
+      && result.analysis.length,
+  );
+  if (inspectionForecast) {
+    const forecasts = inspectionForecast.analysis;
+    const itemLines = forecasts.map((forecast) => {
+      const orderId = String(forecast?.orderId || "PO").trim();
+      const itemCode = String(forecast?.itemCode || "item").trim();
+      const planningDate = String(forecast?.planningDate || "could not be estimated").trim();
+      const windowStart = String(forecast?.windowStart || "").trim();
+      const windowEnd = String(forecast?.windowEnd || "").trim();
+      const confidence = String(forecast?.confidence?.label || "low").trim();
+      const samples = Number(forecast?.estimate?.sampleCount || 0);
+      const window = windowStart && windowEnd && windowStart !== windowEnd
+        ? ` (window ${windowStart} to ${windowEnd})`
+        : "";
+      return `- ${orderId} / ${itemCode}: ${planningDate}${window}; ${confidence} confidence${samples ? `, ${samples} historical samples` : ""}.`;
+    });
+    return `The completed OMS inspection forecast is:\n${itemLines.join("\n")}\nThis is a partial answer because the final narrative step was unavailable.`;
+  }
+
+  const result = completedResults.find(
+    (entry) => entry?.analysisType === "vendor_next_shipment_forecast",
+  );
   if (result?.analysisType !== "vendor_next_shipment_forecast") return "";
   const analysis = result.analysis;
   const shipment = analysis?.nextShipment;
@@ -1789,7 +1816,7 @@ const askOmsAssistant = async (
         });
       } catch (error) {
         const fallback = TRANSIENT_PROVIDER_CATEGORIES.has(error?.category)
-          ? formatForecastPartialAnswer(analyticsResults.at(-1)) || (
+          ? formatForecastPartialAnswer(analyticsResults) || (
             toolResults.length || capabilityResults.length || analyticsResults.length
               ? PARTIAL_EVIDENCE_ANSWER
               : ""

@@ -2657,6 +2657,67 @@ test("a transient Gemini failure after deterministic forecasting returns a safe 
   assert.match(result.answer, /partial answer/i);
 });
 
+test("a transient Gemini failure preserves a completed PO inspection forecast", async (t) => {
+  configureAssistant(t);
+  const unavailable = () => {
+    const error = new Error("temporary upstream failure");
+    error.status = 429;
+    error.headers = { get: () => "0ms" };
+    throw error;
+  };
+  const gemini = fakeGemini(
+    functionResponse(
+      { analysisType: "open_order_inspection_forecast", vendor: "Boranada" },
+      { name: "analyze_oms_business_data", call_id: "inspection-forecast-call" },
+    ),
+    functionResponse(
+      { analysisType: "historical_inspection_lead_time", vendor: "Boranada" },
+      { name: "analyze_oms_business_data", call_id: "lead-time-call" },
+    ),
+    unavailable,
+    unavailable,
+    unavailable,
+  );
+  const historyRows = [28, 30, 32].map((days, index) => ({
+    order_id: `H-INSPECTION-${index}`,
+    item_code: "CHAIR-1",
+    vendor: "Boranada",
+    product_type: "Chair",
+    order_date: `2026-0${index + 1}-01`,
+    inspection_date: new Date(Date.UTC(2026, index, 1 + days)).toISOString().slice(0, 10),
+    inspection_status: "Inspection Done",
+    order_status: "Shipped",
+    passed: 10,
+  }));
+
+  const result = await askOmsAssistant(
+    { message: "When is PO INSPECTION-PARTIAL expected to be inspected?", user: USER },
+    {
+      now: new Date("2026-08-18T00:00:00Z"),
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      queryExecutor: async (request) => {
+        if (/^Resolve /i.test(request.purpose)) return emptyEntityQuery(request);
+        if (/historical/i.test(request.purpose)) return queryResult(historyRows);
+        return queryResult([{
+          order_id: "INSPECTION-PARTIAL",
+          item_code: "CHAIR-1",
+          vendor: "Boranada",
+          product_type: "Chair",
+          order_date: "2026-08-01",
+          revised_ETD: "2026-09-05",
+          quantity: 100,
+          shipped_quantity: 0,
+          qc_passed: 40,
+        }]);
+      },
+    },
+  );
+
+  assert.equal(result.metadata.partialResults, true);
+  assert.match(result.answer, /INSPECTION-PARTIAL \/ CHAIR-1: 2026-09-05/i);
+  assert.match(result.answer, /partial answer/i);
+});
 test("prompt injection cannot turn an unsafe model tool request into a DB call", async (t) => {
   configureAssistant(t);
   const gemini = fakeGemini(functionResponse({
