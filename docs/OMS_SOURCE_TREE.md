@@ -234,6 +234,7 @@ oms/
 |   |   |-- notificationService.js
 |   |   |-- omsAiProvider.service.js
 |   |   |-- omsCapabilityExecution.service.js
+|   |   |-- omsCapabilityPlanner.service.js
 |   |   |-- omsChat.service.js
 |   |   |-- omsChatCatalog.service.js
 |   |   |-- omsChatLogger.service.js
@@ -284,6 +285,7 @@ oms/
 |   |   |-- monthlyShipmentsReport.test.js
 |   |   |-- omsAiProvider.test.js
 |   |   |-- omsCapabilityExecution.test.js
+|   |   |-- omsCapabilityPlanner.test.js
 |   |   |-- omsChat.test.js
 |   |   |-- omsForecast.test.js
 |   |   |-- omsKnowledgeBase.test.js

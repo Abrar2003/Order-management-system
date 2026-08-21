@@ -513,7 +513,7 @@ const capabilities = [
     businessPurpose: "Calculate volume consistently without reproducing CBM arithmetic in report metadata or model prompts.",
     collections: ["orders", "items", "samples"], relationships: ["order_item_code", "order_shipment_entries", "sample_shipment_entries"], routes: [],
     canonicalFile: "backend/services/shipmentCbmAllocation.service.js", canonicalSymbols: ["resolveOrderRowCbmSummary", "resolveShipmentRowCbm", "resolveOrderRowCbmSummaryWithStoredFallback"], sourceKind: "canonical_service", reusable: true, controllerLocal: false,
-    filters: filters("po", "item"), outputFields: outputs("order_id", "item_code", "total_cbm", "cbm_source"), resultGrain: "calculation_for_order_shipment_or_sample_quantity",
+    filters: filters("po", "item", filter("shipment_quantity", [], "number", false, "Optional positive quantity for a shipment allocation.")), outputFields: outputs("order_id", "item_code", "total_cbm", "cbm_source"), resultGrain: "calculation_for_order_shipment_or_sample_quantity",
     aliases: ["PO CBM", "shipment CBM", "cubic meter"], keywords: ["volume", "box measurements"], userIntentExamples: ["How was this PO CBM calculated?"],
     quantitySemantics: ["Partial shipment quantities can be prorated against order totals."], cbmSemantics: cbm({ fallback: "Stored orders.total_po_cbm is the final labelled fallback; sample CBM can fall back to sample cbm times quantity.", partial: true }),
     fallbackRules: ["Inspected measurements first, then PIS where supported, then stored Item CBM, then stored order total."], rawFactsWarning: "Never calculate a generic CBM formula from metadata alone.",

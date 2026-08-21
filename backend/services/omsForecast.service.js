@@ -825,6 +825,7 @@ const runOmsForecastAnalysis = async (
     const result = await capabilityExecutor(payload, {
       ...capabilityDependencies,
       now,
+      user,
     });
     capabilityResults.push(result);
     return result;

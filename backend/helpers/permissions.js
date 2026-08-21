@@ -89,6 +89,9 @@ const WORKFLOW_ADMIN_ONLY_ACTIONS = Object.freeze([
 ]);
 
 const PERMISSION_ADMIN_ONLY_ACTIONS = Object.freeze(PERMISSION_ACTIONS);
+const OMS_ASSISTANT_ADMIN_ROLE_KEYS = new Set(["admin", "super_admin"]);
+const canRoleUseOmsAssistant = (roleKey) =>
+  OMS_ASSISTANT_ADMIN_ROLE_KEYS.has(normalizeUserRoleKey(roleKey));
 
 const moduleKeys = new Set(PERMISSION_MODULES.map((module) => module.key));
 const actionKeys = new Set(PERMISSION_ACTIONS);
@@ -142,6 +145,12 @@ const lockAdminOnlyPermissions = (roleKey, permissions) => {
     }
   });
 
+  PERMISSION_ACTIONS.forEach((action) => {
+    if (permissions?.oms_assistant && action in permissions.oms_assistant && !canRoleUseOmsAssistant(roleKey)) {
+      permissions.oms_assistant[action] = false;
+    }
+  });
+
   if (isAdminLikeRole(roleKey)) return applyRequiredPermissionFloors(roleKey, permissions);
 
   PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS.forEach((action) => {
@@ -165,11 +174,6 @@ const lockAdminOnlyPermissions = (roleKey, permissions) => {
     }
   });
 
-  PERMISSION_ACTIONS.forEach((action) => {
-    if (permissions?.oms_assistant && action in permissions.oms_assistant) {
-      permissions.oms_assistant[action] = false;
-    }
-  });
 
   return applyRequiredPermissionFloors(roleKey, permissions);
 };
@@ -180,9 +184,7 @@ const buildAdminPermissions = () => {
   return permissions;
 };
 
-const buildManagerPermissions = () => {
-  return buildAdminPermissions();
-};
+const buildManagerPermissions = () => lockAdminOnlyPermissions("manager", buildAdminPermissions());
 
 const buildDevPermissions = () => {
   const permissions = buildAdminPermissions();
@@ -191,11 +193,10 @@ const buildDevPermissions = () => {
 
 const buildSuperAdminPermissions = () => buildAdminPermissions();
 
-const buildProductManagerPermissions = () => buildAdminPermissions();
+const buildProductManagerPermissions = () => lockAdminOnlyPermissions("product_manager", buildAdminPermissions());
 
-const buildInspectionManagerPermissions = () => {
-  return buildAdminPermissions();
-};
+const buildInspectionManagerPermissions = () =>
+  lockAdminOnlyPermissions("inspection_manager", buildAdminPermissions());
 
 const buildUserPermissions = () => {
   const permissions = createEmptyPermissions();
@@ -337,12 +338,12 @@ const sanitizePermissionsForRole = (role, permissions = {}) => {
 const isPermissionCellLocked = (role, moduleKey, action) => {
   const roleKey = normalizeRoleKey(role);
   if (isSuperAdminLikeRole(roleKey)) return false;
+  if (moduleKey === "oms_assistant") return !canRoleUseOmsAssistant(roleKey);
   if (moduleKey === "pis" && PIS_ADMIN_ONLY_ACTIONS.includes(action)) {
     return !canRoleUsePisAction(roleKey, action);
   }
   if (isAdminLikeRole(roleKey)) return false;
   if (moduleKey === "permissions") return true;
-  if (moduleKey === "oms_assistant") return true;
   if (
     moduleKey === "product_type_templates" &&
     PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS.includes(action)
@@ -382,9 +383,9 @@ const buildPermissionMeta = () => ({
       message: "Permission-management rights are admin-only.",
     },
     oms_assistant: {
-      roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
+      roles: ROLE_KEYS.filter((role) => !canRoleUseOmsAssistant(role)),
       actions: PERMISSION_ACTIONS,
-      message: "OMS Assistant access is restricted to managers and admins.",
+      message: "OMS Assistant access is restricted to admins and super admins.",
     },
   },
 });

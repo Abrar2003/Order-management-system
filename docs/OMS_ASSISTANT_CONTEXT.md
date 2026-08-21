@@ -2,7 +2,7 @@
 
 Use this file when changing the OMS Assistant. It explains the current implementation, its supported behaviour, and the safe place to make each kind of change. Source code is the authority if this file ever disagrees with it. `docs/OMS_ASSISTANT.md` remains the deployment and operations guide; `docs/OMS_SOURCE_TREE.md` is the repository-wide file tree.
 
-The versioned Knowledge Base in `docs/OMS_KNOWLEDGE_BASE.md` is wired into the Assistant as a canonical-first selection layer. Knowledge Base V2 now maps all 74 audited OMS capability groups and is ready for the next capability-execution integration phase. This does **not** mean the Assistant can execute all 74 capabilities: the catalog remains static metadata, and only an explicit server-side adapter registry can execute a capability.
+The versioned Knowledge Base in `docs/OMS_KNOWLEDGE_BASE.md` is wired into the Assistant as a canonical-first selection layer. Knowledge Base V2 maps all 74 audited OMS capability groups. `omsCapabilityPlanner.service.js` deterministically ranks a compact subset after entity/date resolution, finds token-boundary ambiguities, and prepares safe model context. The catalog remains static metadata: only an explicit server-side adapter registry can execute a capability.
 
 ## What it is
 
@@ -45,11 +45,11 @@ The assistant does **not** write OMS data, create reports/files, expose aggregat
 
 ## Knowledge-aware canonical-first flow
 
-`searchCapabilities()` ranks V2 catalog entries deterministically, but the current Assistant preselection passes through only `existing_assistant_feature`/`ready` entries. `not_ready`, business-blocked, export/presentation, and unsafe entries are not advertised as executable paths. Only a compact selected subset is included in system instructions; the full 74-capability catalog is never sent on every turn. Search exposes audited ambiguity candidates and separate architectural recommendation/runtime readiness metadata for the next phase.
+`searchCapabilities()` ranks V2 catalog entries deterministically. The planner keeps at most eight compact entries, including readiness and adapter availability but no source paths. It detects documented ambiguity phrases inside longer questions and asks a concise clarification only when surrounding wording does not resolve them. The full 74-capability catalog is never sent on every turn.
 
-`backend/services/omsCapabilityExecution.service.js` owns the explicit registry. `packed_goods` calls the same `packedGoods.service.js` builder used by its API and export. `monthly_shipments` calls the existing `monthlyShipmentsReport.service.js`. Both run against models bound to the separate read-only Assistant connection. Adapter filters and operations are allowlisted, grouping/metrics/sorting are server-side, and output is bounded to 100 rows/groups with safe provenance and warnings.
+`backend/services/omsCapabilityExecution.service.js` owns the explicit registry. `packed_goods` calls the same `packedGoods.service.js` builder used by its API and export; `monthly_shipments` calls `monthlyShipmentsReport.service.js`; `shipment_cbm` calls the CBM allocation service against a bounded PO/item lookup. Adapters use the read-only Assistant connection, carry user scope into their queries, validate allowlisted filters and fields, and bound filtering/grouping/distinct/metrics/sorting to 100 rows/groups with safe provenance and warnings.
 
-For obvious Packed Goods or Monthly Shipments intent, a raw-query attempt is redirected internally: the canonical adapter runs first, and the model may ask for a raw query only for missing supplemental detail. No-match questions retain the existing schema and raw-Mongo route. Capability results are not cached, so reports retain current application freshness.
+For obvious direct-capability intent, a raw-query attempt is redirected through the registered adapter and receives recoverable `canonical_capability_available` guidance plus its safe canonical result. A later raw query is permitted only for supplemental detail. No-match questions retain the existing schema and raw-Mongo route. Capability results are not cached, so reports retain current application freshness.
 
 Audit/log metadata distinguishes entity-resolution queries, capability calls, raw database tool calls, analytics calls, schema calls, invalid calls, capabilities used, and internal database-operation counts. It never records capability result documents.
 
@@ -109,7 +109,8 @@ Expected analytics and capability validation errors return compact, safe functio
 | HTTP endpoint and safe public errors | `backend/routers/omsChat.routes.js`, `backend/controllers/omsChat.controller.js` | Mounted at both `/oms-chat` and `/api/oms-chat`. |
 | Core prompt, entity/date resolution, deterministic reports, conversation loop | `backend/services/omsChat.service.js` | Main behaviour file. |
 | Static OMS domains, 74 audited capabilities, definitions, ambiguities, status, and deterministic search | `backend/knowledge/omsKnowledgeBase.*`, `backend/services/omsKnowledgeBase.service.js` | Catalog `2.0.0`; never dynamically executes source metadata. |
-| Capability validation, explicit adapters, bounded grouping, and safe provenance | `backend/services/omsCapabilityExecution.service.js` | Only `packed_goods` and `monthly_shipments` have registered capability adapters. |
+| Capability planning | `backend/services/omsCapabilityPlanner.service.js` | Deterministic compact ranking, canonical guidance, and ambiguity handling. |
+| Capability validation, explicit adapters, bounded grouping, and safe provenance | `backend/services/omsCapabilityExecution.service.js` | `packed_goods`, `monthly_shipments`, and `shipment_cbm` are registered direct adapters. |
 | Shared Packed Goods canonical dataset | `backend/services/packedGoods.service.js` | Used unchanged by the API, export, Assistant, and forecast input. |
 | Gemini initialization, stateless Interactions requests, response normalization, and provider retries/errors | `backend/services/omsAiProvider.service.js` | Always enforces `store: false`; does not access MongoDB. |
 | Correlated structured lifecycle/error logs | `backend/services/omsChatLogger.service.js` | Every request uses one `request_id`; logs omit credentials, provider payloads, query pipelines, and result documents. |
@@ -119,17 +120,17 @@ Expected analytics and capability validation errors return compact, safe functio
 | Conversation TTL/history model | `backend/models/omsChatConversation.model.js` | Stored in the primary application database. |
 | Per-user limiter | `backend/middlewares/omsChatRateLimit.middleware.js`, `backend/models/omsChatRateBucket.model.js` | TTL bucket model. |
 | Permission module and role lock | `backend/helpers/permissions.js`, `backend/helpers/userRole.js` | `oms_assistant.view` is locked to admin-like roles. |
-| Feature tests | `backend/tests/omsCapabilityExecution.test.js`, `backend/tests/omsKnowledgeBase.test.js`, `backend/tests/omsAiProvider.test.js`, `backend/tests/omsChat.test.js`, `backend/tests/omsForecast.test.js`, `client/OMS/src/utils/omsAssistantState.test.js` | Provider mocks never call live Gemini; fixtures prove report/capability/forecast equivalence. |
+| Feature tests | `backend/tests/omsCapabilityPlanner.test.js`, `backend/tests/omsCapabilityExecution.test.js`, `backend/tests/omsKnowledgeBase.test.js`, `backend/tests/omsAiProvider.test.js`, `backend/tests/omsChat.test.js`, `backend/tests/omsForecast.test.js`, `client/OMS/src/utils/omsAssistantState.test.js` | Provider mocks never call live Gemini; fixtures prove report/capability/forecast equivalence. |
 
 ## How a request is coded
 
 1. `OmsAssistant.jsx` posts `{ message, conversationId? }` with the shared Axios client. It stores the returned server `conversationId` for the next question.
 2. `omsChat.routes.js` assigns a request ID, starts ordered JSON lifecycle logging, records audit metadata, authenticates the user, checks `oms_assistant.view`, then rate-limits the request.
 3. The controller allows only `message` and `conversationId`, limits the body, maps internal errors to safe public messages/codes, and returns the request ID for log correlation without exposing stacks or provider payloads.
-4. `askOmsAssistant()` validates the question/configuration, creates or verifies a user-owned conversation, resolves live entities/date phrases, and preselects a small ranked Knowledge Base subset.
+4. `askOmsAssistant()` validates the question/configuration, creates or verifies a user-owned conversation, resolves live entities/date phrases, then recomputes a small ranked Knowledge Base plan for the new question plus resolved context.
 5. If a deterministic shipment/CBM handler applies, it returns its programmatic answer. Otherwise the provider sends Gemini the system instructions, recent text history, resolved context, compact capability context, and four bounded tool definitions with `store: false` and high thinking.
 6. The service iterates at most eight times. Canonical capabilities go through the explicit adapter registry; schema arguments are restricted to catalogued business collections; supplemental aggregations go through `executeOmsQuery()`; controlled analytics use the same query executor and canonical Packed Goods readiness.
-7. The model receives only safe Knowledge Base/schema metadata, bounded capability/query rows, or compact analysis results. If a clearly canonical question first requests raw MongoDB, the server executes the canonical capability and returns recoverable guidance. If the budget is exhausted, a final turn sets `tool_choice: "none"` so Gemini must synthesize completed evidence.
+7. The model receives only safe Knowledge Base/schema metadata, bounded capability/query rows, or compact analysis results. If a clearly canonical question first requests raw MongoDB, the server executes the canonical adapter and returns recoverable guidance. If the budget is exhausted, a final turn sets `tool_choice: "none"` so Gemini must synthesize completed evidence.
 8. The service saves compact history with optimistic revision checking and returns safe factual/forecast metadata. The page renders the complete answer, optional forecast pills, and optional supporting rows.
 
 ## Where to make common changes

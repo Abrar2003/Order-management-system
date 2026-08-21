@@ -717,6 +717,7 @@ test("Gemini completes the By Boo tool loop when interaction IDs are omitted", a
     {
       aiClient: gemini,
       conversationModel: fakeConversationModel(),
+      capabilityExecutor: fakeCapabilityExecutor,
       queryExecutor: withEntityResolver(async (request) => queryResult(
         [{ total: 1 }],
         { metadata: { filters: { collection: request.collection, purpose: request.purpose } } },
@@ -789,35 +790,59 @@ test("persistent Gemini rate limits preserve completed query evidence", async (t
   assert.match(result.answer, /supporting evidence/i);
 });
 
-test("simple container and vendor-order questions stay concise after migration", async (t) => {
+test("simple container counts use Monthly Shipments without a model turn", async (t) => {
   configureAssistant(t);
-  for (const [question, purpose, answer] of [
-    ["How many containers shipped last month?", "Count shipped containers last month", "3 containers shipped last month."],
-    ["How many open orders does Boranada have?", "Count Boranada open orders", "Boranada has 5 open orders."],
-  ]) {
-    const gemini = fakeGemini(
-      functionResponse({
-        collection: "orders",
-        purpose,
-        pipeline: [{ $match: { archived: { $ne: true } } }, { $count: "total" }],
-      }),
-      finalResponse(answer),
-    );
-    const result = await askOmsAssistant(
-      { message: question, user: USER },
-      {
-        aiClient: gemini,
-        conversationModel: fakeConversationModel(),
-        capabilityExecutor: fakeCapabilityExecutor,
-        queryExecutor: withEntityResolver(async () => queryResult([{ total: answer.startsWith("3") ? 3 : 5 }])),
+  const gemini = fakeGemini();
+  let capabilityRequest;
+  const result = await askOmsAssistant(
+    { message: "How many containers shipped last month?", user: USER },
+    {
+      now: new Date("2026-08-20T00:00:00Z"),
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      capabilityExecutor: async (request, dependencies) => {
+        capabilityRequest = request;
+        return fakeCapabilityExecutor(request, dependencies);
       },
-    );
+      queryExecutor: emptyEntityQuery,
+    },
+  );
 
-    assert.equal(result.answer, answer);
-    assert.equal(result.metadata.toolCallCount, 1);
-    assert.equal(result.metadata.capabilityCount, question.includes("containers") ? 1 : 0);
-    assert.equal(gemini.calls.length, 2);
-  }
+  assert.match(result.answer, /^3 containers were shipped last month\./);
+  assert.equal(result.metadata.toolCallCount, 0);
+  assert.equal(result.metadata.capabilityCount, 1);
+  assert.deepEqual(capabilityRequest.filters, {
+    from_date: "2026-07-01",
+    to_date: "2026-07-31",
+    period_mode: "custom",
+  });
+  assert.equal(gemini.calls.length, 0);
+});
+
+test("simple vendor-order questions stay concise after migration", async (t) => {
+  configureAssistant(t);
+  const gemini = fakeGemini(
+    functionResponse({
+      collection: "orders",
+      purpose: "Count Boranada open orders",
+      pipeline: [{ $match: { archived: { $ne: true } } }, { $count: "total" }],
+    }),
+    finalResponse("Boranada has 5 open orders."),
+  );
+  const result = await askOmsAssistant(
+    { message: "How many open orders does Boranada have?", user: USER },
+    {
+      aiClient: gemini,
+      conversationModel: fakeConversationModel(),
+      capabilityExecutor: fakeCapabilityExecutor,
+      queryExecutor: withEntityResolver(async () => queryResult([{ total: 5 }])),
+    },
+  );
+
+  assert.equal(result.answer, "Boranada has 5 open orders.");
+  assert.equal(result.metadata.toolCallCount, 1);
+  assert.equal(result.metadata.capabilityCount, 0);
+  assert.equal(gemini.calls.length, 2);
 });
 
 test("canonical Packed Goods questions execute the capability instead of raw Mongo", async (t) => {
@@ -859,7 +884,7 @@ test("canonical Packed Goods questions execute the capability instead of raw Mon
   const redirected = gemini.calls[1].body.input.find(
     (entry) => entry.type === "function_result" && entry.call_id === "tool-call-1",
   );
-  assert.match(redirected.result[0].text, /canonical_capability_used/);
+  assert.match(redirected.result[0].text, /canonical_capability_available/);
   assert.match(redirected.result[0].text, /Packed Goods/);
 });
 
@@ -1789,27 +1814,29 @@ test("oms_assistant.view permission is enforced before route work", async (t) =>
   assert.equal(nextCalled, false);
 });
 
-test("oms_assistant.view permission allows manager requests to continue", async (t) => {
+test("oms_assistant.view permission allows admin and super-admin requests to continue", async (t) => {
   t.mock.method(RolePermission, "findOne", () => ({
     lean: async () => ({
-      role: "manager",
+      role: "admin",
       permissions: { oms_assistant: { view: true } },
     }),
   }));
-  const res = responseRecorder();
-  let nextCalled = false;
 
-  await requirePermission("oms_assistant", "view")(
-    { user: { ...USER, role: "manager" } },
-    res,
-    () => { nextCalled = true; },
-  );
+  for (const role of ["admin", "super_admin"]) {
+    const res = responseRecorder();
+    let nextCalled = false;
+    await requirePermission("oms_assistant", "view")(
+      { user: { ...USER, role } },
+      res,
+      () => { nextCalled = true; },
+    );
 
-  assert.equal(nextCalled, true);
-  assert.equal(res.body, null);
+    assert.equal(nextCalled, true);
+    assert.equal(res.body, null);
+  }
 });
 
-test("oms_assistant.view is locked to false for non-manager/admin roles (user, qc, dev)", async (t) => {
+test("oms_assistant.view is locked to false for every non-admin role", async (t) => {
   t.mock.method(RolePermission, "findOne", () => ({
     lean: async () => ({
       role: "user",
@@ -1817,7 +1844,7 @@ test("oms_assistant.view is locked to false for non-manager/admin roles (user, q
     }),
   }));
 
-  for (const role of ["user", "qc", "dev"]) {
+  for (const role of ["manager", "product_manager", "inspection_manager", "user", "qc", "dev"]) {
     const res = responseRecorder();
     let nextCalled = false;
 
@@ -2020,6 +2047,22 @@ test("multiple tool date ranges merge into an outer coverage envelope", () => {
     end: "2026-07-31T18:30:00.000Z",
     timezone: "Asia/Kolkata",
   });
+});
+
+test("response metadata excludes internal query details", () => {
+  const merged = serviceInternals.mergeToolResults([
+    queryResult([], {
+      metadata: {
+        filters: {
+          collection: "orders",
+          purpose: "Inspect order shipment structure",
+          brand: "By Boo",
+        },
+      },
+    }),
+  ]);
+
+  assert.deepEqual(merged.filters, { brand: "By Boo" });
 });
 
 test("schema discovery exposes catalogued structure without records or denied collections", () => {

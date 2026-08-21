@@ -6,11 +6,21 @@ const {
   fetchMonthlyShipmentContributionRows,
   getMonthlyShipmentsReportData,
 } = require("./monthlyShipmentsReport.service");
+const {
+  resolveOrderRowCbmSummary,
+  resolveOrderRowCbmSummaryWithStoredFallback,
+  resolveShipmentRowCbm,
+} = require("./shipmentCbmAllocation.service");
 const { getOmsChatConnection } = require("./omsChatQuery.service");
 const {
   getCapability,
-  searchCapabilities,
 } = require("./omsKnowledgeBase.service");
+const {
+  buildCapabilityPlannerContext,
+  findRelevantCapabilities: findPlannedCapabilities,
+  getCanonicalCapabilityGuidance,
+} = require("./omsCapabilityPlanner.service");
+const { applyDataAccessMatch } = require("./userDataAccess.service");
 const {
   logOmsChatError,
   logOmsChatEvent,
@@ -34,6 +44,13 @@ const MONTHLY_SHIPMENT_FIELDS = new Set([
 ]);
 const MONTHLY_SHIPMENT_NUMERIC_FIELDS = new Set([
   "unique_container_count", "total_allocated_cbm",
+]);
+const SHIPMENT_CBM_FIELDS = new Set([
+  "id", "order_id", "item_code", "brand", "vendor", "order_quantity",
+  "shipment_quantity", "total_cbm", "per_item_cbm", "cbm_source",
+]);
+const SHIPMENT_CBM_NUMERIC_FIELDS = new Set([
+  "order_quantity", "shipment_quantity", "total_cbm", "per_item_cbm",
 ]);
 
 class OmsCapabilityError extends Error {
@@ -155,6 +172,7 @@ const normalizeMonthlyShipmentFilters = (filters = {}) => {
   const toDate = cleanDate(filters.to_date ?? filters.toDate ?? filters.to, "to_date");
   if (fromDate) query.from_date = fromDate;
   if (toDate) query.to_date = toDate;
+  if (fromDate && toDate && !query.period_mode) query.period_mode = "custom";
   if (fromDate && toDate && fromDate > toDate) {
     throw new OmsCapabilityError("invalid_capability_filter", "from_date cannot be after to_date.");
   }
@@ -165,11 +183,36 @@ const normalizeMonthlyShipmentFilters = (filters = {}) => {
   return query;
 };
 
+const normalizeShipmentCbmFilters = (filters = {}) => {
+  assertPlainObject(filters, "filters");
+  assertAllowedKeys(
+    filters,
+    new Set(["po", "order_id", "order", "item", "item_code", "shipment_quantity"]),
+    "invalid_capability_filter",
+    "Shipment CBM supports PO, item, and shipment quantity filters.",
+  );
+  const shipmentQuantity = filters.shipment_quantity === undefined
+    ? null
+    : Number(filters.shipment_quantity);
+  if (shipmentQuantity !== null && (!Number.isFinite(shipmentQuantity) || shipmentQuantity <= 0)) {
+    throw new OmsCapabilityError("invalid_capability_filter", "shipment_quantity must be a positive number.");
+  }
+  const normalized = {
+    orderId: cleanText(filters.po ?? filters.order_id ?? filters.order, "PO"),
+    itemCode: cleanText(filters.item ?? filters.item_code, "item"),
+    shipmentQuantity: shipmentQuantity === null ? null : Number(shipmentQuantity.toFixed(6)),
+  };
+  if (!normalized.orderId && !normalized.itemCode) {
+    throw new OmsCapabilityError("invalid_capability_filter", "Shipment CBM requires a PO or item filter.");
+  }
+  return normalized;
+};
+
 const validateOperation = (operation = {}, { fields, numericFields }) => {
   assertPlainObject(operation, "operation");
   assertAllowedKeys(
     operation,
-    new Set(["type", "groupBy", "metrics", "sort", "limit"]),
+    new Set(["type", "groupBy", "metrics", "sort", "limit", "filter", "distinct"]),
     "invalid_capability_operation",
     "Capability operation contains an unsupported setting.",
   );
@@ -191,17 +234,18 @@ const validateOperation = (operation = {}, { fields, numericFields }) => {
   }
   const normalizedMetrics = metrics.map((metric) => {
     assertPlainObject(metric, "metric");
-    assertAllowedKeys(metric, new Set(["operation", "field", "as"]), "invalid_capability_metric", "Capability metric contains an unsupported setting.");
-    const aggregation = cleanText(metric.operation, "metric operation", { optional: false }).toLowerCase();
+    assertAllowedKeys(metric, new Set(["operation", "type", "field", "as"]), "invalid_capability_metric", "Capability metric contains an unsupported setting.");
+    const aggregation = cleanText(metric.operation ?? metric.type, "metric operation", { optional: false }).toLowerCase();
     const field = cleanText(metric.field, "metric field", { optional: false });
     const as = cleanText(metric.as, "metric alias", { optional: false });
-    if (!["sum", "count", "avg", "min", "max"].includes(aggregation)
+    const normalizedAggregation = aggregation === "average" ? "avg" : aggregation;
+    if (!["sum", "count", "avg", "min", "max"].includes(normalizedAggregation)
       || (!numericFields.has(field) && !(aggregation === "count" && field === "*"))
       || !SAFE_NAME.test(as)
       || BLOCKED_KEYS.has(as)) {
       throw new OmsCapabilityError("invalid_capability_metric", "Capability metric is not allowed.");
     }
-    return { operation: aggregation, field, as };
+    return { operation: normalizedAggregation, field, as };
   });
   if (type === "group" && (!groupBy.length || !normalizedMetrics.length)) {
     throw new OmsCapabilityError("invalid_capability_operation", "Grouped operations require groupBy and metrics.");
@@ -221,7 +265,21 @@ const validateOperation = (operation = {}, { fields, numericFields }) => {
     }
     return { field, direction };
   });
-  return { type, groupBy, metrics: normalizedMetrics, sort: normalizedSort, limit };
+  const filter = operation.filter === undefined ? {} : operation.filter;
+  assertPlainObject(filter, "operation filter");
+  assertAllowedKeys(filter, fields, "invalid_capability_filter", "Capability result filter contains an unsupported field.");
+  const normalizedFilter = Object.fromEntries(Object.entries(filter).map(([field, value]) => [
+    field,
+    cleanStringList(value, field),
+  ]));
+  const distinct = operation.distinct === undefined ? "" : cleanText(operation.distinct, "distinct field");
+  if (distinct && !fields.has(distinct)) {
+    throw new OmsCapabilityError("invalid_capability_field", "Capability distinct field is not allowed.");
+  }
+  return {
+    type, groupBy, metrics: normalizedMetrics, sort: normalizedSort, limit,
+    filter: normalizedFilter, distinct,
+  };
 };
 
 const compare = (left, right, field) => {
@@ -278,7 +336,13 @@ const groupRows = (rows, operation) => {
 };
 const postProcess = (rows, operation) => {
   if (operation.type === "summary") return { rows: [], grouped: [], truncated: false };
-  const processed = operation.type === "group" ? groupRows(rows, operation) : [...rows];
+  const filtered = rows.filter((row) => Object.entries(operation.filter || {}).every(([field, values]) => (
+    !values.length || values.includes(String(row?.[field] ?? ""))
+  )));
+  const uniqueRows = operation.distinct
+    ? [...new Map(filtered.map((row) => [JSON.stringify(row?.[operation.distinct] ?? null), row])).values()]
+    : filtered;
+  const processed = operation.type === "group" ? groupRows(uniqueRows, operation) : uniqueRows;
   const sorted = operation.sort.length ? sortRows(processed, operation.sort) : processed;
   return {
     rows: operation.type === "rows" ? sorted.slice(0, operation.limit) : [],
@@ -313,7 +377,7 @@ const executePackedGoods = async ({ filters, operation }, dependencies = {}) => 
   });
   const models = dependencies.models || await getReadOnlyModels(dependencies.connectionProvider);
   const builder = dependencies.packedGoodsBuilder || buildPackedGoodsDataset;
-  const dataset = await builder({ ...normalizedFilters, user: null }, {
+  const dataset = await builder({ ...normalizedFilters, user: dependencies.user || null }, {
     ...models,
     maxTimeMS: CAPABILITY_TIMEOUT_MS,
   });
@@ -344,7 +408,7 @@ const executeMonthlyShipments = async ({ filters, operation }, dependencies = {}
   const loader = dependencies.monthlyShipmentsLoader || getMonthlyShipmentsReportData;
   const report = await loader({
     query,
-    user: null,
+    user: dependencies.user || null,
     now: dependencies.now || new Date(),
     fetchRows: ({ period, user, query: reportQuery }) => fetchMonthlyShipmentContributionRows({
       period,
@@ -373,9 +437,105 @@ const executeMonthlyShipments = async ({ filters, operation }, dependencies = {}
   };
 };
 
+const escapeRegex = (value = "") => String(value)
+  .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const executeShipmentCbm = async ({ filters, operation }, dependencies = {}) => {
+  const normalizedFilters = normalizeShipmentCbmFilters(filters);
+  const normalizedOperation = validateOperation(operation, {
+    fields: SHIPMENT_CBM_FIELDS,
+    numericFields: SHIPMENT_CBM_NUMERIC_FIELDS,
+  });
+  const models = dependencies.models || await getReadOnlyModels(dependencies.connectionProvider);
+  const orderMatch = {
+    $and: [{ archived: { $ne: true } }, { status: { $ne: "Cancelled" } }],
+    ...(normalizedFilters.orderId ? {
+      order_id: { $regex: `^${escapeRegex(normalizedFilters.orderId)}$`, $options: "i" },
+    } : {}),
+    ...(normalizedFilters.itemCode ? {
+      "item.item_code": { $regex: `^${escapeRegex(normalizedFilters.itemCode)}$`, $options: "i" },
+    } : {}),
+  };
+  const scopedOrderMatch = dependencies.user
+    ? applyDataAccessMatch(orderMatch, dependencies.user)
+    : orderMatch;
+  const query = models.OrderModel.find(scopedOrderMatch)
+    .select("_id order_id item brand vendor quantity total_po_cbm")
+    .sort({ order_date: -1, _id: 1 })
+    .limit(MAX_CAPABILITY_ROWS);
+  if (typeof query.maxTimeMS === "function") query.maxTimeMS(CAPABILITY_TIMEOUT_MS);
+  const orders = await query.lean();
+  const itemCodes = [...new Set(orders.map((order) => String(order?.item?.item_code || "").trim()).filter(Boolean))];
+  const itemMatch = dependencies.user
+    ? applyDataAccessMatch({ code: { $in: itemCodes } }, dependencies.user, {
+      brandFields: ["brand", "brand_name", "brands"],
+      vendorFields: ["vendors"],
+    })
+    : { code: { $in: itemCodes } };
+  const itemQuery = itemCodes.length
+    ? models.ItemModel.find(itemMatch).select("code cbm inspected_item_sizes inspected_box_sizes inspected_box_mode pis_item_sizes pis_box_sizes pis_box_mode")
+    : null;
+  if (itemQuery && typeof itemQuery.maxTimeMS === "function") itemQuery.maxTimeMS(CAPABILITY_TIMEOUT_MS);
+  const items = itemQuery ? await itemQuery.lean() : [];
+  const itemByCode = new Map(items.map((item) => [String(item?.code || "").trim().toLowerCase(), item]));
+  const rows = orders.map((order) => {
+    const orderQuantity = Math.max(0, Number(order?.quantity || 0));
+    const shipmentQuantity = normalizedFilters.shipmentQuantity || orderQuantity;
+    const itemCode = String(order?.item?.item_code || "").trim();
+    const itemDoc = itemByCode.get(itemCode.toLowerCase()) || null;
+    const calculatedShipment = normalizedFilters.shipmentQuantity
+      ? resolveOrderRowCbmSummary(itemDoc, shipmentQuantity)
+      : null;
+    const cbm = normalizedFilters.shipmentQuantity
+      ? {
+          total: resolveShipmentRowCbm({
+            itemDoc,
+            orderQuantity,
+            storedPoCbm: order?.total_po_cbm,
+            shipmentQuantity,
+          }),
+          per_item: Number(calculatedShipment?.per_item || 0)
+            || (orderQuantity > 0 ? Number(order?.total_po_cbm || 0) / orderQuantity : 0),
+          source: calculatedShipment?.total ? calculatedShipment.source
+            : Number(order?.total_po_cbm || 0) > 0 ? "total_po_cbm" : null,
+        }
+      : resolveOrderRowCbmSummaryWithStoredFallback({
+          itemDoc,
+          quantity: orderQuantity,
+          storedTotalCbm: order?.total_po_cbm,
+        });
+    return {
+      id: String(order?._id || ""),
+      order_id: String(order?.order_id || "").trim(),
+      item_code: itemCode,
+      brand: String(order?.brand || "").trim(),
+      vendor: String(order?.vendor?.name || order?.vendor || "").trim(),
+      order_quantity: orderQuantity,
+      shipment_quantity: shipmentQuantity,
+      total_cbm: Number(cbm?.total || 0),
+      per_item_cbm: Number(cbm?.per_item || 0),
+      cbm_source: cbm?.source || null,
+    };
+  });
+  const fallbackUsed = rows.some((row) => row.cbm_source === "total_po_cbm");
+  return {
+    appliedFilters: normalizedFilters,
+    summary: {
+      rowCount: rows.length,
+      totalCbm: Number(rows.reduce((sum, row) => sum + row.total_cbm, 0).toFixed(6)),
+    },
+    ...postProcess(rows, normalizedOperation),
+    warnings: fallbackUsed ? ["Some CBM values use the stored Total PO CBM fallback."] : [],
+    provenance: { canonical: true, sourceLabel: "Shipment CBM", sourceType: "canonical_service", cbmFallbackUsed: fallbackUsed },
+    databaseCalls: itemCodes.length ? 2 : 1,
+    audit: { collections: ["orders", "items"], stageCount: 0 },
+  };
+};
+
 const CAPABILITY_ADAPTERS = Object.freeze({
   packed_goods: executePackedGoods,
   monthly_shipments: executeMonthlyShipments,
+  shipment_cbm: executeShipmentCbm,
 });
 
 const assertAdapterRegistryMatchesKnowledgeBase = () => {
@@ -384,7 +544,7 @@ const assertAdapterRegistryMatchesKnowledgeBase = () => {
     const capability = getCapability(id);
     return !capability
       || capability.assistantRecommendation !== "DIRECT_CAPABILITY"
-      || capability.assistantStatus !== "existing_assistant_feature";
+      || !["existing_assistant_feature", "ready"].includes(capability.assistantStatus);
   });
   if (invalid.length) {
     throw new Error("OMS capability adapter registry is out of sync with the Knowledge Base");
@@ -400,7 +560,14 @@ const executeOmsCapability = async (request, dependencies = {}) => {
   const capability = getCapability(capabilityId);
   if (!capability) throw new OmsCapabilityError("unknown_capability", "That OMS capability is not available.");
   if (!CAPABILITY_ADAPTERS[capability.id]) {
-    throw new OmsCapabilityError("capability_not_available", "That OMS capability is not available to the Assistant.");
+    const unavailable = ["NOT_ASSISTANT_SAFE", "EXPORT_ONLY", "PRESENTATION_ONLY"].includes(capability.assistantRecommendation)
+      || capability.assistantStatus === "not_tool_eligible";
+    throw new OmsCapabilityError(
+      unavailable ? "capability_not_available" : "capability_not_ready",
+      unavailable
+        ? "That OMS capability is not available to the Assistant."
+        : "OMS contains this business report, but it is not yet available as a direct Assistant capability.",
+    );
   }
   logOmsChatEvent("capability.validation_completed", {
     capability_id: capability.id,
@@ -418,8 +585,15 @@ const executeOmsCapability = async (request, dependencies = {}) => {
     }, dependencies);
     const normalized = {
       success: true,
-      capability: safeCapabilityMetadata(capability),
+      factuality: "fact",
+      capability: {
+        ...safeCapabilityMetadata(capability),
+        auditId: capability.auditId,
+        sourceClass: capability.sourceClass,
+      },
       ...result,
+      filters: result.appliedFilters,
+      groups: result.grouped,
       provenance: {
         ...result.provenance,
         routePermissions: routePermissions(capability),
@@ -446,48 +620,14 @@ const executeOmsCapability = async (request, dependencies = {}) => {
   }
 };
 
-const strongIntentCapabilityIds = (question) => {
-  const text = String(question || "").toLowerCase();
-  const ids = [];
-  if (/(packed goods|goods ready|ready goods|ready\s+cbm|ready to ship|available to ship|inspected but unshipped|next container)/i.test(text)) {
-    ids.push("packed_goods");
-  }
-  if (/(monthly shipments|containers? shipped|shipped last month)/i.test(text)) {
-    ids.push("monthly_shipments");
-  }
-  return ids;
-};
-
-const findRelevantCapabilities = (question, { limit = 5 } = {}) => {
-  const preferred = strongIntentCapabilityIds(question).map(getCapability).filter(Boolean);
-  const searched = searchCapabilities(question, { limit: 12 });
-  return [...new Map([...preferred, ...searched].map((entry) => [entry.id, entry])).values()]
-    .filter((capability) => ["existing_assistant_feature", "ready"].includes(capability.assistantStatus))
-    .slice(0, Math.max(1, Math.min(6, limit)));
-};
-
-const getCanonicalCapabilityRequirement = (question) => {
-  const text = String(question || "").toLowerCase();
-  if (/(packed goods|goods ready|ready goods|ready\s+cbm|ready to ship|available to ship|inspected but unshipped|shipment[- ]ready volume)/i.test(text)) {
-    return getCapability("packed_goods");
-  }
-  if (/(monthly shipments|how many containers? shipped|containers? shipped last month)/i.test(text)) {
-    return getCapability("monthly_shipments");
-  }
-  return null;
-};
-
-const buildKnowledgeCapabilityContext = (capabilities = []) => (
-  capabilities.length
-    ? capabilities.map((capability) => {
-        const inputs = capability.inputs?.length ? ` Supported filters: ${capability.inputs.join(", ")}.` : "";
-        const priority = CAPABILITY_ADAPTERS[capability.id]
-          ? " Use the canonical capability before rebuilding this concept from raw data."
-          : " This capability is already represented by an existing bounded Assistant path.";
-        return `- ${capability.id} (${capability.name}): ${capability.description}${inputs}${priority}`;
-      }).join("\n")
-    : "- No strong canonical capability match was found; safe schema inspection or raw Mongo investigation may be used."
-);
+const findRelevantCapabilities = (question, options = {}) => findPlannedCapabilities({ question, ...options });
+const getCanonicalCapabilityRequirement = (question) => getCanonicalCapabilityGuidance(question, {
+  adapterIds: Object.keys(CAPABILITY_ADAPTERS),
+});
+const buildKnowledgeCapabilityContext = (capabilities = []) => buildCapabilityPlannerContext({
+  capabilities,
+  adapterIds: Object.keys(CAPABILITY_ADAPTERS),
+});
 
 module.exports = {
   CAPABILITY_ADAPTERS,
@@ -502,10 +642,12 @@ module.exports = {
   __test__: {
     executeMonthlyShipments,
     executePackedGoods,
+    executeShipmentCbm,
     getReadOnlyModels,
     groupRows,
     normalizeMonthlyShipmentFilters,
     normalizePackedGoodsFilters,
+    normalizeShipmentCbmFilters,
     postProcess,
     validateOperation,
   },

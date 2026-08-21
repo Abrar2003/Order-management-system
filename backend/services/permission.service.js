@@ -23,9 +23,10 @@ const ADMIN_PERMISSION_MIRROR_ROLES = new Set([
 const serializeRolePermission = (doc, role, permissionOverride = null) => {
   const roleKey = normalizeRoleKey(doc?.role || role);
   const rawPermissions = doc?.permissions || {};
-  const permissions = permissionOverride
-    ? clonePermissions(permissionOverride)
-    : mergePermissionsWithDefaults(roleKey, rawPermissions);
+  const permissions = mergePermissionsWithDefaults(
+    roleKey,
+    permissionOverride || rawPermissions,
+  );
 
   return {
     role: roleKey,

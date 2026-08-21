@@ -4,7 +4,7 @@
 
 The runtime Knowledge Base is version **2.0.0**. This is the material migration from the former 28-capability Step-1/Step-2 abstraction to the **74 audited capability groups** in `OMS_REPORTS_AND_FUNCTIONS_SUMMARY.md`.
 
-V2 is complete discovery metadata for the next OMS Assistant capability-execution phase. It does **not** register all 49 Assistant-useful capabilities as tools, extract controller-local reports, alter report calculations, change forecasting, widen raw Mongo access, or change Gemini orchestration. Existing Assistant functionality remains in place; the explicit capability adapter registry still contains only `packed_goods` and `monthly_shipments`.
+V2 is discovery metadata plus the first execution checkpoint. It does **not** register all 49 Assistant-useful capabilities as tools, extract controller-local reports, alter report calculations, change forecasting, or widen raw Mongo access. The explicit server-owned adapter registry contains `packed_goods`, `monthly_shipments`, and `shipment_cbm`; all other capability records remain metadata until an adapter is deliberately registered.
 
 Runtime files:
 
@@ -247,7 +247,16 @@ question
   -> bounded result with source/date/quantity/CBM provenance
 ```
 
-V2 metadata does not dynamically import a controller or source path. Future work must extract the 28 controller/helper report datasets before registration and add explicit adapters one at a time. Existing adapters remain Packed Goods and Monthly Shipments; existing deterministic shipment/CBM and forecasting paths are unchanged.
+V2 metadata does not dynamically import a controller or source path. Future work must extract the 28 controller/helper report datasets before registration and add explicit adapters one at a time. The direct registry currently contains Packed Goods, Monthly Shipments, and Shipment CBM; existing deterministic shipment/CBM and forecasting paths remain shared rather than duplicated.
+
+## Runtime adapter status
+
+| Capability | Adapter | Runtime status |
+| --- | --- | --- |
+| `packed_goods` | `buildPackedGoodsDataset` | ready |
+| `monthly_shipments` | `getMonthlyShipmentsReportData` | ready |
+| `shipment_cbm` | shipment CBM allocation service | ready |
+| all other capability records | none | metadata only; `capability_not_ready` or `capability_not_available` as appropriate |
 
 ## Validation and maintenance
 

@@ -41,7 +41,7 @@ const catalog = {
     step: "knowledge_base_v2",
     auditCapabilityCount: 74,
     assistantIntegration: "metadata_ready_for_next_capability_execution_phase",
-    existingCapabilityAdapters: ["packed_goods", "monthly_shipments"],
+    existingCapabilityAdapters: ["packed_goods", "monthly_shipments", "shipment_cbm"],
     behaviorChange: false,
     generatedFrom: "docs/OMS_REPORTS_AND_FUNCTIONS_SUMMARY.md; runtime data was not queried",
   },

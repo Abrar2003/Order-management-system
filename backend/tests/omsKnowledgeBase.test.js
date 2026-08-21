@@ -40,7 +40,7 @@ test("OMS Knowledge Base V2 loads as a frozen, read-only 74-capability catalog",
   assert.equal(catalog.version, "2.0.0");
   assert.equal(catalog.scope.step, "knowledge_base_v2");
   assert.equal(catalog.scope.behaviorChange, false);
-  assert.deepEqual(catalog.scope.existingCapabilityAdapters, ["packed_goods", "monthly_shipments"]);
+  assert.deepEqual(catalog.scope.existingCapabilityAdapters, ["packed_goods", "monthly_shipments", "shipment_cbm"]);
   assert.equal(validation.valid, true, validation.errors.join("\n"));
   assert.equal(validation.stats.capabilities, 74);
   assert.equal(validation.stats.auditIds, 74);
