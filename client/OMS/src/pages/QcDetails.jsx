@@ -37,7 +37,6 @@ import {
 } from "../utils/clientSort";
 import {
   formatDateDDMMYYYY,
-  formatDateTimeIST,
   toISODateString,
 } from "../utils/date";
 import { formatEan13BarcodeDisplay, toEan13BarcodeValue } from "../utils/barcode";
@@ -1734,7 +1733,6 @@ const QcDetails = () => {
         cbmTotal: cbmValue,
         pendingAfter: record?.pending_after ?? 0,
         status: record?.status || linkedRequest?.status || "pending",
-        deadline: linkedRequest?.deadline || null,
         remarks: record?.remarks || "None",
       };
     });
@@ -3264,7 +3262,6 @@ const QcDetails = () => {
                           />
                         </th>
                         <th>Status</th>
-                        <th>Deadline</th>
                         <th>
                           <SortHeaderButton
                             label="Remarks"
@@ -3289,11 +3286,6 @@ const QcDetails = () => {
                           <td>{row.cbmTotal}</td>
                           <td>{row.pendingAfter}</td>
                           <td>{formatInspectionStatusLabel(row.status)}</td>
-                          <td>
-                            {row.deadline
-                              ? `${formatDateTimeIST(row.deadline)} IST`
-                              : "-"}
-                          </td>
                           <td>{row.remarks}</td>
                           {showInspectionActions && (
                             <td>
