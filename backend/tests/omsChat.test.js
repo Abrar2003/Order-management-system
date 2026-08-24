@@ -787,7 +787,8 @@ test("persistent Gemini rate limits preserve completed query evidence", async (t
 
   assert.equal(result.metadata.partialResults, true);
   assert.deepEqual(result.rows, [{ total: 4 }]);
-  assert.match(result.answer, /supporting evidence/i);
+  assert.match(result.answer, /result is.*4/i);
+  assert.doesNotMatch(result.answer, /processing stopped/i);
 });
 
 test("simple container counts use Monthly Shipments without a model turn", async (t) => {

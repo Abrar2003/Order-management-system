@@ -1194,6 +1194,34 @@ const formatForecastPartialAnswer = (results) => {
   return "";
 };
 
+const formatToolPartialAnswer = (results) => {
+  const result = [...(Array.isArray(results) ? results : [results])]
+    .reverse()
+    .find((entry) => Array.isArray(entry?.rows));
+  if (!result) return "";
+
+  const rows = result.rows;
+  const limitation = "The AI summary was temporarily unavailable, so this is a partial answer based on completed supporting evidence.";
+  if (rows.length === 0) {
+    return `The completed OMS query found no matching records. ${limitation}`;
+  }
+
+  if (
+    rows.length === 1
+    && rows[0]
+    && typeof rows[0] === "object"
+    && !Array.isArray(rows[0])
+    && Object.keys(rows[0]).length === 1
+  ) {
+    const value = Object.values(rows[0])[0];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return `The completed OMS query result is **${value.toLocaleString("en-IN")}**. ${limitation}`;
+    }
+  }
+
+  return `The completed OMS query found **${rows.length.toLocaleString("en-IN")}** matching row${rows.length === 1 ? "" : "s"}. The validated results are shown below. ${limitation}`;
+};
+
 const askOmsAssistant = async (
   { message, conversationId, user },
   {
@@ -1346,6 +1374,13 @@ const askOmsAssistant = async (
   let partialResults = false;
   let partialAnswer = "";
   let response;
+  const completedEvidencePartialAnswer = () =>
+    formatForecastPartialAnswer(analyticsResults)
+    || formatToolPartialAnswer(
+      toolResults.length
+        ? toolResults
+        : capabilityResults.map(toCapabilityToolResult),
+    );
 
   const markPartialIfEvidence = () => {
     partialResults ||= Boolean(
@@ -1398,7 +1433,12 @@ const askOmsAssistant = async (
         phase: "finalize",
         failure_category: error.category,
       });
-      return { status: "completed", text: PARTIAL_EVIDENCE_ANSWER, toolCalls: [], identifiers: [] };
+      return {
+        status: "completed",
+        text: completedEvidencePartialAnswer() || PARTIAL_EVIDENCE_ANSWER,
+        toolCalls: [],
+        identifiers: [],
+      };
     }
     rememberProviderIdentifiers(finalResponse, providerIdentifiers);
     if (getOutputText(finalResponse)) return finalResponse;
@@ -1406,7 +1446,11 @@ const askOmsAssistant = async (
       phase: "finalize",
       failure_category: "provider_missing_text",
     });
-    return { ...finalResponse, text: PARTIAL_EVIDENCE_ANSWER, toolCalls: [] };
+    return {
+      ...finalResponse,
+      text: completedEvidencePartialAnswer() || PARTIAL_EVIDENCE_ANSWER,
+      toolCalls: [],
+    };
   };
 
   try {
@@ -1816,11 +1860,7 @@ const askOmsAssistant = async (
         });
       } catch (error) {
         const fallback = TRANSIENT_PROVIDER_CATEGORIES.has(error?.category)
-          ? formatForecastPartialAnswer(analyticsResults) || (
-            toolResults.length || capabilityResults.length || analyticsResults.length
-              ? PARTIAL_EVIDENCE_ANSWER
-              : ""
-          )
+          ? completedEvidencePartialAnswer()
           : "";
         if (!fallback) throw error;
         partialResults = true;

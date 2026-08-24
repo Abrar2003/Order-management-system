@@ -47,7 +47,7 @@ const Answer = ({ children }) => (
   </ReactMarkdown>
 );
 
-const ResultRows = ({ rows = [] }) => {
+const ResultRows = ({ rows = [], open = false }) => {
   const columns = useMemo(() => {
     const keys = rows.flatMap((row) =>
       row && typeof row === "object" && !Array.isArray(row)
@@ -61,7 +61,7 @@ const ResultRows = ({ rows = [] }) => {
   if (!rows.length) return null;
 
   return (
-    <details className="oms-assistant-results mt-3">
+    <details className="oms-assistant-results mt-3" open={open}>
       <summary>Supporting rows ({rows.length})</summary>
       <div className="table-responsive mt-2">
         <table className="table table-sm align-middle mb-0">
@@ -294,7 +294,10 @@ const OmsAssistant = () => {
                   {message.role === "assistant" && (
                     <>
                       <AnswerMetadata metadata={message.metadata} />
-                      <ResultRows rows={message.rows} />
+                      <ResultRows
+                        rows={message.rows}
+                        open={Boolean(message.metadata?.partialResults)}
+                      />
                     </>
                   )}
                 </div>
