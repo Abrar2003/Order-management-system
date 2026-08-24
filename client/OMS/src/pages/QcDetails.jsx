@@ -7,6 +7,7 @@ import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
 import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
 import GoodsNotReadyModal from "../components/GoodsNotReadyModal";
+import ShiftForLaterModal from "../components/ShiftForLaterModal";
 import RejectAllModal from "../components/RejectAllModal";
 import FilePreviewModal from "../components/FilePreviewModal";
 import QcItemComplaintsSection from "../components/complaints/QcItemComplaintsSection";
@@ -34,7 +35,11 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
-import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
+import {
+  formatDateDDMMYYYY,
+  formatDateTimeIST,
+  toISODateString,
+} from "../utils/date";
 import { formatEan13BarcodeDisplay, toEan13BarcodeValue } from "../utils/barcode";
 import { formatPositiveCbm } from "../utils/cbm";
 import { resolveInspectionRecordCbm } from "../utils/inspectionCbm";
@@ -43,7 +48,10 @@ import { getOptionText } from "../utils/optionText";
 import {
   canTransferLatestRequestToday,
   getQcUserUpdateRequestAvailability,
+  hasInspectionRecordActivity,
+  isPendingRequestHistoryStatus,
   resolveLatestRequestEntry,
+  resolveLatestInspectionRecordForRequestEntry,
 } from "../utils/qcRequests";
 import { isLabelExemptUser } from "../utils/qcUpdateAccess";
 import useBulkQcImageUpload from "../hooks/useBulkQcImageUpload";
@@ -241,6 +249,18 @@ const formatClaimPercentage = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return "0";
   return parsed.toFixed(2).replace(/\.?0+$/, "");
+};
+
+const formatInspectionStatusLabel = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "inspection done") return "Inspection Done";
+  if (normalized === "goods not ready") return "Goods Not Ready";
+  if (normalized === "shifted for later") return "Shifted for Later";
+  if (normalized === "transfered" || normalized === "transferred") {
+    return "Transferred";
+  }
+  if (normalized === "rejected") return "Rejected";
+  return "Pending";
 };
 
 const QC_IMAGE_PICKER_ACCEPT = "image/*";
@@ -543,6 +563,7 @@ const QcDetails = () => {
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
   const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
   const [showGoodsNotReadyModal, setShowGoodsNotReadyModal] = useState(false);
+  const [showShiftForLaterModal, setShowShiftForLaterModal] = useState(false);
   const [showRejectAllModal, setShowRejectAllModal] = useState(false);
   const [showTransferRequestModal, setShowTransferRequestModal] = useState(false);
   const [transferInspectionRecord, setTransferInspectionRecord] = useState(null);
@@ -745,6 +766,34 @@ const QcDetails = () => {
       ? "Only the inspector assigned to this QC request can update it."
       : "Only admin, manager, or aligned QC can update this record."
     : "";
+  const latestRequestInspection = useMemo(
+    () =>
+      resolveLatestInspectionRecordForRequestEntry(
+        qc?.inspection_record,
+        latestRequestEntry,
+      ),
+    [qc?.inspection_record, latestRequestEntry],
+  );
+  const latestRequestHasActivity = hasInspectionRecordActivity({
+    checked: latestRequestInspection?.checked,
+    passed: latestRequestInspection?.passed,
+    vendorOffered: latestRequestInspection?.vendor_offered,
+    labelsAdded: latestRequestInspection?.labels_added,
+    labelRanges: latestRequestInspection?.label_ranges,
+    goodsNotReady: latestRequestInspection?.goods_not_ready,
+    status: latestRequestInspection?.status,
+  });
+  const canShiftForLater =
+    canUpdateQc &&
+    isPendingRequestHistoryStatus(latestRequestEntry?.status) &&
+    !latestRequestHasActivity;
+  const shiftForLaterDisabledReason = !canUpdateQc
+    ? qcUpdateDisabledReason
+    : !isPendingRequestHistoryStatus(latestRequestEntry?.status)
+      ? "Only an open QC request can be shifted for later."
+      : latestRequestHasActivity
+        ? "Requests with inspection activity cannot be shifted for later."
+        : "";
   const availableRelatedFileOptions = useMemo(
     () =>
       isQcUser
@@ -1613,12 +1662,22 @@ const QcDetails = () => {
         };
       })
       .sort((a, b) => a.__requestTime - b.__requestTime);
+    const requestById = new Map(
+      requestSnapshotsAsc.map((request) => [
+        String(request?._id || "").trim(),
+        request,
+      ]),
+    );
 
-    const resolveRequestForInspection = (inspectionDate, createdAt) => {
+    const resolveRequestForInspection = (record = {}) => {
+      const linkedRequestId = String(record?.request_history_id || "").trim();
+      if (linkedRequestId && requestById.has(linkedRequestId)) {
+        return requestById.get(linkedRequestId);
+      }
       if (requestSnapshotsAsc.length === 0) return null;
       const inspectionTime = Math.max(
-        toTimestamp(inspectionDate),
-        toTimestamp(createdAt),
+        toTimestamp(record?.inspection_date),
+        toTimestamp(record?.createdAt),
       );
 
       if (!inspectionTime) {
@@ -1652,10 +1711,7 @@ const QcDetails = () => {
     // }));
 
     const inspectionRows = inspectionHistory.map((record, index) => {
-      const linkedRequest = resolveRequestForInspection(
-        record?.inspection_date,
-        record?.createdAt,
-      );
+      const linkedRequest = resolveRequestForInspection(record);
       const inspectionCbm = resolveInspectionRecordCbm(record, qc);
       const cbmValue = formatPositiveCbm(inspectionCbm, "Not Set");
 
@@ -1677,6 +1733,8 @@ const QcDetails = () => {
         passedQty: record?.passed ?? 0,
         cbmTotal: cbmValue,
         pendingAfter: record?.pending_after ?? 0,
+        status: record?.status || linkedRequest?.status || "pending",
+        deadline: linkedRequest?.deadline || null,
         remarks: record?.remarks || "None",
       };
     });
@@ -3205,6 +3263,8 @@ const QcDetails = () => {
                             onClick={() => handleTimelineSortColumn("pending", "desc")}
                           />
                         </th>
+                        <th>Status</th>
+                        <th>Deadline</th>
                         <th>
                           <SortHeaderButton
                             label="Remarks"
@@ -3228,6 +3288,12 @@ const QcDetails = () => {
                           <td>{row.passedQty}</td>
                           <td>{row.cbmTotal}</td>
                           <td>{row.pendingAfter}</td>
+                          <td>{formatInspectionStatusLabel(row.status)}</td>
+                          <td>
+                            {row.deadline
+                              ? `${formatDateTimeIST(row.deadline)} IST`
+                              : "-"}
+                          </td>
                           <td>{row.remarks}</td>
                           {showInspectionActions && (
                             <td>
@@ -3495,6 +3561,16 @@ const QcDetails = () => {
 
                 <button
                   type="button"
+                  className="btn btn-outline-warning"
+                  onClick={() => setShowShiftForLaterModal(true)}
+                  disabled={!canShiftForLater}
+                  title={!canShiftForLater ? shiftForLaterDisabledReason : ""}
+                >
+                  Shift for Later
+                </button>
+
+                <button
+                  type="button"
                   className="btn btn-outline-danger"
                   onClick={() => setShowGoodsNotReadyModal(true)}
                   disabled={!canUpdateQc}
@@ -3624,6 +3700,20 @@ const QcDetails = () => {
           onClose={() => setShowGoodsNotReadyModal(false)}
           onSuccess={() => {
             setShowGoodsNotReadyModal(false);
+            fetchQcDetails();
+          }}
+        />
+      )}
+
+      {showShiftForLaterModal &&
+        !isViewOnly &&
+        canShiftForLater && (
+        <ShiftForLaterModal
+          qc={qc}
+          request={latestRequestEntry}
+          onClose={() => setShowShiftForLaterModal(false)}
+          onSuccess={() => {
+            setShowShiftForLaterModal(false);
             fetchQcDetails();
           }}
         />

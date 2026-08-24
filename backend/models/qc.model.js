@@ -91,10 +91,18 @@ const qcSchema = new mongoose.Schema(
         },
         status: {
           type: String,
-          enum: ["open", "inspected", "transfered", "rejected"],
+          enum: [
+            "open",
+            "inspected",
+            "transfered",
+            "transferred",
+            "rejected",
+            "shifted for later",
+          ],
           required: true,
           default: "open",
         },
+        deadline: { type: Date, default: null },
         remarks: { type: String, default: "" },
         createdBy: {
           type: mongoose.Schema.Types.ObjectId,

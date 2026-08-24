@@ -46,6 +46,7 @@ const QcEditLogSchema = new mongoose.Schema(
         "qc_align",
         "qc_update",
         "qc_goods_not_ready",
+        "qc_shift_for_later",
         "qc_inspection_record_edit",
         "qc_inspection_record_delete",
         "qc_inspection_record_transfer",

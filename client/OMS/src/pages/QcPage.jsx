@@ -64,6 +64,7 @@ const getQcInspectionStatus = (qc = {}) => {
     return "Transferred";
   }
   if (derivedStatus === "goods not ready") return "Goods Not Ready";
+  if (derivedStatus === "shifted for later") return "Shifted for Later";
   if (derivedStatus === "inspection done") return "Inspection Done";
   if (derivedStatus === "pending") return "Pending";
 
@@ -82,6 +83,10 @@ const getQcInspectionStatus = (qc = {}) => {
     return "Goods Not Ready";
   }
 
+  if (explicitStatus === "shifted for later") {
+    return "Shifted for Later";
+  }
+
   if (
     toSafeNumber(lastInspection?.checked) > 0 ||
     explicitStatus === "inspection done"
@@ -96,6 +101,7 @@ const INSPECTION_STATUS_OPTIONS = [
   "Pending",
   "Inspection Done",
   "Goods Not Ready",
+  "Shifted for Later",
   "Rejected",
   "Transferred",
 ];
@@ -113,6 +119,10 @@ const renderInspectionStatus = (qc = {}) => {
 
   if (inspectionStatus === "Goods Not Ready") {
     return <span className="text-danger fw-semibold">Goods Not Ready</span>;
+  }
+
+  if (inspectionStatus === "Shifted for Later") {
+    return <span className="text-warning fw-semibold">Shifted for Later</span>;
   }
 
   if (inspectionStatus === "Inspection Done") {

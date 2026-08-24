@@ -28,7 +28,10 @@ import {
   parseMeasuredSizeEntries as parseMeasuredSizeEntriesUtil,
   requiresInnerBarcode,
 } from "../utils/measuredSizeForm";
-import { getQcUserUpdateRequestAvailability } from "../utils/qcRequests";
+import {
+  getQcUserUpdateRequestAvailability,
+  hasInspectionRecordActivity,
+} from "../utils/qcRequests";
 import { formatNumberInputValue } from "../utils/measurementDisplay";
 import useFormDraft from "../hooks/useFormDraft";
 import {
@@ -1432,6 +1435,18 @@ const UpdateQcModal = ({
     const storedInnerBarcode =
       getRecordInnerBarcodeValue(barcodePrefillRecord) ||
       getPositiveBarcodeValue(itemMaster, ["pis_inner_barcode"]);
+    const useTodayForShiftedRequest =
+      !isInspectionRecordUpdate &&
+      Boolean(latestRequestEntry?.deadline) &&
+      !hasInspectionRecordActivity({
+        checked: recordToPrefill?.checked,
+        passed: recordToPrefill?.passed,
+        vendorOffered: recordToPrefill?.vendor_offered,
+        labelsAdded: recordToPrefill?.labels_added,
+        labelRanges: recordToPrefill?.label_ranges,
+        goodsNotReady: recordToPrefill?.goods_not_ready,
+        status: recordToPrefill?.status,
+      });
 
     setForm({
       inspector: defaultInspectorId,
@@ -1507,7 +1522,9 @@ const UpdateQcModal = ({
       last_inspected_date: toDDMMYYYYInputValue(
         isInspectionRecordUpdate
           ? recordToPrefill?.inspection_date
-          : recordToPrefill?.inspection_date ||
+          : useTodayForShiftedRequest
+            ? todayIso
+            : recordToPrefill?.inspection_date ||
             latestRequestEntry?.request_date ||
             qc.request_date ||
             qc.last_inspected_date,
@@ -1546,6 +1563,7 @@ const UpdateQcModal = ({
     latestRequestEntry,
     qcUserRewriteInspectionRecord,
     isQcUserRewriteMode,
+    todayIso,
   ]);
 
   useEffect(() => {

@@ -1,4 +1,8 @@
-import { getTodayISODate, toISODateString } from "./date.js";
+import {
+  formatDateTimeIST,
+  getTodayISODate,
+  toISODateString,
+} from "./date.js";
 import {
   buildUpdateQcPastDaysMessage,
   getUpdateQcPastDaysLimit,
@@ -16,6 +20,7 @@ const getRequestHistoryStatusPriority = (value) => {
   if (normalized === "open") return 4;
   if (normalized === "inspected") return 3;
   if (normalized === "rejected") return 2;
+  if (normalized === "shifted for later") return 1;
   if (normalized === "transfered") return 1;
   return 0;
 };
@@ -88,7 +93,7 @@ export const isPendingRequestHistoryStatus = (value) =>
 const isInspectionStatusMatching = (value = "", expected = "") =>
   normalizeRequestHistoryStatus(value) === normalizeRequestHistoryStatus(expected);
 
-const hasInspectionRecordActivity = ({
+export const hasInspectionRecordActivity = ({
   checked = 0,
   passed = 0,
   vendorOffered = 0,
@@ -98,6 +103,7 @@ const hasInspectionRecordActivity = ({
   status = "",
 } = {}) =>
   isInspectionStatusMatching(status, "rejected") ||
+  isInspectionStatusMatching(status, "shifted for later") ||
   isInspectionStatusMatching(status, "goods not ready") ||
   isInspectionStatusMatching(status, "Inspection Done") ||
   Boolean(goodsNotReady?.ready) ||
@@ -351,7 +357,32 @@ export const getQcUserUpdateRequestAvailability = (
   const requestDateIso = toISODateString(
     latestRequestEntry?.request_date || qc?.request_date || "",
   );
-  if (!requestDateIso || !isWithinPastDaysInclusive(requestDateIso, qcUserPastDaysLimit)) {
+  const deadlineValue = latestRequestEntry?.deadline;
+  const deadlineTime = deadlineValue ? new Date(deadlineValue).getTime() : 0;
+  if (deadlineValue && !Number.isFinite(deadlineTime)) {
+    return {
+      isAvailable: false,
+      reason: "The shifted QC request deadline is invalid.",
+      latestRequestEntry,
+      latestInspectionRecord: null,
+    };
+  }
+  if (deadlineTime && Date.now() >= deadlineTime) {
+    const deadlineLabel = formatDateTimeIST(deadlineValue, "");
+    return {
+      isAvailable: false,
+      reason: deadlineLabel
+        ? `The shifted QC request deadline expired at ${deadlineLabel} IST.`
+        : "The shifted QC request deadline has expired.",
+      latestRequestEntry,
+      latestInspectionRecord: null,
+    };
+  }
+  if (
+    !requestDateIso ||
+    (!deadlineTime &&
+      !isWithinPastDaysInclusive(requestDateIso, qcUserPastDaysLimit))
+  ) {
     return {
       isAvailable: false,
       reason: buildUpdateQcPastDaysMessage("qc", qcUserPastDaysLimit),

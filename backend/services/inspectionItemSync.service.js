@@ -30,6 +30,7 @@ const normalizeStatus = (value) => normalizeText(value).toLowerCase();
 
 const NON_MEASUREMENT_INSPECTION_STATUSES = new Set([
   "goods not ready",
+  "shifted for later",
   "rejected",
   "transfered",
   "transferred",

@@ -305,6 +305,7 @@ const QC_REQUEST_TYPES = Object.freeze({
 const REQUEST_HISTORY_STATUS = Object.freeze({
   OPEN: "open",
   INSPECTED: "inspected",
+  SHIFTED_FOR_LATER: "shifted for later",
   REJECTED: "rejected",
   TRANSFERRED: "transfered",
 });
@@ -312,6 +313,7 @@ const INSPECTION_RECORD_STATUS = Object.freeze({
   PENDING: "pending",
   DONE: "Inspection Done",
   GOODS_NOT_READY: "goods not ready",
+  SHIFTED_FOR_LATER: "shifted for later",
   REJECTED: "rejected",
   TRANSFERRED: "transfered",
 });
@@ -319,9 +321,11 @@ const QC_INSPECTION_STATUS_LABEL = Object.freeze({
   PENDING: "Pending",
   DONE: "Inspection Done",
   GOODS_NOT_READY: "Goods Not Ready",
+  SHIFTED_FOR_LATER: "Shifted for Later",
   REJECTED: "Rejected",
   TRANSFERRED: "Transferred",
 });
+const SHIFT_FOR_LATER_WINDOW_MS = 96 * 60 * 60 * 1000;
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
 const MANAGER_ALLOWED_PAST_DAYS = 2;
 const QC_ALLOWED_PAST_DAYS = 1;
@@ -701,8 +705,10 @@ const getGoodsNotReadyReason = (goodsNotReady = null, fallback = "") => {
   return normalizeText(fallback || "");
 };
 
-const normalizeRequestHistoryStatus = (value) =>
-  String(value || "").trim().toLowerCase();
+const normalizeRequestHistoryStatus = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "transferred" ? REQUEST_HISTORY_STATUS.TRANSFERRED : normalized;
+};
 
 const normalizeActionBoolean = (value, fallback = false) => {
   if (typeof value === "boolean") return value;
@@ -746,6 +752,10 @@ const hasInspectionRecordActivity = ({
   status = "",
 } = {}) =>
   isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.REJECTED) ||
+  isInspectionStatusMatching(
+    status,
+    INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER,
+  ) ||
   isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.GOODS_NOT_READY) ||
   isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.DONE) ||
   isGoodsNotReadyMarked(goodsNotReady, status) ||
@@ -766,6 +776,15 @@ const resolveInspectionRecordStatus = ({
 
   if (isInspectionStatusMatching(explicitStatus, INSPECTION_RECORD_STATUS.REJECTED)) {
     return INSPECTION_RECORD_STATUS.REJECTED;
+  }
+
+  if (
+    isInspectionStatusMatching(
+      explicitStatus,
+      INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER,
+    )
+  ) {
+    return INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER;
   }
 
   if (isGoodsNotReadyMarked(goodsNotReady, explicitStatus)) {
@@ -792,8 +811,9 @@ const syncQcRequestHistoryStatuses = (
   const statusPriority = {
     [REQUEST_HISTORY_STATUS.OPEN]: 0,
     [REQUEST_HISTORY_STATUS.INSPECTED]: 1,
-    [REQUEST_HISTORY_STATUS.REJECTED]: 2,
-    [REQUEST_HISTORY_STATUS.TRANSFERRED]: 3,
+    [REQUEST_HISTORY_STATUS.SHIFTED_FOR_LATER]: 2,
+    [REQUEST_HISTORY_STATUS.REJECTED]: 3,
+    [REQUEST_HISTORY_STATUS.TRANSFERRED]: 4,
   };
   const mergeRequestHistoryStatus = (currentStatus, nextStatus) => {
     const normalizedCurrent = normalizeRequestHistoryStatus(
@@ -837,6 +857,11 @@ const syncQcRequestHistoryStatuses = (
         : normalizeInspectionStatus(resolvedInspectionStatus) ===
             normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED)
           ? REQUEST_HISTORY_STATUS.REJECTED
+        : normalizeInspectionStatus(resolvedInspectionStatus) ===
+            normalizeInspectionStatus(
+              INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER,
+            )
+          ? REQUEST_HISTORY_STATUS.SHIFTED_FOR_LATER
         : hasActivity
           ? REQUEST_HISTORY_STATUS.INSPECTED
           : REQUEST_HISTORY_STATUS.OPEN;
@@ -910,6 +935,14 @@ const syncQcRequestHistoryStatuses = (
 };
 
 const toISODateString = (value) => toDateOnlyIso(value);
+
+const buildShiftedRequestDeadline = (requestDate) => {
+  const requestDateIso = toISODateString(requestDate);
+  if (!requestDateIso) return null;
+  const requestStartIst = new Date(`${requestDateIso}T00:00:00+05:30`);
+  if (Number.isNaN(requestStartIst.getTime())) return null;
+  return new Date(requestStartIst.getTime() + SHIFT_FOR_LATER_WINDOW_MS);
+};
 
 const parseIsoDateToUtcDate = (isoDate) => {
   return parseDateOnly(isoDate);
@@ -991,8 +1024,13 @@ const formatRequestHistoryForAudit = (entries = []) => {
         normalizeText(entry?.inspector?.name || entry?.updated_by?.name || "") ||
         "Not Set";
       const status = normalizeText(entry?.status) || "open";
+      const parsedDeadline = entry?.deadline ? new Date(entry.deadline) : null;
+      const deadline =
+        parsedDeadline && !Number.isNaN(parsedDeadline.getTime())
+          ? parsedDeadline.toISOString()
+          : "None";
       const remarks = normalizeText(entry?.remarks) || "None";
-      return `${index + 1}) ${requestDate} | ${requestType} | qty ${quantityRequested} | inspector ${inspectorName} | ${status} | remarks: ${remarks}`;
+      return `${index + 1}) ${requestDate} | ${requestType} | qty ${quantityRequested} | inspector ${inspectorName} | ${status} | deadline ${deadline} | remarks: ${remarks}`;
     })
     .join(" || ");
 };
@@ -2675,7 +2713,27 @@ const getQcUserLatestRequestAvailability = (
     };
   }
 
+  const deadlineValue = latestRequestEntry?.deadline;
+  const deadline = deadlineValue ? new Date(deadlineValue) : null;
+  if (deadlineValue && Number.isNaN(deadline.getTime())) {
+    return {
+      isAvailable: false,
+      latestRequestEntry,
+      latestInspectionRecord: null,
+      reason: "QC request deadline is invalid.",
+    };
+  }
+  if (deadline && Date.now() >= deadline.getTime()) {
+    return {
+      isAvailable: false,
+      latestRequestEntry,
+      latestInspectionRecord: null,
+      reason: "The shifted QC request deadline has expired.",
+    };
+  }
+
   if (
+    !deadline &&
     qcUserPastDaysLimit !== null &&
     !isIsoDateWithinPastDaysInclusive(requestDateIso, qcUserPastDaysLimit)
   ) {
@@ -3603,9 +3661,14 @@ const buildApprovedGoodsQuantityByInspectionId = (inspectionRecords = []) => {
 
 exports.__test__ = {
   buildApprovedGoodsQuantityByInspectionId,
+  buildShiftedRequestDeadline,
+  getQcUserLatestRequestAvailability,
+  hasInspectionRecordActivity,
+  resolveInspectionRecordStatus,
   resolveBarcodeWithPisDefault,
   selectPreviousPoImageHistory,
   syncQcCurrentRequestFieldsFromHistory,
+  syncQcRequestHistoryStatuses,
   syncRequestHistoryInspectorsFromInspections,
   requiresPisBarcodeForQcUpdate,
 };
@@ -3926,6 +3989,9 @@ const normalizeQcInspectionStatusFilter = (value = "") => {
   if (normalized === "goods not ready") {
     return QC_INSPECTION_STATUS_LABEL.GOODS_NOT_READY;
   }
+  if (normalized === "shifted for later") {
+    return QC_INSPECTION_STATUS_LABEL.SHIFTED_FOR_LATER;
+  }
   if (normalized === "rejected") return QC_INSPECTION_STATUS_LABEL.REJECTED;
   if (normalized === "transfered" || normalized === "transferred") {
     return QC_INSPECTION_STATUS_LABEL.TRANSFERRED;
@@ -4110,6 +4176,17 @@ const buildQcInspectionStatusExpression = () => {
                 ],
               },
               then: QC_INSPECTION_STATUS_LABEL.GOODS_NOT_READY,
+            },
+            {
+              case: {
+                $eq: [
+                  "$$explicitStatus",
+                  normalizeInspectionStatus(
+                    INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER,
+                  ),
+                ],
+              },
+              then: QC_INSPECTION_STATUS_LABEL.SHIFTED_FOR_LATER,
             },
             {
               case: {
@@ -8915,6 +8992,251 @@ exports.getDailyOrderSummary = async (req, res) => {
   }
 };
 
+const shiftQcRequestForLater = async (req, res) => {
+  try {
+    const remark = String(req.body?.remark || "").trim();
+    const requestHistoryId = String(req.body?.request_history_id || "").trim();
+    if (!remark) {
+      return res.status(400).json({ message: "Remark is required" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(requestHistoryId)) {
+      return res.status(400).json({ message: "A valid request history id is required" });
+    }
+
+    const qc = await QC.findById(req.params.id)
+      .populate("inspector")
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "status quantity shipment order_id brand vendor",
+      });
+
+    if (!qc || !qc.order) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const beforeInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    const beforeQcSnapshot = buildQcEditLogSnapshot(
+      qc.toObject(),
+      beforeInspectionRecords,
+    );
+    const latestRequestEntry = resolveLatestRequestEntry(qc.request_history || []);
+    if (
+      !latestRequestEntry ||
+      String(latestRequestEntry?._id || "").trim() !== requestHistoryId
+    ) {
+      return res.status(409).json({
+        message: "Only the latest QC request can be shifted for later",
+      });
+    }
+    if (
+      normalizeRequestHistoryStatus(latestRequestEntry?.status) !==
+      REQUEST_HISTORY_STATUS.OPEN
+    ) {
+      return res.status(400).json({
+        message: "Only an open QC request can be shifted for later",
+      });
+    }
+
+    const normalizedRole = normalizeUserRoleKey(req.user?.role);
+    const isAdmin = isAdminLikeRole(normalizedRole);
+    const isManager = !isAdmin && isManagerLikeRole(normalizedRole);
+    const hasElevatedAccess = isAdmin || isManager;
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    if (!hasElevatedAccess && normalizedRole !== "qc") {
+      return res.status(403).json({
+        message: "Only the assigned QC user or a manager can shift this request",
+      });
+    }
+    if (!hasElevatedAccess) {
+      const availability = getQcUserLatestRequestAvailability(
+        qc,
+        beforeInspectionRecords,
+        { currentUserId },
+      );
+      if (!availability.isAvailable) {
+        return res.status(availability.statusCode || 403).json({
+          message: availability.reason,
+        });
+      }
+    }
+
+    const currentInspection = await Inspection.findOne({
+      qc: qc._id,
+      request_history_id: latestRequestEntry._id,
+    }).sort({ createdAt: -1 });
+    if (
+      currentInspection &&
+      hasInspectionRecordActivity({
+        checked: currentInspection?.checked,
+        passed: currentInspection?.passed,
+        vendorOffered: currentInspection?.vendor_offered,
+        labelsAdded: currentInspection?.labels_added,
+        labelRanges: currentInspection?.label_ranges,
+        goodsNotReady: currentInspection?.goods_not_ready,
+        status: currentInspection?.status,
+      })
+    ) {
+      return res.status(409).json({
+        message:
+          "This request already has inspection activity and cannot be shifted for later",
+      });
+    }
+
+    const requestDate = toISODateString(
+      latestRequestEntry?.request_date || qc?.request_date,
+    );
+    const requestDeadline = latestRequestEntry?.deadline
+      ? new Date(latestRequestEntry.deadline)
+      : buildShiftedRequestDeadline(requestDate);
+    if (
+      !requestDate ||
+      !requestDeadline ||
+      Number.isNaN(requestDeadline.getTime())
+    ) {
+      return res.status(400).json({
+        message: "The shifted request deadline could not be calculated",
+      });
+    }
+    if (Date.now() >= requestDeadline.getTime()) {
+      return res.status(409).json({
+        message: "The shifted QC request deadline has expired",
+      });
+    }
+
+    const inspectorId = String(
+      latestRequestEntry?.inspector?._id ||
+        latestRequestEntry?.inspector ||
+        qc?.inspector?._id ||
+        qc?.inspector ||
+        "",
+    ).trim();
+    if (!mongoose.Types.ObjectId.isValid(inspectorId)) {
+      return res.status(400).json({
+        message: "The QC request does not have a valid inspector",
+      });
+    }
+
+    const requestedQuantity = toNonNegativeNumber(
+      latestRequestEntry?.quantity_requested,
+      0,
+    );
+    if (requestedQuantity <= 0) {
+      return res.status(400).json({
+        message: "The QC request does not have a quantity to shift",
+      });
+    }
+
+    const auditTimestamp = new Date();
+    const actionDate = toISODateString(auditTimestamp);
+    const inspectionSizeSource =
+      currentInspection ||
+      (await findInspectionSizeSourceForQc(qc, null, req.user));
+    await upsertInspectionRecordForRequest({
+      qcDoc: qc,
+      inspectorId,
+      requestDate,
+      requestHistoryId: latestRequestEntry._id,
+      requestedQuantity,
+      inspectionDate: actionDate,
+      remarks: remark,
+      createdBy: req.user._id,
+      auditUser: req.user,
+      explicitStatus: INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER,
+      allowRequestedDateFallback: false,
+      currentSizeSource: inspectionSizeSource,
+      restrictToInspectorId: normalizedRole === "qc" ? currentUserId : "",
+    });
+
+    latestRequestEntry.status = REQUEST_HISTORY_STATUS.SHIFTED_FOR_LATER;
+    latestRequestEntry.remarks = remark;
+    stampRequestHistoryEntry(latestRequestEntry, {
+      user: req.user,
+      updatedAt: auditTimestamp,
+    });
+
+    qc.request_history.push({
+      request_date: requestDate,
+      request_type: normalizeQcRequestType(
+        latestRequestEntry?.request_type || qc?.request_type,
+      ),
+      quantity_requested: requestedQuantity,
+      inspector: inspectorId,
+      status: REQUEST_HISTORY_STATUS.OPEN,
+      remarks: "",
+      deadline: requestDeadline,
+      createdBy: req.user._id,
+      updatedAt: auditTimestamp,
+      updated_by: buildAuditActor(req.user),
+    });
+    const followUpRequest = qc.request_history[qc.request_history.length - 1];
+    await upsertInspectionRecordForRequest({
+      qcDoc: qc,
+      inspectorId,
+      requestDate,
+      requestHistoryId: followUpRequest?._id || null,
+      requestedQuantity,
+      inspectionDate: actionDate,
+      remarks: "",
+      createdBy: req.user._id,
+      auditUser: req.user,
+      allowRequestedDateFallback: false,
+      currentSizeSource: inspectionSizeSource,
+    });
+
+    const refreshedInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    syncQcCurrentRequestFieldsFromHistory(qc, refreshedInspectionRecords);
+    syncQcRequestHistoryStatuses(qc, refreshedInspectionRecords, {
+      user: req.user,
+      updatedAt: auditTimestamp,
+    });
+    qc.last_inspected_date = actionDate;
+    qc.updated_by = buildAuditActor(req.user);
+    await qc.save();
+
+    const afterInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    await createQcEditLog({
+      reqUser: req.user,
+      qcDoc: qc,
+      beforeSnapshot: beforeQcSnapshot,
+      afterSnapshot: buildQcEditLogSnapshot(qc.toObject(), afterInspectionRecords),
+      operationType: "qc_shift_for_later",
+      extraRemarks: [
+        `QC request shifted for later until ${requestDeadline.toISOString()}.`,
+      ],
+    });
+
+    return res.status(200).json({
+      message: "QC request shifted for later",
+      data: qc,
+    });
+  } catch (err) {
+    if (
+      typeof err?.hasErrorLabel === "function" &&
+      err.hasErrorLabel("TransientTransactionError")
+    ) {
+      throw err;
+    }
+    if (
+      err?.name === "VersionError" ||
+      isTransactionUnsupportedError(err)
+    ) {
+      throw err;
+    }
+    return res
+      .status(400)
+      .json({ message: err.message || "Failed to shift QC request for later" });
+  }
+};
+
+exports.markShiftedForLater = async (req, res) =>
+  runTransactionalController({
+    connection: mongoose.connection,
+    handler: shiftQcRequestForLater,
+    req,
+    res,
+  });
+
 exports.markGoodsNotReady = async (req, res) => {
   const uploadedImageKeys = [];
   const preparedUploads = [];
@@ -9882,10 +10204,15 @@ exports.lookupInspectionTransferTarget = async (req, res) => {
       normalizeInspectionStatus(sourceStatus) ===
         normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED) ||
       normalizeInspectionStatus(sourceStatus) ===
-        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY)
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY) ||
+      normalizeInspectionStatus(sourceStatus) ===
+        normalizeInspectionStatus(
+          INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER,
+        )
     ) {
       return res.status(400).json({
-        message: "Rejected or goods-not-ready inspection records cannot be transferred",
+        message:
+          "Rejected, goods-not-ready, or shifted inspection records cannot be transferred",
       });
     }
 
@@ -10064,10 +10391,15 @@ exports.transferInspectionRecord = async (req, res) => {
       normalizeInspectionStatus(sourceStatus) ===
         normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY) ||
       normalizeInspectionStatus(sourceStatus) ===
+        normalizeInspectionStatus(
+          INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER,
+        ) ||
+      normalizeInspectionStatus(sourceStatus) ===
         normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
     ) {
       return res.status(400).json({
-        message: "Rejected, goods-not-ready, or already transferred inspection records cannot be transferred",
+        message:
+          "Rejected, goods-not-ready, shifted, or already transferred inspection records cannot be transferred",
       });
     }
 
@@ -12930,8 +13262,17 @@ exports.editInspectionRecords = async (req, res) => {
         goodsNotReady: record?.goods_not_ready,
         explicitStatus:
           passed <= 0 &&
-          isInspectionStatusMatching(record?.status, INSPECTION_RECORD_STATUS.REJECTED)
-            ? INSPECTION_RECORD_STATUS.REJECTED
+          (
+            isInspectionStatusMatching(
+              record?.status,
+              INSPECTION_RECORD_STATUS.REJECTED,
+            ) ||
+            isInspectionStatusMatching(
+              record?.status,
+              INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER,
+            )
+          )
+            ? record.status
             : "",
         requestType: qc?.request_type,
       });
@@ -13576,6 +13917,14 @@ exports.syncInspectionStatuses = async (req, res) => {
           normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED)
         ) {
           return REQUEST_HISTORY_STATUS.REJECTED;
+        }
+        if (
+          normalizeInspectionStatus(inspectionStatus) ===
+          normalizeInspectionStatus(
+            INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER,
+          )
+        ) {
+          return REQUEST_HISTORY_STATUS.SHIFTED_FOR_LATER;
         }
         const hasActivity = hasInspectionRecordActivity({
           checked: inspection?.checked,

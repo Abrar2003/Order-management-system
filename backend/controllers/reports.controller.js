@@ -839,6 +839,8 @@ const normalizeInspectionStatusFilter = (value) => {
     done: "Inspection Done",
     "goods not ready": "goods not ready",
     goods_not_ready: "goods not ready",
+    "shifted for later": "shifted for later",
+    shifted_for_later: "shifted for later",
     rejected: "rejected",
     transfered: "transfered",
     transferred: "transfered",

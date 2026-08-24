@@ -72,6 +72,9 @@ const renderInspectionStatus = (value) => {
   if (normalized === "goods not ready") {
     return <span className="text-danger fw-semibold">Goods Not Ready</span>;
   }
+  if (normalized === "shifted for later") {
+    return <span className="text-warning fw-semibold">Shifted for Later</span>;
+  }
   if (normalized === "inspection done") {
     return <span className="text-success fw-semibold">Inspection Done</span>;
   }
@@ -86,6 +89,9 @@ const getAlignedRequestRowClassName = (request) => {
     return "weekly-summary-warning-row";
   }
   if (normalizedStatus === "goods not ready") return "weekly-summary-warning-row";
+  if (normalizedStatus === "shifted for later") {
+    return "weekly-summary-warning-row";
+  }
   if (normalizedStatus === "inspection done") return "om-report-success-row";
   return "";
 };
@@ -647,6 +653,10 @@ const DailyReport = () => {
                           {request?.goods_not_ready ? (
                             <div className="small fw-semibold">Goods Not Ready</div>
                           ) : null}
+                          {normalizeInspectionStatus(request?.inspection_status) ===
+                          "shifted for later" ? (
+                            <div className="small fw-semibold">Shifted for Later</div>
+                          ) : null}
                           {request?.transfer_note ? (
                             <div className="small">{request.transfer_note}</div>
                           ) : null}
@@ -734,7 +744,10 @@ const DailyReport = () => {
                                 inspection?.is_rejected
                                   ? "om-report-danger-row"
                                   : inspection?.goods_not_ready ||
-                                      inspection?.is_transferred
+                                      inspection?.is_transferred ||
+                                      normalizeInspectionStatus(
+                                        inspection?.inspection_status,
+                                      ) === "shifted for later"
                                     ? "weekly-summary-warning-row"
                                     : ""
                               }
@@ -751,6 +764,13 @@ const DailyReport = () => {
                                 ) : null}
                                 {inspection?.goods_not_ready ? (
                                   <div className="small fw-semibold">Goods Not Ready</div>
+                                ) : null}
+                                {normalizeInspectionStatus(
+                                  inspection?.inspection_status,
+                                ) === "shifted for later" ? (
+                                  <div className="small fw-semibold">
+                                    Shifted for Later
+                                  </div>
                                 ) : null}
                               </td>
                               <td>{inspection.vendor || "N/A"}</td>

@@ -5998,7 +5998,12 @@ exports.getItemDetails = async (req, res) => {
 
 const isCompletedInspectionForComparison = (inspection = {}) => {
   const status = normalizeTextField(inspection?.status).toLowerCase();
-  if (status === "pending" || status === "goods not ready" || status === "rejected") {
+  if (
+    status === "pending" ||
+    status === "goods not ready" ||
+    status === "shifted for later" ||
+    status === "rejected"
+  ) {
     return false;
   }
   if (status === "transfered" || status === "transferred") return false;
@@ -6294,7 +6299,14 @@ exports.getPisInspectionMasterComparisonRecords = async (req, res) => {
       {
         $match: {
           normalized_inspection_status: {
-            $nin: ["pending", "goods not ready", "rejected", "transfered", "transferred"],
+            $nin: [
+              "pending",
+              "goods not ready",
+              "shifted for later",
+              "rejected",
+              "transfered",
+              "transferred",
+            ],
           },
           $or: [
             { "inspection_rows.inspected_item_sizes.0": { $exists: true } },

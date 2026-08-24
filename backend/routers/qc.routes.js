@@ -110,6 +110,15 @@ router.patch(
 );
 
 router.patch(
+  "/:id/shift-for-later",
+  auth,
+  requirePermission("qc", "edit"),
+  securityLog("update", "qc"),
+  invalidateQcOnSuccess,
+  qcController.markShiftedForLater,
+);
+
+router.patch(
   "/reject-all/:id",
   auth,
   requirePermission("qc", "edit"),

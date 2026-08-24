@@ -446,7 +446,14 @@ const AlignQCModal = ({
                         <tr
                           key={request?.qc_id || `${request?.order_id || "po"}-${request?.item_code || "item"}-${index}`}
                           className={
-                            normalizeInspectionStatus(request?.inspection_status) === "goods not ready"
+                            [
+                              "goods not ready",
+                              "shifted for later",
+                            ].includes(
+                              normalizeInspectionStatus(
+                                request?.inspection_status,
+                              ),
+                            )
                               ? "weekly-summary-warning-row"
                               : normalizeInspectionStatus(request?.inspection_status) === "inspection done"
                                 ? "om-report-success-row"
