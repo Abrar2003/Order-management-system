@@ -3270,7 +3270,7 @@ const QcDetails = () => {
                             onClick={() => handleTimelineSortColumn("remarks", "asc")}
                           />
                         </th>
-                        {showInspectionActions && <th>Action</th>}
+                        {showInspectionActions && <th className="text-center">Action</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -3288,66 +3288,90 @@ const QcDetails = () => {
                           <td>{formatInspectionStatusLabel(row.status)}</td>
                           <td>{row.remarks}</td>
                           {showInspectionActions && (
-                            <td>
+                            <td className="text-center">
                               {row.rowType === "Inspection" && row.recordId ? (
-	                                <div className="qc-inspection-actions">
+	                                <div className="dropdown d-inline-block">
                                     <button
                                       type="button"
-                                      className="btn btn-sm qc-inspection-action-btn qc-inspection-action-btn--report"
-                                      onClick={() =>
-                                        navigate(
-                                          `/qc/${encodeURIComponent(id)}/inspection-report?inspection_record_id=${encodeURIComponent(row.recordId)}`,
-                                          {
-                                            state: {
-                                              fromQcDetails: location.pathname + location.search,
-                                            },
-                                          },
-                                        )
-                                      }
+                                      className="btn btn-outline-secondary btn-sm px-2 lh-1"
+                                      data-bs-toggle="dropdown"
+                                      data-bs-popper-config='{"strategy":"fixed"}'
+                                      aria-expanded="false"
+                                      aria-label="Open inspection actions"
+                                      title="Inspection actions"
                                     >
-                                      View Detailed Report
+                                      <span aria-hidden="true" className="fs-5">⋮</span>
                                     </button>
-	                                  {canUpdateInspectionRecord(row.inspectionRecord) && (
-	                                    <button
-	                                      type="button"
-	                                      className="btn btn-sm qc-inspection-action-btn qc-inspection-action-btn--neutral"
-	                                      onClick={() => setInspectionRecordToUpdate(row.inspectionRecord)}
-	                                    >
-	                                      Update
-	                                    </button>
-	                                  )}
-	                                  {canTransferInspectionRecords && (
-	                                    <button
-                                      type="button"
-                                      className="btn btn-sm qc-inspection-action-btn qc-inspection-action-btn--transfer"
-                                      disabled={
-                                        Number(row?.passedQty || 0) <= 0 ||
-                                        isTransferredInspectionRecord(row.inspectionRecord)
-                                      }
-                                      title={
-                                        isTransferredInspectionRecord(row.inspectionRecord)
-                                          ? "Transferred inspection rows cannot be transferred again."
-                                          : Number(row?.passedQty || 0) <= 0
-                                          ? "Only inspection rows with passed quantity can be transferred."
-                                          : "Transfer this inspection record"
-                                      }
-                                      onClick={() => setTransferInspectionRecord(row.inspectionRecord)}
-                                    >
-                                      Transfer
-                                    </button>
-                                  )}
-                                  {canDeleteInspectionRecords && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-sm qc-inspection-action-btn qc-inspection-action-btn--danger"
-                                      disabled={deletingInspectionId === String(row.recordId)}
-                                      onClick={() => handleDeleteInspectionRecord(row.recordId)}
-                                    >
-                                      {deletingInspectionId === String(row.recordId)
-                                        ? "Deleting..."
-                                        : "Delete"}
-                                    </button>
-                                  )}
+                                    <ul className="dropdown-menu dropdown-menu-end shadow">
+                                      <li>
+                                        <button
+                                          type="button"
+                                          className="dropdown-item"
+                                          onClick={() =>
+                                            navigate(
+                                              `/qc/${encodeURIComponent(id)}/inspection-report?inspection_record_id=${encodeURIComponent(row.recordId)}`,
+                                              {
+                                                state: {
+                                                  fromQcDetails: location.pathname + location.search,
+                                                },
+                                              },
+                                            )
+                                          }
+                                        >
+                                          View Detailed Report
+                                        </button>
+                                      </li>
+                                      {canUpdateInspectionRecord(row.inspectionRecord) && (
+                                        <li>
+                                          <button
+                                            type="button"
+                                            className="dropdown-item"
+                                            onClick={() => setInspectionRecordToUpdate(row.inspectionRecord)}
+                                          >
+                                            Update
+                                          </button>
+                                        </li>
+                                      )}
+                                      {canTransferInspectionRecords && (
+                                        <li>
+                                          <button
+                                            type="button"
+                                            className="dropdown-item"
+                                            disabled={
+                                              Number(row?.passedQty || 0) <= 0 ||
+                                              isTransferredInspectionRecord(row.inspectionRecord)
+                                            }
+                                            title={
+                                              isTransferredInspectionRecord(row.inspectionRecord)
+                                                ? "Transferred inspection rows cannot be transferred again."
+                                                : Number(row?.passedQty || 0) <= 0
+                                                ? "Only inspection rows with passed quantity can be transferred."
+                                                : "Transfer this inspection record"
+                                            }
+                                            onClick={() => setTransferInspectionRecord(row.inspectionRecord)}
+                                          >
+                                            Transfer
+                                          </button>
+                                        </li>
+                                      )}
+                                      {canDeleteInspectionRecords && (
+                                        <>
+                                          <li><hr className="dropdown-divider" /></li>
+                                          <li>
+                                            <button
+                                              type="button"
+                                              className="dropdown-item text-danger"
+                                              disabled={deletingInspectionId === String(row.recordId)}
+                                              onClick={() => handleDeleteInspectionRecord(row.recordId)}
+                                            >
+                                              {deletingInspectionId === String(row.recordId)
+                                                ? "Deleting..."
+                                                : "Delete"}
+                                            </button>
+                                          </li>
+                                        </>
+                                      )}
+                                    </ul>
                                 </div>
                               ) : (
                                 <span className="text-secondary small">N/A</span>
