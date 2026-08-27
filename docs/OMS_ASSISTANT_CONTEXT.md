@@ -188,3 +188,12 @@ For database-user creation, deployment, and production smoke checks, use `docs/O
 3. For any new business calculation, state its assumptions and add a focused assertion in `backend/tests/omsChat.test.js`.
 4. Preserve read-only isolation, server-owned conversations, bounded results, and public-error redaction.
 5. Update this file only when the implementation contract changes; update `docs/OMS_ASSISTANT.md` when operations/deployment changes.
+
+## QC serial-label storage boundary
+
+The normalized QC serial-label schema is at Phase 2. Allocation, rejection,
+and Inspection-derived usage are independent projections, and only schema
+version 2 verified states can use the existing modern summary read. Production
+mutation paths remain legacy and no Assistant behavior changed. The authority,
+staging commands, reconciliation rules, and Phase 3 prerequisites are in
+docs/QC_LABEL_STORAGE_PHASE_2.md.

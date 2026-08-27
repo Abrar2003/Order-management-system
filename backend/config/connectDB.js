@@ -1,13 +1,27 @@
 const mongoose = require("mongoose");
+const dns = require("node:dns");
 require("dotenv").config();
 
 mongoose.set("transactionAsyncLocalStorage", true);
+
+const configureMongoDnsServers = (
+  value = process.env.MONGO_DNS_SERVERS,
+) => {
+  const servers = String(value || "")
+    .split(",")
+    .map((server) => server.trim())
+    .filter(Boolean);
+  if (servers.length > 0) dns.setServers(servers);
+  return servers;
+};
 
 const connectDB = async ({ mongoUri: uriOverride } = {}) => {
   const mongoUri = String(uriOverride || process.env.MONGO_URI || "").trim();
   if (!mongoUri) {
     throw new Error("MONGO_URI is not configured");
   }
+
+  configureMongoDnsServers();
 
   const selectionTimeout = Number.parseInt(
     String(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS || "10000"),
@@ -42,3 +56,4 @@ const connectDB = async ({ mongoUri: uriOverride } = {}) => {
 };
 
 module.exports = connectDB;
+module.exports.configureMongoDnsServers = configureMongoDnsServers;

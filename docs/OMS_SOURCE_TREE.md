@@ -119,6 +119,12 @@ oms/
 |   |   |-- inspection.model.js
 |   |   |-- inspector.model.js
 |   |   |-- item.model.js
+|   |   |-- label.model.js
+|   |   |-- labelMigrationConflict.model.js
+|   |   |-- labelStorageState.model.js
+|   |   |-- labelSyncFailure.model.js
+|   |   |-- labelTransaction.model.js
+|   |   |-- labelUsage.model.js
 |   |   |-- notification.model.js
 |   |   |-- omsChatConversation.model.js
 |   |   |-- omsChatRateBucket.model.js
@@ -194,6 +200,7 @@ oms/
 |   |   |-- importRectifyItems.js
 |   |   |-- migrateInspectionBarcodeFieldsToString.js
 |   |   |-- migrateItemQcBarcodeFieldsToString.js
+|   |   |-- migrateLabels.js
 |   |   |-- PDFtoSheet.js
 |   |   |-- PIS_extractor.js
 |   |   |-- README-qc-thumbnail-backfill.md
@@ -212,8 +219,13 @@ oms/
 |   |   |-- uploadShippingMarksFolderViaApi.js
 |   |   |-- validate-vendor-objects.js
 |   |   |-- validateQcHeicSharp.js
+|   |   |-- verifyLabelMigration.js
 |   |   `-- verifyBuildInfo.js
 |   |-- services/
+|   |   |-- labels/
+|   |   |   |-- labelStorage.service.js
+|   |   |   |-- legacyLabel.repository.js
+|   |   |   `-- modernLabel.repository.js
 |   |   |-- workflow/
 |   |   |   |-- workflowBatchAggregationService.js
 |   |   |   |-- workflowBatchService.js
@@ -274,6 +286,10 @@ oms/
 |   |   |-- inspectedItemsReport.test.js
 |   |   |-- inspectorApprovedGoodsCbm.test.js
 |   |   |-- inspectorLabelAllocation.test.js
+|   |   |-- labelRepositories.test.js
+|   |   |-- labelMigration.test.js
+|   |   |-- labelStorageModels.test.js
+|   |   |-- labelStorageService.test.js
 |   |   |-- itemBarcodeAlias.test.js
 |   |   |-- itemCountryFilter.test.js
 |   |   |-- itemDetailsFileDelete.test.js
@@ -593,6 +609,8 @@ oms/
 |   |-- PDF_EXPORT_SYSTEM.md
 |   |-- PIS_PD_MASTER_ITEM_FLOW.md
 |   |-- PRODUCT_TYPE_TEMPLATES_PAGE_GUIDE.md
+|   |-- QC_LABEL_STORAGE_PHASE_1.md
+|   |-- QC_LABEL_STORAGE_PHASE_2.md
 |   |-- redis-and-jobs.md
 |   |-- ROLE_ACCESS_MATRIX.md
 |   |-- VPS_MIGRATION.md

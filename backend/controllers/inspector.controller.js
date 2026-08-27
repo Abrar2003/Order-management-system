@@ -4,6 +4,7 @@ const Inspection = require("../models/inspection.model");
 const mongoose = require("mongoose");
 const { getVendorName } = require("../helpers/vendorRef");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const labelStorageService = require("../services/labels/labelStorage.service");
 const parsePositiveInteger = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
@@ -120,37 +121,6 @@ const buildLabelUsedHistoryFromInspectionRecords = (records = []) =>
       (left, right) =>
         new Date(right?.used_at || 0) - new Date(left?.used_at || 0),
     );
-
-const getUsedLabelSummaryForInspectorUser = async (inspectorUserId) => {
-  if (!inspectorUserId) return { totalUsed: 0 };
-
-  const [result = {}] = await Inspection.aggregate([
-    {
-      $match: {
-        inspector: inspectorUserId,
-        labels_added: { $exists: true, $ne: [] },
-      },
-    },
-    { $unwind: "$labels_added" },
-    {
-      $match: {
-        labels_added: { $type: "number", $gt: 0 },
-      },
-    },
-    {
-      $group: {
-        _id: "$labels_added",
-      },
-    },
-    {
-      $count: "totalUsed",
-    },
-  ]);
-
-  return {
-    totalUsed: Number(result.totalUsed || 0),
-  };
-};
 
 const syncInspectorUsedLabelsFromInspectionRecords = async (inspector) => {
   if (!inspector?.user) return inspector;
@@ -1134,49 +1104,11 @@ exports.getLabelUsageStats = async (req, res) => {
         return res.status(404).json({ message: "Inspector not found" });
       }
 
-      const [inspectorSummary = null] = await Inspector.aggregate([
-        {
-          $match: {
-            _id: new mongoose.Types.ObjectId(req.params.id),
-          },
-        },
-        {
-          $project: {
-            user: 1,
-            total_allocated: {
-              $size: { $ifNull: ["$alloted_labels", []] },
-            },
-            total_rejected: {
-              $size: { $ifNull: ["$rejected_labels", []] },
-            },
-          },
-        },
-      ]);
-
-      if (!inspectorSummary) {
+      const summary = await labelStorageService.getSummary(req.params.id);
+      if (!summary) {
         return res.status(404).json({ message: "Inspector not found" });
       }
-
-      const usedLabelSummary = await getUsedLabelSummaryForInspectorUser(
-        inspectorSummary.user,
-      );
-      const totalUsed = usedLabelSummary.totalUsed;
-      const totalAllocated = Number(inspectorSummary.total_allocated || 0);
-      const totalRejected = Number(inspectorSummary.total_rejected || 0);
-      const totalUnused = Math.max(totalAllocated - totalUsed, 0);
-
-      return res.json({
-        data: {
-          inspector: inspectorSummary.user,
-          total_allocated: totalAllocated,
-          total_used: totalUsed,
-          total_unused: totalUnused,
-          total_rejected: totalRejected,
-          usage_percentage: totalAllocated > 0
-            ? ((totalUsed / totalAllocated) * 100).toFixed(2)
-            : 0,
-        },
-      });
+      return res.json({ data: summary });
     }
 
     const inspector = await Inspector.findById(req.params.id)
