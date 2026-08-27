@@ -16,16 +16,18 @@ const ShiftForLaterModal = ({ qc, request, onClose, onSuccess }) => {
     try {
       setSaving(true);
       setError("");
-      await api.patch(`/qc/${qc?._id}/shift-for-later`, {
+      const response = await api.patch(`/qc/${qc?._id}/shift-for-later`, {
         request_history_id: request?._id,
         remark: normalizedRemark,
       });
+      alert(response?.data?.message || "QC request shifted for later.");
       onSuccess?.();
     } catch (err) {
-      setError(
+      const message =
         err?.response?.data?.message ||
-          "Failed to shift the QC request for later.",
-      );
+        "Failed to shift the QC request for later.";
+      setError(message);
+      alert(message);
     } finally {
       setSaving(false);
     }
