@@ -91,9 +91,11 @@ const normalizeUsage = (entry = {}, inspectorId) => {
     request_history_id: id(entry?.request_history_id) || null,
     qc_meta: qcMeta,
     inspection_date: String(entry?.inspection_date || ""),
-    used_at: iso(entry?.createdAt || entry?.used_at),
+    used_at: iso(isInspection ? entry?.createdAt : entry?.used_at),
     source_updated_at: iso(
-      entry?.updatedAt || entry?.source_updated_at || entry?.createdAt,
+      isInspection
+        ? entry?.updatedAt || entry?.createdAt
+        : entry?.source_updated_at,
     ),
   };
 };

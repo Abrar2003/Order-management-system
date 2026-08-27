@@ -996,6 +996,21 @@ const splitMigration = (entry) => {
   };
 };
 
+const buildUsageWriteOperations = (usages, migratedAt) =>
+  usages.map((entry) => {
+    const { fields } = splitMigration(entry);
+    return {
+      updateOne: {
+        filter: { inspection_record: entry.inspection_record },
+        update: {
+          $set: fields,
+          $setOnInsert: { "migration.migrated_at": migratedAt },
+        },
+        upsert: true,
+      },
+    };
+  });
+
 const applyMigration = async (analysis) => {
   await recordConflicts(analysis);
   if (!analysis.can_apply) {
@@ -1149,19 +1164,7 @@ const applyMigration = async (analysis) => {
     );
     if (analysis.expected.usages.length > 0) {
       await LabelUsage.bulkWrite(
-        analysis.expected.usages.map((entry) => {
-          const { fields } = splitMigration(entry);
-          return {
-            updateOne: {
-              filter: { inspection_record: entry.inspection_record },
-              update: {
-                $set: fields,
-                $setOnInsert: { "migration.migrated_at": now },
-              },
-              upsert: true,
-            },
-          };
-        }),
+        buildUsageWriteOperations(analysis.expected.usages, now),
         { ordered: false },
       );
     }
@@ -1180,6 +1183,7 @@ const applyMigration = async (analysis) => {
       inspector: analysis.inspector_user_id,
     })
       .select("_id qc labels_added status createdAt updatedAt")
+      .populate("qc", "_id")
       .lean();
     if (
       computeSourceFingerprint(currentInspector, currentInspections) !==
@@ -1304,6 +1308,7 @@ module.exports = {
   MIGRATION_SOURCE,
   applyMigration,
   buildMigrationAnalysis,
+  buildUsageWriteOperations,
   computeSourceFingerprint,
   getInspectorArgument,
   inspectSerials,

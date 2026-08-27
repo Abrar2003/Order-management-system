@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const {
   MIGRATION_SOURCE,
   buildMigrationAnalysis,
+  buildUsageWriteOperations,
 } = require("../scripts/migrateLabels");
 const {
   buildSummary,
@@ -120,6 +121,26 @@ test("allocated and used label preserves both independent concepts", () => {
   assert.equal(expectedLabel(analysis, 2).owner_inspector, analysis.inspector_id);
   assert.equal(expectedLabel(analysis, 2).usage_inspector, analysis.inspector_id);
   assert.deepEqual(analysis.observations.allocated_and_used, [2]);
+});
+
+test("migration projection preserves historical forensic timestamps", () => {
+  const userId = objectId();
+  const usedAt = new Date("2025-01-10T10:00:00.000Z");
+  const sourceUpdatedAt = new Date("2025-02-15T12:00:00.000Z");
+  const inspection = makeInspection({ user: userId, labels: [41, 42] });
+  inspection.createdAt = usedAt;
+  inspection.updatedAt = sourceUpdatedAt;
+
+  const analysis = buildMigrationAnalysis(
+    makeSnapshot({ userId, allocated: [41, 42], inspections: [inspection] }),
+  );
+  const usage = analysis.expected.usages[0];
+
+  assert.equal(usage.used_at.toISOString(), usedAt.toISOString());
+  assert.equal(
+    usage.source_updated_at.toISOString(),
+    sourceUpdatedAt.toISOString(),
+  );
 });
 
 test("used label survives current deallocation", () => {
@@ -412,6 +433,60 @@ test("compatible partial modern data is safe to resume", () => {
   assert.deepEqual(resumed.expected.labels, first.expected.labels);
 });
 
+test("usage upsert repairs stale timestamps without changing identity", () => {
+  const userId = objectId();
+  const usedAt = new Date("2025-01-10T10:00:00.000Z");
+  const sourceUpdatedAt = new Date("2025-02-15T12:00:00.000Z");
+  const migrationNow = new Date("2026-08-27T06:52:55.995Z");
+  const inspection = makeInspection({ user: userId, labels: [18] });
+  inspection.createdAt = usedAt;
+  inspection.updatedAt = sourceUpdatedAt;
+  const analysis = buildMigrationAnalysis(
+    makeSnapshot({ userId, allocated: [18], inspections: [inspection] }),
+  );
+  const first = buildUsageWriteOperations(analysis.expected.usages, migrationNow);
+  const second = buildUsageWriteOperations(analysis.expected.usages, new Date());
+  const firstUpdate = first[0].updateOne;
+  const secondUpdate = second[0].updateOne;
+
+  assert.equal(first.length, 1);
+  assert.equal(second.length, 1);
+  assert.deepEqual(firstUpdate.filter, secondUpdate.filter);
+  assert.equal(firstUpdate.filter.inspection_record, inspection._id);
+  assert.equal(firstUpdate.update.$set.used_at.getTime(), usedAt.getTime());
+  assert.equal(
+    firstUpdate.update.$set.source_updated_at.getTime(),
+    sourceUpdatedAt.getTime(),
+  );
+  assert.equal(
+    firstUpdate.update.$setOnInsert["migration.migrated_at"],
+    migrationNow,
+  );
+  assert.equal(secondUpdate.update.$set.used_at.getTime(), usedAt.getTime());
+  assert.equal(
+    secondUpdate.update.$set.source_updated_at.getTime(),
+    sourceUpdatedAt.getTime(),
+  );
+});
+
+test("missing QC metadata remains a non-blocking migration warning", () => {
+  const userId = objectId();
+  const inspection = makeInspection({ user: userId, labels: [19] });
+  inspection.qc = null;
+  const analysis = buildMigrationAnalysis(
+    makeSnapshot({ userId, allocated: [19], inspections: [inspection] }),
+  );
+
+  assert.equal(analysis.can_apply, true);
+  assert.equal(analysis.summary.error_count, 0);
+  assert.equal(
+    analysis.conflicts.some(
+      (entry) => entry.conflict_type === "usage_qc_metadata_unresolved",
+    ),
+    true,
+  );
+});
+
 test("empty migrated inspector verifies as a valid empty modern result", () => {
   const inspectorId = objectId();
   const userId = objectId();
@@ -528,6 +603,65 @@ test("independent verifier matches populated allocation, usage, and summary", ()
 
   assert.equal(report.passed, true);
   assert.equal(report.checks.summary.actual.total_unused, 1);
+});
+
+test("verifier compares forensic usage timestamps instead of Mongoose timestamps", () => {
+  const inspectorId = objectId();
+  const userId = objectId();
+  const usedAt = new Date("2025-01-10T10:00:00.000Z");
+  const sourceUpdatedAt = new Date("2025-02-15T12:00:00.000Z");
+  const migrationCreatedAt = new Date("2026-08-27T06:52:55.995Z");
+  const migrationUpdatedAt = new Date("2026-08-27T07:00:18.638Z");
+  const inspection = makeInspection({
+    user: userId,
+    labels: [41, 42, 43, 44],
+  });
+  inspection.createdAt = usedAt;
+  inspection.updatedAt = sourceUpdatedAt;
+  const report = buildVerificationReport({
+    inspector: {
+      _id: inspectorId,
+      user: userId,
+      alloted_labels: inspection.labels_added,
+      used_labels: inspection.labels_added,
+      rejected_labels: [],
+      label_allocation_history: [],
+    },
+    inspections: [inspection],
+    labels: inspection.labels_added.map((number) => ({
+      number,
+      owner_inspector: inspectorId,
+      usage: { inspector: inspectorId },
+    })),
+    usages: [{
+      inspector: inspectorId,
+      labels: inspection.labels_added,
+      inspection_record: inspection._id,
+      qc: inspection.qc._id,
+      request_history_id: inspection.request_history_id,
+      qc_meta: {
+        order_id: "PO-1",
+        brand: "Brand A",
+        vendor: inspection.qc.order_meta.vendor,
+        item_code: "ITEM-1",
+        description: "Fixture item",
+      },
+      inspection_date: inspection.inspection_date,
+      used_at: usedAt,
+      source_updated_at: sourceUpdatedAt,
+      createdAt: migrationCreatedAt,
+      updatedAt: migrationUpdatedAt,
+    }],
+    storageState: {
+      schema_version: 2,
+      migration_status: "backfilled",
+      read_source: "legacy",
+      write_mode: "legacy",
+    },
+  });
+
+  assert.equal(report.checks.usage_history.passed, true);
+  assert.equal(report.passed, true);
 });
 
 test("usage percentage remains total used divided by total allocated", () => {
