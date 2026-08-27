@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../api/axios";
 import { formatDateDDMMYYYY } from "../utils/date";
 
@@ -24,8 +24,13 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
   const [selectedInspectorId, setSelectedInspectorId] = useState("");
   const [selectedRequestIds, setSelectedRequestIds] = useState([]);
   const [loadingInspectors, setLoadingInspectors] = useState(true);
+  const [alignmentUnavailable, setAlignmentUnavailable] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const firstInspectionAlertedItemRef = useRef("");
+  const itemCode = String(
+    qc?.item?.item_code || qc?.order?.item?.item_code || "",
+  ).trim();
 
   useEffect(() => {
     let ignore = false;
@@ -33,12 +38,41 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
     const fetchInspectors = async () => {
       try {
         setLoadingInspectors(true);
-        const response = await api.get("/auth/?role=QC");
+        setAlignmentUnavailable(false);
+        setError("");
+        const response = await api.get("/qc/alignment-options", {
+          params: { item_code: itemCode },
+        });
         if (ignore) return;
-        setInspectors(Array.isArray(response?.data) ? response.data : []);
+        const options = response?.data || {};
+        const eligibleInspectors = Array.isArray(options.inspectors)
+          ? options.inspectors
+          : [];
+        setInspectors(eligibleInspectors);
+        setSelectedInspectorId((current) =>
+          eligibleInspectors.some(
+            (inspector) => String(inspector?._id || "") === current,
+          )
+            ? current
+            : "",
+        );
+        if (!options.can_align) {
+          setAlignmentUnavailable(true);
+          setError(options.message || "QC request transfer is not available.");
+        }
+        if (
+          options.first_inspection &&
+          firstInspectionAlertedItemRef.current !== itemCode
+        ) {
+          firstInspectionAlertedItemRef.current = itemCode;
+          window.alert(
+            "First Time Inspection\nThis item has no passed quantity in any previous PO. Only approved inspectors can be assigned.",
+          );
+        }
       } catch (fetchError) {
         if (ignore) return;
         setInspectors([]);
+        setAlignmentUnavailable(true);
         setError(
           fetchError?.response?.data?.message || "Failed to load inspectors.",
         );
@@ -53,7 +87,7 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [itemCode]);
 
   const requestRows = useMemo(() => {
     const requestHistory = Array.isArray(qc?.request_history) ? qc.request_history : [];
@@ -151,7 +185,7 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
                 className="form-select"
                 value={selectedInspectorId}
                 onChange={(event) => setSelectedInspectorId(String(event.target.value || ""))}
-                disabled={loadingInspectors || saving}
+                disabled={loadingInspectors || alignmentUnavailable || saving}
               >
                 <option value="">Select Inspector</option>
                 {inspectors.map((inspector) => (
@@ -225,7 +259,7 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
               type="button"
               className="btn btn-primary"
               onClick={handleSubmit}
-              disabled={saving || loadingInspectors}
+              disabled={saving || loadingInspectors || alignmentUnavailable}
             >
               {saving ? "Transferring..." : "Transfer Request"}
             </button>

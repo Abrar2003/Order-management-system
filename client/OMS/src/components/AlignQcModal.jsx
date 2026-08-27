@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "../api/axios";
 import {
@@ -49,6 +49,9 @@ const AlignQCModal = ({
     return toISODateString(minDate);
   })();
   const [inspectors, setInspectors] = useState([]);
+  const [alignmentOptionsLoading, setAlignmentOptionsLoading] = useState(true);
+  const [alignmentOptionsError, setAlignmentOptionsError] = useState("");
+  const firstInspectionAlertedItemRef = useRef("");
   const [inspector, setInspector] = useState(
     initialInspector ? String(initialInspector) : "",
   );
@@ -83,17 +86,57 @@ const AlignQCModal = ({
     : 0;
 
   useEffect(() => {
+    const itemCode = String(order?.item?.item_code || "").trim();
+    let cancelled = false;
 
+    setAlignmentOptionsLoading(true);
+    setAlignmentOptionsError("");
     axios
-      .get("/auth/?role=QC", {
-      })
+      .get("/qc/alignment-options", { params: { item_code: itemCode } })
       .then((res) => {
-        setInspectors(Array.isArray(res.data) ? res.data : []);
+        if (cancelled) return;
+        const options = res?.data || {};
+        const eligibleInspectors = Array.isArray(options.inspectors)
+          ? options.inspectors
+          : [];
+        setInspectors(eligibleInspectors);
+        setInspector((current) =>
+          eligibleInspectors.some(
+            (qcInspector) => String(qcInspector?._id || "") === current,
+          )
+            ? current
+            : "",
+        );
+        if (!options.can_align) {
+          setAlignmentOptionsError(
+            options.message || "QC alignment is not available.",
+          );
+        }
+        if (
+          options.first_inspection &&
+          firstInspectionAlertedItemRef.current !== itemCode
+        ) {
+          firstInspectionAlertedItemRef.current = itemCode;
+          window.alert(
+            "First Time Inspection\nThis item has no passed quantity in any previous PO. Only approved inspectors can be assigned.",
+          );
+        }
       })
-      .catch(() => {
+      .catch((err) => {
+        if (cancelled) return;
         setInspectors([]);
+        setAlignmentOptionsError(
+          err?.response?.data?.message || "Failed to load QC alignment options.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setAlignmentOptionsLoading(false);
       });
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [order?.item?.item_code]);
 
   useEffect(() => {
     setInspector(initialInspector ? String(initialInspector) : "");
@@ -165,6 +208,11 @@ const AlignQCModal = ({
   const handleSubmit = async () => {
     const requestDateIso = toISODateString(request_date);
     let shouldResetSubmitting = true;
+
+    if (alignmentOptionsLoading || alignmentOptionsError) {
+      alert(alignmentOptionsError || "QC alignment options are still loading.");
+      return;
+    }
 
     if (
       !inspector ||
@@ -329,15 +377,20 @@ const AlignQCModal = ({
                 className="form-select"
                 value={inspector}
                 onChange={(e) => setInspector(e.target.value)}
-                disabled={submitting}
+                disabled={submitting || alignmentOptionsLoading || Boolean(alignmentOptionsError)}
               >
-                <option value="">Select Inspector</option>
+                <option value="">
+                  {alignmentOptionsLoading ? "Loading Inspectors..." : "Select Inspector"}
+                </option>
                 {inspectors.map((qcInspector) => (
                   <option key={qcInspector._id} value={qcInspector._id}>
                     {qcInspector.name}
                   </option>
                 ))}
               </select>
+              {alignmentOptionsError && (
+                <div className="small text-danger mt-1">{alignmentOptionsError}</div>
+              )}
             </div>
 
             <div>
@@ -488,7 +541,7 @@ const AlignQCModal = ({
               type="button"
               className="btn btn-primary"
               onClick={handleSubmit}
-              disabled={submitting}
+              disabled={submitting || alignmentOptionsLoading || Boolean(alignmentOptionsError)}
             >
               {submitting ? "Submitting..." : "Align QC"}
             </button>

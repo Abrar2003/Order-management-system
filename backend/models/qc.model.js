@@ -89,6 +89,7 @@ const qcSchema = new mongoose.Schema(
           ref: "users",
           default: null
         },
+        is_first_inspection: { type: Boolean, default: false },
         status: {
           type: String,
           enum: [

@@ -654,6 +654,7 @@ const QcDetails = () => {
       ? hardwareInspectionRemainingSlots
       : qcImageUploadRemainingSlots;
   const relatedFileInputRef = useRef(null);
+  const firstInspectionAlertedRequestRef = useRef("");
   const relatedFileUploadInFlightRef = useRef(false);
   const relatedFileUploadBatchKeyRef = useRef("");
   const qcImageGalleryBodyRef = useRef(null);
@@ -710,6 +711,23 @@ const QcDetails = () => {
       qc?.inspector ||
       "",
   ).trim();
+  useEffect(() => {
+    const requestId = String(latestRequestEntry?._id || "").trim();
+    if (
+      !isQcUser ||
+      !latestRequestEntry?.is_first_inspection ||
+      !requestId ||
+      alignedInspectorId !== currentUserId ||
+      firstInspectionAlertedRequestRef.current === requestId
+    ) {
+      return;
+    }
+
+    firstInspectionAlertedRequestRef.current = requestId;
+    window.alert(
+      "First Time Inspection\nThis item has no passed quantity in any previous PO.",
+    );
+  }, [alignedInspectorId, currentUserId, isQcUser, latestRequestEntry]);
   const isLabelExemptAlignedInspectionEditor =
     isCurrentUserLabelExempt &&
     Boolean(currentUserId) &&

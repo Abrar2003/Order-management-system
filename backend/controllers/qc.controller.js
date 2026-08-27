@@ -48,6 +48,7 @@ const {
 } = require("../helpers/dateOnly");
 const {
   isLabelExemptUser,
+  parseUserIdList,
 } = require("../helpers/labelExemptUsers");
 const {
   BOX_PACKAGING_MODES,
@@ -3365,6 +3366,98 @@ const escapeRegex = (value = "") =>
     .trim()
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const buildFirstInspectionAlignmentPolicy = ({
+  hasPassedQuantity = false,
+  qcUsers = [],
+  allowedUserIds = [],
+} = {}) => {
+  const inspectors = (Array.isArray(qcUsers) ? qcUsers : []).filter(
+    (user) => String(user?.role || "").trim().toLowerCase() === "qc",
+  );
+  if (hasPassedQuantity) {
+    return {
+      first_inspection: false,
+      can_align: true,
+      inspectors,
+      message: "",
+    };
+  }
+
+  const allowedIds = new Set(
+    parseUserIdList(allowedUserIds)
+      .filter((userId) => mongoose.Types.ObjectId.isValid(userId))
+      .map((userId) => userId.toLowerCase()),
+  );
+  const allowedInspectors = inspectors.filter((user) =>
+    allowedIds.has(String(user?._id || "").trim().toLowerCase()),
+  );
+
+  return {
+    first_inspection: true,
+    can_align: allowedInspectors.length > 0,
+    inspectors: allowedInspectors,
+    message:
+      allowedInspectors.length > 0
+        ? ""
+        : "No valid QC users are configured in first_inspection_allowed_users.",
+  };
+};
+
+const getFirstInspectionAlignmentPolicy = async (itemCode = "") => {
+  const normalizedItemCode = normalizeText(itemCode);
+  if (!normalizedItemCode) {
+    throw new Error("item code is required");
+  }
+
+  const [passedQc, qcUsers] = await Promise.all([
+    QC.exists({
+      "item.item_code": {
+        $regex: `^\\s*${escapeRegex(normalizedItemCode)}\\s*$`,
+        $options: "i",
+      },
+      "quantities.qc_passed": { $gt: 0 },
+    }),
+    User.find({ role: "QC" })
+      .select("_id name role email")
+      .sort({ name: 1 })
+      .lean(),
+  ]);
+
+  return buildFirstInspectionAlignmentPolicy({
+    hasPassedQuantity: Boolean(passedQc),
+    qcUsers,
+    allowedUserIds: process.env.first_inspection_allowed_users,
+  });
+};
+
+const getFirstInspectionAssignmentError = (policy = {}, inspectorId = "") => {
+  if (!policy.can_align) {
+    return {
+      status: 503,
+      code: "FIRST_INSPECTION_ALLOWLIST_NOT_CONFIGURED",
+      message: policy.message,
+    };
+  }
+
+  const normalizedInspectorId = String(inspectorId || "").toLowerCase();
+  const isEligible = (Array.isArray(policy.inspectors) ? policy.inspectors : [])
+    .some(
+      (qcInspector) =>
+        String(qcInspector?._id || "").toLowerCase() === normalizedInspectorId,
+    );
+  if (isEligible) return null;
+
+  return {
+    status: policy.first_inspection ? 403 : 400,
+    code: policy.first_inspection
+      ? "FIRST_INSPECTION_INSPECTOR_NOT_ALLOWED"
+      : "INVALID_QC_INSPECTOR",
+    message: policy.first_inspection
+      ? "Selected inspector is not allowed for first-time inspections."
+      : "Selected user is not a QC inspector.",
+  };
+};
+
 const INSPECTION_SIZE_SOURCE_SELECT = [
   "code",
   "inspected_item_sizes",
@@ -3660,7 +3753,9 @@ const buildApprovedGoodsQuantityByInspectionId = (inspectionRecords = []) => {
 };
 
 exports.__test__ = {
+  buildFirstInspectionAlignmentPolicy,
   buildApprovedGoodsQuantityByInspectionId,
+  getFirstInspectionAssignmentError,
   buildShiftedRequestDeadline,
   getQcUserLatestRequestAvailability,
   hasInspectionRecordActivity,
@@ -4219,6 +4314,24 @@ const buildQcInspectionStatusStages = (selectedStatus = "") => [
   },
   ...(selectedStatus ? [{ $match: { inspection_status: selectedStatus } }] : []),
 ];
+
+exports.getQcAlignmentOptions = async (req, res) => {
+  try {
+    const itemCode = normalizeText(req.query?.item_code || req.query?.itemCode);
+    if (!itemCode) {
+      return res.status(400).json({ message: "item code is required" });
+    }
+
+    return res.status(200).json(
+      await getFirstInspectionAlignmentPolicy(itemCode),
+    );
+  } catch (err) {
+    console.error("QC Alignment Options Error:", err);
+    return res.status(500).json({
+      message: err?.message || "Failed to load QC alignment options",
+    });
+  }
+};
 
 exports.getQCList = async (req, res) => {
   await QC.createIndexes();
@@ -4960,7 +5073,23 @@ exports.alignQC = async (req, res) => {
       });
     }
 
-    const normalizedItemCode = normalizeText(item?.item_code || "");
+    const normalizedItemCode = normalizeText(
+      orderRecord?.item?.item_code || item?.item_code || "",
+    );
+    const firstInspectionPolicy = await getFirstInspectionAlignmentPolicy(
+      normalizedItemCode,
+    );
+    const assignmentError = getFirstInspectionAssignmentError(
+      firstInspectionPolicy,
+      inspectorId,
+    );
+    if (assignmentError) {
+      return res.status(assignmentError.status).json({
+        code: assignmentError.code,
+        message: assignmentError.message,
+      });
+    }
+
     const matchedItem = normalizedItemCode
       ? await Item.findOne(
         applyDataAccessMatch(
@@ -5117,6 +5246,7 @@ exports.alignQC = async (req, res) => {
         request_type: normalizedRequestType,
         quantity_requested: quantityRequested,
         inspector: inspectorId,
+        is_first_inspection: firstInspectionPolicy.first_inspection,
         status: "open",
         remarks: remarks || "",
         createdBy: req.user._id,
@@ -5201,6 +5331,7 @@ exports.alignQC = async (req, res) => {
       request_type: normalizedRequestType,
       quantity_requested: quantityRequested,
       inspector: inspectorId,
+      is_first_inspection: firstInspectionPolicy.first_inspection,
       status: "open",
       remarks: remarks || "",
       createdBy: req.user._id,
@@ -9008,7 +9139,7 @@ const shiftQcRequestForLater = async (req, res) => {
       .populate({
         path: "order",
         match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
-        select: "status quantity shipment order_id brand vendor",
+        select: "status quantity shipment order_id brand vendor item",
       });
 
     if (!qc || !qc.order) {
@@ -9162,6 +9293,7 @@ const shiftQcRequestForLater = async (req, res) => {
       ),
       quantity_requested: requestedQuantity,
       inspector: inspectorId,
+      is_first_inspection: latestRequestEntry?.is_first_inspection === true,
       status: REQUEST_HISTORY_STATUS.OPEN,
       remarks: "",
       deadline: requestDeadline,
@@ -9883,6 +10015,20 @@ exports.transferQcRequest = async (req, res) => {
       return res.status(400).json({ message: "Selected user is not a QC inspector" });
     }
 
+    const firstInspectionPolicy = await getFirstInspectionAlignmentPolicy(
+      qc?.order?.item?.item_code || qc?.item?.item_code,
+    );
+    const assignmentError = getFirstInspectionAssignmentError(
+      firstInspectionPolicy,
+      targetInspectorId,
+    );
+    if (assignmentError) {
+      return res.status(assignmentError.status).json({
+        code: assignmentError.code,
+        message: assignmentError.message,
+      });
+    }
+
     const selectedRequestHistoryId = requestHistoryIds[0];
     const requestEntry = Array.isArray(qc.request_history)
       ? qc.request_history.find(
@@ -10035,6 +10181,7 @@ exports.transferQcRequest = async (req, res) => {
       ),
       quantity_requested: pendingQuantity,
       inspector: targetInspectorId,
+      is_first_inspection: firstInspectionPolicy.first_inspection,
       status: REQUEST_HISTORY_STATUS.OPEN,
       remarks: newRequestRemarks,
       createdBy: req.user._id,

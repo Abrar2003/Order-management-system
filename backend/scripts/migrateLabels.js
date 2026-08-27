@@ -1099,6 +1099,7 @@ const applyMigration = async (analysis) => {
           },
         },
       ],
+      { updatePipeline: true },
     );
 
     const transactionKeys = analysis.expected.transactions.map(

@@ -44,6 +44,13 @@ router.get(
   qcController.getQCList
 );
 
+router.get(
+  "/alignment-options",
+  auth,
+  requirePermission("qc", "assign"),
+  qcController.getQcAlignmentOptions,
+);
+
 // Align QC (manager/admin)
 router.post(
   "/align-qc",
