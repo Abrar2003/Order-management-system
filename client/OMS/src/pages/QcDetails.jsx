@@ -343,7 +343,9 @@ const getSelectedFileSignature = (file) =>
 
 const getQcImageSelectionValue = (image) =>
   image?.gallery_source === "goods_not_ready" ||
-  image?.gallery_source === "previous_goods_not_ready"
+  image?.gallery_source === "previous_goods_not_ready" ||
+  image?.gallery_source === "rejected" ||
+  image?.gallery_source === "previous_rejected"
     ? ""
     : [
         image?.gallery_parent_qc_id || "",
@@ -794,6 +796,7 @@ const QcDetails = () => {
   const latestRequestHasActivity = hasInspectionRecordActivity({
     checked: latestRequestInspection?.checked,
     passed: latestRequestInspection?.passed,
+    rejected: latestRequestInspection?.rejected,
     vendorOffered: latestRequestInspection?.vendor_offered,
     labelsAdded: latestRequestInspection?.labels_added,
     labelRanges: latestRequestInspection?.label_ranges,
@@ -1252,7 +1255,7 @@ const QcDetails = () => {
               ? "hardware_inspection"
               : field === "goods_not_ready_images"
               ? "goods_not_ready"
-              : field === "rejected_image"
+              : field === "rejected_image" || field === "rejected_images"
               ? "rejected"
               : "qc",
           gallery_source_label: label,
@@ -1267,7 +1270,9 @@ const QcDetails = () => {
           gallery_group_subtitle: subtitleParts.join(" | "),
           gallery_inspection_record_id: recordId,
           gallery_can_delete:
-            field !== "goods_not_ready_images" && field !== "rejected_image",
+            field !== "goods_not_ready_images" &&
+            field !== "rejected_image" &&
+            field !== "rejected_images",
         };
       };
       const currentInspectionImages = inspectionRecords.flatMap((record) => [
@@ -1298,6 +1303,16 @@ const QcDetails = () => {
                 image,
                 "goods_not_ready_images",
                 "Goods Not Ready",
+              ),
+            )
+          : []),
+        ...(Array.isArray(record?.rejected_images)
+          ? record.rejected_images.map((image) =>
+              decorateCurrentInspectionImage(
+                record,
+                image,
+                "rejected_images",
+                "Rejected",
               ),
             )
           : []),
@@ -1343,7 +1358,7 @@ const QcDetails = () => {
               ? "previous_hardware_inspection"
               : field === "goods_not_ready_images"
               ? "previous_goods_not_ready"
-              : field === "rejected_image"
+              : field === "rejected_image" || field === "rejected_images"
               ? "previous_rejected"
               : "previous_qc",
           gallery_source_label: label,
@@ -1378,6 +1393,15 @@ const QcDetails = () => {
                   image,
                   "goods_not_ready_images",
                   "Previous Goods Not Ready",
+                ),
+              )
+            : []),
+          ...(Array.isArray(record?.rejected_images)
+            ? record.rejected_images.map((image) =>
+                decoratePreviousImage(
+                  image,
+                  "rejected_images",
+                  "Previous Rejected",
                 ),
               )
             : []),
@@ -1748,6 +1772,7 @@ const QcDetails = () => {
         offeredQty: record?.vendor_offered ?? 0,
         inspectedQty: record?.checked ?? 0,
         passedQty: record?.passed ?? 0,
+        rejectedQty: record?.rejected ?? 0,
         cbmTotal: cbmValue,
         pendingAfter: record?.pending_after ?? 0,
         status: record?.status || linkedRequest?.status || "pending",
@@ -1787,6 +1812,7 @@ const QcDetails = () => {
           if (column === "offered") return Number(row?.offeredQty || 0);
           if (column === "inspected") return Number(row?.inspectedQty || 0);
           if (column === "passed") return Number(row?.passedQty || 0);
+          if (column === "rejected") return Number(row?.rejectedQty || 0);
           if (column === "cbm") return row?.cbmTotal;
           if (column === "pending") return Number(row?.pendingAfter || 0);
           if (column === "remarks") return row?.remarks;
@@ -3019,6 +3045,11 @@ const QcDetails = () => {
                 />
                 <InfoBox
                   compact
+                  label="Rejected"
+                  value={qc.quantities.qc_rejected}
+                />
+                <InfoBox
+                  compact
                   label="Pending"
                   value={qc.quantities.pending}
                 />
@@ -3265,6 +3296,14 @@ const QcDetails = () => {
                         </th>
                         <th>
                           <SortHeaderButton
+                            label="Rejected"
+                            isActive={timelineSortBy === "rejected"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("rejected", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
                             label="CBM"
                             isActive={timelineSortBy === "cbm"}
                             direction={timelineSortOrder}
@@ -3301,6 +3340,7 @@ const QcDetails = () => {
                           <td>{row.offeredQty}</td>
                           <td>{row.inspectedQty}</td>
                           <td>{row.passedQty}</td>
+                          <td>{row.rejectedQty}</td>
                           <td>{row.cbmTotal}</td>
                           <td>{row.pendingAfter}</td>
                           <td>{formatInspectionStatusLabel(row.status)}</td>

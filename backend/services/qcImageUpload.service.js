@@ -361,6 +361,9 @@ const persistSingleQcImageEntry = async ({
   const duplicateGuards = {
     [`${targetField}.hash`]: { $ne: normalizedHash },
   };
+  if (targetField === "rejected_images") {
+    duplicateGuards[`${targetField}.9`] = { $exists: false };
+  }
   if (normalizedIdempotencyKey) {
     duplicateGuards[`${targetField}.idempotency_key`] = {
       $ne: normalizedIdempotencyKey,

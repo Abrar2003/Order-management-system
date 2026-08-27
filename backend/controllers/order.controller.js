@@ -2359,6 +2359,10 @@ const applyNewOrderRows = async ({
             nextPassed,
             toNonNegativeQuantity(previousQc.quantities.vendor_provision),
           );
+          const nextRejected = Math.min(
+            toNonNegativeQuantity(previousQc.quantities.qc_rejected),
+            Math.max(0, nextChecked - nextPassed),
+          );
 
           previousQc.quantities.client_demand = nextQuantity;
           previousQc.quantities.qc_passed = nextPassed;
@@ -2369,10 +2373,7 @@ const applyNewOrderRows = async ({
             0,
             nextQuantity - nextPassed,
           );
-          previousQc.quantities.qc_rejected = Math.max(
-            0,
-            nextChecked - nextPassed,
-          );
+          previousQc.quantities.qc_rejected = nextRejected;
           previousQc.updated_by = buildAuditActor(reqUser);
 
           newOrder.qc_record = previousQc._id;
@@ -10994,6 +10995,10 @@ exports.editOrder = async (req, res) => {
         const nextProvision = toNonNegativeQuantity(
           qcRecord.quantities.vendor_provision,
         );
+        const nextRejected = Math.min(
+          toNonNegativeQuantity(qcRecord.quantities.qc_rejected),
+          Math.max(0, nextChecked - nextPassed),
+        );
 
         qcRecord.quantities.client_demand = nextQuantity;
         qcRecord.quantities.qc_passed = nextPassed;
@@ -11001,7 +11006,7 @@ exports.editOrder = async (req, res) => {
         qcRecord.quantities.quantity_requested = nextRequested;
         qcRecord.quantities.vendor_provision = nextProvision;
         qcRecord.quantities.pending = Math.max(0, nextQuantity - nextPassed);
-        qcRecord.quantities.qc_rejected = Math.max(0, nextChecked - nextPassed);
+        qcRecord.quantities.qc_rejected = nextRejected;
       }
     }
 

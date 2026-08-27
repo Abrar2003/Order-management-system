@@ -116,6 +116,8 @@ const {
 } = require("../helpers/vendorRef");
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+const MIN_REJECTION_IMAGE_COUNT = 2;
+const MAX_REJECTION_IMAGE_COUNT = 10;
 
 const normalizeLabels = (labels = []) => {
   if (!Array.isArray(labels)) return [];
@@ -486,6 +488,10 @@ const calculateQcAggregateMetrics = (qcDoc, inspectionRecords = []) => {
     (sum, record) => sum + toNonNegativeNumber(record?.passed, 0),
     0,
   );
+  const totalRejected = safeInspectionRecords.reduce(
+    (sum, record) => sum + toNonNegativeNumber(record?.rejected, 0),
+    0,
+  );
 
   safeInspectionRecords.forEach((record, index) => {
     const requestGroupKey = resolveInspectionRequestGroupKey(
@@ -532,6 +538,7 @@ const calculateQcAggregateMetrics = (qcDoc, inspectionRecords = []) => {
     totalChecked,
     totalVendorOffered,
     totalSamplePassed,
+    totalRejected,
     totalEffectivePassed,
   };
 };
@@ -653,8 +660,12 @@ const buildQcLabelRequirementMessage = ({
   return `Total labels must equal passed quantity x box sizes count (${requirement.requiredCount}). Actual total labels: ${toNonNegativeNumber(actualCount, 0)}. Expected: passed quantity ${requirement.basisQuantity} x box sizes ${requirement.boxSizesCount}.`;
 };
 
-const normalizeInspectionStatus = (value) =>
-  String(value || "").trim().toLowerCase();
+const normalizeInspectionStatus = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "transferred"
+    ? INSPECTION_RECORD_STATUS.TRANSFERRED
+    : normalized;
+};
 
 const isInspectionStatusMatching = (value, expectedStatus) =>
   normalizeInspectionStatus(value) === normalizeInspectionStatus(expectedStatus);
@@ -746,6 +757,7 @@ const stampRequestHistoryEntry = (
 const hasInspectionRecordActivity = ({
   checked = 0,
   passed = 0,
+  rejected = 0,
   vendorOffered = 0,
   labelsAdded = [],
   labelRanges = [],
@@ -762,6 +774,7 @@ const hasInspectionRecordActivity = ({
   isGoodsNotReadyMarked(goodsNotReady, status) ||
   toNonNegativeNumber(checked, 0) > 0 ||
   toNonNegativeNumber(passed, 0) > 0 ||
+  toNonNegativeNumber(rejected, 0) > 0 ||
   toNonNegativeNumber(vendorOffered, 0) > 0 ||
   (Array.isArray(labelsAdded) && labelsAdded.length > 0) ||
   (Array.isArray(labelRanges) && labelRanges.length > 0);
@@ -845,6 +858,7 @@ const syncQcRequestHistoryStatuses = (
     const hasActivity = hasInspectionRecordActivity({
       checked: record?.checked,
       passed: record?.passed,
+      rejected: record?.rejected,
       vendorOffered: record?.vendor_offered,
       labelsAdded: record?.labels_added,
       labelRanges: record?.label_ranges,
@@ -1058,6 +1072,7 @@ const formatInspectionRecordsForAudit = (entries = []) => {
       const requested = toNonNegativeNumber(entry?.vendor_requested, 0);
       const checked = toNonNegativeNumber(entry?.checked, 0);
       const passed = toNonNegativeNumber(entry?.passed, 0);
+      const rejected = toNonNegativeNumber(entry?.rejected, 0);
       const offered = toNonNegativeNumber(entry?.vendor_offered, 0);
       const pendingAfter = toNonNegativeNumber(entry?.pending_after, 0);
       const cbmSnapshot = buildNormalizedCbmSnapshot(entry?.cbm);
@@ -1073,7 +1088,7 @@ const formatInspectionRecordsForAudit = (entries = []) => {
         `branding ${formatAuditBoolean(entry?.branding)}`,
       ].join(" | ");
       const remarks = normalizeText(entry?.remarks) || "None";
-      return `${index + 1}) inspector ${inspectorName} | requested date ${requestedDate} | inspection date ${inspectionDate} | requested ${requested} | offered ${offered} | checked ${checked} | passed ${passed} | pending ${pendingAfter} | ${status} | labels ${labels} | cbm ${normalizeText(cbmSnapshot?.total) || "0"} | ${barcode} | ${flags} | remarks: ${remarks}`;
+      return `${index + 1}) inspector ${inspectorName} | requested date ${requestedDate} | inspection date ${inspectionDate} | requested ${requested} | offered ${offered} | checked ${checked} | passed ${passed} | rejected ${rejected} | pending ${pendingAfter} | ${status} | labels ${labels} | cbm ${normalizeText(cbmSnapshot?.total) || "0"} | ${barcode} | ${flags} | remarks: ${remarks}`;
     })
     .join(" || ");
 };
@@ -1291,7 +1306,7 @@ const refreshQcAggregateState = async (qcDoc, reqUser) => {
 
   const refreshedInspections = await Inspection.find({ qc: qcDoc._id })
     .select(
-      "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status createdAt",
+      "inspection_date requested_date request_history_id inspector checked passed rejected vendor_requested vendor_offered labels_added label_ranges goods_not_ready status createdAt",
     )
     .lean();
 
@@ -1727,6 +1742,65 @@ const hasStoredImageReference = (image = {}) =>
 const getSingleImageAsList = (image = null) =>
   image && hasStoredImageReference(image) ? [image] : [];
 
+const getRejectionEvidenceImages = (inspection = {}) => [
+  ...getImageListFromQc(inspection, "rejected_images"),
+  ...getSingleImageAsList(inspection?.rejected_image),
+]
+  .filter(hasStoredImageReference)
+  .filter((image, index, images) => {
+    const reference = getStoredImageReference(image);
+    return images.findIndex(
+      (candidate) => getStoredImageReference(candidate) === reference,
+    ) === index;
+  });
+
+const getRejectionEvidenceError = ({
+  rejected = 0,
+  remarks = "",
+  inspection = {},
+} = {}) => {
+  if (isGoodsNotReadyInspectionRecord(inspection)) return "";
+  if (toNonNegativeNumber(rejected, 0) <= 0) return "";
+  if (!normalizeText(remarks)) {
+    return "Remarks are required when rejected quantity is greater than 0";
+  }
+
+  const images = getRejectionEvidenceImages(inspection);
+  if (images.length < MIN_REJECTION_IMAGE_COUNT) {
+    return `At least ${MIN_REJECTION_IMAGE_COUNT} rejection images are required when rejected quantity is greater than 0`;
+  }
+  if (images.length > MAX_REJECTION_IMAGE_COUNT) {
+    return `You can upload up to ${MAX_REJECTION_IMAGE_COUNT} rejection images per inspection record`;
+  }
+  if (images.some((image) => !normalizeText(image?.comment))) {
+    return "A comment is required for every rejection image";
+  }
+
+  return "";
+};
+
+const getInspectionQuantityError = ({
+  checked = 0,
+  passed = 0,
+  rejected = 0,
+  offered = 0,
+} = {}) => {
+  const quantities = [
+    ["Checked", checked],
+    ["Passed", passed],
+    ["Rejected", rejected],
+  ];
+  const invalid = quantities.find(
+    ([, value]) => !Number.isFinite(value) || !Number.isInteger(value) || value < 0,
+  );
+  if (invalid) return `${invalid[0]} quantity must be a non-negative whole number`;
+  if (checked > offered) return "Checked quantity cannot exceed offered quantity";
+  if (passed + rejected > checked) {
+    return "Passed and rejected quantities cannot exceed checked quantity";
+  }
+  return "";
+};
+
 const getInspectionImageEntriesForField = (inspections = [], field = "qc_images") =>
   (Array.isArray(inspections) ? inspections : []).flatMap((inspection) =>
     getImageListFromQc(inspection, field),
@@ -2020,7 +2094,7 @@ const findPreviousPoImageHistoryForItem = async ({
     },
   })
     .select(
-      "_id order order_id order_meta item inspector request_date last_inspected_date createdAt qc_images hardware_inspection goods_not_ready_images rejected_image",
+      "_id order order_id order_meta item inspector request_date last_inspected_date createdAt qc_images hardware_inspection goods_not_ready_images rejected_images rejected_image",
     )
     .populate({
       path: "order",
@@ -2044,7 +2118,7 @@ const findPreviousPoImageHistoryForItem = async ({
     qc: { $in: accessiblePreviousQcs.map((record) => record._id) },
   })
     .select(
-      "_id qc inspector inspection_date createdAt qc_images hardware_inspection goods_not_ready_images rejected_image",
+      "_id qc inspector inspection_date createdAt qc_images hardware_inspection goods_not_ready_images rejected_images rejected_image",
     )
     .populate("inspector", "name")
     .lean();
@@ -2087,7 +2161,7 @@ const recalculateQcAggregateQuantities = (qcDoc, inspectionRecords = []) => {
   const {
     totalChecked,
     totalVendorOffered,
-    totalSamplePassed,
+    totalRejected,
     totalEffectivePassed,
   } = calculateQcAggregateMetrics(qcDoc, inspectionRecords);
   const clientDemandQty = toNonNegativeNumber(qcDoc?.quantities?.client_demand, 0);
@@ -2096,7 +2170,7 @@ const recalculateQcAggregateQuantities = (qcDoc, inspectionRecords = []) => {
   qcDoc.quantities.qc_passed = totalEffectivePassed;
   qcDoc.quantities.vendor_provision = totalVendorOffered;
   qcDoc.quantities.pending = Math.max(0, clientDemandQty - totalEffectivePassed);
-  qcDoc.quantities.qc_rejected = Math.max(0, totalChecked - totalSamplePassed);
+  qcDoc.quantities.qc_rejected = totalRejected;
 };
 
 const toPositiveCbmNumber = (value) => {
@@ -2842,6 +2916,7 @@ const getQcUserLatestRequestAvailability = (
     hasInspectionRecordActivity({
       checked: record?.checked,
       passed: record?.passed,
+      rejected: record?.rejected,
       vendorOffered: record?.vendor_offered,
       labelsAdded: record?.labels_added,
       labelRanges: record?.label_ranges,
@@ -3004,6 +3079,7 @@ const upsertInspectionRecordForRequest = async ({
   auditUser = null,
   addChecked = 0,
   addPassed = 0,
+  addRejected = 0,
   addProvision = 0,
   appendLabelRanges = [],
   appendLabels = [],
@@ -3106,6 +3182,7 @@ const upsertInspectionRecordForRequest = async ({
       requested_date: resolvedRequestDate,
       checked: toNonNegativeNumber(addChecked, 0),
       passed: toNonNegativeNumber(addPassed, 0),
+      rejected: toNonNegativeNumber(addRejected, 0),
       vendor_requested: requestedQty,
       vendor_offered: toNonNegativeNumber(addProvision, 0),
       pending_after: pendingAfter,
@@ -3152,6 +3229,10 @@ const upsertInspectionRecordForRequest = async ({
     ? toNonNegativeNumber(addPassed, 0)
     : toNonNegativeNumber(inspectionRecord.passed, 0) +
       toNonNegativeNumber(addPassed, 0);
+  const nextRejected = replaceCurrentRecord
+    ? toNonNegativeNumber(addRejected, 0)
+    : toNonNegativeNumber(inspectionRecord.rejected, 0) +
+      toNonNegativeNumber(addRejected, 0);
   const nextOffered = replaceCurrentRecord
     ? toNonNegativeNumber(addProvision, 0)
     : toNonNegativeNumber(inspectionRecord.vendor_offered, 0) +
@@ -3159,6 +3240,7 @@ const upsertInspectionRecordForRequest = async ({
 
   inspectionRecord.checked = nextChecked;
   inspectionRecord.passed = nextPassed;
+  inspectionRecord.rejected = nextRejected;
   inspectionRecord.vendor_offered = nextOffered;
   inspectionRecord.pending_after = pendingAfter;
   inspectionRecord.barcode = inspectionBarcodeSnapshot.barcode;
@@ -3755,7 +3837,10 @@ const buildApprovedGoodsQuantityByInspectionId = (inspectionRecords = []) => {
 exports.__test__ = {
   buildFirstInspectionAlignmentPolicy,
   buildApprovedGoodsQuantityByInspectionId,
+  calculateQcAggregateMetrics,
   getFirstInspectionAssignmentError,
+  getRejectionEvidenceError,
+  getInspectionQuantityError,
   buildShiftedRequestDeadline,
   getQcUserLatestRequestAvailability,
   hasInspectionRecordActivity,
@@ -5126,6 +5211,7 @@ exports.alignQC = async (req, res) => {
         ? hasInspectionRecordActivity({
             checked: latestRequestInspection?.checked,
             passed: latestRequestInspection?.passed,
+            rejected: latestRequestInspection?.rejected,
             vendorOffered: latestRequestInspection?.vendor_offered,
             labelsAdded: latestRequestInspection?.labels_added,
             labelRanges: latestRequestInspection?.label_ranges,
@@ -5269,6 +5355,7 @@ exports.alignQC = async (req, res) => {
         auditUser: req.user,
         addChecked: 0,
         addPassed: 0,
+        addRejected: 0,
         addProvision: 0,
         appendLabelRanges: [],
         appendLabels: [],
@@ -5387,6 +5474,7 @@ exports.alignQC = async (req, res) => {
       auditUser: req.user,
       addChecked: 0,
       addPassed: 0,
+      addRejected: 0,
       addProvision: 0,
       appendLabelRanges: [],
       appendLabels: [],
@@ -5633,6 +5721,7 @@ const updateQC = async (req, res) => {
     const {
       qc_checked,
       qc_passed,
+      qc_rejected,
       remarks,
       labels,
       label_ranges,
@@ -6646,10 +6735,12 @@ const updateQC = async (req, res) => {
 
     const addChecked = Number(qc_checked ?? 0);
     const addPassed = Number(qc_passed ?? 0);
+    const addRejected = Number(qc_rejected ?? 0);
     const addProvision = Number(vendor_provision ?? 0);
     const hasExplicitQuantityPayload =
       qc_checked !== undefined ||
       qc_passed !== undefined ||
+      qc_rejected !== undefined ||
       vendor_provision !== undefined;
     const hasExplicitLabelsPayload =
       labels !== undefined ||
@@ -6666,6 +6757,7 @@ const updateQC = async (req, res) => {
     );
     const currentCheckedTotal = currentAggregateMetrics.totalChecked;
     const currentSamplePassedTotal = currentAggregateMetrics.totalSamplePassed;
+    const currentRejectedTotal = currentAggregateMetrics.totalRejected;
     const currentEffectivePassedTotal =
       currentAggregateMetrics.totalEffectivePassed;
     const currentVendorOfferedTotal =
@@ -6702,6 +6794,10 @@ const updateQC = async (req, res) => {
       currentRequestInspectionRecord?.passed,
       0,
     );
+    const currentRequestRejectedBefore = toNonNegativeNumber(
+      currentRequestInspectionRecord?.rejected,
+      0,
+    );
     const currentRequestOfferedBefore = toNonNegativeNumber(
       currentRequestInspectionRecord?.vendor_offered,
       0,
@@ -6714,12 +6810,18 @@ const updateQC = async (req, res) => {
       });
 
     if (
-      [addChecked, addPassed, addProvision].some(
-        (v) => v < 0 || Number.isNaN(v),
+      [addChecked, addPassed, addRejected].some(
+        (value) =>
+          !Number.isFinite(value) || !Number.isInteger(value) || value < 0,
       )
     ) {
       return res.status(400).json({
-        message: "Quantity values must be valid non-negative numbers",
+        message: "Checked, passed, and rejected quantities must be non-negative whole numbers",
+      });
+    }
+    if (!Number.isFinite(addProvision) || addProvision < 0) {
+      return res.status(400).json({
+        message: "Offered quantity must be a valid non-negative number",
       });
     }
 
@@ -6789,6 +6891,7 @@ const updateQC = async (req, res) => {
       !allowAdminRewrite &&
       (
         addPassed ||
+        addRejected ||
         (Array.isArray(labels) && labels.length) ||
         hasLabelRangePayload
       ) &&
@@ -6803,8 +6906,10 @@ const updateQC = async (req, res) => {
     let nextVendorProvision = currentVendorOfferedTotal;
     let nextChecked = currentCheckedTotal;
     let nextSamplePassedTotal = currentSamplePassedTotal;
+    let nextRejectedTotal = currentRejectedTotal;
     let nextCurrentRequestChecked = currentRequestCheckedBefore;
     let nextCurrentRequestSamplePassed = currentRequestSamplePassedBefore;
+    let nextCurrentRequestRejected = currentRequestRejectedBefore;
     let nextCurrentRequestOffered = currentRequestOfferedBefore;
 
     if (allowRecordRewrite && hasExplicitQuantityPayload) {
@@ -6822,6 +6927,10 @@ const updateQC = async (req, res) => {
         0,
         currentSamplePassedTotal - currentRequestSamplePassedBefore,
       );
+      const otherRejected = Math.max(
+        0,
+        currentRejectedTotal - currentRequestRejectedBefore,
+      );
 
       nextCurrentRequestChecked =
         qc_checked !== undefined
@@ -6835,16 +6944,23 @@ const updateQC = async (req, res) => {
         qc_passed !== undefined
           ? toNonNegativeNumber(qc_passed, 0)
           : currentRequestSamplePassedBefore;
+      nextCurrentRequestRejected =
+        qc_rejected !== undefined
+          ? toNonNegativeNumber(qc_rejected, 0)
+          : currentRequestRejectedBefore;
 
       nextVendorProvision = otherOffered + nextCurrentRequestOffered;
       nextChecked = otherChecked + nextCurrentRequestChecked;
       nextSamplePassedTotal = otherSamplePassed + nextCurrentRequestSamplePassed;
+      nextRejectedTotal = otherRejected + nextCurrentRequestRejected;
     } else {
       nextVendorProvision = currentVendorOfferedTotal + addProvision;
       nextChecked = currentCheckedTotal + addChecked;
       nextSamplePassedTotal = currentSamplePassedTotal + addPassed;
+      nextRejectedTotal = currentRejectedTotal + addRejected;
       nextCurrentRequestChecked = currentRequestCheckedBefore + addChecked;
       nextCurrentRequestSamplePassed = currentRequestSamplePassedBefore + addPassed;
+      nextCurrentRequestRejected = currentRequestRejectedBefore + addRejected;
       nextCurrentRequestOffered = currentRequestOfferedBefore + addProvision;
     }
 
@@ -6862,22 +6978,30 @@ const updateQC = async (req, res) => {
         .json({ message: "offered quantity cannot be negative" });
     }
 
-    if (nextCurrentRequestChecked > nextCurrentRequestOffered) {
-      return res.status(400).json({
-        message: "qc_checked cannot exceed offered quantity",
-      });
-    }
-
-    if (nextCurrentRequestSamplePassed > nextCurrentRequestChecked) {
-      return res.status(400).json({
-        message: "qc_passed cannot exceed qc_checked",
-      });
-    }
+    const quantityError = getInspectionQuantityError({
+      checked: nextCurrentRequestChecked,
+      passed: nextCurrentRequestSamplePassed,
+      rejected: nextCurrentRequestRejected,
+      offered: nextCurrentRequestOffered,
+    });
+    if (quantityError) return res.status(400).json({ message: quantityError });
 
     if (nextCurrentRequestSamplePassed > nextCurrentRequestOffered) {
       return res.status(400).json({
         message: "passed quantity cannot exceed offered quantity",
       });
+    }
+
+    const rejectionEvidenceError = getRejectionEvidenceError({
+      rejected: nextCurrentRequestRejected,
+      remarks:
+        remarks !== undefined
+          ? remarks
+          : currentRequestInspectionRecord?.remarks,
+      inspection: currentRequestInspectionRecord,
+    });
+    if (rejectionEvidenceError) {
+      return res.status(400).json({ message: rejectionEvidenceError });
     }
 
     let itemDocForLabelValidation = itemDocForInspectedSizeUpdate;
@@ -6944,10 +7068,7 @@ const updateQC = async (req, res) => {
       0,
       clientDemandQuantity - nextEffectivePassed,
     );
-    qc.quantities.qc_rejected = Math.max(
-      0,
-      nextChecked - nextSamplePassedTotal,
-    );
+    qc.quantities.qc_rejected = nextRejectedTotal;
 
     /* ────────────────────────
          🏷️ LABELS (UNCHANGED LOGIC)
@@ -7140,6 +7261,7 @@ const updateQC = async (req, res) => {
       allowQcRequestRewrite ||
       addChecked > 0 ||
       addPassed > 0 ||
+      addRejected > 0 ||
       addProvision > 0 ||
       (labelsAddedThisVisit && labelsAddedThisVisit.length > 0);
 
@@ -7253,6 +7375,7 @@ const updateQC = async (req, res) => {
         auditUser: req.user,
         addChecked: isVisitUpdate ? addChecked : 0,
         addPassed: isVisitUpdate ? addPassed : 0,
+        addRejected: isVisitUpdate ? addRejected : 0,
         addProvision: isVisitUpdate ? addProvision : 0,
         appendLabelRanges: isVisitUpdate ? labelRangesUsedThisVisit : [],
         appendLabels: isVisitUpdate ? labelsAddedThisVisit : [],
@@ -7795,7 +7918,7 @@ exports.getInspectorReports = async (req, res) => {
     };
     const inspectionsRaw = await Inspection.find(baseInspectionMatch)
       .select(
-        "inspector inspection_date requested_date request_history_id createdAt status checked passed vendor_requested cbm qc",
+        "inspector inspection_date requested_date request_history_id createdAt status checked passed rejected vendor_requested cbm qc",
       )
       .populate("inspector", "name email")
       .populate({
@@ -9201,6 +9324,7 @@ const shiftQcRequestForLater = async (req, res) => {
       hasInspectionRecordActivity({
         checked: currentInspection?.checked,
         passed: currentInspection?.passed,
+        rejected: currentInspection?.rejected,
         vendorOffered: currentInspection?.vendor_offered,
         labelsAdded: currentInspection?.labels_added,
         labelRanges: currentInspection?.label_ranges,
@@ -9273,6 +9397,7 @@ const shiftQcRequestForLater = async (req, res) => {
       remarks: remark,
       createdBy: req.user._id,
       auditUser: req.user,
+      addRejected: 0,
       explicitStatus: INSPECTION_RECORD_STATUS.SHIFTED_FOR_LATER,
       allowRequestedDateFallback: false,
       currentSizeSource: inspectionSizeSource,
@@ -9312,6 +9437,7 @@ const shiftQcRequestForLater = async (req, res) => {
       remarks: "",
       createdBy: req.user._id,
       auditUser: req.user,
+      addRejected: 0,
       allowRequestedDateFallback: false,
       currentSizeSource: inspectionSizeSource,
     });
@@ -9480,6 +9606,7 @@ exports.markGoodsNotReady = async (req, res) => {
       auditUser: req.user,
       addChecked: 0,
       addPassed: 0,
+      addRejected: 0,
       addProvision: 0,
       appendLabelRanges: [],
       appendLabels: [],
@@ -9780,6 +9907,7 @@ exports.rejectAllQc = async (req, res) => {
         vendor_offered: requestedQuantityForRecord,
         checked: requestedQuantityForRecord,
         passed: 0,
+        rejected: requestedQuantityForRecord,
         pending_after: 0,
         cbm: buildNormalizedCbmSnapshot(qc?.cbm),
         ...inspectionBarcodeSnapshot,
@@ -9811,6 +9939,7 @@ exports.rejectAllQc = async (req, res) => {
       inspectionRecord.vendor_offered = requestedQuantityForRecord;
       inspectionRecord.checked = requestedQuantityForRecord;
       inspectionRecord.passed = 0;
+      inspectionRecord.rejected = requestedQuantityForRecord;
       inspectionRecord.status = INSPECTION_RECORD_STATUS.REJECTED;
       inspectionRecord.barcode = inspectionBarcodeSnapshot.barcode;
       inspectionRecord.master_barcode = inspectionBarcodeSnapshot.master_barcode;
@@ -10108,6 +10237,7 @@ exports.transferQcRequest = async (req, res) => {
       const latestInspectionHasActivity = hasInspectionRecordActivity({
         checked: latestInspection?.checked,
         passed: latestInspection?.passed,
+        rejected: latestInspection?.rejected,
         vendorOffered: latestInspection?.vendor_offered,
         labelsAdded: latestInspection?.labels_added,
         labelRanges: latestInspection?.label_ranges,
@@ -10201,6 +10331,7 @@ exports.transferQcRequest = async (req, res) => {
       vendor_offered: 0,
       checked: 0,
       passed: 0,
+      rejected: 0,
       pending_after: pendingQuantity,
       cbm: buildNormalizedCbmSnapshot(qc?.cbm),
       ...buildInspectionBarcodeSnapshotFromQc(qc),
@@ -10332,7 +10463,7 @@ exports.lookupInspectionTransferTarget = async (req, res) => {
       _id: recordId,
       qc: qc._id,
     }).select(
-      "qc inspection_date requested_date status checked passed vendor_requested vendor_offered labels_added goods_not_ready",
+      "qc inspection_date requested_date status checked passed rejected vendor_requested vendor_offered labels_added goods_not_ready",
     );
     if (!sourceInspection) {
       return res.status(404).json({ message: "Inspection record not found" });
@@ -10770,6 +10901,7 @@ exports.transferInspectionRecord = async (req, res) => {
       auditUser: req.user,
       addChecked: transferQuantityRaw,
       addPassed: transferQuantityRaw,
+      addRejected: 0,
       addProvision: transferQuantityRaw,
       appendLabelRanges: buildLabelRangesFromLabels(transferLabels),
       appendLabels: transferLabels,
@@ -11180,7 +11312,7 @@ exports.getDailyReport = async (req, res) => {
         ],
       })
         .select(
-          "inspection_date status inspector qc checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt updatedAt",
+          "inspection_date status inspector qc checked passed rejected vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt updatedAt",
         )
         .populate("inspector", "name email role")
         .populate({
@@ -11239,7 +11371,7 @@ exports.getDailyReport = async (req, res) => {
     const alignedRequestInspections = alignedRequestQcIds.length > 0
       ? await Inspection.find({ qc: { $in: alignedRequestQcIds } })
         .select(
-          "inspection_date requested_date request_history_id status qc inspector checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt updatedAt",
+          "inspection_date requested_date request_history_id status qc inspector checked passed rejected vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt updatedAt",
         )
         .sort({ createdAt: -1 })
         .lean()
@@ -11342,6 +11474,7 @@ exports.getDailyReport = async (req, res) => {
           const hasInspectionActivity = hasInspectionRecordActivity({
             checked: latestInspection?.checked,
             passed: latestInspection?.passed,
+            rejected: latestInspection?.rejected,
             vendorOffered: latestInspection?.vendor_offered,
             labelsAdded: latestInspection?.labels_added,
             labelRanges: latestInspection?.label_ranges,
@@ -11714,8 +11847,21 @@ exports.uploadQcImages = async (req, res) => {
       .trim()
       .toLowerCase();
 
-    if (imageType !== "qc_images" && imageType !== "hardware_inspection") {
+    if (
+      imageType !== "qc_images" &&
+      imageType !== "hardware_inspection" &&
+      imageType !== "rejected_images"
+    ) {
       return res.status(400).json({ success: false, message: "Invalid image type" });
+    }
+    if (
+      imageType === "rejected_images" &&
+      files.length > MAX_REJECTION_IMAGE_COUNT
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `You can upload up to ${MAX_REJECTION_IMAGE_COUNT} rejection images per inspection record`,
+      });
     }
 
     const requestedInspectionId = normalizeText(
@@ -11727,23 +11873,32 @@ exports.uploadQcImages = async (req, res) => {
       inspectionId: requestedInspectionId,
     });
     const allInspectionRecords = await Inspection.find({ qc: qc._id })
-      .select("_id qc qc_images hardware_inspection")
+      .select("_id qc qc_images hardware_inspection rejected_images")
       .lean();
 
-    const singleImageComment =
-      uploadMode === QC_IMAGE_UPLOAD_MODES.SINGLE
-        ? normalizeText(req.body?.comment || "")
-        : "";
+    const singleImageComment = normalizeText(req.body?.comment || "");
+    if (imageType === "rejected_images" && !singleImageComment) {
+      return res.status(400).json({
+        success: false,
+        message: "A comment is required for rejection images",
+      });
+    }
     const uploadedBy = buildAuditActor(req.user);
 
     let maxSuccessfulUploads = 0;
     let limitMessage = "";
     let totalLimit = 0;
     let currentCount = 0;
-    const imageTypeLabel =
-      imageType === "hardware_inspection" ? "hardware inspection image" : "QC image";
-    const storageFolder =
-      imageType === "hardware_inspection" ? "hardware-inspection" : "qc-images";
+    const imageTypeLabel = imageType === "hardware_inspection"
+      ? "hardware inspection image"
+      : imageType === "rejected_images"
+        ? "rejection image"
+        : "QC image";
+    const storageFolder = imageType === "hardware_inspection"
+      ? "hardware-inspection"
+      : imageType === "rejected_images"
+        ? "qc-rejected-images"
+        : "qc-images";
     const targetInspectionImages = getImageListFromQc(targetInspection, imageType);
     const duplicateSourceImages = getQcWideImageEntriesForField({
       qc,
@@ -11757,6 +11912,12 @@ exports.uploadQcImages = async (req, res) => {
       maxSuccessfulUploads = Math.max(0, totalLimit - currentCount);
       limitMessage =
         `Hardware inspection image limit reached (max ${HARDWARE_INSPECTION_IMAGE_LIMIT} images).`;
+    } else if (imageType === "rejected_images") {
+      currentCount = targetInspectionImages.length;
+      totalLimit = MAX_REJECTION_IMAGE_COUNT;
+      maxSuccessfulUploads = Math.max(0, totalLimit - currentCount);
+      limitMessage =
+        `Rejection image limit reached (max ${MAX_REJECTION_IMAGE_COUNT} images per inspection record).`;
     } else {
       currentCount = targetInspectionImages.length;
       totalLimit = QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD;
@@ -11933,7 +12094,7 @@ exports.deleteQcImages = async (req, res) => {
     }
 
     const inspectionImageRecords = await Inspection.find({ qc: qc._id })
-      .select("_id qc qc_images hardware_inspection goods_not_ready_images")
+      .select("_id qc checked passed rejected qc_images hardware_inspection goods_not_ready_images rejected_images rejected_image")
       .lean();
     const matchingImageEntries = findMatchingOwnedImages({
       buckets: buildOwnedImageBuckets({
@@ -11999,6 +12160,34 @@ exports.deleteQcImages = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Selected QC images are invalid",
+      });
+    }
+
+    const inspectionById = new Map(
+      inspectionImageRecords.map((record) => [String(record?._id || ""), record]),
+    );
+    const wouldRemoveRequiredRejectionEvidence = [...deleteGroups.values()]
+      .some((group) => {
+        if (group.ownerModel !== "inspection" || group.field !== "rejected_images") {
+          return false;
+        }
+        const inspection = inspectionById.get(String(group.ownerId || ""));
+        const rejectedQuantity = toNonNegativeNumber(inspection?.rejected, 0);
+        if (rejectedQuantity <= 0) return false;
+
+        const deletedReferences = new Set(
+          group.images.map(getStoredImageReference).filter(Boolean),
+        );
+        const remainingEvidenceCount = getRejectionEvidenceImages(inspection)
+          .filter(
+            (image) => !deletedReferences.has(getStoredImageReference(image)),
+          ).length;
+        return remainingEvidenceCount < MIN_REJECTION_IMAGE_COUNT;
+      });
+    if (wouldRemoveRequiredRejectionEvidence) {
+      return res.status(400).json({
+        success: false,
+        message: `Rejected inspections must keep at least ${MIN_REJECTION_IMAGE_COUNT} rejection images`,
       });
     }
 
@@ -12081,7 +12270,7 @@ exports.downloadQcImageFile = async (req, res) => {
 
     const qc = await QC.findById(qcId)
       .select(
-        "order order_id inspector qc_images hardware_inspection goods_not_ready_images rejected_image",
+        "order order_id inspector qc_images hardware_inspection goods_not_ready_images rejected_images rejected_image",
       )
       .populate({
         path: "order",
@@ -12119,7 +12308,7 @@ exports.downloadQcImageFile = async (req, res) => {
 
     const inspectionImageRecords = await Inspection.find({ qc: qc._id })
       .select(
-        "_id qc qc_images hardware_inspection goods_not_ready_images rejected_image",
+        "_id qc qc_images hardware_inspection goods_not_ready_images rejected_images rejected_image",
       )
       .lean();
     const matchingImages = findMatchingOwnedImages({
@@ -12187,7 +12376,7 @@ exports.downloadQcImages = async (req, res) => {
 
     const qc = await QC.findById(qcId)
       .select(
-        "order order_id order_meta item request_date last_inspected_date inspector qc_images hardware_inspection goods_not_ready_images rejected_image",
+        "order order_id order_meta item request_date last_inspected_date inspector qc_images hardware_inspection goods_not_ready_images rejected_images rejected_image",
       )
       .populate({
         path: "order",
@@ -12255,7 +12444,7 @@ exports.downloadQcImages = async (req, res) => {
       });
     const currentInspectionImageRecords = await Inspection.find({ qc: qc._id })
       .select(
-        "_id qc qc_images hardware_inspection goods_not_ready_images rejected_image",
+        "_id qc qc_images hardware_inspection goods_not_ready_images rejected_images rejected_image",
       )
       .lean();
     const getImagesFromBuckets = (buckets = []) =>
@@ -12411,7 +12600,7 @@ exports.getQCById = async (req, res) => {
         ),
       )
           .select(
-            "code name description brand_name brands vendors finish claim_percentage barcode_exempted inspected_weight pis_weight weight cbm kd mounting_file_needed pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_mode inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_mode pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file mounting_file packeging_ppt shipping_marks",
+            "code name description brand_name brands vendors finish claim_percentage barcode_exempted inspected_weight pis_weight weight cbm kd mounting_file_needed pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_mode inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_mode pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file logistics_ean mounting_file packeging_ppt shipping_marks",
           )
           .lean()
       : null;
@@ -12544,6 +12733,9 @@ exports.getQCById = async (req, res) => {
           buildSignedItemFile(itemMaster?.shipping_marks?.flat_carton_2, {
             logLabel: "Flat carton 2",
           }),
+          buildSignedItemFile(itemMaster?.logistics_ean, {
+            logLabel: "Logistics EAN",
+          }),
         ])
       : [];
     const itemMasterWithSignedUrls = itemMaster
@@ -12554,6 +12746,7 @@ exports.getQCById = async (req, res) => {
           cad_file: signedItemFiles[1],
           pis_file: signedItemFiles[2],
           assembly_file: signedItemFiles[3],
+          logistics_ean: signedItemFiles[14],
           mounting_file: signedItemFiles[4],
           packeging_ppt: signedItemFiles[5],
           shipping_marks: {
@@ -12586,6 +12779,7 @@ exports.getQCById = async (req, res) => {
         goods_not_ready_images: await buildSignedQcImageList(
           record?.goods_not_ready_images,
         ),
+        rejected_images: await buildSignedQcImageList(record?.rejected_images),
         rejected_image: record?.rejected_image
           ? {
               ...record.rejected_image,
@@ -12642,6 +12836,11 @@ exports.getQCById = async (req, res) => {
           ),
           goods_not_ready_images: await buildSignedQcImageList(
             getImageListFromQc(imageOwner, "goods_not_ready_images").filter(
+              hasStoredImageReference,
+            ),
+          ),
+          rejected_images: await buildSignedQcImageList(
+            getImageListFromQc(imageOwner, "rejected_images").filter(
               hasStoredImageReference,
             ),
           ),
@@ -12860,6 +13059,14 @@ exports.editInspectionRecords = async (req, res) => {
 	      }
 	      return parsed;
 	    };
+
+    const parseWholePieceField = (value, fieldName) => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+        throw new Error(`${fieldName} must be a non-negative whole number`);
+      }
+      return parsed;
+    };
 
 	    const parseOptionalNonNegativeField = (value, fieldName) => {
 	      if (value === undefined) return { hasInput: false, value: null };
@@ -13107,6 +13314,7 @@ exports.editInspectionRecords = async (req, res) => {
           hasExistingUpdate: hasInspectionRecordActivity({
             checked: record?.checked,
             passed: record?.passed,
+            rejected: record?.rejected,
             vendorOffered: record?.vendor_offered,
             labelsAdded: record?.labels_added,
             labelRanges: record?.label_ranges,
@@ -13164,28 +13372,32 @@ exports.editInspectionRecords = async (req, res) => {
         row?.vendor_offered ?? record.vendor_offered,
         "Vendor offered",
       );
-      const checked = parseNonNegativeField(
+      const checked = parseWholePieceField(
         row?.checked ?? record.checked,
         "Checked quantity",
       );
-      const submittedPassed = parseNonNegativeField(
+      const submittedPassed = parseWholePieceField(
         row?.passed ?? record.passed,
         "Passed quantity",
+      );
+      const submittedRejected = parseWholePieceField(
+        row?.rejected ?? record.rejected ?? 0,
+        "Rejected quantity",
       );
       const recordIsGoodsNotReady = isGoodsNotReadyInspectionRecord(record);
       const passed = recordIsGoodsNotReady
         ? toNonNegativeNumber(record?.passed, 0)
         : submittedPassed;
-
-      if (passed > checked) {
-        throw new Error("Passed quantity cannot exceed checked quantity");
-      }
-      if (checked > vendorOffered) {
-        throw new Error("Checked quantity cannot exceed offered quantity");
-      }
-	      if (passed > vendorOffered) {
-	        throw new Error("Passed quantity cannot exceed offered quantity");
-	      }
+      const rejected = recordIsGoodsNotReady
+        ? toNonNegativeNumber(record?.rejected, 0)
+        : submittedRejected;
+      const quantityError = getInspectionQuantityError({
+        checked,
+        passed,
+        rejected,
+        offered: vendorOffered,
+      });
+      if (quantityError) throw new Error(quantityError);
 
 	      const parsedInspectedBoxMode = detectBoxPackagingMode(
 	        row?.inspected_box_mode ?? record?.inspected_box_mode,
@@ -13360,6 +13572,16 @@ exports.editInspectionRecords = async (req, res) => {
         : (row?.remarks !== undefined
             ? String(row.remarks || "")
             : String(record?.remarks || ""));
+      const rejectionEvidenceError = recordIsGoodsNotReady
+        ? ""
+        : getRejectionEvidenceError({
+            rejected,
+            remarks,
+            inspection: record,
+          });
+      if (rejectionEvidenceError) {
+        throw new Error(rejectionEvidenceError);
+      }
       const linkedRequestHistoryEntry = resolveLinkedRequestHistoryEntry(record);
       const linkedRequestHistoryId = String(
         linkedRequestHistoryEntry?._id || record?.request_history_id || "",
@@ -13397,6 +13619,7 @@ exports.editInspectionRecords = async (req, res) => {
       record.vendor_offered = vendorOffered;
       record.checked = checked;
       record.passed = passed;
+      record.rejected = rejected;
       record.cbm = nextCbmSnapshot;
 	      record.status = recordIsGoodsNotReady
         ? INSPECTION_RECORD_STATUS.GOODS_NOT_READY
@@ -13520,7 +13743,7 @@ exports.editInspectionRecords = async (req, res) => {
 
 	    const refreshedInspections = await Inspection.find({ qc: qc._id })
 	      .select(
-	        "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered pending_after labels_added label_ranges goods_not_ready status createdAt barcode master_barcode inner_barcode packed_size finishing branding kd inspected_item_sizes inspected_box_sizes inspected_box_mode cbm",
+	        "inspection_date requested_date request_history_id inspector checked passed rejected vendor_requested vendor_offered pending_after labels_added label_ranges goods_not_ready rejected_images rejected_image status createdAt barcode master_barcode inner_barcode packed_size finishing branding kd inspected_item_sizes inspected_box_sizes inspected_box_mode cbm",
 	      )
 	      .lean();
 
@@ -13742,7 +13965,7 @@ exports.deleteInspectionRecord = async (req, res) => {
       _id: { $ne: inspection._id },
     })
       .select(
-        "inspection_date requested_date createdAt inspector labels_added request_history_id checked passed vendor_requested vendor_offered label_ranges goods_not_ready status barcode master_barcode inner_barcode packed_size finishing branding remarks cbm",
+        "inspection_date requested_date createdAt inspector labels_added request_history_id checked passed rejected vendor_requested vendor_offered label_ranges goods_not_ready status barcode master_barcode inner_barcode packed_size finishing branding remarks cbm",
       )
       .lean();
 
@@ -13958,7 +14181,7 @@ exports.syncInspectionStatuses = async (req, res) => {
         ],
       })
         .select(
-          "qc status inspector checked passed vendor_offered vendor_requested labels_added label_ranges goods_not_ready requested_date inspection_date request_history_id remarks createdAt updatedAt",
+          "qc status inspector checked passed rejected vendor_offered vendor_requested labels_added label_ranges goods_not_ready requested_date inspection_date request_history_id remarks createdAt updatedAt",
         )
         .populate({
           path: "qc",
@@ -14076,6 +14299,7 @@ exports.syncInspectionStatuses = async (req, res) => {
         const hasActivity = hasInspectionRecordActivity({
           checked: inspection?.checked,
           passed: inspection?.passed,
+          rejected: inspection?.rejected,
           vendorOffered: inspection?.vendor_offered,
           labelsAdded: inspection?.labels_added,
           labelRanges: inspection?.label_ranges,
@@ -14093,7 +14317,7 @@ exports.syncInspectionStatuses = async (req, res) => {
         const scopedRecords = scopedInspectionsByQcId.get(qcId) || [];
         const allInspectionRecords = await Inspection.find({ qc: qcDoc._id })
           .select(
-            "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status remarks createdAt updatedAt",
+            "inspection_date requested_date request_history_id inspector checked passed rejected vendor_requested vendor_offered labels_added label_ranges goods_not_ready status remarks createdAt updatedAt",
           )
           .lean();
         const beforeSnapshot = buildQcEditLogSnapshot(
@@ -14227,7 +14451,7 @@ exports.syncInspectionStatuses = async (req, res) => {
 
           const afterInspectionRecords = await Inspection.find({ qc: qcDoc._id })
             .select(
-              "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status remarks createdAt updatedAt",
+              "inspection_date requested_date request_history_id inspector checked passed rejected vendor_requested vendor_offered labels_added label_ranges goods_not_ready status remarks createdAt updatedAt",
             )
             .lean();
           await createQcEditLog({
@@ -14269,7 +14493,7 @@ exports.syncInspectionStatuses = async (req, res) => {
 
     const inspections = await Inspection.find({})
       .select(
-        "qc status checked passed vendor_offered labels_added label_ranges goods_not_ready",
+        "qc status checked passed rejected vendor_offered labels_added label_ranges goods_not_ready",
       )
       .populate("qc", "request_type")
       .lean();

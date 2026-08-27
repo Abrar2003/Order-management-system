@@ -54,6 +54,7 @@ const sortEntriesByLabel = (entries) =>
 const ITEM_DOC_FILE_TYPES = new Set([
   "pis_file",
   "assembly_file",
+  "logistics_ean",
   "mounting_file",
   "packeging_ppt",
 ]);

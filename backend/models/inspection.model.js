@@ -8,6 +8,17 @@ const {
 const ITEM_SIZE_ENTRY_LIMIT = 5;
 const BOX_SIZE_ENTRY_LIMIT = 4;
 
+const wholePieceQuantity = (field) => ({
+  type: Number,
+  required: true,
+  min: 0,
+  default: 0,
+  validate: {
+    validator: Number.isInteger,
+    message: `${field} must be a whole number`,
+  },
+});
+
 const createSizeEntrySchema = () =>
   new mongoose.Schema(
     {
@@ -176,8 +187,9 @@ const InspectionSchema = new mongoose.Schema(
     vendor_requested: { type: Number, required: true, min: 0 },
     vendor_offered: { type: Number, required: true, min: 0 },
 
-    checked: { type: Number, required: true, min: 0 },
-    passed: { type: Number, required: true, min: 0 },
+    checked: wholePieceQuantity("checked"),
+    passed: wholePieceQuantity("passed"),
+    rejected: wholePieceQuantity("rejected"),
 
     // store the "pending after visit" for easy history display
     pending_after: { type: Number, required: true, min: 0 },
@@ -280,6 +292,14 @@ const InspectionSchema = new mongoose.Schema(
       type: inspectionImageSchema,
       default: null,
     },
+    rejected_images: {
+      type: [inspectionImageSchema],
+      default: [],
+      validate: {
+        validator: (images) => !Array.isArray(images) || images.length <= 10,
+        message: "rejected_images cannot exceed 10 images",
+      },
+    },
 
     remarks: { type: String, default: "" },
 
@@ -292,6 +312,18 @@ const InspectionSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+InspectionSchema.pre("validate", function validateInspectionQuantities() {
+  if (this.checked > this.vendor_offered) {
+    this.invalidate("checked", "checked cannot exceed vendor_offered");
+  }
+  if (this.passed + this.rejected > this.checked) {
+    this.invalidate(
+      "rejected",
+      "passed and rejected cannot exceed checked",
+    );
+  }
+});
 
 // Fast QC details page (history)
 InspectionSchema.index({ qc: 1, createdAt: -1 });

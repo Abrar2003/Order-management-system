@@ -599,7 +599,6 @@ const itemSchema = new mongoose.Schema(
       public_id: { type: String, default: "", trim: true },
     },
     satin_label_required: { type: Boolean, default: false },
-    logistics_ean_required: { type: Boolean, default: false },
     mounting_file: {
       key: { type: String, default: "", trim: true },
       originalName: { type: String, default: "", trim: true },

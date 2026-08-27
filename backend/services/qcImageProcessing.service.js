@@ -30,6 +30,7 @@ const VALID_IMAGE_FIELDS = Object.freeze([
   "qc_images",
   "hardware_inspection",
   "goods_not_ready_images",
+  "rejected_images",
 ]);
 const OWNER_MODEL_QC = "qc";
 const OWNER_MODEL_INSPECTION = "inspection";

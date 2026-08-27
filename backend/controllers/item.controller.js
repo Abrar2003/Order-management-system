@@ -860,6 +860,16 @@ const ITEM_FILE_CONFIG = Object.freeze({
     defaultExtension: ".pdf",
     invalidTypeMessage: "Only PDF files are allowed for Assembly files",
   },
+  logistics_ean: {
+    field: "logistics_ean",
+    folder: "item-logistics-ean",
+    label: "Logistics EAN",
+    mimeTypes: ITEM_PDF_AND_IMAGE_MIME_TYPES,
+    extensions: ITEM_PDF_AND_IMAGE_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF, JPG, JPEG, and PNG files are allowed for Logistics EAN",
+    requiresKd: true,
+  },
   mounting_file: {
     field: "mounting_file",
     folder: "item-mounting",
@@ -993,6 +1003,7 @@ const getItemFileConfig = (fileType = "") =>
   ITEM_FILE_CONFIG[normalizeTextField(fileType).toLowerCase()] || null;
 
 const isItemFileAllowedForItem = (item = {}, fileConfig = {}) =>
+  (!fileConfig?.requiresKd || item?.kd === true) &&
   (!fileConfig?.requiresMountingFileNeeded || item?.mounting_file_needed === true) &&
   (!fileConfig?.requiresSatinLabelRequired || item?.satin_label_required === true);
 
@@ -1678,6 +1689,7 @@ const ITEM_DETAILS_SELECT = [
   "cad_file",
   "pis_file",
   "assembly_file",
+  "logistics_ean",
   "mounting_file",
   "packeging_ppt",
   "shipping_marks",
@@ -1842,11 +1854,10 @@ const buildItemFileViewMatch = (fileType = "") => {
   if (normalizedFileType === "satin_label") {
     return { satin_label_required: true };
   }
-  if (normalizedFileType !== "assembly_file") return {};
-
-  return {
-    kd: true,
-  };
+  if (["assembly_file", "logistics_ean"].includes(normalizedFileType)) {
+    return { kd: true };
+  }
+  return {};
 };
 
 const handleProductDatabaseError = (res, error, fallbackMessage) => {
@@ -5730,6 +5741,7 @@ const buildItemDetailFilePayloads = async (item = {}) => {
     { type: "cad_file", field: "cad_file", fallbackBaseName: "item-cad", extension: ".pdf" },
     { type: "pis_file", field: "pis_file", fallbackBaseName: "item-pis", extension: ".pdf" },
     { type: "assembly_file", field: "assembly_file", fallbackBaseName: "item-assembly", extension: ".pdf" },
+    { type: "logistics_ean", field: "logistics_ean", fallbackBaseName: "logistics-ean", extension: ".pdf" },
     { type: "mounting_file", field: "mounting_file", fallbackBaseName: "item-mounting", extension: ".pdf" },
     { type: "packeging_ppt", field: "packeging_ppt", fallbackBaseName: "item-packaging-ppt", extension: ".pptx" },
     { type: "satin_label", field: "satin_label", fallbackBaseName: "satin-label", extension: ".pdf" },
@@ -7881,6 +7893,7 @@ exports.getItemFileUrl = async (req, res) => {
 
     const fileSelectFields = [
       "code",
+      "kd",
       "mounting_file_needed",
       "satin_label_required",
       fileConfig.field,
@@ -7895,9 +7908,11 @@ exports.getItemFileUrl = async (req, res) => {
       });
     }
     if (!isItemFileAllowedForItem(item, fileConfig)) {
-      const requirement = fileConfig.requiresSatinLabelRequired
-        ? "satin label is required for this item"
-        : "mounting file is needed for this item";
+      const requirement = fileConfig.requiresKd
+        ? "K/D is enabled for this item"
+        : fileConfig.requiresSatinLabelRequired
+          ? "satin label is required for this item"
+          : "mounting file is needed for this item";
       return res.status(400).json({
         success: false,
         message: `${fileConfig.label} can only be used when ${requirement}`,
@@ -8031,9 +8046,11 @@ exports.uploadItemFile = async (req, res) => {
       });
     }
     if (!isItemFileAllowedForItem(item, fileConfig)) {
-      const requirement = fileConfig.requiresSatinLabelRequired
-        ? "satin label is required for this item"
-        : "mounting file is needed for this item";
+      const requirement = fileConfig.requiresKd
+        ? "K/D is enabled for this item"
+        : fileConfig.requiresSatinLabelRequired
+          ? "satin label is required for this item"
+          : "mounting file is needed for this item";
       return res.status(400).json({
         success: false,
         message: `${fileConfig.label} can only be uploaded when ${requirement}`,

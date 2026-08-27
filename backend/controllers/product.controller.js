@@ -88,6 +88,10 @@ const processOrderAnalyticsRow = (order = {}) => {
     (sum, inspection) => sum + Math.max(0, toFiniteNumber(inspection?.passed, 0)),
     0,
   );
+  const rejectedQuantity = inspections.reduce(
+    (sum, inspection) => sum + Math.max(0, toFiniteNumber(inspection?.rejected, 0)),
+    0,
+  );
   const shippedQuantity = sumShipmentQuantity(order.shipment);
   const isFullyShipped = orderQuantity > 0 && shippedQuantity >= orderQuantity;
   const latestShipmentDate = isFullyShipped
@@ -98,7 +102,9 @@ const processOrderAnalyticsRow = (order = {}) => {
     : null;
 
   let inspectionTimeDays = null;
-  let rejectionPercent = null;
+  const rejectionPercent = orderQuantity > 0
+    ? toRoundedNumber((rejectedQuantity / orderQuantity) * 100, 2)
+    : null;
 
   if (inspections.length === 1) {
     const [inspection] = inspections;
@@ -110,13 +116,6 @@ const processOrderAnalyticsRow = (order = {}) => {
       ? null
       : toRoundedNumber(inspectionDays, 2);
 
-    const passed = Math.max(0, toFiniteNumber(inspection?.passed, 0));
-    if (orderQuantity > 0) {
-      const rejected = Math.max(0, orderQuantity - passed);
-      rejectionPercent = passed >= orderQuantity
-        ? 0
-        : toRoundedNumber((rejected / orderQuantity) * 100, 2);
-    }
   } else if (inspections.length >= 2) {
     const first = new Date(getInspectionDateValue(inspections[0]));
     const last = new Date(getInspectionDateValue(inspections[inspections.length - 1]));
@@ -125,21 +124,6 @@ const processOrderAnalyticsRow = (order = {}) => {
       ? toRoundedNumber(inspectionDays, 2)
       : null;
 
-    let remaining = orderQuantity;
-    const percentages = [];
-
-    for (const inspection of inspections) {
-      if (!remaining || remaining <= 0) break;
-
-      const passed = Math.max(0, toFiniteNumber(inspection?.passed, 0));
-      const rejected = Math.max(0, remaining - passed);
-      const percent = (rejected / remaining) * 100;
-
-      if (percent !== 0) percentages.push(percent);
-      remaining = rejected;
-    }
-
-    rejectionPercent = averageNumbers(percentages, 2);
   }
 
   return {
@@ -313,6 +297,7 @@ exports.getProductAnalytics = async (req, res) => {
               as: "insp",
               in: {
                 passed: "$$insp.passed",
+                rejected: "$$insp.rejected",
                 inspection_date: "$$insp.inspection_date",
                 createdAt: "$$insp.createdAt",
               },

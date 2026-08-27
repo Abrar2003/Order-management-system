@@ -17,6 +17,18 @@ const normalizeLabels = (labels = []) =>
     ),
   ].sort((left, right) => left - right);
 
+const MIN_REJECTION_IMAGE_COUNT = 2;
+const MAX_REJECTION_IMAGE_COUNT = 10;
+
+const getStoredRejectionImageCount = (record = {}) => {
+  const images = Array.isArray(record?.rejected_images) ? record.rejected_images : [];
+  return new Set(
+    (record?.rejected_image ? [...images, record.rejected_image] : images)
+      .map((image) => String(image?.key || image?.url || image?.link || "").trim())
+      .filter(Boolean),
+  ).size;
+};
+
 const toSafeNumberString = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return "0";
@@ -151,6 +163,9 @@ const buildInitialRows = (qc) =>
       vendor_offered: toSafeNumberString(record?.vendor_offered),
       checked: toSafeNumberString(record?.checked),
       passed: toSafeNumberString(record?.passed),
+      rejected: toSafeNumberString(record?.rejected),
+      stored_rejection_image_count: getStoredRejectionImageCount(record),
+      new_rejection_images: [],
       pending_after: toSafeNumberString(record?.pending_after),
       cbm_total: formatNumberInputValue(record?.cbm?.total, { allowZero: true }) || "0.00",
       remarks: String(record?.remarks || ""),
@@ -166,6 +181,14 @@ const parseNonNegativeNumber = (value, fieldName, rowIndex) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new Error(`Row ${rowIndex + 1}: ${fieldName} must be a valid non-negative number`);
+  }
+  return parsed;
+};
+
+const parseWholePieceNumber = (value, fieldName, rowIndex) => {
+  const parsed = parseNonNegativeNumber(value, fieldName, rowIndex);
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`Row ${rowIndex + 1}: ${fieldName} must be a whole number`);
   }
   return parsed;
 };
@@ -205,6 +228,7 @@ const EditInspectionRecordsModal = ({
           acc.vendor_offered += Number(row.vendor_offered || 0) || 0;
           acc.checked += Number(row.checked || 0) || 0;
           acc.passed += Number(row.passed || 0) || 0;
+          acc.rejected += Number(row.rejected || 0) || 0;
           return acc;
         },
         {
@@ -212,6 +236,7 @@ const EditInspectionRecordsModal = ({
           vendor_offered: 0,
           checked: 0,
           passed: 0,
+          rejected: 0,
           pending_after: 0,
         },
       );
@@ -297,12 +322,35 @@ const EditInspectionRecordsModal = ({
           "offered quantity",
           rowIndex,
         );
-        const checked = parseNonNegativeNumber(row.checked, "checked quantity", rowIndex);
-        const passed = parseNonNegativeNumber(row.passed, "passed quantity", rowIndex);
+        const checked = parseWholePieceNumber(row.checked, "checked quantity", rowIndex);
+        const passed = parseWholePieceNumber(row.passed, "passed quantity", rowIndex);
+        const rejected = parseWholePieceNumber(row.rejected, "rejected quantity", rowIndex);
         const cbmTotal = parseNonNegativeNumber(row.cbm_total, "cbm", rowIndex);
+        const labelsAdded = normalizeLabels(row.labels_added);
+        const remarks = String(row.remarks || "").trim();
+        const newRejectionImages = Array.isArray(row.new_rejection_images)
+          ? row.new_rejection_images
+          : [];
+        const rejectionImageCount =
+          Number(row.stored_rejection_image_count || 0) + newRejectionImages.length;
 
-        if (passed > checked) {
-          throw new Error(`Row ${rowIndex + 1}: passed quantity cannot exceed checked quantity`);
+        if (checked > vendorOffered) {
+          throw new Error(`Row ${rowIndex + 1}: checked quantity cannot exceed offered quantity`);
+        }
+        if (passed + rejected > checked) {
+          throw new Error(`Row ${rowIndex + 1}: passed and rejected quantities cannot exceed checked quantity`);
+        }
+        if ((passed > 0 || rejected > 0 || labelsAdded.length > 0) && checked <= 0) {
+          throw new Error(`Row ${rowIndex + 1}: checked quantity must be greater than 0`);
+        }
+        if (rejected > 0 && !remarks) {
+          throw new Error(`Row ${rowIndex + 1}: remarks are required for rejected pieces`);
+        }
+        if (rejected > 0 && rejectionImageCount < MIN_REJECTION_IMAGE_COUNT) {
+          throw new Error(`Row ${rowIndex + 1}: at least 2 rejection images are required`);
+        }
+        if (rejectionImageCount > MAX_REJECTION_IMAGE_COUNT) {
+          throw new Error(`Row ${rowIndex + 1}: up to 10 rejection images are allowed`);
         }
 
         return {
@@ -314,17 +362,39 @@ const EditInspectionRecordsModal = ({
           vendor_offered: vendorOffered,
           checked,
           passed,
+          rejected,
           cbm: {
             total: cbmTotal,
           },
           label_ranges: normalizeLabelRanges(row.label_ranges),
-          labels_added: normalizeLabels(row.labels_added),
+          labels_added: labelsAdded,
           kd: Boolean(row.kd),
-          remarks: String(row.remarks || "").trim(),
+          remarks,
         };
       });
 
       setSaving(true);
+      await Promise.all(
+        rows.map(async (row) => {
+          const files = Array.isArray(row.new_rejection_images)
+            ? row.new_rejection_images
+            : [];
+          if (files.length === 0 || Number(row.rejected || 0) <= 0) return;
+
+          const formData = new FormData();
+          files.forEach((file) => formData.append("images", file));
+          formData.append("upload_mode", "bulk");
+          formData.append("comment", String(row.remarks || "").trim());
+          formData.append("inspection_id", row._id);
+          const response = await api.post(`/qc/${qc?._id}/rejection-images`, formData);
+          if (Number(response?.data?.data?.failed_count || 0) > 0) {
+            throw new Error(
+              response?.data?.data?.failures?.[0]?.reason ||
+                "Some rejection images could not be uploaded.",
+            );
+          }
+        }),
+      );
       await api.patch(`/qc/${qc?._id}/inspection-records`, { records: payload });
       onSuccess?.();
       onClose?.();
@@ -367,6 +437,10 @@ const EditInspectionRecordsModal = ({
                   <strong>{totals.passed}</strong>
                 </div>
                 <div>
+                  <span>Rejected</span>
+                  <strong>{totals.rejected}</strong>
+                </div>
+                <div>
                   <span>Pending</span>
                   <strong>{totals.pending_after}</strong>
                 </div>
@@ -392,6 +466,7 @@ const EditInspectionRecordsModal = ({
                     </div>
                     <div className="edit-inspection-card-meta">
                       <span>Passed {row.passed || 0}</span>
+                      <span>Rejected {row.rejected || 0}</span>
                       <span>Pending {row.pending_after || 0}</span>
                     </div>
                   </div>
@@ -475,6 +550,7 @@ const EditInspectionRecordsModal = ({
                       <input
                         type="number"
                         min="0"
+                        step="1"
                         className="form-control form-control-sm"
                         value={row.checked}
                         onChange={(e) => updateRow(index, "checked", e.target.value)}
@@ -486,9 +562,22 @@ const EditInspectionRecordsModal = ({
                       <input
                         type="number"
                         min="0"
+                        step="1"
                         className="form-control form-control-sm"
                         value={row.passed}
                         onChange={(e) => updateRow(index, "passed", e.target.value)}
+                      />
+                    </label>
+
+                    <label className="edit-inspection-field">
+                      <span>Rejected</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        className="form-control form-control-sm"
+                        value={row.rejected}
+                        onChange={(e) => updateRow(index, "rejected", e.target.value)}
                       />
                     </label>
 
@@ -569,6 +658,24 @@ const EditInspectionRecordsModal = ({
                         onChange={(e) => updateRow(index, "remarks", e.target.value)}
                       />
                     </label>
+
+                    {Number(row.rejected || 0) > 0 && (
+                      <label className="edit-inspection-field edit-inspection-field-wide">
+                        <span>Rejection Images</span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                          multiple
+                          className="form-control form-control-sm"
+                          onChange={(e) =>
+                            updateRow(index, "new_rejection_images", Array.from(e.target.files || []))
+                          }
+                        />
+                        <small className="text-muted">
+                          2–10 required; {row.stored_rejection_image_count || 0} already uploaded.
+                        </small>
+                      </label>
+                    )}
                   </div>
                 </section>
               ))}

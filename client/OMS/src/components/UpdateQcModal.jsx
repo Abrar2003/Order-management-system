@@ -45,6 +45,7 @@ import AllocateLabelsModal from "./AllocateLabelsModal";
 const NON_NEGATIVE_FIELDS = new Set([
   "qc_checked",
   "qc_passed",
+  "qc_rejected",
   "offeredQuantity",
   "barcode",
   "inner_barcode",
@@ -73,6 +74,25 @@ const NON_NEGATIVE_FIELDS = new Set([
   "inspected_item_bottom_B",
   "inspected_item_bottom_H",
 ]);
+
+const MIN_REJECTION_IMAGE_COUNT = 2;
+const MAX_REJECTION_IMAGE_COUNT = 10;
+
+const getStoredRejectionImages = (record = {}) => {
+  const images = Array.isArray(record?.rejected_images)
+    ? record.rejected_images
+    : [];
+  const seen = new Set();
+  return (record?.rejected_image ? [...images, record.rejected_image] : images)
+    .filter((image) => {
+      const reference = String(
+        image?.key || image?.url || image?.link || image?.public_id || "",
+      ).trim();
+      if (!reference || seen.has(reference)) return false;
+      seen.add(reference);
+      return true;
+    });
+};
 
 const normalizeComparableBarcode = (value) => {
   const normalized = String(value ?? "").trim().replace(/\s+/g, "");
@@ -901,6 +921,7 @@ const UpdateQcModal = ({
     inspector: "",
     qc_checked: "",
     qc_passed: "",
+    qc_rejected: "",
     offeredQuantity: "",
     barcode: "",
     inner_barcode: "",
@@ -945,6 +966,7 @@ const UpdateQcModal = ({
   const [inspectors, setInspectors] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [rejectionImages, setRejectionImages] = useState([]);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
   const [barcodeScannerTarget, setBarcodeScannerTarget] = useState("barcode");
@@ -1130,6 +1152,26 @@ const UpdateQcModal = ({
     : canRewriteLatestInspectionRecord
       ? latestInspectionRecord
       : qcUserRewriteInspectionRecord;
+  const rejectionInspectionRecord = isInspectionRecordUpdate
+    ? inspectionRecord
+    : resolveLatestInspectionRecordForRequestEntry(
+        Array.isArray(qc?.inspection_record) ? qc.inspection_record : [],
+        latestRequestEntry,
+      ) || selectedInspectionRecord || latestInspectionRecord;
+  const isRejectionRewriteMode =
+    isInspectionRecordUpdate ||
+    Boolean(canRewriteLatestInspectionRecord && latestInspectionRecord?._id) ||
+    isQcUserRewriteMode;
+  const enteredRejectedQuantity = Math.max(0, Number(form.qc_rejected) || 0);
+  const rejectedQuantityPreview = isRejectionRewriteMode
+    ? enteredRejectedQuantity
+    : Math.max(
+        0,
+        (Number(rejectionInspectionRecord?.rejected) || 0) + enteredRejectedQuantity,
+      );
+  const storedRejectionImageCount = getStoredRejectionImages(
+    rejectionInspectionRecord,
+  ).length;
   const selectedRecordIsGoodsNotReady = isGoodsNotReadyRecord(selectedInspectionRecord);
   const barcodePrefillRecord = selectedInspectionRecord || latestInspectionRecord || qc;
   const isQcUpdateBlockedByMissingRequest =
@@ -1256,7 +1298,7 @@ const UpdateQcModal = ({
       : nextForm;
 
     skipNextBarcodeValidationResetRef.current = true;
-    setForm(restoredForm);
+    setForm({ qc_rejected: "", ...restoredForm });
     setBarcodeScannedInSession(
       restoredBarcodeScannedInSession,
     );
@@ -1345,6 +1387,7 @@ const UpdateQcModal = ({
 
   useEffect(() => {
     if (!qc) return;
+    setRejectionImages([]);
     const assignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "");
     const recordToPrefill = isInspectionRecordUpdate
       ? inspectionRecord
@@ -1441,6 +1484,7 @@ const UpdateQcModal = ({
       !hasInspectionRecordActivity({
         checked: recordToPrefill?.checked,
         passed: recordToPrefill?.passed,
+        rejected: recordToPrefill?.rejected,
         vendorOffered: recordToPrefill?.vendor_offered,
         labelsAdded: recordToPrefill?.labels_added,
         labelRanges: recordToPrefill?.label_ranges,
@@ -1452,6 +1496,7 @@ const UpdateQcModal = ({
       inspector: defaultInspectorId,
       qc_checked: recordToPrefill ? toQuantityInputValue(recordToPrefill?.checked) : "",
       qc_passed: recordToPrefill ? toQuantityInputValue(recordToPrefill?.passed) : "",
+      qc_rejected: recordToPrefill ? toQuantityInputValue(recordToPrefill?.rejected) : "",
       offeredQuantity: recordToPrefill
         ? toQuantityInputValue(recordToPrefill?.vendor_offered)
         : "",
@@ -2024,6 +2069,23 @@ const UpdateQcModal = ({
     });
   };
 
+  const handleRejectionImagesChange = (event) => {
+    const files = Array.from(event.target.files || []);
+    const availableSlots = Math.max(
+      0,
+      MAX_REJECTION_IMAGE_COUNT - storedRejectionImageCount,
+    );
+    if (files.length > availableSlots) {
+      setError(
+        `You can add up to ${availableSlots} more rejection image${availableSlots === 1 ? "" : "s"}.`,
+      );
+      event.target.value = "";
+      return;
+    }
+    setError("");
+    setRejectionImages(files);
+  };
+
   const toggleBarcodeScanner = (targetField) => {
     setBarcodeScannerError("");
     setBarcodeScannerStatus("");
@@ -2320,15 +2382,19 @@ const UpdateQcModal = ({
 
     const qcChecked = form.qc_checked === "" ? 0 : Number(form.qc_checked);
     const submittedQcPassed = form.qc_passed === "" ? 0 : Number(form.qc_passed);
+    const submittedQcRejected = form.qc_rejected === "" ? 0 : Number(form.qc_rejected);
     const qcPassed = selectedRecordIsGoodsNotReady
       ? Number(selectedInspectionRecord?.passed || 0) || 0
       : submittedQcPassed;
+    const qcRejected = selectedRecordIsGoodsNotReady
+      ? Number(selectedInspectionRecord?.rejected || 0) || 0
+      : submittedQcRejected;
     const offeredQuantity =
       form.offeredQuantity === "" ? 0 : Number(form.offeredQuantity);
 
     if (
-      [qcChecked, submittedQcPassed, offeredQuantity].some((value) =>
-        Number.isNaN(value),
+      [qcChecked, submittedQcPassed, submittedQcRejected, offeredQuantity].some((value) =>
+        !Number.isFinite(value),
       )
     ) {
       setError("QC quantities must be valid numbers.");
@@ -2336,7 +2402,7 @@ const UpdateQcModal = ({
     }
 
     if (
-      [qcChecked, submittedQcPassed, offeredQuantity].some(
+      [qcChecked, submittedQcPassed, submittedQcRejected, offeredQuantity].some(
         (value) => value < 0,
       )
     ) {
@@ -2357,10 +2423,11 @@ const UpdateQcModal = ({
     const isInspectionRewriteMode =
       isInspectionRecordUpdate || isAdminRewriteMode || isQcUserRewriteMode;
     const hasQuantityUpdate = isAdminRewriteMode
-      ? qcChecked > 0 || qcPassed > 0 || offeredQuantity > 0
+      ? qcChecked > 0 || qcPassed > 0 || qcRejected > 0 || offeredQuantity > 0
       : (
         form.qc_checked !== "" ||
         form.qc_passed !== "" ||
+        form.qc_rejected !== "" ||
         form.offeredQuantity !== ""
       );
     const hasLabelUpdate =
@@ -2384,6 +2451,8 @@ const UpdateQcModal = ({
           inspectionRecords,
           latestRequestEntry,
         );
+    const rejectionRemarks =
+      normalizedRemarks || String(currentRequestInspectionRecord?.remarks || "").trim();
     const requestedQuantityLimit = getLatestRequestedQuantity(qc);
     const aqlRequestedQuantity =
       requestedQuantityLimit > 0 ? requestedQuantityLimit : clientDemandQuantity;
@@ -2405,10 +2474,84 @@ const UpdateQcModal = ({
       0,
       Number(currentRequestInspectionRecord?.passed || 0) || 0,
     );
+    const currentRequestRejectedBefore = Math.max(
+      0,
+      Number(currentRequestInspectionRecord?.rejected || 0) || 0,
+    );
     const currentRequestOfferedBefore = Math.max(
       0,
       Number(currentRequestInspectionRecord?.vendor_offered || 0) || 0,
     );
+    const nextCurrentRequestCheckedForRejection = isInspectionRewriteMode
+      ? qcChecked
+      : currentRequestCheckedBefore + qcChecked;
+    const nextCurrentRequestPassedForRejection = isInspectionRewriteMode
+      ? qcPassed
+      : currentRequestPassedBefore + qcPassed;
+    const rejectedQuantity = isInspectionRewriteMode
+      ? qcRejected
+      : currentRequestRejectedBefore + qcRejected;
+    const existingRejectionImageCount = getStoredRejectionImages(
+      currentRequestInspectionRecord,
+    ).length;
+    const totalRejectionImageCount =
+      existingRejectionImageCount + rejectionImages.length;
+
+    const requiresRejectionEvidence =
+      rejectedQuantity > 0 && !selectedRecordIsGoodsNotReady;
+    if (requiresRejectionEvidence && !rejectionRemarks) {
+      setError("Remarks are required when rejected quantity is greater than 0.");
+      return;
+    }
+
+    if (
+      [qcChecked, submittedQcPassed, submittedQcRejected].some(
+        (value) => !Number.isInteger(value),
+      )
+    ) {
+      setError("Checked, passed, and rejected quantities must be whole numbers.");
+      return;
+    }
+
+    if (
+      requiresRejectionEvidence &&
+      totalRejectionImageCount < MIN_REJECTION_IMAGE_COUNT
+    ) {
+      setError(
+        `Upload at least ${MIN_REJECTION_IMAGE_COUNT} rejection images when rejected quantity is greater than 0.`,
+      );
+      return;
+    }
+    if (totalRejectionImageCount > MAX_REJECTION_IMAGE_COUNT) {
+      setError(
+        `You can upload up to ${MAX_REJECTION_IMAGE_COUNT} rejection images per inspection record.`,
+      );
+      return;
+    }
+
+    const uploadRejectionEvidence = async () => {
+      if (!requiresRejectionEvidence || rejectionImages.length === 0) return;
+
+      const formData = new FormData();
+      rejectionImages.forEach((file) => formData.append("images", file));
+      formData.append("upload_mode", "bulk");
+      formData.append("comment", rejectionRemarks);
+      if (currentRequestInspectionRecord?._id) {
+        formData.append("inspection_id", currentRequestInspectionRecord._id);
+      }
+
+      const response = await api.post(
+        `/qc/${qc._id}/rejection-images`,
+        formData,
+      );
+      const failedCount = Number(response?.data?.data?.failed_count || 0);
+      if (failedCount > 0) {
+        throw new Error(
+          response?.data?.data?.failures?.[0]?.reason ||
+            "Some rejection images could not be uploaded.",
+        );
+      }
+    };
     const currentSamplePassedTotal = inspectionRecords.reduce(
       (sum, record) => sum + (Number(record?.passed || 0) || 0),
       0,
@@ -2423,13 +2566,16 @@ const UpdateQcModal = ({
       requestedQuantity: currentRequestRequestedQuantity,
     });
 
-    if ((qcPassed > 0 || hasLabelUpdate) && qcChecked <= 0) {
+    if ((qcPassed > 0 || qcRejected > 0 || hasLabelUpdate) && qcChecked <= 0) {
       setError("QC checked must be greater than 0 for updates.");
       return;
     }
 
-    if (qcPassed > qcChecked && qcChecked > 0) {
-      setError("Passed cannot exceed checked quantity.");
+    if (
+      nextCurrentRequestPassedForRejection + rejectedQuantity >
+      nextCurrentRequestCheckedForRejection
+    ) {
+      setError("Passed and rejected quantities cannot exceed checked quantity.");
       return;
     }
 
@@ -2837,6 +2983,7 @@ const UpdateQcModal = ({
       if (!isAdminRewriteMode) {
         if (form.qc_checked !== "") payload.qc_checked = qcChecked;
         if (form.qc_passed !== "") payload.qc_passed = qcPassed;
+        if (form.qc_rejected !== "") payload.qc_rejected = qcRejected;
         if (form.offeredQuantity !== "") payload.vendor_provision = offeredQuantity;
         if (labelsForUpdate.length > 0 || isQcUserRewriteMode) {
           payload.labels = labelsForUpdate;
@@ -3021,6 +3168,7 @@ const UpdateQcModal = ({
       try {
         pauseDraftSaves();
         setSaving(true);
+        await uploadRejectionEvidence();
         await api.patch(`/qc/${qc._id}/inspection-records`, {
           records: [
             {
@@ -3036,6 +3184,7 @@ const UpdateQcModal = ({
               vendor_offered: offeredQuantity,
               checked: qcChecked,
               passed: qcPassed,
+              rejected: qcRejected,
               pending_after: effectivePendingAfterUpdate,
               cbm: inspectionRecord?.cbm || { total: 0 },
               label_ranges: normalizedLabelRanges,
@@ -3185,11 +3334,13 @@ const UpdateQcModal = ({
       qcPayload.vendor_provision = offeredQuantity;
       qcPayload.qc_checked = qcChecked;
       qcPayload.qc_passed = qcPassed;
+      qcPayload.qc_rejected = qcRejected;
       qcPayload.labels = allLabelsAfterRewrite;
 
       try {
         pauseDraftSaves();
         setSaving(true);
+        await uploadRejectionEvidence();
         await api.patch(`/qc/${qc._id}/inspection-records`, {
           records: [
             {
@@ -3205,6 +3356,7 @@ const UpdateQcModal = ({
               vendor_offered: offeredQuantity,
               checked: qcChecked,
               passed: qcPassed,
+              rejected: qcRejected,
               pending_after: effectivePendingAfterRewrite,
               cbm: rewriteTargetRecord?.cbm || { total: 0 },
               label_ranges: normalizedLabelRanges,
@@ -3317,6 +3469,7 @@ const UpdateQcModal = ({
     try {
       pauseDraftSaves();
       setSaving(true);
+      await uploadRejectionEvidence();
       await api.patch(`/qc/update-qc/${qc._id}`, payload);
       await clearDraft({ resetStatus: false });
       alert("QC updated successfully.");
@@ -4221,20 +4374,20 @@ const UpdateQcModal = ({
 
               <div className="col-12 d-none d-md-block" aria-hidden="true" />
 
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">Quantity Offered</label>
                 <input
                   type="number"
                   className="form-control"
                   name="offeredQuantity"
-	                  value={form.offeredQuantity}
+                  value={form.offeredQuantity}
 	                  onChange={handleChange}
 	                  min="0"
 	                  disabled={qcBarcodeValidationLocked || saving}
 	                />
               </div>
 
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">QC Inspected</label>
                 <input
                   type="number"
@@ -4243,11 +4396,12 @@ const UpdateQcModal = ({
 	                  value={form.qc_checked}
 	                  onChange={handleChange}
 	                  min="0"
+	                  step="1"
 	                  disabled={qcBarcodeValidationLocked || saving}
 	                />
               </div>
 
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">QC Passed</label>
                 <input
                   type="number"
@@ -4256,6 +4410,7 @@ const UpdateQcModal = ({
 	                  value={form.qc_passed}
 	                  onChange={handleChange}
 	                  min="0"
+	                  step="1"
 	                  disabled={qcBarcodeValidationLocked || saving || selectedRecordIsGoodsNotReady}
 	                />
                 {selectedRecordIsGoodsNotReady && (
@@ -4264,6 +4419,53 @@ const UpdateQcModal = ({
                   </div>
                 )}
               </div>
+
+              <div className="col-md-3">
+                <label className="form-label">QC Rejected</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="qc_rejected"
+                  value={form.qc_rejected}
+                  onChange={handleChange}
+                  min="0"
+                  step="1"
+                  disabled={qcBarcodeValidationLocked || saving || selectedRecordIsGoodsNotReady}
+                />
+              </div>
+
+              {rejectedQuantityPreview > 0 && !selectedRecordIsGoodsNotReady && (
+                <div className="col-12">
+                  <div className="border border-danger-subtle rounded p-3">
+                    <label className="form-label fw-semibold">
+                      Rejection Images <span className="text-danger">*</span>
+                    </label>
+                    <input
+                      type="file"
+                      className="form-control"
+                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                      multiple
+                      onChange={handleRejectionImagesChange}
+                      disabled={saving || qcBarcodeValidationLocked}
+                    />
+                    <div className="form-text">
+                      Upload 2–10 images. The mandatory rejection remark is saved as the comment on every image.
+                      {storedRejectionImageCount > 0
+                        ? ` ${storedRejectionImageCount} already uploaded.`
+                        : ""}
+                    </div>
+                    {rejectionImages.length > 0 && (
+                      <ul className="small mb-0 mt-2">
+                        {rejectionImages.map((file) => (
+                          <li key={`${file.name}-${file.size}-${file.lastModified}`}>
+                            {file.name}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="col-md-2">
                 <label className="form-label">Packed Size</label>
@@ -4470,13 +4672,19 @@ const UpdateQcModal = ({
               {/* <div className="col-md-12">{"   "}</div> */}
 
               <div className="col-12 col-md-6">
-                <label className="form-label">Remarks</label>
+                <label className="form-label">
+                  Remarks
+                  {rejectedQuantityPreview > 0 && !selectedRecordIsGoodsNotReady && (
+                    <span className="text-danger"> *</span>
+                  )}
+                </label>
                 <textarea
                   className="form-control"
                   name="remarks"
 	                  value={form.remarks}
 	                  onChange={handleChange}
 	                  rows="3"
+	                  required={rejectedQuantityPreview > 0 && !selectedRecordIsGoodsNotReady}
 	                  disabled={saving || qcBarcodeValidationLocked}
 	                />
               </div>

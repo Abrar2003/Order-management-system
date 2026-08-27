@@ -75,6 +75,18 @@ export const ITEM_FILE_OPTIONS = Object.freeze([
     invalidMessage: "Only PDF files are allowed for Assembly.",
   },
   {
+    value: "logistics_ean",
+    label: "Logistics EAN",
+    buttonLabel: "Logistics EAN",
+    field: "logistics_ean",
+    previewMode: "pdf",
+    accept: PDF_IMAGE_ACCEPT,
+    extensions: PDF_IMAGE_EXTENSIONS,
+    mimeTypes: PDF_IMAGE_MIME_TYPES,
+    invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Logistics EAN.",
+    requiresKd: true,
+  },
+  {
     value: "mounting_file",
     label: "Mounting File",
     buttonLabel: "Mounting file",
@@ -214,6 +226,7 @@ export const isItemFileOptionAvailableForItem = (option, item = {}) => {
   const resolvedOption =
     typeof option === "string" ? getItemFileOption(option) : option;
   if (!resolvedOption) return false;
+  if (resolvedOption.requiresKd && item?.kd !== true) return false;
   if (
     resolvedOption.requiresMountingFileNeeded &&
     item?.mounting_file_needed !== true

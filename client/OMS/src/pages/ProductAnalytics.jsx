@@ -95,10 +95,8 @@ const HEADER_FORMULAS = Object.freeze({
   rejectionPercent: {
     title: "Average Rejection (%)",
     lines: [
-      "Start with remaining = order quantity.",
-      "For each inspection: rejected = remaining - passed, rejection % = (rejected / remaining) x 100.",
-      "For a PO fully passed in one inspection, rejection is 0%.",
-      "Average Rejection (%) = average of the non-zero rejection percentages collected across inspections.",
+      "PO rejection % = summed manually entered rejected quantity / order quantity x 100.",
+      "Average Rejection (%) = average of the PO rejection percentages for this item.",
     ],
   },
   avgShippingTimeDays: {

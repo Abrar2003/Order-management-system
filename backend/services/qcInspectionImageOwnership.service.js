@@ -11,6 +11,7 @@ const INSPECTION_IMAGE_ARRAY_FIELDS = Object.freeze([
   "qc_images",
   "hardware_inspection",
   "goods_not_ready_images",
+  "rejected_images",
 ]);
 
 const INSPECTION_IMAGE_FIELDS = Object.freeze([

@@ -144,6 +144,19 @@ router.post(
 );
 
 router.post(
+  "/:id/rejection-images",
+  auth,
+  requirePermission("qc", "edit"),
+  qcImageAnyUpload,
+  (req, _res, next) => {
+    req.body.image_type = "rejected_images";
+    next();
+  },
+  invalidateQcOnSuccess,
+  qcController.uploadQcImages,
+);
+
+router.post(
   "/:id/images",
   auth,
   requirePermission("images_documents", "upload"),

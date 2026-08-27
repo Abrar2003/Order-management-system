@@ -17,7 +17,12 @@ const {
   invalidateQcCaches,
 } = require("./cacheInvalidation.service");
 
-const VALID_QC_IMAGE_FIELDS = new Set(["qc_images", "hardware_inspection", "goods_not_ready_images"]);
+const VALID_QC_IMAGE_FIELDS = new Set([
+  "qc_images",
+  "hardware_inspection",
+  "goods_not_ready_images",
+  "rejected_images",
+]);
 const OWNER_MODEL_INSPECTION = "inspection";
 
 const normalizeText = (value) => String(value ?? "").trim();

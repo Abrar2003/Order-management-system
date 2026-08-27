@@ -96,6 +96,7 @@ const isInspectionStatusMatching = (value = "", expected = "") =>
 export const hasInspectionRecordActivity = ({
   checked = 0,
   passed = 0,
+  rejected = 0,
   vendorOffered = 0,
   labelsAdded = [],
   labelRanges = [],
@@ -109,6 +110,7 @@ export const hasInspectionRecordActivity = ({
   Boolean(goodsNotReady?.ready) ||
   Number(checked || 0) > 0 ||
   Number(passed || 0) > 0 ||
+  Number(rejected || 0) > 0 ||
   Number(vendorOffered || 0) > 0 ||
   (Array.isArray(labelsAdded) && labelsAdded.length > 0) ||
   (Array.isArray(labelRanges) && labelRanges.length > 0);
@@ -457,6 +459,7 @@ export const getQcUserUpdateRequestAvailability = (
     hasInspectionRecordActivity({
       checked: record?.checked,
       passed: record?.passed,
+      rejected: record?.rejected,
       vendorOffered: record?.vendor_offered,
       labelsAdded: record?.labels_added,
       labelRanges: record?.label_ranges,
