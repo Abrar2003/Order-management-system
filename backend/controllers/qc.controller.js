@@ -1756,14 +1756,10 @@ const getRejectionEvidenceImages = (inspection = {}) => [
 
 const getRejectionEvidenceError = ({
   rejected = 0,
-  remarks = "",
   inspection = {},
 } = {}) => {
   if (isGoodsNotReadyInspectionRecord(inspection)) return "";
   if (toNonNegativeNumber(rejected, 0) <= 0) return "";
-  if (!normalizeText(remarks)) {
-    return "Remarks are required when rejected quantity is greater than 0";
-  }
 
   const images = getRejectionEvidenceImages(inspection);
   if (images.length < MIN_REJECTION_IMAGE_COUNT) {
@@ -1773,7 +1769,7 @@ const getRejectionEvidenceError = ({
     return `You can upload up to ${MAX_REJECTION_IMAGE_COUNT} rejection images per inspection record`;
   }
   if (images.some((image) => !normalizeText(image?.comment))) {
-    return "A comment is required for every rejection image";
+    return "A rejection remark is required for every rejection image";
   }
 
   return "";
@@ -6994,10 +6990,6 @@ const updateQC = async (req, res) => {
 
     const rejectionEvidenceError = getRejectionEvidenceError({
       rejected: nextCurrentRequestRejected,
-      remarks:
-        remarks !== undefined
-          ? remarks
-          : currentRequestInspectionRecord?.remarks,
       inspection: currentRequestInspectionRecord,
     });
     if (rejectionEvidenceError) {
@@ -11880,7 +11872,7 @@ exports.uploadQcImages = async (req, res) => {
     if (imageType === "rejected_images" && !singleImageComment) {
       return res.status(400).json({
         success: false,
-        message: "A comment is required for rejection images",
+        message: "A rejection remark is required for rejection images",
       });
     }
     const uploadedBy = buildAuditActor(req.user);
@@ -13576,7 +13568,6 @@ exports.editInspectionRecords = async (req, res) => {
         ? ""
         : getRejectionEvidenceError({
             rejected,
-            remarks,
             inspection: record,
           });
       if (rejectionEvidenceError) {

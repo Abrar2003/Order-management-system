@@ -932,6 +932,7 @@ const UpdateQcModal = ({
     mounting_file_needed: false,
     labelRanges: [createEmptyLabelRange()],
     remarks: "",
+    rejection_remark: "",
     inspected_weight_top_net: "",
     inspected_weight_top_gross: "",
     inspected_weight_bottom_net: "",
@@ -1298,7 +1299,7 @@ const UpdateQcModal = ({
       : nextForm;
 
     skipNextBarcodeValidationResetRef.current = true;
-    setForm({ qc_rejected: "", ...restoredForm });
+    setForm({ qc_rejected: "", rejection_remark: "", ...restoredForm });
     setBarcodeScannedInSession(
       restoredBarcodeScannedInSession,
     );
@@ -1523,6 +1524,7 @@ const UpdateQcModal = ({
       remarks: isInspectionRecordUpdate || canRewriteLatestInspectionRecord || isQcUserRewriteMode
         ? initialRemarks
         : "",
+      rejection_remark: "",
       inspected_weight_top_net: "",
       inspected_weight_top_gross: "",
       inspected_weight_bottom_net: "",
@@ -2437,6 +2439,7 @@ const UpdateQcModal = ({
       qc?.inspector?._id || qc?.inspector || "",
     ).trim();
     const normalizedRemarks = String(form.remarks || "").trim();
+    const rejectionRemark = String(form.rejection_remark || "").trim();
     const clientDemandQuantity = Number(qc?.quantities?.client_demand || 0) || 0;
     const requestType = String(qc?.request_type || "").trim().toUpperCase();
     const inspectionRecords = Array.isArray(qc?.inspection_record)
@@ -2451,8 +2454,6 @@ const UpdateQcModal = ({
           inspectionRecords,
           latestRequestEntry,
         );
-    const rejectionRemarks =
-      normalizedRemarks || String(currentRequestInspectionRecord?.remarks || "").trim();
     const requestedQuantityLimit = getLatestRequestedQuantity(qc);
     const aqlRequestedQuantity =
       requestedQuantityLimit > 0 ? requestedQuantityLimit : clientDemandQuantity;
@@ -2499,8 +2500,8 @@ const UpdateQcModal = ({
 
     const requiresRejectionEvidence =
       rejectedQuantity > 0 && !selectedRecordIsGoodsNotReady;
-    if (requiresRejectionEvidence && !rejectionRemarks) {
-      setError("Remarks are required when rejected quantity is greater than 0.");
+    if (rejectionImages.length > 0 && !rejectionRemark) {
+      setError("A rejection remark is required for rejection images.");
       return;
     }
 
@@ -2535,7 +2536,7 @@ const UpdateQcModal = ({
       const formData = new FormData();
       rejectionImages.forEach((file) => formData.append("images", file));
       formData.append("upload_mode", "bulk");
-      formData.append("comment", rejectionRemarks);
+      formData.append("comment", rejectionRemark);
       if (currentRequestInspectionRecord?._id) {
         formData.append("inspection_id", currentRequestInspectionRecord._id);
       }
@@ -4437,6 +4438,22 @@ const UpdateQcModal = ({
               {rejectedQuantityPreview > 0 && !selectedRecordIsGoodsNotReady && (
                 <div className="col-12">
                   <div className="border border-danger-subtle rounded p-3">
+                    <label className="form-label fw-semibold" htmlFor="rejection_remark">
+                      Rejection Remark
+                      {(rejectionImages.length > 0 || storedRejectionImageCount < MIN_REJECTION_IMAGE_COUNT) && (
+                        <span className="text-danger"> *</span>
+                      )}
+                    </label>
+                    <textarea
+                      id="rejection_remark"
+                      className="form-control mb-3"
+                      name="rejection_remark"
+                      value={form.rejection_remark}
+                      onChange={handleChange}
+                      rows="2"
+                      required={rejectionImages.length > 0}
+                      disabled={saving || qcBarcodeValidationLocked}
+                    />
                     <label className="form-label fw-semibold">
                       Rejection Images <span className="text-danger">*</span>
                     </label>
@@ -4449,7 +4466,7 @@ const UpdateQcModal = ({
                       disabled={saving || qcBarcodeValidationLocked}
                     />
                     <div className="form-text">
-                      Upload 2–10 images. The mandatory rejection remark is saved as the comment on every image.
+                      Upload 2–10 images. The rejection remark is shown when viewing them.
                       {storedRejectionImageCount > 0
                         ? ` ${storedRejectionImageCount} already uploaded.`
                         : ""}
@@ -4672,19 +4689,14 @@ const UpdateQcModal = ({
               {/* <div className="col-md-12">{"   "}</div> */}
 
               <div className="col-12 col-md-6">
-                <label className="form-label">
-                  Remarks
-                  {rejectedQuantityPreview > 0 && !selectedRecordIsGoodsNotReady && (
-                    <span className="text-danger"> *</span>
-                  )}
-                </label>
+                <label className="form-label" htmlFor="qc_remarks">QC Remarks</label>
                 <textarea
+                  id="qc_remarks"
                   className="form-control"
                   name="remarks"
 	                  value={form.remarks}
 	                  onChange={handleChange}
 	                  rows="3"
-	                  required={rejectedQuantityPreview > 0 && !selectedRecordIsGoodsNotReady}
 	                  disabled={saving || qcBarcodeValidationLocked}
 	                />
               </div>

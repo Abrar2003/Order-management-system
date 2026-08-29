@@ -19,19 +19,14 @@ const image = (index, comment = "Rejected finish") => ({
   comment,
 });
 
-test("rejected inspection quantities require a remark and 2-10 commented images", () => {
+test("rejected inspection quantities require 2-10 images with rejection remarks", () => {
   assert.equal(
     getRejectionEvidenceError({ rejected: 0 }),
     "",
   );
   assert.match(
-    getRejectionEvidenceError({ rejected: 1 }),
-    /Remarks are required/,
-  );
-  assert.match(
     getRejectionEvidenceError({
       rejected: 1,
-      remarks: "Finish issue",
       inspection: { rejected_images: [image(1)] },
     }),
     /At least 2 rejection images/,
@@ -39,7 +34,6 @@ test("rejected inspection quantities require a remark and 2-10 commented images"
   assert.equal(
     getRejectionEvidenceError({
       rejected: 1,
-      remarks: "Finish issue",
       inspection: { rejected_images: [image(1), image(2)] },
     }),
     "",
@@ -47,15 +41,13 @@ test("rejected inspection quantities require a remark and 2-10 commented images"
   assert.match(
     getRejectionEvidenceError({
       rejected: 1,
-      remarks: "Finish issue",
       inspection: { rejected_images: [image(1), image(2, "")] },
     }),
-    /comment is required/,
+    /rejection remark is required/,
   );
   assert.match(
     getRejectionEvidenceError({
       rejected: 1,
-      remarks: "Finish issue",
       inspection: {
         rejected_images: Array.from({ length: 11 }, (_, index) => image(index)),
       },

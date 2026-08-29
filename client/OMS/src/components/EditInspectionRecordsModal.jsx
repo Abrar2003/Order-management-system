@@ -166,6 +166,7 @@ const buildInitialRows = (qc) =>
       rejected: toSafeNumberString(record?.rejected),
       stored_rejection_image_count: getStoredRejectionImageCount(record),
       new_rejection_images: [],
+      rejection_remark: "",
       pending_after: toSafeNumberString(record?.pending_after),
       cbm_total: formatNumberInputValue(record?.cbm?.total, { allowZero: true }) || "0.00",
       remarks: String(record?.remarks || ""),
@@ -331,6 +332,7 @@ const EditInspectionRecordsModal = ({
         const newRejectionImages = Array.isArray(row.new_rejection_images)
           ? row.new_rejection_images
           : [];
+        const rejectionRemark = String(row.rejection_remark || "").trim();
         const rejectionImageCount =
           Number(row.stored_rejection_image_count || 0) + newRejectionImages.length;
 
@@ -343,8 +345,8 @@ const EditInspectionRecordsModal = ({
         if ((passed > 0 || rejected > 0 || labelsAdded.length > 0) && checked <= 0) {
           throw new Error(`Row ${rowIndex + 1}: checked quantity must be greater than 0`);
         }
-        if (rejected > 0 && !remarks) {
-          throw new Error(`Row ${rowIndex + 1}: remarks are required for rejected pieces`);
+        if (newRejectionImages.length > 0 && !rejectionRemark) {
+          throw new Error(`Row ${rowIndex + 1}: a rejection remark is required for rejection images`);
         }
         if (rejected > 0 && rejectionImageCount < MIN_REJECTION_IMAGE_COUNT) {
           throw new Error(`Row ${rowIndex + 1}: at least 2 rejection images are required`);
@@ -384,7 +386,7 @@ const EditInspectionRecordsModal = ({
           const formData = new FormData();
           files.forEach((file) => formData.append("images", file));
           formData.append("upload_mode", "bulk");
-          formData.append("comment", String(row.remarks || "").trim());
+          formData.append("comment", String(row.rejection_remark || "").trim());
           formData.append("inspection_id", row._id);
           const response = await api.post(`/qc/${qc?._id}/rejection-images`, formData);
           if (Number(response?.data?.data?.failed_count || 0) > 0) {
@@ -650,7 +652,7 @@ const EditInspectionRecordsModal = ({
                     </div>
 
                     <label className="edit-inspection-field edit-inspection-field-remarks">
-                      <span>Remarks</span>
+                      <span>QC Remarks</span>
                       <input
                         type="text"
                         className="form-control form-control-sm"
@@ -660,21 +662,36 @@ const EditInspectionRecordsModal = ({
                     </label>
 
                     {Number(row.rejected || 0) > 0 && (
-                      <label className="edit-inspection-field edit-inspection-field-wide">
-                        <span>Rejection Images</span>
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                          multiple
-                          className="form-control form-control-sm"
-                          onChange={(e) =>
-                            updateRow(index, "new_rejection_images", Array.from(e.target.files || []))
-                          }
-                        />
-                        <small className="text-muted">
-                          2–10 required; {row.stored_rejection_image_count || 0} already uploaded.
-                        </small>
-                      </label>
+                      <>
+                        <label className="edit-inspection-field edit-inspection-field-wide">
+                          <span>
+                            Rejection Remark
+                            {row.new_rejection_images.length > 0 ? " *" : ""}
+                          </span>
+                          <input
+                            type="text"
+                            className="form-control form-control-sm"
+                            value={row.rejection_remark}
+                            onChange={(e) => updateRow(index, "rejection_remark", e.target.value)}
+                            required={row.new_rejection_images.length > 0}
+                          />
+                        </label>
+                        <label className="edit-inspection-field edit-inspection-field-wide">
+                          <span>Rejection Images</span>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                            multiple
+                            className="form-control form-control-sm"
+                            onChange={(e) =>
+                              updateRow(index, "new_rejection_images", Array.from(e.target.files || []))
+                            }
+                          />
+                          <small className="text-muted">
+                            2–10 required; {row.stored_rejection_image_count || 0} already uploaded.
+                          </small>
+                        </label>
+                      </>
                     )}
                   </div>
                 </section>

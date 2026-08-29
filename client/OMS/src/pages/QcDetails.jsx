@@ -361,6 +361,10 @@ const isMongoObjectIdLike = (value) => /^[a-f0-9]{24}$/i.test(String(value || ""
 const hasQcImageComment = (image = {}) =>
   String(image?.comment || "").trim().length > 0;
 
+const isRejectionImage = (image = {}) =>
+  image?.gallery_source === "rejected" ||
+  image?.gallery_source === "previous_rejected";
+
 const getQcImageUploaderName = (image = {}) =>
   String(
     image?.uploaded_by?.name ||
@@ -4018,7 +4022,7 @@ const QcDetails = () => {
                                 )}
                                 {comment && (
                                   <span className="qc-image-gallery-comment-indicator">
-                                    Comment
+                                    {isRejectionImage(image) ? "Rejection Remark" : "Comment"}
                                   </span>
                                 )}
                                 {image?.gallery_source_label &&
@@ -4116,7 +4120,8 @@ const QcDetails = () => {
                     </div>
                     {String(activeQcImage?.comment || "").trim() && (
                       <div className="small mt-2">
-                        <strong>Comment:</strong> {String(activeQcImage.comment || "").trim()}
+                        <strong>{isRejectionImage(activeQcImage) ? "Rejection Remark" : "Comment"}:</strong>{" "}
+                        {String(activeQcImage.comment || "").trim()}
                       </div>
                     )}
                   </div>
