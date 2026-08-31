@@ -388,7 +388,7 @@ const buildPackedGoodsPeriodDataset = async ({
       packed_quantity: allocated.total_packed_quantity,
       total_cbm: cbm.total_packed_cbm,
     };
-  }).filter(Boolean);
+  }).filter((row) => row && row.period_packed_quantity > 0);
 
   const historicalLimitations = undatedShipmentCount > 0
     ? [`${undatedShipmentCount} legacy shipment record(s) had no stuffing date and were conservatively treated as shipped before the report cutoff.`]

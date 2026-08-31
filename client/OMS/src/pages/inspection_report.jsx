@@ -656,7 +656,9 @@ const collectLbhDifferenceLogs = ({
       const pisAxisValue = Number(pisLbh?.[axis] || 0);
       const checkedAxisValue = Number(checkedLbh?.[axis] || 0);
       const delta = checkedAxisValue - pisAxisValue;
+      const tolerance = String(attribute).toLowerCase().includes("box size") ? 1 : 0.5;
       if (!Number.isFinite(delta) || Math.abs(delta) < 0.0001) return;
+      if (Math.abs(delta) <= tolerance) return;
 
       const direction = delta > 0 ? "greater" : "smaller";
       logs.push(
@@ -704,7 +706,9 @@ const collectWeightDifferenceLogs = ({
     }
 
     const delta = Number(checkedWeight) - Number(pisWeight);
+    const tolerance = Math.abs(Number(pisWeight)) * 0.1;
     if (!Number.isFinite(delta) || Math.abs(delta) < 0.0001) return;
+    if (tolerance > 0 && Math.abs(delta) <= tolerance) return;
 
     const direction = delta > 0 ? "greater" : "smaller";
     logs.push(
