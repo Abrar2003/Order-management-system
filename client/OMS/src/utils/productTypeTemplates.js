@@ -1,4 +1,4 @@
-import { BOX_ENTRY_TYPES, BOX_PACKAGING_MODES } from "./measuredSizeForm";
+import { BOX_ENTRY_TYPES, BOX_PACKAGING_MODES } from "./measuredSizeForm.js";
 
 const NUMBER_LIST_ENTRY_LIMIT = 4;
 
@@ -71,6 +71,19 @@ export const flattenTemplateFields = (template = {}) =>
       group_label: normalizeText(group?.label),
     })),
   );
+
+export const isTemplateFieldVisible = (field = {}, fieldValues = {}) => {
+  const visibleWhen = field?.validation?.visible_when;
+  if (!visibleWhen || typeof visibleWhen !== "object" || Array.isArray(visibleWhen)) {
+    return true;
+  }
+
+  return Object.entries(visibleWhen).every(([fieldKey, allowedValues]) =>
+    (Array.isArray(allowedValues) ? allowedValues : [allowedValues]).includes(
+      fieldValues?.[normalizeTemplateKey(fieldKey)],
+    ),
+  );
+};
 
 export const createEmptyItemSizeEntry = (remark = "") => ({
   L: "",
@@ -383,6 +396,7 @@ export const validateProductTypeFormState = ({
 
   flattenTemplateFields(template).forEach((field) => {
     const fieldKey = normalizeTemplateKey(field?.key);
+    if (!isTemplateFieldVisible(field, formState?.fieldValues)) return;
     const inputType = normalizeTemplateKey(field?.input_type);
     const valueType = normalizeTemplateKey(
       field?.value_type || getDefaultValueTypeForInputType(inputType),
@@ -676,6 +690,7 @@ export const buildProductTypePayload = ({
 
   flattenTemplateFields(template).forEach((field) => {
     const fieldKey = normalizeTemplateKey(field?.key);
+    if (!isTemplateFieldVisible(field, formState?.fieldValues)) return;
     const inputType = normalizeTemplateKey(field?.input_type);
 
     if (!includeSizeFields && (inputType === "item_size" || inputType === "box_size")) {

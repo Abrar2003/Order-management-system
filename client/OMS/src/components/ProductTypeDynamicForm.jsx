@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BOX_ENTRY_TYPES } from "../utils/measuredSizeForm";
 import {
   flattenTemplateFields,
+  isTemplateFieldVisible,
   normalizeTemplateKey,
   sortTemplateGroups,
 } from "../utils/productTypeTemplates";
@@ -454,7 +455,7 @@ const ProductTypeDynamicForm = ({
   onBoxSizeChange,
 }) => {
   const groups = useMemo(() => sortTemplateGroups(template?.groups), [template]);
-  const visibleGroups = useMemo(
+  const formGroups = useMemo(
     () =>
       hideSizeFields
         ? groups.filter((group) =>
@@ -466,9 +467,18 @@ const ProductTypeDynamicForm = ({
         : groups,
     [groups, hideSizeFields],
   );
+  const visibleGroups = useMemo(
+    () =>
+      formGroups.filter((group) =>
+        flattenTemplateFields({ groups: [group] }).some((field) =>
+          isTemplateFieldVisible(field, fieldValues),
+        ),
+      ),
+    [fieldValues, formGroups],
+  );
   const defaultOpenGroups = useMemo(() => {
     const normalizedTemplateKey = normalizeTemplateKey(template?.key);
-    return visibleGroups
+    return formGroups
       .filter((group, index) => {
         if (index < 2) return true;
         return (
@@ -477,7 +487,7 @@ const ProductTypeDynamicForm = ({
         );
       })
       .map((group) => normalizeTemplateKey(group?.key));
-  }, [template?.key, visibleGroups]);
+  }, [formGroups, template?.key]);
   const [openGroups, setOpenGroups] = useState([]);
 
   useEffect(() => {
@@ -494,6 +504,7 @@ const ProductTypeDynamicForm = ({
         const groupKey = normalizeTemplateKey(group?.key);
         const isOpen = openGroups.includes(groupKey);
         const groupFields = flattenTemplateFields({ groups: [group] }).filter((field) => {
+          if (!isTemplateFieldVisible(field, fieldValues)) return false;
           if (!hideSizeFields) return true;
           const inputType = normalizeTemplateKey(field?.input_type);
           return inputType !== "item_size" && inputType !== "box_size";
