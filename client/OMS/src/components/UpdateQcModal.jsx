@@ -1492,6 +1492,9 @@ const UpdateQcModal = ({
         goodsNotReady: recordToPrefill?.goods_not_ready,
         status: recordToPrefill?.status,
       });
+    const getBooleanPrefill = (field) => Boolean(
+      latestRequestEntry?.[field] ?? recordToPrefill?.[field] ?? itemMaster?.[field] ?? qc?.[field],
+    );
 
     setForm({
       inspector: defaultInspectorId,
@@ -1509,15 +1512,9 @@ const UpdateQcModal = ({
         canViewStoredBarcodes && isPositiveBarcodeText(storedInnerBarcode)
           ? String(storedInnerBarcode)
           : "",
-      packed_size: isInspectionRecordUpdate
-        ? Boolean(itemMaster?.packed_size)
-        : Boolean(itemMaster?.packed_size ?? qc?.packed_size),
-      finishing: isInspectionRecordUpdate
-        ? Boolean(itemMaster?.finishing)
-        : Boolean(itemMaster?.finishing ?? qc?.finishing),
-      branding: isInspectionRecordUpdate
-        ? Boolean(itemMaster?.branding)
-        : Boolean(itemMaster?.branding ?? qc?.branding),
+      packed_size: getBooleanPrefill("packed_size"),
+      finishing: getBooleanPrefill("finishing"),
+      branding: getBooleanPrefill("branding"),
       kd: Boolean(itemMaster?.kd),
       mounting_file_needed: Boolean(itemMaster?.mounting_file_needed),
       labelRanges: initialLabelRanges,

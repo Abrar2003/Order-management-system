@@ -358,6 +358,19 @@ const getInspectorArgument = (argv = process.argv.slice(2)) => {
   return index >= 0 ? String(argv[index + 1] || "").trim() : "";
 };
 
+const buildAllVerificationSummary = (reports = []) => {
+  const summaries = reports.map((report) => report?.checks?.summary?.actual || {});
+  return {
+    total_inspectors: reports.length,
+    verified_inspectors: reports.filter((report) => report?.passed).length,
+    failed_inspectors: reports.filter((report) => !report?.passed).length,
+    total_allocated: summaries.reduce((total, summary) => total + Number(summary.total_allocated || 0), 0),
+    total_used: summaries.reduce((total, summary) => total + Number(summary.total_used || 0), 0),
+    total_unused: summaries.reduce((total, summary) => total + Number(summary.total_unused || 0), 0),
+    total_rejected: summaries.reduce((total, summary) => total + Number(summary.total_rejected || 0), 0),
+  };
+};
+
 const loadUsageInspectorsByNumber = async (numbers = []) => {
   const result = new Map();
   if (!Array.isArray(numbers) || numbers.length === 0) return result;
@@ -487,17 +500,41 @@ const main = async () => {
   const argv = process.argv.slice(2);
   const inspectorId = getInspectorArgument(argv);
   const shouldMarkVerified = argv.includes("--mark-verified");
-  if (!inspectorId) {
+  const shouldVerifyAll = argv.includes("--all");
+  if (shouldVerifyAll && shouldMarkVerified) {
+    throw new Error("--all cannot be combined with --mark-verified");
+  }
+  if (shouldVerifyAll && inspectorId) {
+    throw new Error("Use either --all or --inspector <Inspector._id>, not both");
+  }
+  if (!shouldVerifyAll && !inspectorId) {
     throw new Error(
-      "Usage: node scripts/verifyLabelMigration.js --inspector <Inspector._id> [--mark-verified]",
+      "Usage: node scripts/verifyLabelMigration.js --inspector <Inspector._id> [--mark-verified] | --all",
     );
   }
-
   loadEnvFiles({
     cwd: path.resolve(__dirname, ".."),
     preserveExistingEnv: true,
   });
   await connectDB();
+  if (shouldVerifyAll) {
+    const inspectors = await Inspector.find({}).select("_id").lean();
+    const reports = [];
+    for (const inspector of inspectors) {
+      reports.push(buildVerificationReport(
+        await loadVerificationSnapshot(id(inspector)),
+      ));
+    }
+    console.log(JSON.stringify({
+      mode: "verify-all",
+      summary: buildAllVerificationSummary(reports),
+      state_changed: false,
+      read_source: "legacy",
+      write_mode: "legacy",
+    }, null, 2));
+    if (reports.some((report) => !report.passed)) process.exitCode = 2;
+    return;
+  }
   const report = buildVerificationReport(
     await loadVerificationSnapshot(inspectorId),
   );
@@ -531,6 +568,7 @@ if (require.main === module) {
 
 module.exports = {
   buildSummary,
+  buildAllVerificationSummary,
   buildVerificationReport,
   getInspectorArgument,
   loadVerificationSnapshot,
