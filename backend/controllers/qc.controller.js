@@ -46,6 +46,7 @@ const {
   parseDateOnly,
   toDateOnlyIso,
 } = require("../helpers/dateOnly");
+const { buildApprovedGoodsQuantityByInspectionId } = require("../helpers/inspectionPassedQuantity");
 const {
   isLabelExemptUser,
   parseUserIdList,
@@ -3746,89 +3747,6 @@ const resolveInspectionReportDateIso = (inspection = {}) =>
   toISODateString(inspection?.inspection_date) ||
   toISODateString(inspection?.createdAt) ||
   "";
-
-const buildApprovedGoodsQuantityByInspectionId = (inspectionRecords = []) => {
-  const requestGroups = new Map();
-
-  (Array.isArray(inspectionRecords) ? inspectionRecords : []).forEach(
-    (inspection, index) => {
-      if (
-        normalizeInspectionStatus(inspection?.status) ===
-        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
-      ) {
-        return;
-      }
-
-      const inspectionId = String(inspection?._id || "").trim();
-      const qcDoc = inspection?.qc;
-      const qcId = String(qcDoc?._id || qcDoc || "").trim();
-      if (!inspectionId || !qcId) return;
-
-      const requestHistoryId = String(
-        inspection?.request_history_id || "",
-      ).trim();
-      const requestHistoryEntry = requestHistoryId
-        ? (Array.isArray(qcDoc?.request_history) ? qcDoc.request_history : [])
-            .find(
-              (entry) => String(entry?._id || "").trim() === requestHistoryId,
-            )
-        : null;
-      const groupKey = `${qcId}:${resolveInspectionRequestGroupKey(
-        inspection,
-        `fallback:${index}`,
-      )}`;
-      const group = requestGroups.get(groupKey) || {
-        requestType: requestHistoryEntry?.request_type || qcDoc?.request_type,
-        requestedQuantity: 0,
-        fallbackRequestedQuantity: resolveRequestedQuantityFromQc(qcDoc),
-        samplePassed: 0,
-        ownerId: "",
-        ownerTime: 0,
-      };
-
-      group.requestedQuantity = Math.max(
-        group.requestedQuantity,
-        toNonNegativeNumber(inspection?.vendor_requested, 0),
-        toNonNegativeNumber(requestHistoryEntry?.quantity_requested, 0),
-      );
-      const passedQuantity = toNonNegativeNumber(inspection?.passed, 0);
-      group.samplePassed += passedQuantity;
-
-      if (passedQuantity > 0) {
-        const ownerTime = toSortableTimestamp(
-          resolveInspectionReportDateIso(inspection),
-        );
-        if (
-          !group.ownerId ||
-          ownerTime > group.ownerTime ||
-          (ownerTime === group.ownerTime && inspectionId > group.ownerId)
-        ) {
-          group.ownerId = inspectionId;
-          group.ownerTime = ownerTime;
-        }
-      }
-
-      requestGroups.set(groupKey, group);
-    },
-  );
-
-  const approvedQuantityByInspectionId = new Map();
-  for (const group of requestGroups.values()) {
-    const approvedQuantity = getEffectiveRequestPassedQuantity({
-      requestType: group.requestType,
-      samplePassed: group.samplePassed,
-      requestedQuantity:
-        group.requestedQuantity > 0
-          ? group.requestedQuantity
-          : group.fallbackRequestedQuantity,
-    });
-    if (group.ownerId && approvedQuantity > 0) {
-      approvedQuantityByInspectionId.set(group.ownerId, approvedQuantity);
-    }
-  }
-
-  return approvedQuantityByInspectionId;
-};
 
 exports.__test__ = {
   buildFirstInspectionAlignmentPolicy,

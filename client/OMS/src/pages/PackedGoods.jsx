@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
@@ -11,7 +11,7 @@ import {
 } from "../utils/clientSort";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
-import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
+import { formatCbm } from "../utils/cbm";
 import { getOptionText } from "../utils/optionText";
 import "../App.css";
 import { exportElementToPdf } from "../services/pdfExport.service";
@@ -67,22 +67,13 @@ const normalizeDistinctValues = (values = []) =>
     ),
   ].sort((left, right) => left.localeCompare(right));
 
-const matchesBrandFilter = (rowBrandValue, brands = DEFAULT_BRAND_FILTER) => {
-  const rowBrand = String(rowBrandValue || "").trim();
-  return isAllBrandFilter(brands) || normalizeBrandFilter(brands).includes(rowBrand);
-};
-
-const matchesDraftFilters = (row = {}, brands = DEFAULT_BRAND_FILTER, vendor = "all") => {
-  const rowBrand = String(row?.brand || "").trim();
-  const rowVendor = getOptionText(row?.vendor);
-  if (!matchesBrandFilter(rowBrand, brands)) return false;
-  if (vendor !== "all" && rowVendor !== vendor) return false;
-  return true;
-};
 
 const parseSortBy = (value) => {
   const normalized = String(value || "").trim();
   const allowed = new Set([
+    "previouslyPackedQuantity",
+    "periodPackedQuantity",
+    "totalPackedQuantity",
     "po",
     "brand",
     "vendor",
@@ -183,6 +174,7 @@ const downloadBlobResponse = (response, fallbackName, fallbackType) => {
 };
 
 const PackedGoods = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "packed-goods");
   const { hasPermission } = usePermissions();
@@ -193,6 +185,9 @@ const PackedGoods = () => {
   const canExportPackedGoods = hasPermission("orders", "export");
 
   const [allRows, setAllRows] = useState([]);
+  const [availableFilters, setAvailableFilters] = useState({ brands: [], vendors: [], order_ids: [] });
+  const [summary, setSummary] = useState({ total_rows: 0, previously_packed_quantity: 0, period_packed_quantity: 0, total_packed_quantity: 0, shipped_quantity: 0, total_packed_cbm: 0 });
+  const [warnings, setWarnings] = useState([]);
   const [draftBrand, setDraftBrand] = useState(initialFilters.brand);
   const [draftVendor, setDraftVendor] = useState(initialFilters.vendor);
   const [draftPo, setDraftPo] = useState(initialFilters.po);
@@ -219,17 +214,40 @@ const PackedGoods = () => {
       setLoading(true);
       setError("");
 
-      const response = await api.get("/orders/packed-goods");
+      const query = buildPackedGoodsApiQuery(appliedFilters);
+      const response = await api.get(`/orders/packed-goods?${query.toString()}`);
+      const filters = response?.data?.filters || {};
       setAllRows(Array.isArray(response?.data?.data) ? response.data.data : []);
+      setAvailableFilters(filters);
+      setSummary(response?.data?.summary || { total_rows: 0, previously_packed_quantity: 0, period_packed_quantity: 0, total_packed_quantity: 0, shipped_quantity: 0, total_packed_cbm: 0 });
+      setWarnings(Array.isArray(response?.data?.warnings) ? response.data.warnings : []);
+
+      if (
+        filters.from_date
+        && filters.to_date
+        && !appliedFilters.fromDate
+        && !appliedFilters.toDate
+      ) {
+        setDraftFromDate(filters.from_date);
+        setDraftToDate(filters.to_date);
+        setAppliedFilters((previous) => ({
+          ...previous,
+          fromDate: filters.from_date,
+          toDate: filters.to_date,
+        }));
+      }
     } catch (fetchError) {
       setError(
         fetchError?.response?.data?.message || "Failed to load packed goods.",
       );
       setAllRows([]);
+      setAvailableFilters({ brands: [], vendors: [], order_ids: [] });
+      setSummary({ total_rows: 0, previously_packed_quantity: 0, period_packed_quantity: 0, total_packed_quantity: 0, shipped_quantity: 0, total_packed_cbm: 0 });
+      setWarnings([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [appliedFilters]);
 
   useEffect(() => {
     fetchPackedGoods();
@@ -254,6 +272,8 @@ const PackedGoods = () => {
       return areBrandFiltersEqual(prev.brand, nextFilters.brand)
         && prev.vendor === nextFilters.vendor
         && prev.po === nextFilters.po
+        && prev.fromDate === nextFilters.fromDate
+        && prev.toDate === nextFilters.toDate
           ? prev
           : nextFilters
     });
@@ -291,82 +311,21 @@ const PackedGoods = () => {
   ]);
 
   const brandOptions = useMemo(
-    () => normalizeDistinctValues(allRows.map((row) => row?.brand)),
-    [allRows],
+    () => normalizeDistinctValues(availableFilters.brands),
+    [availableFilters.brands],
   );
-
   const availableDraftVendors = useMemo(
-    () =>
-      normalizeDistinctValues(
-        allRows
-          .filter((row) => matchesDraftFilters(row, draftBrand, "all"))
-          .map((row) => row?.vendor),
-      ),
-    [allRows, draftBrand],
+    () => normalizeDistinctValues(availableFilters.vendors),
+    [availableFilters.vendors],
   );
-
   const availableDraftPos = useMemo(
-    () =>
-      normalizeDistinctValues(
-        allRows
-          .filter((row) => matchesDraftFilters(row, draftBrand, draftVendor))
-          .map((row) => row?.order_id),
-      ).sort((left, right) =>
-        left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }),
-      ),
-    [allRows, draftBrand, draftVendor],
-  );
-
-  const filteredRows = useMemo(
-    () =>
-      allRows.filter((row) => {
-        const rowBrand = String(row?.brand || "").trim();
-        const rowVendor = getOptionText(row?.vendor);
-        const rowPo = String(row?.order_id || "").trim();
-
-        if (!matchesBrandFilter(rowBrand, appliedFilters.brand)) {
-          return false;
-        }
-        if (appliedFilters.vendor !== "all" && rowVendor !== appliedFilters.vendor) {
-          return false;
-        }
-        if (appliedFilters.po !== "all" && rowPo !== appliedFilters.po) {
-          return false;
-        }
-        const rowDate = String(row?.order_date || "").slice(0, 10);
-        if (appliedFilters.fromDate && rowDate < appliedFilters.fromDate) return false;
-        if (appliedFilters.toDate && rowDate > appliedFilters.toDate) return false;
-        return true;
-      }),
-    [allRows, appliedFilters],
-  );
-
-  const summary = useMemo(
-    () => ({
-      total_rows: filteredRows.length,
-      total_packed_quantity: filteredRows.reduce(
-        (sum, row) => sum + Number(row?.packed_quantity || 0),
-        0,
-      ),
-      total_cbm: filteredRows.reduce(
-        (sum, row) =>
-          sum
-          + Number(
-            resolvePreferredCbm(
-              row?.total_cbm,
-              row?.total_po_cbm,
-              row?.top_po_cbm,
-            ) || 0,
-          ),
-        0,
-      ),
-    }),
-    [filteredRows],
+    () => normalizeDistinctValues(availableFilters.order_ids),
+    [availableFilters.order_ids],
   );
 
   const sortedRows = useMemo(
     () =>
-      sortClientRows(filteredRows, {
+      sortClientRows(allRows, {
         sortBy,
         sortOrder,
         getSortValue: (row, column) => {
@@ -375,12 +334,16 @@ const PackedGoods = () => {
           if (column === "vendor") return getOptionText(row?.vendor);
           if (column === "itemCode") return row?.item_code;
           if (column === "orderQuantity") return Number(row?.order_quantity || 0);
+          if (column === "previouslyPackedQuantity") return Number(row?.previously_packed_quantity || 0);
+          if (column === "periodPackedQuantity") return Number(row?.period_packed_quantity || 0);
+          if (column === "totalPackedQuantity") return Number(row?.total_packed_quantity || 0);
+          if (column === "shippedQuantity") return Number(row?.shipped_quantity || 0);
           if (column === "packedQuantity") return Number(row?.packed_quantity || 0);
-          if (column === "totalCbm") return Number(row?.total_cbm || 0);
+          if (column === "totalCbm") return Number(row?.total_packed_cbm || 0);
           return "";
         },
       }),
-    [filteredRows, sortBy, sortOrder],
+    [allRows, sortBy, sortOrder],
   );
 
   const totalPages = useMemo(
@@ -408,6 +371,13 @@ const PackedGoods = () => {
     () => new Date().toLocaleString(),
     [appliedFilters, sortedRows.length],
   );
+
+  const handleOpenQcDetails = useCallback((row) => {
+    const qcId = String(row?.qc_id || "").trim();
+    if (qcId) {
+      navigate(`/qc/${encodeURIComponent(qcId)}`);
+    }
+  }, [navigate]);
 
   const handleSortColumn = useCallback(
     (column, defaultDirection = "asc") => {
@@ -465,18 +435,12 @@ const PackedGoods = () => {
     setPage(1);
     setAppliedFilters({
       brand: normalizeBrandFilter(draftBrand),
-      vendor:
-        draftVendor !== "all" && !availableDraftVendors.includes(draftVendor)
-          ? "all"
-          : draftVendor,
-      po:
-        draftPo !== "all" && !availableDraftPos.includes(draftPo)
-          ? "all"
-          : draftPo,
+      vendor: draftVendor,
+      po: draftPo,
       fromDate: draftFromDate,
       toDate: draftToDate,
     });
-  }, [availableDraftPos, availableDraftVendors, draftBrand, draftFromDate, draftPo, draftToDate, draftVendor]);
+  }, [draftBrand, draftFromDate, draftPo, draftToDate, draftVendor]);
 
   const handleClearFilters = useCallback(() => {
     const clearedFilters = { brand: DEFAULT_BRAND_FILTER, vendor: "all", po: "all", fromDate: "", toDate: "" };
@@ -523,10 +487,10 @@ const PackedGoods = () => {
         element: reportRef.current,
         reportKey: "packed-goods",
         filename: `packed-goods-${new Date().toISOString().slice(0, 10)}.pdf`,
-        landscape: false,
+        landscape: true,
         repeatHeader: {
           title: "Packed Goods",
-          subtitle: "Items inspected and packed, but not yet shipped.",
+          subtitle: "Inspection-period packed quantities, shown as of the selected period end.",
         },
       });
     } catch (pdfError) {
@@ -546,49 +510,56 @@ const PackedGoods = () => {
           <div>
             <h2 className="h4 mb-1">Packed Goods</h2>
             <p className="text-secondary mb-0">
-              Items inspected and packed, but not yet shipped.
+              Inspection-period packed quantities, shown as of the selected period end.
             </p>
           </div>
-          <div className="d-flex flex-column align-items-stretch align-items-md-end gap-2">
-            {canExportPackedGoods && (
-              <div className="d-flex flex-wrap justify-content-end gap-2">
-                <button
-                  type="button"
-                  className="btn btn-outline-primary btn-sm"
-                  onClick={handleExportPdf}
-                  disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
-                >
-                  {exportingFormat === "pdf" ? "Exporting..." : "Export PDF"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline-primary btn-sm"
-                  onClick={handleExportXls}
-                  disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
-                >
-                  {exportingFormat === "xls" ? "Exporting..." : "Export XLS"}
-                </button>
-              </div>
-            )}
+          {canExportPackedGoods && (
             <div className="d-flex flex-wrap justify-content-end gap-2">
-              <span className="om-summary-chip">Rows: {summary.total_rows}</span>
-              <span className="om-summary-chip">
-                Brands: {appliedFilters.brand && appliedFilters.brand.length > 0 && !appliedFilters.brand.includes("all") ? appliedFilters.brand.join(', ') : "All Brands"}
-              </span>
-              <span className="om-summary-chip">
-                Packed Qty: {summary.total_packed_quantity}
-              </span>
-              <span className="om-summary-chip">
-                Total CBM: {formatCbm(summary.total_cbm)}
-              </span>
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={handleExportPdf}
+                disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
+              >
+                {exportingFormat === "pdf" ? "Exporting..." : "Export PDF"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={handleExportXls}
+                disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
+              >
+                {exportingFormat === "xls" ? "Exporting..." : "Export XLS"}
+              </button>
             </div>
-          </div>
+          )}
+        </div>
+        <div className="d-flex flex-wrap gap-2 mb-3">
+          <span className="om-summary-chip">Rows: {summary.total_rows}</span>
+          <span className="om-summary-chip">
+            Brands: {appliedFilters.brand && appliedFilters.brand.length > 0 && !appliedFilters.brand.includes("all") ? appliedFilters.brand.join(', ') : "All Brands"}
+          </span>
+          <span className="om-summary-chip">
+            Previously Packed: {summary.previously_packed_quantity}
+          </span>
+          <span className="om-summary-chip">
+            This Period Packed: {summary.period_packed_quantity}
+          </span>
+          <span className="om-summary-chip">
+            Total Packed: {summary.total_packed_quantity}
+          </span>
+          <span className="om-summary-chip">
+            Shipped Quantity: {summary.shipped_quantity}
+          </span>
+          <span className="om-summary-chip">
+            Total Packed CBM: {formatCbm(summary.total_packed_cbm)}
+          </span>
         </div>
 
         <ReportInfoBanner
-          description="Tracks items that have been inspected and packed but are not yet shipped out of the warehouse."
-          dataShown="PO number, brand, vendor, item code, order quantity, packed quantity, and total volume (CBM)."
-          howItWorks="Lists items with packed quantities not yet shipped, filterable by brand list, vendor, and PO, and pageable."
+          description="Shows remaining packed and shipped quantities for the selected inspection period."
+          dataShown="PO, brand, vendor, item, ordered quantity, previously packed, this-period packed, total packed, shipped quantity, and total packed CBM."
+          howItWorks="The backend filters inspection history by date, brand, vendor, and PO; explicit From and To dates are inclusive."
         />
 
         <div className="card om-card mb-3">
@@ -760,6 +731,12 @@ const PackedGoods = () => {
           </div>
         )}
 
+        {warnings.length > 0 && (
+          <div className="alert alert-warning mb-3" role="alert">
+            {warnings.join(" ")}
+          </div>
+        )}
+
         {canExportPackedGoods && sortedRows.length > 0 && (
           <div className="packed-goods-pdf-surface" aria-hidden="true">
             <div ref={reportRef} className="packed-goods-pdf-report">
@@ -778,16 +755,27 @@ const PackedGoods = () => {
                   <span className="om-summary-chip">
                     PO: {appliedFilters.po === "all" ? "All POs" : appliedFilters.po}
                   </span>
+                  <span className="om-summary-chip">From: {appliedFilters.fromDate}</span>
+                  <span className="om-summary-chip">To: {appliedFilters.toDate}</span>
                 </div>
               </div>
 
               <div className="d-flex flex-wrap gap-2 mb-3">
                 <span className="om-summary-chip">Rows: {summary.total_rows}</span>
                 <span className="om-summary-chip">
-                  Packed Qty: {summary.total_packed_quantity}
+                  Previously Packed: {summary.previously_packed_quantity}
                 </span>
                 <span className="om-summary-chip">
-                  Total CBM: {formatCbm(summary.total_cbm)}
+                  This Period Packed: {summary.period_packed_quantity}
+                </span>
+                <span className="om-summary-chip">
+                  Total Packed: {summary.total_packed_quantity}
+                </span>
+                <span className="om-summary-chip">
+                  Shipped Quantity: {summary.shipped_quantity}
+                </span>
+                <span className="om-summary-chip">
+                  Total Packed CBM: {formatCbm(summary.total_packed_cbm)}
                 </span>
               </div>
 
@@ -840,8 +828,11 @@ const PackedGoods = () => {
                           <th>Vendor</th>
                           <th>Item code</th>
                           <th>Order Quantity</th>
-                          <th>Packed Quantity</th>
-                          <th>Total CBM</th>
+                          <th>Previously Packed Quantity</th>
+                          <th>This Period Packed</th>
+                          <th>Total Packed</th>
+                          <th>Shipped Quantity</th>
+                          <th>Total Packed CBM</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -855,16 +846,11 @@ const PackedGoods = () => {
                             <td>{getOptionText(row?.vendor) || "N/A"}</td>
                             <td>{row?.item_code || "N/A"}</td>
                             <td>{Number(row?.order_quantity || 0)}</td>
-                            <td>{Number(row?.packed_quantity || 0)}</td>
-                            <td>
-                              {formatCbm(
-                                resolvePreferredCbm(
-                                  row?.total_cbm,
-                                  row?.total_po_cbm,
-                                  row?.top_po_cbm,
-                                ),
-                              )}
-                            </td>
+                            <td>{Number(row?.previously_packed_quantity || 0)}</td>
+                            <td>{Number(row?.period_packed_quantity || 0)}</td>
+                            <td>{Number(row?.total_packed_quantity || 0)}</td>
+                            <td>{Number(row?.shipped_quantity || 0)}</td>
+                            <td>{formatCbm(row?.total_packed_cbm)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -967,15 +953,39 @@ const PackedGoods = () => {
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="Packed Quantity"
-                          isActive={sortBy === "packedQuantity"}
+                          label="Previously Packed Quantity"
+                          isActive={sortBy === "previouslyPackedQuantity"}
                           direction={sortOrder}
-                          onClick={() => handleSortColumn("packedQuantity", "desc")}
+                          onClick={() => handleSortColumn("previouslyPackedQuantity", "desc")}
                         />
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="Total CBM"
+                          label="This Period Packed"
+                          isActive={sortBy === "periodPackedQuantity"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("periodPackedQuantity", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Total Packed"
+                          isActive={sortBy === "totalPackedQuantity"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("totalPackedQuantity", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Shipped Quantity"
+                          isActive={sortBy === "shippedQuantity"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("shippedQuantity", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Total Packed CBM"
                           isActive={sortBy === "totalCbm"}
                           direction={sortOrder}
                           onClick={() => handleSortColumn("totalCbm", "desc")}
@@ -986,7 +996,7 @@ const PackedGoods = () => {
                   <tbody>
                     {paginatedRows.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="text-center py-4">
+                        <td colSpan={10} className="text-center py-4">
                           No packed goods found.
                         </td>
                       </tr>
@@ -994,23 +1004,27 @@ const PackedGoods = () => {
                       paginatedRows.map((row) => (
                         <tr
                           key={row?.id || `${row?.order_id}-${row?.item_code}`}
-                          className={row?.po_has_no_pending_quantity ? "om-report-success-row" : "om-report-warning-row"}
+                          className={`table-clickable ${row?.po_has_no_pending_quantity ? "om-report-success-row" : "om-report-warning-row"}`}
+                          role="link"
+                          tabIndex={0}
+                          onClick={() => handleOpenQcDetails(row)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              handleOpenQcDetails(row);
+                            }
+                          }}
                         >
                           <td>{row?.order_id || "N/A"}</td>
                           <td>{row?.brand || "N/A"}</td>
                           <td>{getOptionText(row?.vendor) || "N/A"}</td>
                           <td>{row?.item_code || "N/A"}</td>
                           <td>{Number(row?.order_quantity || 0)}</td>
-                          <td>{Number(row?.packed_quantity || 0)}</td>
-                          <td>
-                            {formatCbm(
-                              resolvePreferredCbm(
-                                row?.total_cbm,
-                                row?.total_po_cbm,
-                                row?.top_po_cbm,
-                              ),
-                            )}
-                          </td>
+                          <td>{Number(row?.previously_packed_quantity || 0)}</td>
+                          <td>{Number(row?.period_packed_quantity || 0)}</td>
+                          <td>{Number(row?.total_packed_quantity || 0)}</td>
+                          <td>{Number(row?.shipped_quantity || 0)}</td>
+                          <td>{formatCbm(row?.total_packed_cbm)}</td>
                         </tr>
                       ))
                     )}

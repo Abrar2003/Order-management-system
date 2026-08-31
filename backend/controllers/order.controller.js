@@ -53,8 +53,8 @@ const {
   toRoundedCbmValue,
 } = require("../services/shipmentCbmAllocation.service");
 const {
-  buildPackedGoodsDataset,
-} = require("../services/packedGoods.service");
+  buildPackedGoodsPeriodDataset,
+} = require("../services/packedGoodsPeriod.service");
 const {
   applyDataAccessMatch,
   assertBrandVendorAssociations,
@@ -9720,7 +9720,7 @@ exports.getOrderSummary = async (req, res) => {
 
 exports.getPackedGoods = async (req, res) => {
   try {
-    const dataset = await buildPackedGoodsDataset({
+    const dataset = await buildPackedGoodsPeriodDataset({
       brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
       vendor: req.query.vendor,
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
@@ -9734,10 +9734,12 @@ exports.getPackedGoods = async (req, res) => {
       data: dataset.rows,
       filters: dataset.filters,
       summary: dataset.summary,
+      warnings: dataset.warnings,
+      historical_limitations: dataset.historical_limitations,
     });
   } catch (error) {
     console.error("Get Packed Goods Error:", error);
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       success: false,
       message: "Failed to fetch packed goods",
       error: error.message,
@@ -9754,7 +9756,7 @@ exports.exportPackedGoods = async (req, res) => {
         ? "xlsx"
         : "xls";
 
-    const dataset = await buildPackedGoodsDataset({
+    const dataset = await buildPackedGoodsPeriodDataset({
       brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
       vendor: req.query.vendor,
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
@@ -9769,10 +9771,11 @@ exports.exportPackedGoods = async (req, res) => {
       { key: "vendor", header: "Vendor" },
       { key: "item_code", header: "Item Code" },
       { key: "order_quantity", header: "Order Quantity" },
-      { key: "packed_quantity", header: "Packed Quantity" },
-      { key: "pending_quantity", header: "Pending Quantity" },
-      { key: "total_cbm", header: "Total CBM" },
-      { key: "po_pending_clear", header: "PO Pending Cleared" },
+      { key: "previously_packed_quantity", header: "Previously Packed Quantity" },
+      { key: "period_packed_quantity", header: "This Period Packed" },
+      { key: "total_packed_quantity", header: "Total Packed" },
+      { key: "shipped_quantity", header: "Shipped Quantity" },
+      { key: "total_packed_cbm", header: "Total Packed CBM" },
     ];
 
     const exportRows = dataset.rows.map((row) => ({
@@ -9781,10 +9784,11 @@ exports.exportPackedGoods = async (req, res) => {
       vendor: normalizeLooseString(row?.vendor),
       item_code: String(row?.item_code || "").trim(),
       order_quantity: Number(row?.order_quantity || 0),
-      packed_quantity: Number(row?.packed_quantity || 0),
-      pending_quantity: Number(row?.pending_quantity || 0),
-      total_cbm: Number(row?.total_cbm || 0),
-      po_pending_clear: row?.po_has_no_pending_quantity ? "Yes" : "No",
+      previously_packed_quantity: Number(row?.previously_packed_quantity || 0),
+      period_packed_quantity: Number(row?.period_packed_quantity || 0),
+      total_packed_quantity: Number(row?.total_packed_quantity || 0),
+      shipped_quantity: Number(row?.shipped_quantity || 0),
+      total_packed_cbm: Number(row?.total_packed_cbm || 0),
     }));
 
     const headerRow = columns.map((column) => column.header);
@@ -9792,7 +9796,25 @@ exports.exportPackedGoods = async (req, res) => {
       columns.map((column) => row[column.key] ?? ""),
     );
 
-    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    const selectedBrands = Array.isArray(dataset.filters?.brand)
+      && dataset.filters.brand.length > 0
+      ? dataset.filters.brand.join(", ")
+      : "All Brands";
+    const reportRows = [
+      ["Packed Goods Inspection Period Report"],
+      ["From", dataset.filters?.from_date || "", "To", dataset.filters?.to_date || ""],
+      [
+        "Brand", selectedBrands,
+        "Vendor", dataset.filters?.vendor || "All Vendors",
+        "PO", dataset.filters?.order_id || "All POs",
+      ],
+      ...(dataset.warnings?.length ? [["Note", dataset.warnings.join(" ")]] : []),
+      [],
+      headerRow,
+      ...dataRows,
+    ];
+    const worksheet = XLSX.utils.aoa_to_sheet(reportRows);
+
     worksheet["!cols"] = columns.map((column, columnIndex) => {
       const maxDataLength = Math.max(
         ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
@@ -9820,7 +9842,7 @@ exports.exportPackedGoods = async (req, res) => {
     return res.status(200).send(fileBuffer);
   } catch (error) {
     console.error("Export Packed Goods Error:", error);
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       success: false,
       message: "Failed to export packed goods",
       error: error.message,

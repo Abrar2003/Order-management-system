@@ -78,7 +78,7 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 | ORD-13 | Order upload/import logs | Audit report | UploadLogs | `GET /orders/upload-logs` | `getUploadLogs` | upload_logs | Read | RAW_COLLECTION | NOT_ASSISTANT_SAFE |
 | ORD-14 | Order edit/archive logs | Audit report | OrderEditLogs | `GET /orders/edit-logs` | `getOrderEditLogs` | order_edit_logs | Read | RAW_COLLECTION | NOT_ASSISTANT_SAFE |
 | ORD-15 | Previous-order lookup and order-entry options | Support read | Upload/order entry | `GET /orders/previous-order-check`, `/manual-options`, `/brands-and-vendors` | `lookupPreviousOrder`; `getManualOrderOptions`; option handler | orders, qcs, vendors, brands | Read supporting writes | CANONICAL_WITH_FALLBACK | NOT_ASSISTANT_SAFE |
-| SHP-01 | Packed Goods | Canonical report/export | PackedGoods | `GET /orders/packed-goods`, `/export` | `packedGoods.service#buildPackedGoodsDataset` | orders, qcs, items | Read/export | CANONICAL_WITH_FALLBACK | DIRECT_CAPABILITY |
+| SHP-01 | Packed Goods | Inspection-period report/export | PackedGoods | `GET /orders/packed-goods`, `/export` | `packedGoodsPeriod.service#buildPackedGoodsPeriodDataset` | inspections, qcs, orders, items | Read/export | CANONICAL_WITH_FALLBACK | NOT_ASSISTANT_SAFE |
 | SHP-02 | Shipping Pending | Report/export | ShippingPending | `GET /orders/shipping-pending`, `/export` | `buildShippingPendingDataset` | orders, qcs | Read/export | DUPLICATED_LOGIC | EXTRACT_TO_SERVICE_THEN_CAPABILITY |
 | SHP-03 | Shipment rows | Operational report/export | Shipments | `GET /orders/shipments`, `/export` | `getShipmentDataset` | orders, samples, qcs, items | Read/export | DUPLICATED_LOGIC | EXTRACT_TO_SERVICE_THEN_CAPABILITY |
 | SHP-04 | Container aggregation | Operational report | Containers | `GET /orders/containers` | `getContainerDataset` | orders, samples, qcs, items | Read | DUPLICATED_LOGIC | EXTRACT_TO_SERVICE_THEN_CAPABILITY |
@@ -250,9 +250,10 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 ### SHP-01 — Packed Goods
 
 - **Representative questions:** “How much inspected stock is ready to ship?”; “Packed CBM for vendor X”; “Which POs have no inspection-pending quantity?”
-- **Trace:** `PackedGoods.jsx` → `/orders/packed-goods`/export → shared `buildPackedGoodsDataset`; the same service is used by the current Assistant adapter and forecast readiness logic.
-- **Rules/output:** Active, non-cancelled order lines are included only when `inspected_unshipped_quantity > 0`. `packed_quantity` is that derived value; `pending_quantity` is inspection pending. CBM is calculated for packed quantity, with stored PO CBM prorated only if calculation fails. Filters: brands (array/CSV), exact vendor/PO and inclusive order-date range. Summary: rows, packed quantity and CBM.
-- **Frontend:** fetches the unfiltered dataset, then locally filters, sorts, paginates and recomputes displayed totals. Those client steps are presentation duplication, not source-of-truth logic.
+- **Trace:** `PackedGoods.jsx` → `/orders/packed-goods`/export → `buildPackedGoodsPeriodDataset`. The Assistant adapter and forecast readiness logic continue to use `buildPackedGoodsDataset` unchanged.
+- **Rules/output:** Qualifying `Inspection.passed` records are the source and are summed by inspection date, including AQL visits, so prior and current-period quantities reconcile to QC Details. The default period is Tuesday–Monday in the application business timezone; explicit From and To dates must be supplied together and are inclusive. Shipments are allocated FIFO through the period end using `stuffing_date`. Rows are keyed by PO/order line and item, and expose previously packed, this-period packed, total packed, and total packed CBM.
+- **Frontend:** sends date, brand, vendor, and PO filters to the API. The API returns the rows, filter options, summary, resolved period, and warnings; browser work is limited to sort and page presentation.
+- **Performance:** the selected-period scan uses the existing `inspections.inspection_date` index; the batched QC-history lookup would benefit from a future `{ qc: 1, inspection_date: 1 }` index if production `explain()` shows it is not selective enough. No live database query plan was available during this change.
 
 ### SHP-02 — Shipping Pending
 
@@ -780,7 +781,7 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 | Upcoming ETD | PO | Open and effective ETD in window | Today + 10 days default, inclusive | Counts, no primary CBM | Today ETD |
 | Shipping Delay | PO | Fully packed before ETD, no shipment, ETD passed | Past relative to start date | Counts/days late | Delayed PO |
 | Today ETD | PO | Original ETD matches client day | Client offset day | Status counts | Upcoming one-day window |
-| Packed Goods | Order line | Inspected-unshipped > 0 | Optional order-date range | Packed qty + source-labelled CBM | Shipping Pending |
+| Packed Goods | PO/order line + item | Qualifying passed inspection in selected period | Tuesday–Monday default or inclusive From/To inspection dates | Previously/period/total packed + CBM | Inspection history |
 | Shipping Pending | Order line + frontend PO | Any unshipped quantity | Optional order-date range | Packed/pending/shipped; no CBM | Pending PO |
 | Shipments | Shipment entry plus placeholders | Shipment exists or order status progressed | Stuffing-date support not wired | Shipment qty/CBM | Containers |
 | Containers | Container | Nonblank container shipment rows | Stuffing date wired | Container qty/CBM/checks | Monthly Shipments |
@@ -832,7 +833,8 @@ Legend: **P** primary, **J** joined, **H** historical/audit, **C** configuration
 |---|---|---|---|---|
 | Order progress/status | `backend/helpers/orderStatus.js#deriveOrderProgress` | Orders, reports, exports, frontend mirror | DERIVED_HELPER | Frontend mirror is matching duplication; some reports still prefilter stored status |
 | Grouped PO status | `deriveGroupedOrderStatus` | PO bucket/client shipping grouping | DERIVED_HELPER | Client `getGroupedOrderStatus` duplicates it |
-| Packed Goods | `backend/services/packedGoods.service.js#buildPackedGoodsDataset` | API, export, Assistant, forecast | CANONICAL_WITH_FALLBACK | Frontend re-filters/re-totals only |
+| Packed Goods inspection-period report | `backend/services/packedGoodsPeriod.service.js#buildPackedGoodsPeriodDataset` | API, page, PDF, XLS | CANONICAL_WITH_FALLBACK | Inspection history source; backend returns filtered totals/options |
+| Assistant/forecast ready Packed Goods | `backend/services/packedGoods.service.js#buildPackedGoodsDataset` | Assistant, forecast | CANONICAL_WITH_FALLBACK | Current ready-to-ship semantics remain intentionally unchanged |
 | Order/PO CBM | `orderCbm.service` | backfill, order reports | CANONICAL_WITH_FALLBACK | Stored total is cache/fallback |
 | Shipment CBM allocation | `shipmentCbmAllocation.service` | packed, shipments, monthly, QC | CANONICAL_WITH_FALLBACK | Provenance must be retained |
 | Monthly Shipments | `monthlyShipmentsReport.service` | API/drilldown/Assistant | CANONICAL_WITH_FALLBACK | Stored status prefilter |

@@ -86,7 +86,7 @@ test("Packed Goods API service, capability grouping, and forecast ready CBM agre
     path.resolve(__dirname, "../controllers/order.controller.js"),
     "utf8",
   );
-  assert.match(controllerSource, /require\("\.\.\/services\/packedGoods\.service"\)/);
+  assert.match(controllerSource, /require\("\.\.\/services\/packedGoodsPeriod\.service"\)/);
   assert.doesNotMatch(controllerSource, /const buildPackedGoodsDataset = async/);
 });
 
