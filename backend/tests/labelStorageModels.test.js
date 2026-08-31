@@ -36,6 +36,7 @@ test("Label keeps allocation, rejection, and usage independent", async () => {
     true,
   );
   assert.equal(hasIndex(Label, { "usage.inspector": 1, number: 1 }), true);
+  assert.equal(hasIndex(Label, { "usage.inspectors": 1, number: 1 }), true);
   assert.equal(
     hasIndex(Label, { rejected_by_inspector: 1, number: 1 }),
     true,

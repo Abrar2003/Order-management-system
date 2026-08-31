@@ -54,6 +54,7 @@ const labelUsageSchema = new mongoose.Schema(
 // The legacy rebuild creates at most one usage-history entry per Inspection.
 labelUsageSchema.index({ inspection_record: 1 }, { unique: true });
 labelUsageSchema.index({ inspector: 1, used_at: -1 });
+labelUsageSchema.index({ labels: 1 });
 
 labelUsageSchema.pre("validate", async function resolveVendorReference() {
   const vendor = this.qc_meta?.vendor;

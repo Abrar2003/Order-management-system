@@ -478,6 +478,99 @@ const buildGlobalMaps = (analysis, relevant, globalInspectors, globalInspections
   }
 };
 
+const collectGlobalLabelMaps = (relevant, globalInspectors, globalInspections) => {
+  const userInspectors = new Map();
+  const allocated = new Map();
+  const rejected = new Map();
+  const used = new Map();
+  for (const inspector of Array.isArray(globalInspectors) ? globalInspectors : []) {
+    const inspectorId = id(inspector?._id);
+    const userId = id(inspector?.user);
+    if (!userId || !inspectorId) continue;
+    const ids = userInspectors.get(userId) || [];
+    ids.push(inspectorId);
+    userInspectors.set(userId, [...new Set(ids)]);
+    for (const number of inspectSerials(inspector?.alloted_labels).labels) {
+      if (!relevant.has(number)) continue;
+      const owners = allocated.get(number) || new Set();
+      owners.add(inspectorId);
+      allocated.set(number, owners);
+    }
+    for (const number of inspectSerials(inspector?.rejected_labels).labels) {
+      if (!relevant.has(number)) continue;
+      const owners = rejected.get(number) || new Set();
+      owners.add(inspectorId);
+      rejected.set(number, owners);
+    }
+  }
+  for (const inspection of Array.isArray(globalInspections) ? globalInspections : []) {
+    const inspectorIds = userInspectors.get(id(inspection?.inspector)) || [];
+    if (inspectorIds.length !== 1) continue;
+    for (const number of inspectSerials(inspection?.labels_added).labels) {
+      if (!relevant.has(number)) continue;
+      const owners = used.get(number) || new Set();
+      owners.add(inspectorIds[0]);
+      used.set(number, owners);
+    }
+  }
+  return { allocated, rejected, used };
+};
+
+const classifyConflicts = (analysis) => {
+  const resolvedOwners = new Map();
+  for (const conflict of analysis.resolved_conflicts || []) {
+    const number = Number(conflict?.label_number);
+    const owner = id(
+      conflict?.canonical_current_owner ||
+        conflict?.resulting_canonical_state?.owner_inspector,
+    );
+    if (
+      Number.isInteger(number) &&
+      number > 0 &&
+      owner &&
+      conflict?.status === 'resolved' &&
+      ['multiple_current_allocation_claims', 'allocated_multiple_inspectors']
+        .includes(String(conflict?.conflict_type || ''))
+    ) {
+      resolvedOwners.set(number, owner);
+    }
+  }
+  const aliases = new Map([
+    ['allocated_multiple_inspectors', 'multiple_current_allocation_claims'],
+    ['rejected_multiple_inspectors', 'multiple_current_rejection_claims'],
+  ]);
+  analysis.conflicts = analysis.conflicts
+    .map((conflict) => {
+      const conflictType = aliases.get(conflict.conflict_type) || conflict.conflict_type;
+      const representable = new Set([
+        'used_multiple_inspectors',
+        'allocated_used_cross_inspector',
+        'rejected_used_cross_inspector',
+        'allocated_rejected_cross_inspector',
+      ]).has(conflictType);
+      return {
+        ...conflict,
+        conflict_type: conflictType,
+        severity: representable ? 'warning' : conflict.severity,
+      };
+    })
+    .filter((conflict) => {
+      const number = Number(conflict.label_number);
+      return !(
+        conflict.conflict_type === 'multiple_current_allocation_claims' &&
+        resolvedOwners.has(number)
+      );
+    });
+  analysis.resolved_allocation_owners = resolvedOwners;
+  analysis.blocking_label_numbers = getBlockingLabelNumbers(analysis.conflicts);
+  analysis.quarantine_label_numbers = getQuarantineLabelNumbers(analysis.conflicts);
+  analysis.non_label_blocking_conflicts = analysis.conflicts.filter(
+    (conflict) =>
+      String(conflict.severity || '') === 'error' &&
+      !Number.isInteger(Number(conflict.label_number)),
+  );
+};
+
 const compareExistingModern = (analysis, expectedLabels, transactions, usages, snapshot) => {
   const existingByNumber = new Map();
   for (const label of snapshot.existingLabels || []) {
@@ -516,13 +609,27 @@ const compareExistingModern = (analysis, expectedLabels, transactions, usages, s
     const incompatible = [
       ["owner_inspector", id(existing?.owner_inspector), expected.owner_inspector],
       ["rejected_by_inspector", id(existing?.rejected_by_inspector), expected.rejected_by_inspector],
-      ["usage.inspector", id(existing?.usage?.inspector), expected.usage_inspector],
     ].filter(
       ([, actual, desired]) =>
         actual &&
         actual !== desired &&
         actual !== analysis.inspector_id,
     );
+    if (Array.isArray(existing?.usage?.inspectors)) {
+      const actualUsageInspectors = [...new Set(
+        existing.usage.inspectors.map(id).filter(Boolean),
+      )].sort();
+      const expectedUsageInspectors = [...new Set(
+        (expected.usage_inspectors || []).map(id).filter(Boolean),
+      )].sort();
+      if (!equalStable(actualUsageInspectors, expectedUsageInspectors)) {
+        incompatible.push([
+          "usage.inspectors",
+          actualUsageInspectors,
+          expectedUsageInspectors,
+        ]);
+      }
+    }
     if (incompatible.length > 0) {
       addConflict(analysis, {
         conflictType: "modern_label_incompatible",
@@ -658,6 +765,12 @@ const buildMigrationAnalysis = (snapshot = {}) => {
       snapshot.inspections || [],
     ),
     conflicts: [],
+    resolved_conflicts: Array.isArray(snapshot.resolvedConflicts)
+      ? snapshot.resolvedConflicts
+      : [],
+    blocking_label_numbers: new Set(),
+    quarantine_label_numbers: new Set(),
+    non_label_blocking_conflicts: [],
     observations: {},
     expected: {},
     _conflictFingerprints: new Set(),
@@ -753,9 +866,8 @@ const buildMigrationAnalysis = (snapshot = {}) => {
       rejected_by_inspector: rejectedSet.has(number)
         ? analysis.inspector_id
         : null,
-      usage_inspector: forensicUsedSet.has(number)
-        ? analysis.inspector_id
-        : null,
+      usage_inspector: null,
+      usage_inspectors: [],
       usage_source_updated_at: latestSourceUpdate,
     });
   }
@@ -766,6 +878,48 @@ const buildMigrationAnalysis = (snapshot = {}) => {
     snapshot.globalInspectors || [],
     snapshot.globalInspections || [],
   );
+  classifyConflicts(analysis);
+  const globalLabelMaps = collectGlobalLabelMaps(
+    relevant,
+    snapshot.globalInspectors || [],
+    snapshot.globalInspections || [],
+  );
+  for (const expected of expectedLabels.values()) {
+    const allocationOwners = [
+      ...(globalLabelMaps.allocated.get(expected.number) || new Set()),
+    ].sort();
+    const rejectionOwners = [
+      ...(globalLabelMaps.rejected.get(expected.number) || new Set()),
+    ].sort();
+    expected.owner_inspector = allocationOwners.length === 1
+      ? allocationOwners[0]
+      : null;
+    expected.rejected_by_inspector = rejectionOwners.length === 1
+      ? rejectionOwners[0]
+      : null;
+    const resolvedOwner = analysis.resolved_allocation_owners.get(expected.number);
+    if (resolvedOwner) expected.owner_inspector = resolvedOwner;
+    if (analysis.quarantine_label_numbers.has(expected.number)) {
+      const conflicts = analysis.conflicts.filter(
+        (entry) => Number(entry.label_number) === expected.number,
+      );
+      if (conflicts.some((entry) => entry.conflict_type === 'multiple_current_allocation_claims')) {
+        expected.owner_inspector = null;
+      }
+      if (conflicts.some((entry) => entry.conflict_type === 'multiple_current_rejection_claims')) {
+        expected.rejected_by_inspector = null;
+      }
+      expected.allocation_state = 'conflicted';
+    } else {
+      expected.allocation_state = 'active';
+    }
+    expected.usage_inspectors = [
+      ...(globalLabelMaps.used.get(expected.number) || new Set()),
+    ].sort();
+    expected.usage_inspector = expected.usage_inspectors.length === 1
+      ? expected.usage_inspectors[0]
+      : null;
+  }
   compareExistingModern(
     analysis,
     expectedLabels,
@@ -794,6 +948,22 @@ const buildMigrationAnalysis = (snapshot = {}) => {
       },
       sourceDocumentIds: [state?._id],
     });
+  }
+
+  classifyConflicts(analysis);
+  for (const expected of expectedLabels.values()) {
+    if (analysis.quarantine_label_numbers.has(expected.number)) {
+      const conflicts = analysis.conflicts.filter(
+        (entry) => Number(entry.label_number) === expected.number,
+      );
+      if (conflicts.some((entry) => entry.conflict_type === 'multiple_current_allocation_claims')) {
+        expected.owner_inspector = null;
+      }
+      if (conflicts.some((entry) => entry.conflict_type === 'multiple_current_rejection_claims')) {
+        expected.rejected_by_inspector = null;
+      }
+      expected.allocation_state = 'conflicted';
+    }
   }
 
   analysis.observations = {
@@ -830,7 +1000,37 @@ const buildMigrationAnalysis = (snapshot = {}) => {
       ? ((forensicUsed.length / allocated.labels.length) * 100).toFixed(2)
       : 0,
   };
+  analysis.summary.blocking_conflict_count = analysis.conflicts.filter(
+    (entry) => entry.severity === 'error',
+  ).length;
+  analysis.summary.blocking_label_count = analysis.blocking_label_numbers.size;
+  analysis.summary.quarantine_label_count = analysis.quarantine_label_numbers.size;
+  analysis.non_label_blocking_conflicts = analysis.conflicts.filter(
+    (entry) =>
+      entry.severity === 'error' &&
+      !(Number.isInteger(Number(entry.label_number)) && Number(entry.label_number) > 0),
+  );
+  analysis.skip_label_numbers = new Set(
+    analysis.conflicts
+      .filter(
+        (entry) =>
+          entry.severity === 'error' &&
+          Number.isInteger(Number(entry.label_number)) &&
+          !QUARANTINE_CONFLICT_TYPES.has(entry.conflict_type),
+      )
+      .map((entry) => Number(entry.label_number)),
+  );
+  analysis.summary.partial_backfill =
+    analysis.summary.blocking_conflict_count > 0 &&
+    analysis.non_label_blocking_conflicts.length === 0;
+  analysis.can_backfill = analysis.non_label_blocking_conflicts.length === 0;
   analysis.can_apply = analysis.summary.error_count === 0;
+  analysis.migration_classification = analysis.summary.blocking_conflict_count > 0
+    ? 'BLOCKED_CURRENT_STATE'
+    : analysis.summary.warning_count > 0
+      ? 'REPRESENTABLE_ANOMALIES'
+      : 'CLEAN';
+  analysis.resolved_conflicts = undefined;
   delete analysis._conflictFingerprints;
   return analysis;
 };
@@ -840,6 +1040,16 @@ const getInspectorArgument = (argv = process.argv.slice(2)) => {
   if (equals) return equals.slice("--inspector=".length).trim();
   const index = argv.indexOf("--inspector");
   return index >= 0 ? String(argv[index + 1] || "").trim() : "";
+};
+
+const getBatchInspectorIds = async ({ includeVerified = false } = {}) => {
+  const filter = { migration_status: { $in: ['verified', 'modern'] } };
+  const states = await LabelStorageState.find(filter).select('inspector').lean();
+  const stateIds = new Set(states.map((entry) => id(entry.inspector)));
+  const inspectors = await Inspector.find({}).select('_id').sort({ _id: 1 }).lean();
+  return inspectors
+    .filter((entry) => includeVerified || !stateIds.has(id(entry._id)))
+    .map((entry) => entry._id);
 };
 
 const loadSnapshot = async (inspectorId) => {
@@ -904,6 +1114,7 @@ const loadSnapshot = async (inspectorId) => {
     existingTransactions,
     existingUsages,
     storageState,
+    resolvedConflicts,
   ] = await Promise.all([
     Label.find({ $or: existingLabelMatch }).lean(),
     LabelTransaction.find({ inspector: inspector._id }).lean(),
@@ -916,6 +1127,10 @@ const loadSnapshot = async (inspectorId) => {
       ],
     }).lean(),
     LabelStorageState.findOne({ inspector: inspector._id }).lean(),
+    LabelMigrationConflict.find({
+      label_number: { $in: numbers },
+      status: 'resolved',
+    }).lean(),
   ]);
 
   return {
@@ -927,6 +1142,7 @@ const loadSnapshot = async (inspectorId) => {
     existingTransactions,
     existingUsages,
     storageState,
+    resolvedConflicts,
   };
 };
 
@@ -1013,7 +1229,7 @@ const buildUsageWriteOperations = (usages, migratedAt) =>
 
 const applyMigration = async (analysis) => {
   await recordConflicts(analysis);
-  if (!analysis.can_apply) {
+  if (analysis.can_backfill === false) {
     throw new Error(
       "Migration blocked by " + analysis.summary.error_count + " error conflict(s)",
     );
@@ -1049,7 +1265,9 @@ const applyMigration = async (analysis) => {
 
   try {
     const expectedNumbers = analysis.expected.labels.map((entry) => entry.number);
-    const labelOps = analysis.expected.labels.map((entry) => ({
+    const labelOps = analysis.expected.labels
+      .filter((entry) => !analysis.skip_label_numbers.has(entry.number))
+      .map((entry) => ({
       updateOne: {
         filter: { number: entry.number },
         update: {
@@ -1068,6 +1286,15 @@ const applyMigration = async (analysis) => {
         upsert: true,
       },
     }));
+    labelOps.forEach((operation) => {
+      const expected = analysis.expected.labels.find(
+        (entry) => entry.number === operation.updateOne.filter.number,
+      );
+      operation.updateOne.update.$set.allocation_state =
+        expected?.allocation_state || 'active';
+      operation.updateOne.update.$set['usage.inspectors'] =
+        expected?.usage_inspectors || [];
+    });
     if (labelOps.length > 0) {
       await Label.bulkWrite(labelOps, { ordered: false });
     }
@@ -1110,6 +1337,53 @@ const applyMigration = async (analysis) => {
                 null,
                 "$usage.source_updated_at",
               ],
+            },
+          },
+        },
+      ],
+      { updatePipeline: true },
+    );
+    await Label.updateMany(
+      {
+        number: { $nin: expectedNumbers },
+        'usage.inspectors': inspectorId,
+      },
+      [
+        {
+          $set: {
+            'usage.inspectors': {
+              $let: {
+                vars: {
+                  remaining: {
+                    $filter: {
+                      input: { $ifNull: ['$usage.inspectors', []] },
+                      as: 'owner',
+                      cond: { $ne: ['$$owner', inspectorId] },
+                    },
+                  },
+                },
+                in: '$$remaining',
+              },
+            },
+            'usage.inspector': {
+              $let: {
+                vars: {
+                  remaining: {
+                    $filter: {
+                      input: { $ifNull: ['$usage.inspectors', []] },
+                      as: 'owner',
+                      cond: { $ne: ['$$owner', inspectorId] },
+                    },
+                  },
+                },
+                in: {
+                  $cond: [
+                    { $eq: [{ $size: '$$remaining' }, 1] },
+                    { $arrayElemAt: ['$$remaining', 0] },
+                    null,
+                  ],
+                },
+              },
             },
           },
         },
@@ -1199,8 +1473,10 @@ const applyMigration = async (analysis) => {
       {
         $set: {
           schema_version: 2,
-          migration_status: "backfilled",
           backfilled_at: now,
+          migration_status: analysis.summary.partial_backfill
+            ? 'backfilled_with_conflicts'
+            : 'backfilled',
           "last_error.message": "",
           "last_error.at": null,
         },
@@ -1210,7 +1486,9 @@ const applyMigration = async (analysis) => {
       labels: analysis.expected.labels.length,
       transactions: analysis.expected.transactions.length,
       usages: analysis.expected.usages.length,
-      migration_status: "backfilled",
+      migration_status: analysis.summary.partial_backfill
+        ? 'backfilled_with_conflicts'
+        : 'backfilled',
       read_source: "legacy",
       write_mode: "legacy",
     };
@@ -1251,6 +1529,9 @@ const printableAnalysis = (analysis, { mode, applyResult = null } = {}) => ({
     ]),
   ),
   can_apply: analysis.can_apply,
+  can_backfill: analysis.can_backfill,
+  migration_classification: analysis.migration_classification,
+  partial_backfill: Boolean(analysis.summary?.partial_backfill),
   conflicts: analysis.conflicts.slice(0, 100),
   conflict_output_truncated: analysis.conflicts.length > 100,
   apply_result: applyResult,
@@ -1259,12 +1540,17 @@ const printableAnalysis = (analysis, { mode, applyResult = null } = {}) => ({
 const main = async () => {
   const argv = process.argv.slice(2);
   const inspectorId = getInspectorArgument(argv);
+  const all = argv.includes('--all');
+  const includeVerified = argv.includes('--include-verified');
   const apply = argv.includes("--apply");
   const dryRun = argv.includes("--dry-run") || !apply;
-  if (!inspectorId) {
+  if (!inspectorId && !all) {
     throw new Error(
       "Usage: node scripts/migrateLabels.js --inspector <Inspector._id> [--dry-run|--apply]",
     );
+  }
+  if (inspectorId && all) {
+    throw new Error('Use either --inspector or --all, not both');
   }
   if (apply && argv.includes("--dry-run")) {
     throw new Error("Use either --dry-run or --apply, not both");
@@ -1275,6 +1561,40 @@ const main = async () => {
     preserveExistingEnv: true,
   });
   await connectDB();
+  if (all) {
+    const inspectorIds = await getBatchInspectorIds({ includeVerified });
+    const results = [];
+    let failed = 0;
+    for (const batchInspectorId of inspectorIds) {
+      try {
+        const analysis = buildMigrationAnalysis(
+          await loadSnapshot(batchInspectorId),
+        );
+        let applyResult = null;
+        if (!dryRun) applyResult = await applyMigration(analysis);
+        results.push(printableAnalysis(analysis, {
+          mode: dryRun ? 'dry-run' : 'apply',
+          applyResult,
+        }));
+      } catch (error) {
+        failed += 1;
+        results.push({
+          inspector: { document_id: String(batchInspectorId) },
+          error: error?.message || String(error),
+        });
+      }
+    }
+    console.log(JSON.stringify({
+      mode: dryRun ? 'dry-run' : 'apply',
+      batch: true,
+      inspector_count: inspectorIds.length,
+      failed_count: failed,
+      results,
+    }, null, 2));
+    if (dryRun) console.log('Batch dry-run complete: zero database writes were made.');
+    if (failed > 0) process.exitCode = 1;
+    return;
+  }
   const analysis = buildMigrationAnalysis(await loadSnapshot(inspectorId));
   let applyResult = null;
   if (!dryRun) applyResult = await applyMigration(analysis);
@@ -1304,12 +1624,21 @@ if (require.main === module) {
     });
 }
 
+const {
+  QUARANTINE_CONFLICT_TYPES,
+  getBlockingLabelNumbers,
+  getQuarantineLabelNumbers,
+} = require('../services/labels/labelConflict.service');
+
 module.exports = {
   MIGRATION_SOURCE,
   applyMigration,
   buildMigrationAnalysis,
   buildUsageWriteOperations,
+  classifyConflicts,
+  collectGlobalLabelMaps,
   computeSourceFingerprint,
+  getBatchInspectorIds,
   getInspectorArgument,
   inspectSerials,
   loadSnapshot,

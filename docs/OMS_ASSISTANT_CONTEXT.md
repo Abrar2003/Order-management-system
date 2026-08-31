@@ -191,9 +191,15 @@ For database-user creation, deployment, and production smoke checks, use `docs/O
 
 ## QC serial-label storage boundary
 
-The normalized QC serial-label schema is at Phase 2. Allocation, rejection,
-and Inspection-derived usage are independent projections, and only schema
-version 2 verified states can use the existing modern summary read. Production
-mutation paths remain legacy and no Assistant behavior changed. The authority,
-staging commands, reconciliation rules, and Phase 3 prerequisites are in
-docs/QC_LABEL_STORAGE_PHASE_2.md.
+The normalized QC serial-label schema is at Phase 2.5. Allocation, rejection,
+and Inspection-derived usage are independent projections; historical usage
+anomalies are preserved as warnings, while ambiguous current ownership is
+quarantined with `Label.allocation_state=conflicted`. `LabelUsage.inspector`
+identifies one forensic Inspection record; `Label.usage.inspectors` is the
+deduplicated historical aggregate; the singular `Label.usage.inspector` is a
+compatibility scalar (sole Inspector only, otherwise null). Partial backfill
+uses `backfilled_with_conflicts`, and only schema version 2 fully verified
+states can use the existing modern summary read. Production mutation paths
+remain legacy and no Assistant behavior changed. The authority,
+audit/resolution commands, reconciliation rules, and Phase 3 prerequisites
+are in docs/QC_LABEL_STORAGE_PHASE_2_5.md.

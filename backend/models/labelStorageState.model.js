@@ -43,6 +43,7 @@ const labelStorageStateSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+labelStorageStateSchema.path('migration_status').enumValues.push('backfilled_with_conflicts');
 labelStorageStateSchema.index({ inspector: 1 }, { unique: true });
 
 module.exports = mongoose.model("label_storage_states", labelStorageStateSchema);

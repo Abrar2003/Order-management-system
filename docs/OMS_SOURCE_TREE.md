@@ -200,7 +200,9 @@ oms/
 |   |   |-- importRectifyItems.js
 |   |   |-- migrateInspectionBarcodeFieldsToString.js
 |   |   |-- migrateItemQcBarcodeFieldsToString.js
+|   |   |-- auditLabelMigration.js
 |   |   |-- migrateLabels.js
+|   |   |-- resolveLabelMigrationConflicts.js
 |   |   |-- PDFtoSheet.js
 |   |   |-- PIS_extractor.js
 |   |   |-- README-qc-thumbnail-backfill.md
@@ -223,6 +225,7 @@ oms/
 |   |   `-- verifyBuildInfo.js
 |   |-- services/
 |   |   |-- labels/
+|   |   |   |-- labelConflict.service.js
 |   |   |   |-- labelStorage.service.js
 |   |   |   |-- legacyLabel.repository.js
 |   |   |   `-- modernLabel.repository.js
@@ -611,6 +614,7 @@ oms/
 |   |-- PRODUCT_TYPE_TEMPLATES_PAGE_GUIDE.md
 |   |-- QC_LABEL_STORAGE_PHASE_1.md
 |   |-- QC_LABEL_STORAGE_PHASE_2.md
+|   |-- QC_LABEL_STORAGE_PHASE_2_5.md
 |   |-- redis-and-jobs.md
 |   |-- ROLE_ACCESS_MATRIX.md
 |   |-- VPS_MIGRATION.md

@@ -26,6 +26,20 @@ const labelMigrationConflictSchema = new mongoose.Schema(
     detected_at: { type: Date, default: Date.now },
     last_seen_at: { type: Date, default: Date.now },
     resolved_at: { type: Date, default: null },
+    resolution_type: { type: String, default: '', trim: true },
+    canonical_current_owner: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'inspectors',
+      default: null,
+    },
+    resolved_by: { type: mongoose.Schema.Types.Mixed, default: null },
+    resolution_reason: { type: String, default: '', trim: true },
+    previous_evidence: { type: mongoose.Schema.Types.Mixed, default: null },
+    resulting_canonical_state: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    resolution_history: { type: [mongoose.Schema.Types.Mixed], default: [] },
   },
   { timestamps: true },
 );

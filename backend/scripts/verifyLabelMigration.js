@@ -20,6 +20,8 @@ const {
 } = require("../helpers/vendorRef");
 
 const id = (value) => String(value?._id || value || "").trim();
+const { isLabelReserved } = require('../services/labels/labelConflict.service');
+
 const normalizeSerials = (values = []) =>
   [
     ...new Set(
@@ -28,6 +30,12 @@ const normalizeSerials = (values = []) =>
         .filter((number) => Number.isInteger(number) && number > 0),
     ),
   ].sort((left, right) => left - right);
+const normalizeInspectorIds = (values = []) =>
+  [...new Set(
+    (Array.isArray(values) ? values : [])
+      .map(id)
+      .filter(Boolean),
+  )].sort();
 const setDifference = (left, right) => {
   const rightSet = new Set(right);
   return left.filter((number) => !rightSet.has(number));
@@ -130,6 +138,7 @@ const buildVerificationReport = ({
   usages = [],
   conflicts = [],
   storageState = null,
+  usageInspectorsByNumber = null,
 } = {}) => {
   const inspectorId = id(inspector?._id);
   const inspectorUserId = id(inspector?.user);
@@ -147,7 +156,11 @@ const buildVerificationReport = ({
   );
   const modernUsed = normalizeSerials(
     labels
-      .filter((entry) => id(entry?.usage?.inspector) === inspectorId)
+      .filter(
+        (entry) => Array.isArray(entry?.usage?.inspectors)
+          ? entry.usage.inspectors.some((owner) => id(owner) === inspectorId)
+          : id(entry?.usage?.inspector) === inspectorId,
+      )
       .map((entry) => entry.number),
   );
   const modernRejected = normalizeSerials(
@@ -198,6 +211,35 @@ const buildVerificationReport = ({
       String(entry?.status || "open") === "open" &&
       String(entry?.severity || "") === "error",
   );
+  const usageProjectionMismatches = labels
+    .filter((entry) =>
+      Array.isArray(entry?.usage?.inspectors) ||
+      (usageInspectorsByNumber instanceof Map &&
+        usageInspectorsByNumber.has(Number(entry?.number))),
+    )
+    .map((entry) => {
+      const number = Number(entry.number);
+      const actualInspectors = normalizeInspectorIds(entry?.usage?.inspectors);
+      const expectedInspectors = usageInspectorsByNumber instanceof Map
+        ? normalizeInspectorIds(usageInspectorsByNumber.get(number) || [])
+        : actualInspectors;
+      const expectedScalar = expectedInspectors.length === 1
+        ? expectedInspectors[0]
+        : null;
+      const actualScalar = id(entry?.usage?.inspector) || null;
+      if (
+        equal(actualInspectors, expectedInspectors) &&
+        actualScalar === expectedScalar
+      ) return null;
+      return {
+        number,
+        expected_inspectors: expectedInspectors,
+        actual_inspectors: actualInspectors,
+        expected_scalar: expectedScalar,
+        actual_scalar: actualScalar,
+      };
+    })
+    .filter(Boolean);
 
   const checks = {
     inspector_identity: {
@@ -221,6 +263,11 @@ const buildVerificationReport = ({
     summary: check(legacySummary, modernSummary),
     allocation_history: check(legacyTransactions, modernTransactions),
     usage_history: check(forensicUsages, modernUsages),
+    usage_projection: {
+      passed: usageProjectionMismatches.length === 0,
+      expected: 'usage.inspectors is the sorted aggregate; scalar is sole Inspector only',
+      actual: usageProjectionMismatches,
+    },
     storage_safety: {
       passed:
         Number(storageState?.schema_version) >= 2 &&
@@ -253,7 +300,31 @@ const buildVerificationReport = ({
         label_number: entry.label_number,
       })),
     },
+    quarantine: (() => {
+      const blockingNumbers = normalizeSerials(
+        errorConflicts.map((entry) => entry?.label_number),
+      );
+      const missing = blockingNumbers.filter((number) => {
+        const label = labels.find((entry) => Number(entry?.number) === number) || {
+          number,
+        };
+        return !isLabelReserved(label, conflicts);
+      });
+      return {
+        passed: missing.length === 0,
+        expected: 'every unresolved blocking serial is reserved/quarantined',
+        actual: { blocking_serials: blockingNumbers, missing_quarantine: missing },
+      };
+    })(),
   };
+  if (String(storageState?.migration_status || '') === 'backfilled_with_conflicts') {
+    checks.storage_safety.passed =
+      Number(storageState?.schema_version) >= 2 &&
+      String(storageState?.read_source || '') === 'legacy' &&
+      String(storageState?.write_mode || '') === 'legacy';
+    checks.storage_safety.expected.migration_status =
+      'backfilled|backfilled_with_conflicts|verifying|verified';
+  }
   const derivedUsedLabels = normalizeSerials(inspector?.used_labels);
 
   return {
@@ -272,6 +343,10 @@ const buildVerificationReport = ({
       inspector_used_labels: derivedUsedLabels,
       inspection_labels_added: forensicUsed,
     },
+    fully_verified: Object.values(checks).every((entry) => entry.passed),
+    backfilled_with_unresolved_conflicts:
+      String(storageState?.migration_status || '') === 'backfilled_with_conflicts' ||
+      errorConflicts.length > 0,
     passed: Object.values(checks).every((entry) => entry.passed),
   };
 };
@@ -281,6 +356,40 @@ const getInspectorArgument = (argv = process.argv.slice(2)) => {
   if (equals) return equals.slice("--inspector=".length).trim();
   const index = argv.indexOf("--inspector");
   return index >= 0 ? String(argv[index + 1] || "").trim() : "";
+};
+
+const loadUsageInspectorsByNumber = async (numbers = []) => {
+  const result = new Map();
+  if (!Array.isArray(numbers) || numbers.length === 0) return result;
+  const inspections = await Inspection.find({ labels_added: { $in: numbers } })
+    .select("inspector labels_added")
+    .lean();
+  const userIds = [...new Set(inspections.map((entry) => id(entry?.inspector)).filter(Boolean))];
+  if (userIds.length === 0) return result;
+  const inspectors = await Inspector.find({ user: { $in: userIds } })
+    .select("_id user")
+    .lean();
+  const inspectorsByUser = new Map();
+  inspectors.forEach((entry) => {
+    const userId = id(entry?.user);
+    if (!userId) return;
+    const values = inspectorsByUser.get(userId) || [];
+    values.push(id(entry?._id));
+    inspectorsByUser.set(userId, values);
+  });
+  inspections.forEach((entry) => {
+    const inspectorIds = inspectorsByUser.get(id(entry?.inspector)) || [];
+    if (inspectorIds.length !== 1) return;
+    normalizeSerials(entry?.labels_added).forEach((number) => {
+      const values = result.get(number) || [];
+      values.push(inspectorIds[0]);
+      result.set(number, values);
+    });
+  });
+  for (const [number, inspectorsForLabel] of result) {
+    result.set(number, normalizeInspectorIds(inspectorsForLabel));
+  }
+  return result;
 };
 
 const loadVerificationSnapshot = async (inspectorId) => {
@@ -300,12 +409,18 @@ const loadVerificationSnapshot = async (inspectorId) => {
     .populate("qc", "order_meta item request_date last_inspected_date")
     .lean();
   const inspectionIds = inspections.map((entry) => entry._id);
-  const [labels, transactions, usages, conflicts, storageState] =
+  const relevantNumbers = normalizeSerials([
+    ...(inspector.alloted_labels || []),
+    ...(inspector.rejected_labels || []),
+    ...inspections.flatMap((entry) => entry?.labels_added || []),
+  ]);
+  const [labels, transactions, usages, conflicts, storageState, quarantineLabels] =
     await Promise.all([
       Label.find({
         $or: [
           { owner_inspector: inspector._id },
           { rejected_by_inspector: inspector._id },
+          { 'usage.inspectors': inspector._id },
           { "usage.inspector": inspector._id },
         ],
       }).lean(),
@@ -323,15 +438,22 @@ const loadVerificationSnapshot = async (inspectorId) => {
         status: "open",
       }).lean(),
       LabelStorageState.findOne({ inspector: inspector._id }).lean(),
+      Label.find({ number: { $in: relevantNumbers } }).lean(),
     ]);
   return {
     inspector,
     inspections,
-    labels,
+    labels: [
+      ...labels,
+      ...quarantineLabels.filter(
+        (entry) => !labels.some((row) => String(row?._id) === String(entry?._id)),
+      ),
+    ],
     transactions,
     usages,
     conflicts,
     storageState,
+    usageInspectorsByNumber: await loadUsageInspectorsByNumber(relevantNumbers),
   };
 };
 

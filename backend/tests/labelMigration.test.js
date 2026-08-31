@@ -108,6 +108,7 @@ test("allocated and unused label keeps ownership without usage", () => {
   assert.equal(analysis.can_apply, true);
   assert.equal(String(expectedLabel(analysis, 1).owner_inspector), analysis.inspector_id);
   assert.equal(expectedLabel(analysis, 1).usage_inspector, null);
+  assert.deepEqual(expectedLabel(analysis, 1).usage_inspectors, []);
   assert.deepEqual(analysis.observations.allocated_unused, [1]);
 });
 
@@ -120,6 +121,7 @@ test("allocated and used label preserves both independent concepts", () => {
 
   assert.equal(expectedLabel(analysis, 2).owner_inspector, analysis.inspector_id);
   assert.equal(expectedLabel(analysis, 2).usage_inspector, analysis.inspector_id);
+  assert.deepEqual(expectedLabel(analysis, 2).usage_inspectors, [analysis.inspector_id]);
   assert.deepEqual(analysis.observations.allocated_and_used, [2]);
 });
 
@@ -371,7 +373,7 @@ test("global serial ownership conflict blocks apply", () => {
   assert.equal(analysis.can_apply, false);
   assert.equal(
     analysis.conflicts.some(
-      (entry) => entry.conflict_type === "allocated_multiple_inspectors",
+      (entry) => entry.conflict_type === "multiple_current_allocation_claims",
     ),
     true,
   );

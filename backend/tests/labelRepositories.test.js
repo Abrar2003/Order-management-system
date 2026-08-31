@@ -16,6 +16,33 @@ const queryReturning = (value) => ({
   async lean() { return value; },
 });
 
+test('modern availability excludes reserved conflict serials', async () => {
+  const calls = {};
+  const repository = new ModernLabelRepository({
+    LabelModel: {
+      find(filter) {
+        calls.labelFilter = filter;
+        return queryReturning([
+          { number: 200, owner_inspector: null, rejected_by_inspector: null },
+          { number: 201, owner_inspector: null, rejected_by_inspector: null },
+        ]);
+      },
+    },
+    LabelMigrationConflictModel: {
+      find(filter) {
+        calls.conflictFilter = filter;
+        return queryReturning([
+          { label_number: 200, status: 'open', conflict_type: 'multiple_current_allocation_claims', severity: 'error' },
+        ]);
+      },
+    },
+  });
+
+  assert.deepEqual(await repository.getAvailableLabels(), [201]);
+  assert.equal(calls.labelFilter.allocation_state.$ne, 'conflicted');
+  assert.equal(calls.conflictFilter.status, 'open');
+});
+
 test("legacy used-label reads derive from Inspection evidence", async () => {
   const repository = new LegacyLabelRepository({
     InspectorModel: {
@@ -121,6 +148,14 @@ test("modern summary preserves used labels outside current allocation", async ()
   });
   assert.deepEqual(filters[2], {
     owner_inspector: "inspector-1",
-    "usage.inspector": { $ne: "inspector-1" },
+    $nor: [
+      { "usage.inspectors": "inspector-1" },
+      {
+        $and: [
+          { "usage.inspectors": { $exists: false } },
+          { "usage.inspector": "inspector-1" },
+        ],
+      },
+    ],
   });
 });
