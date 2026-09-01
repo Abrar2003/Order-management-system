@@ -705,24 +705,33 @@ exports.transferLabels = async (req, res) => {
       return res.status(404).json({ message: "Target inspector not found" });
     }
 
-    await Promise.all([
-      syncInspectorUsedLabelsFromInspectionRecords(sourceInspector),
-      syncInspectorUsedLabelsFromInspectionRecords(targetInspector),
-    ]);
-
     const {
       allocated: sourceAllocated,
-      used: sourceUsedLabels,
       rejected: sourceRejectedLabels,
     } = getInspectorLabelState(sourceInspector);
     const {
       allocated: targetAllocated,
-      used: targetUsedLabels,
       rejected: targetRejectedLabels,
     } = getInspectorLabelState(targetInspector);
-    const sourceUsed = new Set(sourceUsedLabels);
+    const [sourceUserId, targetUserId] = [
+      getInspectorUserId(sourceInspector),
+      getInspectorUserId(targetInspector),
+    ];
+    const usageRecords = await Inspection.find({
+      inspector: { $in: [sourceUserId, targetUserId] },
+      labels_added: { $in: normalizedLabels },
+    }).select('inspector labels_added').lean();
+    const usedByInspector = new Map([[sourceUserId, new Set()], [targetUserId, new Set()]]);
+    usageRecords.forEach((record) => {
+      const used = usedByInspector.get(String(record.inspector));
+      if (!used) return;
+      normalizeInspectorLabels(record.labels_added).forEach((label) => {
+        if (normalizedLabels.includes(label)) used.add(label);
+      });
+    });
+    const sourceUsed = usedByInspector.get(sourceUserId);
     const sourceRejected = new Set(sourceRejectedLabels);
-    const targetUsed = new Set(targetUsedLabels);
+    const targetUsed = usedByInspector.get(targetUserId);
     const targetRejected = new Set(targetRejectedLabels);
 
     const sourceAllocatedSet = new Set(sourceAllocated);
@@ -835,10 +844,6 @@ exports.transferLabels = async (req, res) => {
     });
 
     await Promise.all([sourceInspector.save(), targetInspector.save()]);
-    await attachUsedLabelHistoryToInspectorRows(
-      [sourceInspector, targetInspector],
-      req.user,
-    );
 
     return res.json({
       message: `${normalizedLabels.length} label(s) transferred successfully`,
