@@ -112,6 +112,13 @@ router.get(
 );
 
 router.get(
+  "/claims",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.getClaimsReport,
+);
+
+router.get(
   "/inspected-items/export",
   auth,
   requirePermission("reports", "view"),

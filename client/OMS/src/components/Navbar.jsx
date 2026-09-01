@@ -350,6 +350,7 @@ const Navbar = () => {
       ...(canManageLabels
         ? [actionMenuItem("check-labels", "Check Labels", "check-labels")]
         : []),
+      routeMenuItem("claims", "Claims", "/reports/claims"),
       routeMenuItem("inspected-items-report", "Inspected Items Report", "/reports/inspected-items"),
       routeMenuItem(
         "pis-inspection-master-comparison",

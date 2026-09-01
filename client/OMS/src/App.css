@@ -12073,3 +12073,13 @@ button.om-item-order-presence-label {
   .qc-details-batch-table.qc-image-upload-file-table td:nth-child(4)::before { content: "Progress"; }
   .qc-details-batch-table.qc-image-upload-file-table td:nth-child(5)::before { content: "Message"; }
 }
+
+.claims-report-container {
+  width: 80%;
+}
+
+@media (max-width: 768px) {
+  .claims-report-container {
+    width: 100%;
+  }
+}

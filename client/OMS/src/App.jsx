@@ -57,6 +57,7 @@ const PendingPoReport = lazy(() => import("./pages/PendingPoReport"));
 const ProductAnalytics = lazy(() => import("./pages/ProductAnalytics"));
 const QcReportMismatch = lazy(() => import("./pages/QcReportMismatch"));
 const InspectedItemsReport = lazy(() => import("./pages/InspectedItemsReport"));
+const Claims = lazy(() => import("./pages/Claims"));
 const PisInspectionMasterComparison = lazy(() => import("./pages/PisInspectionMasterComparison"));
 const ProductDatabase = lazy(() => import("./pages/ProductDatabase"));
 const ItemDatabase = lazy(() => import("./pages/ItemDatabase"));
@@ -420,6 +421,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <ProductAnalytics />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/claims"
+            element={
+              <ProtectedRoute>
+                <Claims />
               </ProtectedRoute>
             }
           />

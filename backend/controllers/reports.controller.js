@@ -84,6 +84,18 @@ const parseCustomDaysInput = (value, fallback = 30) => {
 };
 
 const INSPECTED_ITEMS_REPORT_LIMIT = 200;
+const CLAIMS_REPORT_SELECT = [
+  "code",
+  "name",
+  "description",
+  "brand",
+  "brand_name",
+  "brands",
+  "vendors",
+  "claim_tenures",
+  "claim_percentage",
+  "updatedAt",
+].join(" ");
 const INSPECTED_ITEMS_REPORT_SELECT = [
   "code",
   "name",
@@ -120,6 +132,43 @@ const INSPECTED_ITEMS_ORDER_SELECT = [
   "qc_record",
   "updatedAt",
 ].join(" ");
+
+const isCurrentClaimSystemItem = (item = {}) =>
+  Array.isArray(item?.claim_tenures) && item.claim_tenures.length > 0;
+
+const buildClaimsReportRow = (item = {}) => {
+  const tenures = (Array.isArray(item?.claim_tenures) ? item.claim_tenures : []).map((tenure) => ({
+    id: String(tenure?._id || `${tenure?.from_date || ""}-${tenure?.to_date || ""}`),
+    from_date: toISODateString(tenure?.from_date),
+    to_date: toISODateString(tenure?.to_date),
+    delivered_quantity: Number(tenure?.delivered_quantity || 0),
+    rejected_quantity: Number(tenure?.rejected_quantity || 0),
+  }));
+  const totals = tenures.reduce(
+    (summary, tenure) => ({
+      delivered_quantity: summary.delivered_quantity + tenure.delivered_quantity,
+      rejected_quantity: summary.rejected_quantity + tenure.rejected_quantity,
+    }),
+    { delivered_quantity: 0, rejected_quantity: 0 },
+  );
+
+  return {
+    id: String(item?._id || ""),
+    code: normalizeText(item?.code),
+    name: normalizeText(item?.name),
+    description: normalizeText(item?.description),
+    brand: normalizeText(item?.brand_name || item?.brand || item?.brands?.[0]),
+    vendors: [...new Set((Array.isArray(item?.vendors) ? item.vendors : [])
+      .map((vendor) => normalizeText(vendor?.name || vendor))
+      .filter(Boolean))],
+    tenures,
+    delivered_quantity: totals.delivered_quantity,
+    rejected_quantity: totals.rejected_quantity,
+    claim_percentage: totals.delivered_quantity > 0
+      ? Number(((totals.rejected_quantity / totals.delivered_quantity) * 100).toFixed(2))
+      : 0,
+  };
+};
 
 const INSPECTED_ITEM_CRITERIA = Object.freeze({
   INSPECTED: "inspected",
@@ -2021,6 +2070,57 @@ exports.getVendorWiseQaDetailed = async (req, res) => {
   }
 };
 
+exports.getClaimsReport = async (req, res) => {
+  try {
+    const items = await Item.find(
+      applyDataAccessMatch(
+        { "claim_tenures.0": { $exists: true } },
+        req.user,
+        { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
+      ),
+    )
+      .select(CLAIMS_REPORT_SELECT)
+      .sort({ updatedAt: -1, code: 1 })
+      .lean();
+
+    const allRows = items.filter(isCurrentClaimSystemItem).map(buildClaimsReportRow);
+    const rows = allRows.filter((row) => matchesInspectedItemsReportFilters(row, {
+      search: req.query.search,
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      rows,
+      filters: {
+        brands: normalizeDistinctTextValues(
+          allRows
+            .filter((row) => matchesInspectedItemsReportFilters(row, {
+              search: req.query.search,
+              vendor: req.query.vendor,
+            }))
+            .flatMap((row) => [row.brand, ...(row.brands || [])]),
+        ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+        vendors: normalizeDistinctTextValues(
+          allRows
+            .filter((row) => matchesInspectedItemsReportFilters(row, {
+              search: req.query.search,
+              brand: req.query.brand,
+            }))
+            .flatMap((row) => row.vendors || []),
+        ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+      },
+    });
+  } catch (error) {
+    console.error("Get Claims Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to fetch claims.",
+    });
+  }
+};
+
 exports.getInspectedItemsReport = async (req, res) => {
   try {
     const search = req.query.search;
@@ -3164,6 +3264,8 @@ exports.getMonthlyShipmentsDrilldown = async (req, res) => {
 };
 
 exports.__test__ = {
+  isCurrentClaimSystemItem,
+  buildClaimsReportRow,
   buildInspectedItemsReportRow,
   buildInspectedItemsVendorDetails,
   buildInspectedItemsSummary,
