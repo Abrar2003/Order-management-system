@@ -693,8 +693,8 @@ exports.transferLabels = async (req, res) => {
     }
 
     const [sourceInspector, targetInspector] = await Promise.all([
-      Inspector.findById(fromInspectorId).populate("user", "name email role"),
-      Inspector.findById(toInspectorId).populate("user", "name email role"),
+      Inspector.findById(fromInspectorId).lean(),
+      Inspector.findById(toInspectorId).lean(),
     ]);
 
     if (!sourceInspector) {
@@ -817,41 +817,46 @@ exports.transferLabels = async (req, res) => {
     }
 
     const transferSet = new Set(normalizedLabels);
-    sourceInspector.alloted_labels = sourceAllocated.filter(
-      (label) => !transferSet.has(label),
-    );
-    targetInspector.alloted_labels = normalizeInspectorLabels([
-      ...targetAllocated,
-      ...normalizedLabels,
-    ]);
-    sourceInspector.labels_allotted_by = req.user?._id || sourceInspector.labels_allotted_by;
-    targetInspector.labels_allotted_by = req.user?._id || targetInspector.labels_allotted_by;
-    appendLabelAllocationHistory(sourceInspector, {
-      action: "transfer_out",
-      labels: normalizedLabels,
-      previousLabels: sourceAllocated,
-      nextLabels: sourceInspector.alloted_labels,
-      toInspector: targetInspector._id,
-      actor: req.user,
-    });
-    appendLabelAllocationHistory(targetInspector, {
-      action: "transfer_in",
-      labels: normalizedLabels,
-      previousLabels: targetAllocated,
-      nextLabels: targetInspector.alloted_labels,
-      fromInspector: sourceInspector._id,
-      actor: req.user,
-    });
-
-    await Promise.all([sourceInspector.save(), targetInspector.save()]);
+    const sourceNextLabels = sourceAllocated.filter((label) => !transferSet.has(label));
+    const targetNextLabels = normalizeInspectorLabels([...targetAllocated, ...normalizedLabels]);
+    const recordedAt = new Date();
+    const actor = buildLabelHistoryActor(req.user);
+    const updates = [
+      {
+        updateOne: {
+          filter: { _id: sourceInspector._id },
+          update: {
+            $set: { alloted_labels: sourceNextLabels, labels_allotted_by: req.user?._id || sourceInspector.labels_allotted_by },
+            $push: {
+              label_allocation_history: {
+                action: 'transfer_out', labels: normalizedLabels, previous_labels: sourceAllocated,
+                next_labels: sourceNextLabels, to_inspector: targetInspector._id, actor, recorded_at: recordedAt,
+              },
+            },
+          },
+        },
+      },
+      {
+        updateOne: {
+          filter: { _id: targetInspector._id },
+          update: {
+            $set: { alloted_labels: targetNextLabels, labels_allotted_by: req.user?._id || targetInspector.labels_allotted_by },
+            $push: {
+              label_allocation_history: {
+                action: 'transfer_in', labels: normalizedLabels, previous_labels: targetAllocated,
+                next_labels: targetNextLabels, from_inspector: sourceInspector._id, actor, recorded_at: recordedAt,
+              },
+            },
+          },
+        },
+      },
+    ];
+    await Inspector.bulkWrite(updates, { ordered: true });
 
     return res.json({
       message: `${normalizedLabels.length} label(s) transferred successfully`,
       transferred_labels: normalizedLabels,
-      data: {
-        from_inspector: sourceInspector,
-        to_inspector: targetInspector,
-      },
+      data: { from_inspector: sourceInspector._id, to_inspector: targetInspector._id },
     });
   } catch (err) {
     return res.status(400).json({ message: err.message });
