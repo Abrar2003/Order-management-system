@@ -2070,6 +2070,34 @@ exports.getVendorWiseQaDetailed = async (req, res) => {
   }
 };
 
+exports.getClaimItemByCode = async (req, res) => {
+  try {
+    const code = normalizeText(req.params.code);
+    if (!code) {
+      return res.status(400).json({ success: false, message: "Item code is required." });
+    }
+
+    const item = await Item.findOne(
+      applyDataAccessMatch(
+        { code: new RegExp(`^\\s*${escapeRegex(code)}\\s*$`, "i") },
+        req.user,
+        { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
+      ),
+    )
+      .select("code name description claim_tenures claim_percentage")
+      .lean();
+
+    if (!item) {
+      return res.status(404).json({ success: false, message: "Item code was not found." });
+    }
+
+    return res.status(200).json({ success: true, data: item });
+  } catch (error) {
+    console.error("Get Claim Item Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to verify item code." });
+  }
+};
+
 exports.getClaimsReport = async (req, res) => {
   try {
     const items = await Item.find(

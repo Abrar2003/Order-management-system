@@ -285,7 +285,7 @@ const createClaimTenure = (value = {}) => ({
 const hasUploadedItemFile = (item, option) =>
   getItemFileValues(item, option).length > 0;
 
-const ClaimPercentageModal = ({
+export const ClaimPercentageModal = ({
   item,
   onClose,
   onSaved,

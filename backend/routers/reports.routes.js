@@ -112,6 +112,13 @@ router.get(
 );
 
 router.get(
+  "/claims/items/:code",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.getClaimItemByCode,
+);
+
+router.get(
   "/claims",
   auth,
   requirePermission("reports", "view"),

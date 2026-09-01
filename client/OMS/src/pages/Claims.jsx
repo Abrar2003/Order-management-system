@@ -1,13 +1,81 @@
 import { useCallback, useEffect, useState } from "react";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import { ClaimPercentageModal } from "./Items";
+import { usePermissions } from "../auth/PermissionContext";
 import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 const DEFAULT_FILTER = "all";
 const formatPercentage = (value) => `${Number(value || 0).toFixed(2).replace(/\.00$/, "")}%`;
 
+const RaiseClaimModal = ({ onClose, onSaved }) => {
+  const [itemCode, setItemCode] = useState("");
+  const [verifiedItem, setVerifiedItem] = useState(null);
+  const [verifying, setVerifying] = useState(false);
+  const [error, setError] = useState("");
+
+  const verifyItem = async (event) => {
+    event.preventDefault();
+    const code = itemCode.trim();
+    if (!code) {
+      setError("Enter an item code.");
+      return;
+    }
+
+    try {
+      setVerifying(true);
+      setError("");
+      const response = await api.get(`/reports/claims/items/${encodeURIComponent(code)}`);
+      setVerifiedItem(response?.data?.data || null);
+    } catch (verifyError) {
+      setVerifiedItem(null);
+      setError(verifyError?.response?.data?.message || "Failed to verify item code.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  if (verifiedItem) {
+    return <ClaimPercentageModal item={verifiedItem} onClose={onClose} onSaved={onSaved} />;
+  }
+
+  return (
+    <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
+      <div className="modal-dialog modal-dialog-centered" role="document">
+        <form className="modal-content" onSubmit={verifyItem}>
+          <div className="modal-header">
+            <h5 className="modal-title">Raise Claim</h5>
+            <button type="button" className="btn-close" aria-label="Close" disabled={verifying} onClick={onClose} />
+          </div>
+          <div className="modal-body">
+            <label className="form-label" htmlFor="raise-claim-item-code">Item code</label>
+            <input
+              id="raise-claim-item-code"
+              type="text"
+              className="form-control"
+              value={itemCode}
+              autoFocus
+              disabled={verifying}
+              placeholder="Enter an exact item code"
+              onChange={(event) => setItemCode(event.target.value)}
+            />
+            <div className="form-text">The item must be verified before claim details can be entered.</div>
+            {error && <div className="alert alert-danger mt-3 mb-0">{error}</div>}
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-outline-secondary" disabled={verifying} onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={verifying}>{verifying ? "Verifying..." : "Verify Item"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 const Claims = () => {
+  const { hasPermission } = usePermissions();
+  const canRaiseClaim = hasPermission("items", "edit");
   const [rows, setRows] = useState([]);
   const [filters, setFilters] = useState({ brands: [], vendors: [] });
   const [loading, setLoading] = useState(true);
@@ -18,6 +86,7 @@ const Claims = () => {
   const [draftBrandFilter, setDraftBrandFilter] = useState(DEFAULT_FILTER);
   const [vendorFilter, setVendorFilter] = useState(DEFAULT_FILTER);
   const [draftVendorFilter, setDraftVendorFilter] = useState(DEFAULT_FILTER);
+  const [showRaiseClaim, setShowRaiseClaim] = useState(false);
 
   const loadClaims = useCallback(async () => {
     try {
@@ -65,9 +134,16 @@ const Claims = () => {
             <h2 className="h4 mb-1">Claims</h2>
             <p className="text-secondary mb-0">Only claims recorded with claim tenures are shown.</p>
           </div>
-          <button type="button" className="btn btn-outline-primary btn-sm" onClick={loadClaims}>
-            Refresh
-          </button>
+          <div className="d-flex gap-2">
+            <button type="button" className="btn btn-outline-primary btn-sm" onClick={loadClaims}>
+              Refresh
+            </button>
+            {canRaiseClaim && (
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowRaiseClaim(true)}>
+                Raise Claim
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="card om-card mb-3">
@@ -150,6 +226,15 @@ const Claims = () => {
           </div>
         </div>
       </main>
+      {showRaiseClaim && (
+        <RaiseClaimModal
+          onClose={() => setShowRaiseClaim(false)}
+          onSaved={() => {
+            setShowRaiseClaim(false);
+            loadClaims();
+          }}
+        />
+      )}
     </>
   );
 };
