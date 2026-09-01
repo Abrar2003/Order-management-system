@@ -335,16 +335,50 @@ function extractPageFragments(pageObject, pageIndex, objectMap, toUnicodeByFontO
   return fragments;
 }
 
-function columnForX(xValue) {
-  if (xValue < 90) return "orderNumber";
-  if (xValue < 160) return "refer";
-  if (xValue < 220) return "orderDate";
-  if (xValue < 280) return "etd";
-  if (xValue < 310) return "daysTillEtd";
-  if (xValue < 390) return "ourItemCode";
-  if (xValue < 478) return "yourItemCode";
-  if (xValue < 700) return "description";
-  return "quantity";
+const TABLE_COLUMNS = [
+  { key: "orderNumber", header: /^order\s*nr\.?$/i },
+  { key: "refer", header: /^refer(?:ence)?\.?$/i },
+  { key: "orderDate", header: /^order\s*date$/i },
+  { key: "etd", header: /^etd$/i },
+  { key: "daysTillEtd", header: /^days?\s*(?:till|to)(?:\s*etd)?$/i },
+  { key: "ourItemCode", header: /^our\s*item\s*code$/i },
+  { key: "yourItemCode", header: /^your\s*item\s*code$/i },
+  { key: "description", header: /^description$/i },
+  { key: "quantity", header: /^quantity$/i },
+];
+
+function findColumnLayout(fragments) {
+  const anchors = new Map();
+  for (const line of clusterFragmentsByLine(fragments)) {
+    const parts = [...line.fragments].sort((a, b) => a.x - b.x);
+    for (const column of TABLE_COLUMNS) {
+      if (anchors.has(column.key)) continue;
+      for (let start = 0; start < parts.length; start += 1) {
+        let text = "";
+        for (let end = start; end < Math.min(parts.length, start + 4); end += 1) {
+          text = appendText(text, parts[end].text);
+          if (column.header.test(text)) {
+            anchors.set(column.key, parts[start].x);
+            break;
+          }
+        }
+        if (anchors.has(column.key)) break;
+      }
+    }
+  }
+  if (anchors.size < 5) return null;
+  const ordered = TABLE_COLUMNS.filter((column) => anchors.has(column.key))
+    .map((column) => ({ ...column, x: anchors.get(column.key) }))
+    .sort((a, b) => a.x - b.x);
+  return ordered.map((column, index) => ({
+    ...column,
+    start: index === 0 ? -Infinity : (ordered[index - 1].x + column.x) / 2,
+    end: index === ordered.length - 1 ? Infinity : (column.x + ordered[index + 1].x) / 2,
+  }));
+}
+
+function columnForX(xValue, layout) {
+  return layout?.find((column) => xValue >= column.start && xValue < column.end)?.key;
 }
 
 function appendText(base, addition) {
@@ -353,7 +387,7 @@ function appendText(base, addition) {
   return `${base} ${addition}`.replace(/\s+/g, " ").trim();
 }
 
-function clusterFragmentsByLine(fragments, yTolerance = 0.8) {
+function clusterFragmentsByLine(fragments, yTolerance = 1.5) {
   const sorted = [...fragments].sort((a, b) => {
     if (a.pageIndex !== b.pageIndex) return a.pageIndex - b.pageIndex;
     const yDiff = b.y - a.y;
@@ -383,8 +417,7 @@ function clusterFragmentsByLine(fragments, yTolerance = 0.8) {
   return lines;
 }
 
-function isLikelyHeaderLine(cells, yValue) {
-  if (yValue >= 470) return true;
+function isLikelyHeaderLine(cells) {
   const lineText = [
     cells.orderNumber,
     cells.refer,
@@ -408,11 +441,11 @@ function isLikelyHeaderLine(cells, yValue) {
     || lineText.includes("notification letter")
     || lineText.includes("shippingdate")
     || lineText.includes("we kindly ask")
-    || lineText.includes("page 1/")
+    || /page\s+\d+\//.test(lineText)
   );
 }
 
-function lineToCells(line) {
+function lineToCells(line, layout) {
   const cells = {
     orderNumber: "",
     refer: "",
@@ -427,7 +460,8 @@ function lineToCells(line) {
 
   const sortedFragments = [...line.fragments].sort((a, b) => a.x - b.x);
   for (const fragment of sortedFragments) {
-    const column = columnForX(fragment.x);
+    const column = columnForX(fragment.x, layout);
+    if (!column) continue;
     cells[column] = appendText(cells[column], fragment.text);
   }
 
@@ -445,22 +479,18 @@ function mergeSupplementLine(previousRow, supplement) {
   if (supplement.ourItemCode) {
     previousRow.ourItemCode = appendText(previousRow.ourItemCode, supplement.ourItemCode);
   }
-  if (supplement.refer) {
-    if (/^[A-Za-z]{2,8}$/.test(supplement.refer) && previousRow.quantity) {
-      previousRow.quantity = appendText(previousRow.quantity, supplement.refer);
-    } else {
-      previousRow.refer = appendText(previousRow.refer, supplement.refer);
-    }
-  }
+  if (supplement.refer) previousRow.refer = appendText(previousRow.refer, supplement.refer);
 }
 
 function extractRowsFromFragments(fragments) {
   const lines = clusterFragmentsByLine(fragments);
+  const layout = findColumnLayout(fragments);
+  if (!layout) return [];
   const rows = [];
 
   for (const line of lines) {
-    const cells = lineToCells(line);
-    if (isLikelyHeaderLine(cells, line.anchorY)) continue;
+    const cells = lineToCells(line, layout);
+    if (isLikelyHeaderLine(cells)) continue;
 
     const hasCoreData = Boolean(
       cells.orderDate
@@ -489,9 +519,8 @@ function extractRowsFromFragments(fragments) {
       && !cells.orderDate
       && !cells.etd
       && !cells.daysTillEtd
-      && !cells.ourItemCode
       && !cells.quantity
-      && (cells.refer || cells.description || cells.yourItemCode);
+      && (cells.refer || cells.ourItemCode || cells.yourItemCode || cells.description);
 
     if (isSupplementOnly && rows.length > 0) {
       mergeSupplementLine(rows[rows.length - 1], cells);
@@ -595,4 +624,6 @@ function extractTableRowsFromPdfBuffer(pdfBuffer) {
 
 module.exports = {
   extractTableRowsFromPdfBuffer,
+  extractRowsFromFragments,
+  findColumnLayout,
 };

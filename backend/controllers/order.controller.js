@@ -1785,7 +1785,7 @@ const normalizeRectifiedSelectionRow = (row = {}, defaults = {}) => {
 
 const buildRectifyRowsForResponse = (rows = []) =>
   (Array.isArray(rows) ? rows : []).map((row) => ({
-    row_id: makeRectifyKey(row?.order_id, row?.item_code),
+    row_id: String(row?.row_id || makeRectifyKey(row?.order_id, row?.item_code)),
     order_id: normalizeOrderKey(row?.order_id),
     item_code: normalizeRectifyText(row?.item_code),
     description: normalizeRectifyText(row?.description),
@@ -1794,7 +1794,7 @@ const buildRectifyRowsForResponse = (rows = []) =>
     quantity: Number(parseQuantityLike(row?.quantity) || 0),
     ETD: row?.ETD || null,
     order_date: row?.order_date || null,
-    change_type: normalizeRectifyChangeType(row?.change_type),
+    change_type: row?.change_type === "review" ? "review" : normalizeRectifyChangeType(row?.change_type),
     changed_fields: normalizeRectifyChangedFields(row?.changed_fields),
     merged: Boolean(row?.merged),
     merged_row_count: Math.max(1, Number(row?.merged_row_count || 1)),
@@ -1806,6 +1806,13 @@ const buildRectifyRowsForResponse = (rows = []) =>
     ),
   }));
 
+const buildRectifyReviewRows = (entries = [], defaults = {}) =>
+  (Array.isArray(entries) ? entries : []).map((entry, index) => ({
+    ...normalizeRectifiedPdfRow(entry?.source, defaults),
+    row_id: `review_${index + 1}`,
+    change_type: "review",
+    changed_fields: [String(entry?.reason || "requires_review")],
+  }));
 const pickPreferredRectifyText = (...values) => {
   const normalizedValues = values
     .map((value) => normalizeRectifyText(value))
@@ -5654,6 +5661,8 @@ exports.rectifyPdfOrders = async (req, res) => {
         vendor: vendorInput,
       });
 
+      if (!normalizedRow.item_code) continue;
+
       if (!normalizedRow.order_id || !normalizedRow.item_code) {
         invalidEntries.push({
           row_index: index + 1,
@@ -5855,7 +5864,13 @@ exports.rectifyPdfOrders = async (req, res) => {
       upload_log_id: uploadLogId,
       file_name: outputFileName,
       file_base64: workbookBuffer.toString("base64"),
-      changed_rows_data: buildRectifyRowsForResponse(previewRows),
+      changed_rows_data: buildRectifyRowsForResponse([
+        ...previewRows,
+        ...buildRectifyReviewRows(invalidEntries, {
+          brand: brandInput,
+          vendor: vendorInput,
+        }),
+      ]),
       invalid_entries: invalidEntries.slice(0, 100),
     });
   } catch (error) {

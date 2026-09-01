@@ -2942,6 +2942,29 @@ small,
   background: var(--om-color-surface);
 }
 
+.rectify-preview-table {
+  min-width: 1280px;
+  table-layout: auto;
+}
+
+.rectify-pdf-modal-dialog {
+  width: min(1480px, calc(100vw - 2rem));
+  max-width: min(1480px, calc(100vw - 2rem));
+}
+
+.rectify-preview-scroll {
+  overflow-x: auto !important;
+}
+
+.rectify-preview-table th,
+.rectify-preview-table td {
+  white-space: nowrap;
+}
+
+.rectify-preview-table .rectify-description-cell {
+  min-width: 260px;
+  white-space: normal;
+}
 .table-responsive {
   position: relative;
   max-width: 100%;

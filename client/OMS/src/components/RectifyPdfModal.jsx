@@ -27,6 +27,10 @@ const triggerFileDownload = (blob, fileName) => {
   window.URL.revokeObjectURL(objectUrl);
 };
 
+const isReviewRowValid = (row = {}) =>
+  Boolean(String(row?.order_id || "").trim() && String(row?.item_code || "").trim())
+  && Number(row?.quantity) > 0;
+
 const isPreviousOrderCheckable = (row = {}) =>
   String(row?.change_type || "").trim().toLowerCase() === "new";
 
@@ -76,10 +80,10 @@ const RectifyPdfModal = ({
   };
 
   const selectableRows = useMemo(
-    () =>
-      previewRows.filter(
-        (row) => ["new", "modified"].includes(String(row?.change_type || "").toLowerCase()),
-      ),
+    () => previewRows.filter((row) => {
+      const type = String(row?.change_type || "").toLowerCase();
+      return ["new", "modified"].includes(type) || (type === "review" && isReviewRowValid(row));
+    }),
     [previewRows],
   );
 
@@ -92,6 +96,12 @@ const RectifyPdfModal = ({
       nextState[row.row_id] = checked;
     });
     setCheckedRows(nextState);
+  };
+
+  const updatePreviewRow = (rowId, field, value) => {
+    setPreviewRows((rows) => rows.map((row) =>
+      row.row_id === rowId ? { ...row, [field]: value } : row,
+    ));
   };
 
   const handlePreview = async () => {
@@ -231,10 +241,11 @@ const RectifyPdfModal = ({
 
   const summary = result?.summary || null;
   const apply = result?.apply || null;
+  const invalidEntries = Array.isArray(result?.invalid_entries) ? result.invalid_entries : [];
 
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
-      <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
+      <div className="modal-dialog modal-dialog-centered modal-xl rectify-pdf-modal-dialog" role="document">
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title">{title}</h5>
@@ -331,8 +342,8 @@ const RectifyPdfModal = ({
                   </span>
                 </div>
                 <div className="card-body p-0">
-                  <div className="table-responsive" style={{ maxHeight: "320px" }}>
-                    <table className="table table-sm table-hover align-middle mb-0">
+                  <div className="table-responsive rectify-preview-scroll" style={{ maxHeight: "320px" }}>
+                    <table className="table table-sm table-hover align-middle mb-0 rectify-preview-table">
                       <thead className="table-light">
                         <tr>
                           <th style={{ width: "42px" }}>
@@ -347,7 +358,7 @@ const RectifyPdfModal = ({
                           <th>Type</th>
                           <th>Order ID</th>
                           <th>Item</th>
-                          <th>Description</th>
+                          <th className="rectify-description-cell">Description</th>
                           <th>Qty</th>
                           <th>ETD</th>
                           <th>Order Date</th>
@@ -359,7 +370,8 @@ const RectifyPdfModal = ({
                       <tbody>
                         {previewRows.map((row) => {
                           const rowType = String(row?.change_type || "").toLowerCase();
-                          const isSelectable = rowType === "new" || rowType === "modified";
+                          const isReviewRow = rowType === "review";
+                          const isSelectable = rowType === "new" || rowType === "modified" || (isReviewRow && isReviewRowValid(row));
                           return (
                             <tr key={row.row_id}>
                               <td>
@@ -384,13 +396,13 @@ const RectifyPdfModal = ({
                                   </span>
                                 )}
                               </td>
-                              <td>{row.order_id || "-"}</td>
-                              <td>{row.item_code || "-"}</td>
-                              <td>{row.description || "-"}</td>
-                              <td>{Number(row.quantity || 0)}</td>
-                              <td>{toDateText(row.ETD)}</td>
-                              <td>{toDateText(row.order_date)}</td>
-                              <td>{row.existing_order_status || "-"}</td>
+                              <td className="text-nowrap">{isReviewRow ? <input className="form-control form-control-sm" value={row.order_id || ""} onChange={(e) => updatePreviewRow(row.row_id, "order_id", e.target.value)} /> : row.order_id || "-"}</td>
+                              <td className="text-nowrap">{isReviewRow ? <input className="form-control form-control-sm" value={row.item_code || ""} onChange={(e) => updatePreviewRow(row.row_id, "item_code", e.target.value)} /> : row.item_code || "-"}</td>
+                              <td className="rectify-description-cell">{isReviewRow ? <input className="form-control form-control-sm" value={row.description || ""} onChange={(e) => updatePreviewRow(row.row_id, "description", e.target.value)} /> : row.description || "-"}</td>
+                              <td>{isReviewRow ? <input type="number" min="0" className="form-control form-control-sm" value={row.quantity ?? ""} onChange={(e) => updatePreviewRow(row.row_id, "quantity", e.target.value)} /> : Number(row.quantity || 0)}</td>
+                              <td className="text-nowrap">{isReviewRow ? <input className="form-control form-control-sm" value={row.ETD || ""} onChange={(e) => updatePreviewRow(row.row_id, "ETD", e.target.value)} /> : toDateText(row.ETD)}</td>
+                              <td className="text-nowrap">{isReviewRow ? <input className="form-control form-control-sm" value={row.order_date || ""} onChange={(e) => updatePreviewRow(row.row_id, "order_date", e.target.value)} /> : toDateText(row.order_date)}</td>
+                              <td className="text-nowrap">{row.existing_order_status || "-"}</td>
                               <td>
                                 {Array.isArray(row.changed_fields) && row.changed_fields.length > 0
                                   ? row.changed_fields.join(", ")
@@ -432,6 +444,11 @@ const RectifyPdfModal = ({
             )}
 
             {error && <div className="alert alert-danger py-2 mb-0">{error}</div>}
+            {invalidEntries.length > 0 && (
+              <div className="alert alert-warning py-2 mb-0">
+                {invalidEntries.length} row{invalidEntries.length === 1 ? "" : "s"} require manual review and will not be applied.
+              </div>
+            )}
             {result?.message && !error && (
               <div className="alert alert-success py-2 mb-0">{result.message}</div>
             )}
