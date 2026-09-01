@@ -13,6 +13,7 @@ const LabelTransaction = require("../models/labelTransaction.model");
 const LabelUsage = require("../models/labelUsage.model");
 const LabelStorageState = require("../models/labelStorageState.model");
 const LabelMigrationConflict = require("../models/labelMigrationConflict.model");
+const { isSafePreCutoverStorageState } = require('../services/labels/labelStorage.service');
 const {
   getVendorCountry,
   getVendorId,
@@ -269,13 +270,7 @@ const buildVerificationReport = ({
       actual: usageProjectionMismatches,
     },
     storage_safety: {
-      passed:
-        Number(storageState?.schema_version) >= 2 &&
-        ["backfilled", "verifying", "verified"].includes(
-          String(storageState?.migration_status || ""),
-        ) &&
-        String(storageState?.read_source || "") === "legacy" &&
-        String(storageState?.write_mode || "") === "legacy",
+      passed: isSafePreCutoverStorageState(storageState),
       expected: {
         schema_version: 2,
         migration_status: "backfilled|verifying|verified",
@@ -317,14 +312,8 @@ const buildVerificationReport = ({
       };
     })(),
   };
-  if (String(storageState?.migration_status || '') === 'backfilled_with_conflicts') {
-    checks.storage_safety.passed =
-      Number(storageState?.schema_version) >= 2 &&
-      String(storageState?.read_source || '') === 'legacy' &&
-      String(storageState?.write_mode || '') === 'legacy';
-    checks.storage_safety.expected.migration_status =
-      'backfilled|backfilled_with_conflicts|verifying|verified';
-  }
+  checks.storage_safety.expected.migration_status =
+    'backfilled|backfilled_with_conflicts|verifying|verified';
   const derivedUsedLabels = normalizeSerials(inspector?.used_labels);
 
   return {

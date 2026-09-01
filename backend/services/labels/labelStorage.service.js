@@ -11,6 +11,18 @@ const DEFAULT_LABEL_STORAGE_STATE = Object.freeze({
   legacy_fallback_enabled: true,
 });
 const MODERN_READ_STATUSES = new Set(["verified", "modern"]);
+const SAFE_PRE_CUTOVER_STATUSES = new Set([
+  "backfilled",
+  "backfilled_with_conflicts",
+  "verifying",
+  "verified",
+]);
+
+const isSafePreCutoverStorageState = (state) =>
+  Number(state?.schema_version) >= 2 &&
+  SAFE_PRE_CUTOVER_STATUSES.has(String(state?.migration_status || "")) &&
+  String(state?.read_source || "") === "legacy" &&
+  String(state?.write_mode || "") === "legacy";
 
 class LabelStorageService {
   constructor({
@@ -141,3 +153,4 @@ class LabelStorageService {
 module.exports = new LabelStorageService();
 module.exports.DEFAULT_LABEL_STORAGE_STATE = DEFAULT_LABEL_STORAGE_STATE;
 module.exports.LabelStorageService = LabelStorageService;
+module.exports.isSafePreCutoverStorageState = isSafePreCutoverStorageState;

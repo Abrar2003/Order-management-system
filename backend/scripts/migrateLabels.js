@@ -15,6 +15,7 @@ const LabelUsage = require("../models/labelUsage.model");
 const LabelStorageState = require("../models/labelStorageState.model");
 const LabelMigrationConflict = require("../models/labelMigrationConflict.model");
 const { coerceVendorValueForSchema } = require("../helpers/vendorRef");
+const { isSafePreCutoverStorageState } = require("../services/labels/labelStorage.service");
 
 const MIGRATION_SOURCE = "legacy-label-backfill-v2";
 const ALLOCATION_ACTIONS = new Set([
@@ -929,14 +930,7 @@ const buildMigrationAnalysis = (snapshot = {}) => {
   );
 
   const state = snapshot.storageState;
-  if (
-    state &&
-    (
-      String(state.read_source || "legacy") !== "legacy" ||
-      String(state.write_mode || "legacy") !== "legacy" ||
-      ["verified", "modern"].includes(String(state.migration_status || ""))
-    )
-  ) {
+  if (state && !isSafePreCutoverStorageState(state)) {
     addConflict(analysis, {
       conflictType: "unsafe_storage_state",
       severity: "error",

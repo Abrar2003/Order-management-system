@@ -205,13 +205,25 @@ const getInspectorDisplayName = (inspector = {}, fallback = "Unknown QC") =>
     inspector?.user?.name || inspector?.user?.email || "",
   ).trim() || fallback;
 
-const collectGlobalInspectorLabelSets = async ({ excludeInspectorIds = [] } = {}) => {
+const collectGlobalInspectorLabelSets = async ({
+  excludeInspectorIds = [],
+  labels = [],
+} = {}) => {
+  const requestedLabels = normalizeInspectorLabels(labels);
+  const labelMatch = requestedLabels.length > 0
+    ? {
+        $or: [
+          { alloted_labels: { $in: requestedLabels } },
+          { rejected_labels: { $in: requestedLabels } },
+        ],
+      }
+    : {};
   const excludedIdSet = new Set(
     (Array.isArray(excludeInspectorIds) ? excludeInspectorIds : [excludeInspectorIds])
       .filter(Boolean)
       .map((id) => String(id)),
   );
-  const inspectors = await Inspector.find({})
+  const inspectors = await Inspector.find(labelMatch)
     .select("_id user alloted_labels rejected_labels")
     .populate("user", "name email")
     .lean();
@@ -245,9 +257,10 @@ const collectGlobalInspectorLabelSets = async ({ excludeInspectorIds = [] } = {}
     labelState.rejected.forEach((label) => rejected.add(label));
   });
 
-  const usedLabelMatch = excludedUserIdSet.size > 0
-    ? { inspector: { $nin: [...excludedUserIdSet] } }
-    : {};
+  const usedLabelMatch = {
+    ...(requestedLabels.length > 0 ? { labels_added: { $in: requestedLabels } } : {}),
+    ...(excludedUserIdSet.size > 0 ? { inspector: { $nin: [...excludedUserIdSet] } } : {}),
+  };
   const usedLabelRecords = await Inspection.find(usedLabelMatch)
     .select("labels_added")
     .lean();
@@ -284,7 +297,7 @@ const getAllocatedElsewhereDetails = (labels = [], allocatedByLabel = new Map())
   };
 };
 
-exports.__test__ = { getAllocatedElsewhereDetails, getInspectorUserId };
+exports.__test__ = { collectGlobalInspectorLabelSets, getAllocatedElsewhereDetails, getInspectorUserId };
 
 const QC_USER_FILTER = {
   $and: [
@@ -576,6 +589,7 @@ exports.allocateLabels = async (req, res) => {
 
     const globalLabelSets = await collectGlobalInspectorLabelSets({
       excludeInspectorIds: [req.params.id],
+      labels: normalizedLabels,
     });
     const allocatedElsewhere = normalizedLabels.filter((label) =>
       globalLabelSets.allocated.has(label),
@@ -759,6 +773,7 @@ exports.transferLabels = async (req, res) => {
 
     const globalLabelSets = await collectGlobalInspectorLabelSets({
       excludeInspectorIds: [fromInspectorId, toInspectorId],
+      labels: normalizedLabels,
     });
     const rejectedElsewhere = normalizedLabels.filter((label) =>
       globalLabelSets.rejected.has(label),
@@ -970,6 +985,7 @@ exports.replaceLabels = async (req, res) => {
 
     const globalLabelSets = await collectGlobalInspectorLabelSets({
       excludeInspectorIds: [req.params.id],
+      labels: normalizedLabels,
     });
     const allocatedElsewhere = normalizedLabels.filter((label) =>
       globalLabelSets.allocated.has(label),

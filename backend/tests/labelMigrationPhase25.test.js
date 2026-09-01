@@ -588,6 +588,21 @@ test('partial migration never changes legacy read or write mode', () => {
     write_mode: 'legacy',
   });
 });
+for (const migration_status of ['backfilled', 'verified']) {
+  test(`${migration_status} with legacy reads and writes is safe before cutover`, () => {
+    const result = buildMigrationAnalysis(snapshot({
+      storageState: { schema_version: 2, migration_status, read_source: 'legacy', write_mode: 'legacy' },
+    }));
+    assert.equal(result.conflicts.some((entry) => entry.conflict_type === 'unsafe_storage_state'), false);
+  });
+}
+
+test('non-legacy routing remains an unsafe storage state', () => {
+  const result = buildMigrationAnalysis(snapshot({
+    storageState: { schema_version: 2, migration_status: 'verified', read_source: 'modern', write_mode: 'legacy' },
+  }));
+  assert.equal(result.conflicts.some((entry) => entry.conflict_type === 'unsafe_storage_state' && entry.severity === 'error'), true);
+});
 
 test('resolved ownership affects only canonical projection, not legacy claims', () => {
   const inspectorA = objectId();
