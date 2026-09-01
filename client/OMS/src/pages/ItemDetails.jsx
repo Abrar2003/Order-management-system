@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import { usePermissions } from "../auth/PermissionContext";
+import { confirmFileDeletion } from "../utils/fileDeletePassword";
 import Navbar from "../components/Navbar";
 import FilePreviewModal from "../components/FilePreviewModal";
 import QcItemComplaintsSection from "../components/complaints/QcItemComplaintsSection";
@@ -939,7 +940,7 @@ const ItemDetails = () => {
     const fileType = String(entry?.fileType || entry?.value || "").trim();
     const fileKey = String(entry?.file?.key || entry?.file?.public_id || "").trim();
     if (!itemId || !fileType || !fileKey || deletingFileKey) return;
-    if (!window.confirm(`Delete ${entry.label || "this file"}?`)) return;
+    if (!confirmFileDeletion(entry.label || "this file")) return;
 
     try {
       setDeletingFileKey(fileKey);

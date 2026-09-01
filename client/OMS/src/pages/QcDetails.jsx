@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "../api/axios";
+import { confirmFileDeletion } from "../utils/fileDeletePassword";
 import Navbar from "../components/Navbar";
 import UpdateQcModal from "../components/UpdateQcModal";
 import ShippingModal from "../components/ShippingModal";
@@ -1985,10 +1986,7 @@ const QcDetails = () => {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Delete ${activeRelatedFileConfig?.label || "selected file"}?`,
-    );
-    if (!confirmed) return;
+    if (!confirmFileDeletion(activeRelatedFileConfig?.label || "selected file")) return;
 
     try {
       setDeletingRelatedFile(true);
@@ -2394,10 +2392,7 @@ const QcDetails = () => {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Delete ${selectedDeletableQcImages.length} selected image${selectedDeletableQcImages.length === 1 ? "" : "s"}?`,
-    );
-    if (!confirmed) return;
+    if (!confirmFileDeletion(`${selectedDeletableQcImages.length} selected image${selectedDeletableQcImages.length === 1 ? "" : "s"}`)) return;
 
     const imageIds = selectedDeletableQcImages
       .map((image) => String(image?._id || "").trim())

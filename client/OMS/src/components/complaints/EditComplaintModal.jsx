@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { confirmFileDeletion } from "../../utils/fileDeletePassword";
 import {
   COMPLAINT_FILE_ACCEPT,
   COMPLAINT_FILE_MAX_COUNT,
@@ -191,6 +192,8 @@ const EditComplaintModal = ({
       setError(getComplaintFileLimitMessage());
       return;
     }
+
+    if ((replaceFiles || removeFileIds.length > 0) && !confirmFileDeletion("the selected complaint file(s)")) return;
 
     const formData = new FormData();
     formData.append("brand", toText(form.brand));

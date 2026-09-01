@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
+import { confirmFileDeletion } from "../utils/fileDeletePassword";
 import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
 import ProductImageThumbnail from "../components/ProductImageThumbnail";
@@ -118,7 +119,7 @@ const Finishes = () => {
 
   const handleDeleteBackImage = async (finish) => {
     const finishId = normalizeText(finish?._id);
-    if (!finishId || !window.confirm("Delete this temporary back image?")) return;
+    if (!finishId || !confirmFileDeletion("this temporary back image")) return;
 
     try {
       setError("");
