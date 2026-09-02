@@ -639,7 +639,14 @@ const DailyReport = () => {
                         style={{ cursor: "pointer" }}
                         onClick={() => navigate(`/qc/${request.qc_id}`)}
                       >
-                        <td>{formatDateDDMMYYYY(request.request_date)}</td>
+                        <td>
+                          <div>{formatDateDDMMYYYY(request.request_date)}</div>
+                          {(request.is_inspection_done || request.goods_not_ready || request.is_rejected) && request.inspection_date && (
+                            <div className="small text-secondary">
+                              {request.inspection_date_label || "Inspection"}: {formatDateDDMMYYYY(request.inspection_date)}
+                            </div>
+                          )}
+                        </td>
                         <td>{request.order_id || "N/A"}</td>
                         <td>
                           <div>{request.item_code || "N/A"}</div>

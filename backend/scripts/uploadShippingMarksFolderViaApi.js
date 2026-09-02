@@ -13,6 +13,8 @@ const ITEM_FILE_TYPES_BY_FOLDER = new Map([
   ["flat carton", "flat_carton"],
   ["3d carton", "three_d_carton"],
   ["satin", "satin_label"],
+  ["logistics labels", "logistics_ean"],
+  ["logistics ean", "logistics_ean"],
 ]);
 const ITEM_FILE_TYPE_CONFIG = Object.freeze({
   shipping_marks: {
@@ -34,6 +36,7 @@ const ITEM_FILE_TYPE_CONFIG = Object.freeze({
     field: "satin_label",
     requiresSatinLabelRequired: true,
   },
+  logistics_ean: { label: "Logistics EAN", field: "logistics_ean" },
 });
 const ISSUE_STATUSES = new Set([
   "lookup-failed",
@@ -1185,3 +1188,6 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
+
+
+

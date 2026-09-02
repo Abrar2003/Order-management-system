@@ -11440,6 +11440,12 @@ exports.getDailyReport = async (req, res) => {
           const isInspectionDone =
             normalizedInspectionStatus ===
             normalizeInspectionStatus(INSPECTION_RECORD_STATUS.DONE);
+          const isStatusUpdate = goodsNotReady || isRejected;
+          const displayInspectionDate = toReportDateKey(
+            isStatusUpdate
+              ? latestInspection?.updatedAt || latestInspection?.createdAt
+              : latestInspection?.inspection_date,
+          );
           const requestRemarks = normalizeText(requestEntry?.remarks || "");
           const isTransferRequestRemark =
             /^transferred\s+(from|to)\b/i.test(requestRemarks);
@@ -11453,6 +11459,8 @@ exports.getDailyReport = async (req, res) => {
               isLatestInspectionRejectedOnReportDate
               ? reportDate
               : requestDateKey,
+            inspection_date: displayInspectionDate,
+            inspection_date_label: isStatusUpdate ? "Updated" : "Inspection",
             order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
             brand: qc?.order_meta?.brand || qc?.order?.brand || "N/A",
             vendor:
