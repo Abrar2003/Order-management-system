@@ -196,6 +196,8 @@ const ProductDatabaseDetails = () => {
   const [actionLoading, setActionLoading] = useState("");
   const [showEditModal, setShowEditModal] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
+  const [productImageUrl, setProductImageUrl] = useState("");
+  const [openingFileType, setOpeningFileType] = useState("");
 
   const fetchDetails = useCallback(async () => {
     try {
@@ -269,6 +271,48 @@ const ProductDatabaseDetails = () => {
     return [...ITEM_FILE_OPTIONS.filter((option) => option.value !== "shipping_marks"), ...SHIPPING_MARKS_SUB_OPTIONS].flatMap((option) => getItemFileValues(source, option).map((file) => ({ ...option, file }))).filter((entry) => hasStoredItemFile(entry.file));
   }, [row?.item_files]);
 
+  useEffect(() => {
+    const itemId = String(row?.id || "").trim();
+    if (!itemId || !hasStoredItemFile(row?.item_files?.image)) {
+      setProductImageUrl("");
+      return undefined;
+    }
+
+    let cancelled = false;
+    api.get(`/items/${encodeURIComponent(itemId)}/files/product_image/url`)
+      .then((response) => {
+        if (!cancelled) setProductImageUrl(String(response?.data?.data?.url || "").trim());
+      })
+      .catch(() => {
+        if (!cancelled) setProductImageUrl("");
+      });
+    return () => { cancelled = true; };
+  }, [row?.id, row?.item_files?.image]);
+
+  const handlePreviewFile = async (entry) => {
+    const itemId = String(row?.id || "").trim();
+    const fileType = String(entry?.value || "").trim();
+    if (!itemId || !fileType || openingFileType) return;
+
+    try {
+      setOpeningFileType(fileType);
+      const response = await api.get(
+        `/items/${encodeURIComponent(itemId)}/files/${encodeURIComponent(fileType)}/url`,
+      );
+      const url = String(response?.data?.data?.url || "").trim();
+      if (!url) throw new Error("File URL is not available.");
+      setPreviewFile({
+        label: entry.label,
+        file: { ...entry.file, url },
+        previewMode: entry.previewMode,
+      });
+    } catch (previewError) {
+      setError(previewError?.response?.data?.message || previewError?.message || "Failed to open file preview.");
+    } finally {
+      setOpeningFileType("");
+    }
+  };
+
   const rawValueRows = useMemo(
     () => normalizeRawValues(productDatabase?.product_specs?.raw_values),
     [productDatabase?.product_specs?.raw_values],
@@ -334,7 +378,7 @@ const ProductDatabaseDetails = () => {
 
         {!loading && row && (
           <div className="row g-4">
-          <div className="col-xl-6"><DetailCard title="Item Files">{getStoredItemFileUrl(row?.item_files?.image) && <button type="button" className="btn p-0 border-0 mb-3" onClick={() => setPreviewFile({ label: "Product Image", file: row.item_files.image, previewMode: "image" })}><img src={getStoredItemFileUrl(row.item_files.image)} alt={`${row.item_code || "Item"} product`} className="img-fluid rounded border" style={{ maxHeight: "260px", objectFit: "contain" }} /></button>}{itemFiles.length ? <div className="d-flex flex-wrap gap-2">{itemFiles.map((entry, index) => <button key={`${entry.value}-${index}`} type="button" className="btn btn-outline-primary btn-sm" onClick={() => setPreviewFile({ label: entry.label, file: entry.file, previewMode: entry.previewMode })}>{entry.label}</button>)}</div> : <div className="text-secondary small">No item files uploaded.</div>}</DetailCard></div>
+          <div className="col-xl-6"><DetailCard title="Item Files">{productImageUrl && <button type="button" className="btn p-0 border-0 mb-3" onClick={() => handlePreviewFile({ label: "Product Image", value: "product_image", file: row.item_files.image, previewMode: "image" })}><img src={productImageUrl} alt={`${row.item_code || "Item"} product`} className="img-fluid rounded border" style={{ maxHeight: "260px", objectFit: "contain" }} /></button>}{itemFiles.length ? <div className="d-flex flex-wrap gap-2">{itemFiles.map((entry, index) => <button key={`${entry.value}-${index}`} type="button" className="btn btn-outline-primary btn-sm" onClick={() => handlePreviewFile(entry)} disabled={Boolean(openingFileType)}>{openingFileType === entry.value ? "Opening..." : entry.label}</button>)}</div> : <div className="text-secondary small">No item files uploaded.</div>}</DetailCard></div>
             <div className="col-xl-6">
               <DetailCard title="Item Summary">
                 <KeyValueGrid
