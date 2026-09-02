@@ -163,7 +163,7 @@ const buildTemplatePayloadFromDraft = (draft = {}) => ({
   })),
 });
 
-const TemplateEditorModal = ({
+const AdvancedTemplateEditorModal = ({
   draft,
   setDraft,
   onClose,
@@ -790,6 +790,27 @@ const TemplateEditorModal = ({
   );
 };
 
+const TemplateEditorModal = ({ draft, setDraft, onClose, onSave, saving, error, isEdit }) => {
+  const change = (groupIndex, fieldIndex, name, value) => setDraft((current) => ({
+    ...current,
+    groups: current.groups.map((group, index) => index !== groupIndex ? group : {
+      ...group,
+      ...(fieldIndex === null ? { [name]: value } : { fields: group.fields.map((field, innerIndex) => innerIndex === fieldIndex ? { ...field, [name]: value } : field) }),
+    }),
+  }));
+  return <div className="modal d-block om-modal-backdrop" tabIndex="-1"><div className="modal-dialog modal-lg"><div className="modal-content">
+    <div className="modal-header"><div><h5 className="modal-title">{isEdit ? "Edit Product Type Template" : "Create Product Type Template"}</h5><div className="small text-muted">Only group names, field labels, and field types are needed.</div></div><button type="button" className="btn-close" onClick={onClose} /></div>
+    <div className="modal-body">{error && <div className="alert alert-danger">{error}</div>}
+      <div className="mb-4"><label className="form-label">Template Name</label><input className="form-control" value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} /></div>
+      <div className="d-flex justify-content-between mb-3"><h6>Groups</h6><button type="button" className="btn btn-outline-primary btn-sm" onClick={() => setDraft((current) => ({ ...current, groups: [...current.groups, createTemplateGroupDraft()] }))}>Add Group</button></div>
+      <div className="d-grid gap-3">{draft.groups.map((group, groupIndex) => <div className="card om-card" key={groupIndex}><div className="card-body">
+        <div className="d-flex gap-2 mb-3"><input className="form-control" placeholder="Group name" value={group.label} onChange={(event) => change(groupIndex, null, "label", event.target.value)} /><button type="button" className="btn btn-outline-danger" onClick={() => setDraft((current) => ({ ...current, groups: current.groups.filter((_, index) => index !== groupIndex) }))}>Remove</button></div>
+        {group.fields.map((field, fieldIndex) => <div className="row g-2 mb-2" key={fieldIndex}><div className="col-md-6"><input className="form-control" placeholder="Field label" value={field.label} onChange={(event) => change(groupIndex, fieldIndex, "label", event.target.value)} /></div><div className="col-md-4"><select className="form-select" value={field.input_type} onChange={(event) => change(groupIndex, fieldIndex, "input_type", event.target.value)}>{PRODUCT_TYPE_TEMPLATE_INPUT_TYPES.map((type) => <option key={type}>{type}</option>)}</select></div><div className="col-md-2"><button type="button" className="btn btn-outline-danger w-100" onClick={() => setDraft((current) => ({ ...current, groups: current.groups.map((entry, index) => index !== groupIndex ? entry : { ...entry, fields: entry.fields.filter((_, index) => index !== fieldIndex) }) }))}>Remove</button></div></div>)}
+        <button type="button" className="btn btn-outline-primary btn-sm" onClick={() => setDraft((current) => ({ ...current, groups: current.groups.map((entry, index) => index !== groupIndex ? entry : { ...entry, fields: [...entry.fields, serializeDraftField(createTemplateFieldDraft())] }) }))}>Add Field</button>
+      </div></div>)}</div>
+    </div><div className="modal-footer"><button type="button" className="btn btn-outline-secondary" onClick={onClose}>Close</button><button type="button" className="btn btn-primary" disabled={saving} onClick={onSave}>{saving ? "Saving..." : isEdit ? "Save Template" : "Create Template"}</button></div>
+  </div></div></div>;
+};
 const ProductTypeTemplates = () => {
   const { hasPermission, isAdmin, role } = usePermissions();
   const canViewTemplates = hasPermission("product_type_templates", "view");
@@ -1252,3 +1273,4 @@ const ProductTypeTemplates = () => {
 };
 
 export default ProductTypeTemplates;
+
