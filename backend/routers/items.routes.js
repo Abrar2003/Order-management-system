@@ -283,7 +283,6 @@ router.get(
 router.get(
   "/item-database/:id",
   auth,
-  requirePermission("product_database", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getItemDatabaseProductDetails,
 );
@@ -502,3 +501,4 @@ router.delete(
 );
 
 module.exports = router;
+

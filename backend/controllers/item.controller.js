@@ -32,6 +32,7 @@ const {
   assertUserDataAccess,
 } = require("../services/userDataAccess.service");
 const { notifyUsers } = require("../services/notificationService");
+const { userHasPermission } = require("../services/permission.service");
 const {
   deriveOrderProgress,
   deriveOrderStatus,
@@ -1639,7 +1640,14 @@ const PRODUCT_DATABASE_ITEM_SELECT = [
   "kd",
   "mounting_file_needed",
   "claim_percentage",
+  "cad_file",
+  "pis_file",
+  "assembly_file",
+  "logistics_ean",
+  "satin_label",
   "mounting_file",
+  "packeging_ppt",
+  "shipping_marks",
   "product_type",
   "product_specs",
   "pd_item_sizes",
@@ -3547,6 +3555,12 @@ const buildItemDatabaseRow = ({
   product_database_status: productDatabaseRow?.pd_checked || NOT_SET_STATUS,
   product_database: productDatabaseRow,
   pd_completion: productDatabaseRow?.pd_completion || null,
+  item_files: {
+    image: item?.image || {}, cad_file: item?.cad_file || {}, pis_file: item?.pis_file || {},
+    assembly_file: item?.assembly_file || {}, logistics_ean: item?.logistics_ean || {},
+    satin_label: item?.satin_label || {}, mounting_file: item?.mounting_file || {},
+    packeging_ppt: item?.packeging_ppt || {}, shipping_marks: item?.shipping_marks || {},
+  },
 });
 
 const getItemDatabaseDataset = async ({
@@ -3815,9 +3829,21 @@ exports.getItemDatabaseProductDetails = async (req, res) => {
       });
     }
 
+    const canViewProductDatabase = await userHasPermission(req.user, "product_database", "view");
+    const qcId = normalizeTextField(req.query?.qc_id);
+    const isQcUser = normalizeTextField(req.user?.role).toLowerCase() === "qc";
     const item = await Item.findOne(applyItemDataAccess({ _id: id }, req.user))
       .select(PRODUCT_DATABASE_ITEM_SELECT)
       .lean();
+    if (!canViewProductDatabase) {
+      const qc = qcId && mongoose.Types.ObjectId.isValid(qcId)
+        ? await QC.findById(qcId).select("inspector item.item_code").lean()
+        : null;
+      const currentUserId = String(req.user?._id || req.user?.id || "");
+      if (!isQcUser || !item || !qc || String(qc.inspector || "") !== currentUserId || normalizeLookupKey(qc?.item?.item_code) !== normalizeLookupKey(item?.code)) {
+        return res.status(403).json({ success: false, message: "Product Database details are available only from your assigned QC record." });
+      }
+    }
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -8531,3 +8557,4 @@ exports.deleteItemFile = async (req, res) => {
     });
   }
 };
+

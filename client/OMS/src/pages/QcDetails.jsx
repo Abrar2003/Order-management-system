@@ -251,6 +251,8 @@ const formatClaimPercentage = (value) => {
   return parsed.toFixed(2).replace(/\.?0+$/, "");
 };
 
+const getTenureClaimPercentage = (tenure = {}) => { const delivered = Number(tenure?.delivered_quantity) || 0; return delivered > 0 ? ((Number(tenure?.rejected_quantity) || 0) / delivered) * 100 : 0; };
+
 const formatInspectionStatusLabel = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "inspection done") return "Inspection Done";
@@ -547,6 +549,7 @@ const QcDetails = () => {
   const { id } = useParams();
   const [qc, setQc] = useState(null);
   const [claimWarningOpen, setClaimWarningOpen] = useState(false);
+  const [claimWarningIsAutomatic, setClaimWarningIsAutomatic] = useState(false);
   const [claimWarningSeconds, setClaimWarningSeconds] = useState(
     CLAIM_WARNING_DELAY_SECONDS,
   );
@@ -1094,6 +1097,7 @@ const QcDetails = () => {
     };
   }, [qc]);
   const claimPercentage = itemMasterDetails.claimPercentage;
+  const claimTenures = Array.isArray(qc?.item_master?.claim_tenures) ? qc.item_master.claim_tenures : [];
 
   useEffect(() => {
     if (claimPercentage <= CLAIM_WARNING_THRESHOLD || !qc?._id) {
@@ -1124,7 +1128,7 @@ const QcDetails = () => {
   }, [claimPercentage, qc?._id]);
 
   const acknowledgeClaimWarning = useCallback(() => {
-    if (claimWarningSeconds > 0 || !qc?._id) return;
+    if ((claimWarningIsAutomatic && claimWarningSeconds > 0) || !qc?._id) return;
     const acknowledgementKey =
       `qc-claim-warning:${String(qc._id)}:${formatClaimPercentage(claimPercentage)}`;
     globalThis.sessionStorage?.setItem(acknowledgementKey, "true");
@@ -2724,6 +2728,12 @@ const QcDetails = () => {
                 </>
               )}
 
+              {qc?.item_master?._id && (
+                <button type="button" className="btn btn-outline-primary btn-sm" onClick={() => navigate(`/product-database-details/${encodeURIComponent(qc.item_master._id)}?qc_id=${encodeURIComponent(qc._id)}`)}>
+                  Product Database
+                </button>
+              )}
+
               <button
                 type="button"
                 className="btn btn-outline-primary btn-sm"
@@ -3017,10 +3027,10 @@ const QcDetails = () => {
         )}
 
         <div className="card om-card qc-details-main-card">
-          <div className="qc-claim-percentage-corner-tag">
+          <button type="button" className="qc-claim-percentage-corner-tag border-0" onClick={() => { setClaimWarningIsAutomatic(false); setClaimWarningSeconds(0); setClaimWarningOpen(true); }} title="View claim tenure details">
             <span>Claim percentage</span>
             <strong>{formatClaimPercentage(claimPercentage)}%</strong>
-          </div>
+          </button>
           <div className="card-body d-grid gap-4">
             <section>
               <h3 className="h6 mb-3 qc-details-section-title">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${getOptionText(qc?.order?.vendor || qc?.order_meta?.vendor) || "N/A"} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
@@ -4153,9 +4163,10 @@ const QcDetails = () => {
                 Item <strong>{itemMasterDetails.code}</strong> has a claim percentage
                 greater than {CLAIM_WARNING_THRESHOLD}%.
               </p>
+              {claimTenures.length > 0 && <div className="table-responsive mt-3"><table className="table table-sm mb-0"><thead><tr><th>Tenure</th><th>Delivered</th><th>Rejected</th><th>Claim</th></tr></thead><tbody>{claimTenures.map((tenure, index) => <tr key={tenure?._id || index}><td>{formatDateDDMMYYYY(tenure.from_date)} - {formatDateDDMMYYYY(tenure.to_date)}</td><td>{tenure.delivered_quantity}</td><td>{tenure.rejected_quantity}</td><td>{formatClaimPercentage(getTenureClaimPercentage(tenure))}%</td></tr>)}</tbody></table></div>}
             </div>
             <div className="om-notification-popup-footer">
-              {claimWarningSeconds > 0 && (
+              {claimWarningIsAutomatic && claimWarningSeconds > 0 && (
                 <span className="small text-secondary">
                   You can acknowledge in {claimWarningSeconds} second
                   {claimWarningSeconds === 1 ? "" : "s"}...
@@ -4164,7 +4175,7 @@ const QcDetails = () => {
               <button
                 type="button"
                 className="btn btn-danger"
-                disabled={claimWarningSeconds > 0}
+                disabled={claimWarningIsAutomatic && claimWarningSeconds > 0}
                 onClick={acknowledgeClaimWarning}
               >
                 Acknowledge
@@ -4178,3 +4189,9 @@ const QcDetails = () => {
 };
 
 export default QcDetails;
+
+
+
+
+
+

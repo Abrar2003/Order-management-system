@@ -270,6 +270,8 @@ const formatClaimPercentage = (value) => {
   return parsed.toFixed(2).replace(/\.?0+$/, "");
 };
 
+const getTenureClaimPercentage = (tenure = {}) => { const delivered = Number(tenure?.delivered_quantity) || 0; return delivered > 0 ? ((Number(tenure?.rejected_quantity) || 0) / delivered) * 100 : 0; };
+
 const toDateInputValue = (value) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
@@ -418,6 +420,7 @@ export const ClaimPercentageModal = ({
                       <input type="number" min="0" step="1" className="form-control" value={tenure.rejected_quantity} disabled={saving} onChange={(event) => updateTenure(index, "rejected_quantity", event.target.value)} />
                     </div>
                   </div>
+                  <div className="small text-secondary mt-2">Tenure claim percentage: <strong>{formatClaimPercentage(getTenureClaimPercentage(tenure))}%</strong></div>
                 </div>
               ))}
             </div>
@@ -1513,3 +1516,6 @@ const Items = () => {
 };
 
 export default Items;
+
+
+

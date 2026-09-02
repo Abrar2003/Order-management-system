@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import FilePreviewModal from "../components/FilePreviewModal";
+import { ITEM_FILE_OPTIONS, SHIPPING_MARKS_SUB_OPTIONS, getItemFileValues, getStoredItemFileUrl, hasStoredItemFile } from "../constants/itemFiles";
 import { ProductDatabaseModal } from "./ProductDatabase";
 import { formatEan13BarcodeDisplay } from "../utils/barcode";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -185,18 +187,21 @@ const SizeTable = ({ rows = [], type = "item" }) => {
 const ProductDatabaseDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const qcId = normalizeText(searchParams.get("qc_id"));
   const [row, setRow] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [actionLoading, setActionLoading] = useState("");
   const [showEditModal, setShowEditModal] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null);
 
   const fetchDetails = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
-      const response = await api.get(`/items/item-database/${id}`);
+      const response = await api.get(`/items/item-database/${id}`, { params: qcId ? { qc_id: qcId } : {} });
       setRow(response?.data?.data || null);
     } catch (fetchError) {
       setRow(null);
@@ -204,7 +209,7 @@ const ProductDatabaseDetails = () => {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, qcId]);
 
   useEffect(() => {
     fetchDetails();
@@ -259,6 +264,11 @@ const ProductDatabaseDetails = () => {
       return groups;
     }, new Map());
   }, [productDatabase?.product_specs?.fields]);
+  const itemFiles = useMemo(() => {
+    const source = row?.item_files || {};
+    return [...ITEM_FILE_OPTIONS.filter((option) => option.value !== "shipping_marks"), ...SHIPPING_MARKS_SUB_OPTIONS].flatMap((option) => getItemFileValues(source, option).map((file) => ({ ...option, file }))).filter((entry) => hasStoredItemFile(entry.file));
+  }, [row?.item_files]);
+
   const rawValueRows = useMemo(
     () => normalizeRawValues(productDatabase?.product_specs?.raw_values),
     [productDatabase?.product_specs?.raw_values],
@@ -267,13 +277,14 @@ const ProductDatabaseDetails = () => {
   return (
     <>
       <Navbar />
+      {previewFile && <FilePreviewModal title={previewFile.label} url={getStoredItemFileUrl(previewFile.file)} originalName={previewFile.file?.originalName} previewMode={previewFile.previewMode} onClose={() => setPreviewFile(null)} />}
       <div className="container-fluid py-4 om-page product-database-details-page">
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
           <div>
             <button
               type="button"
               className="btn btn-link p-0 mb-2"
-              onClick={() => navigate("/item-database")}
+              onClick={() => navigate(qcId ? `/qc/${encodeURIComponent(qcId)}` : "/item-database")}
             >
               Back to Item Database
             </button>
@@ -323,6 +334,7 @@ const ProductDatabaseDetails = () => {
 
         {!loading && row && (
           <div className="row g-4">
+          <div className="col-xl-6"><DetailCard title="Item Files">{getStoredItemFileUrl(row?.item_files?.image) && <button type="button" className="btn p-0 border-0 mb-3" onClick={() => setPreviewFile({ label: "Product Image", file: row.item_files.image, previewMode: "image" })}><img src={getStoredItemFileUrl(row.item_files.image)} alt={`${row.item_code || "Item"} product`} className="img-fluid rounded border" style={{ maxHeight: "260px", objectFit: "contain" }} /></button>}{itemFiles.length ? <div className="d-flex flex-wrap gap-2">{itemFiles.map((entry, index) => <button key={`${entry.value}-${index}`} type="button" className="btn btn-outline-primary btn-sm" onClick={() => setPreviewFile({ label: entry.label, file: entry.file, previewMode: entry.previewMode })}>{entry.label}</button>)}</div> : <div className="text-secondary small">No item files uploaded.</div>}</DetailCard></div>
             <div className="col-xl-6">
               <DetailCard title="Item Summary">
                 <KeyValueGrid
@@ -493,3 +505,4 @@ const ProductDatabaseDetails = () => {
 };
 
 export default ProductDatabaseDetails;
+
