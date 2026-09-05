@@ -1,8 +1,5 @@
 const mongoose = require("mongoose");
 const SampleWorkflow = require("../models/sampleWorkflow.model");
-const User = require("../models/user.model");
-const { TaskType, Department } = require("../models/workflow");
-const { createWorkflowTask } = require("../services/workflow/workflowStatusService");
 const { BOX_PACKAGING_MODES, BOX_ENTRY_TYPES } = require("../helpers/boxMeasurement");
 const { normalizeUserRoleKey } = require("../helpers/userRole");
 const { calculateTotalPoCbm } = require("../services/orderCbm.service");
@@ -384,24 +381,6 @@ const buildSampleWorkflowMatch = (query = {}) => {
   return match;
 };
 
-const calculateDueDate = (creationDate = new Date()) => {
-  const due = new Date(creationDate);
-  due.setDate(due.getDate() + 2);
-  let hasSunday = false;
-  for (let i = 0; i <= 2; i++) {
-    const checkDate = new Date(creationDate);
-    checkDate.setDate(checkDate.getDate() + i);
-    if (checkDate.getDay() === 0) { // 0 is Sunday
-      hasSunday = true;
-      break;
-    }
-  }
-  if (hasSunday) {
-    due.setDate(due.getDate() + 1);
-  }
-  return due;
-};
-
 exports.getSampleWorkflows = async (req, res) => {
   try {
     const page = parsePositiveInt(req.query.page, 1);
@@ -491,68 +470,10 @@ exports.createSampleWorkflow = async (req, res) => {
 
     await sampleWorkflow.save();
 
-    // Trigger Chain of Commands - Create workflow task for Anzar assigned by Gaurav
-    let task = null;
-    try {
-      const gaurav = await User.findOne({ username: { $regex: /^Gaurav$/i } });
-      const anzar = await User.findOne({ username: { $regex: /^Anzar$/i } });
-
-      if (!gaurav) {
-        console.warn("Auto task creation failed: User 'Gaurav' not found");
-      } else if (!anzar) {
-        console.warn("Auto task creation failed: User 'Anzar' not found");
-      } else {
-        const taskType = await TaskType.findOne({ key: "cad_files" });
-        const department = await Department.findOne({ key: "autocad" });
-
-        if (!taskType) {
-          console.warn("Auto task creation failed: Task type 'cad_files' not found");
-        } else if (!department) {
-          console.warn("Auto task creation failed: Department 'autocad' not found");
-        } else {
-          const due = calculateDueDate(new Date());
-          const year = due.getFullYear();
-          const month = String(due.getMonth() + 1).padStart(2, "0");
-          const day = String(due.getDate()).padStart(2, "0");
-          const dueDateString = `${year}-${month}-${day}`;
-
-          const taskPayload = {
-            title: code, // Take sample code as title
-            task_type_key: "cad_files",
-            assignee_ids: [anzar._id.toString()],
-            upload_required: false,
-            department: department._id.toString(),
-            due_date: dueDateString,
-            brand: sampleWorkflow.brand || "Sample Brand",
-            description: sampleWorkflow.description || `Auto task for Sample Workflow ${code}`,
-            priority: "normal",
-            creation_note: `Automatically triggered from creation of Sample Workflow: ${code}`,
-          };
-
-          const actorObj = {
-            _id: gaurav._id,
-            name: gaurav.name,
-            email: gaurav.email,
-            role: gaurav.role,
-          };
-
-          task = await createWorkflowTask({
-            payload: taskPayload,
-            actor: actorObj,
-            realtimeSource: req,
-          });
-        }
-      }
-    } catch (taskError) {
-      console.error("Failed to automatically trigger workflow task creation:", taskError);
-      // We do not roll back sampleWorkflow.save() as the sample workflow itself is created successfully.
-    }
-
     return res.status(201).json({
       success: true,
       message: "Sample Workflow created successfully",
       data: serializeSampleWorkflow(sampleWorkflow),
-      triggered_task: task ? { _id: task._id, task_no: task.task_no } : null,
     });
   } catch (error) {
     return res.status(error?.statusCode || (isBadRequestError(error) ? 400 : 500)).json({

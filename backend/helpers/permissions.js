@@ -28,7 +28,6 @@ const PERMISSION_MODULES = Object.freeze([
   { key: "items", label: "Items" },
   { key: "product_database", label: "Product Database" },
   { key: "product_type_templates", label: "Product Type Templates" },
-  { key: "workflow", label: "Workflow" },
   { key: "pis", label: "PIS" },
   { key: "uploads", label: "Uploads" },
   { key: "shipments", label: "Shipments" },
@@ -81,11 +80,6 @@ const PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS = Object.freeze([
   "assign",
   "sync",
   "manage",
-]);
-
-const WORKFLOW_ADMIN_ONLY_ACTIONS = Object.freeze([
-  "approve",
-  "delete",
 ]);
 
 const PERMISSION_ADMIN_ONLY_ACTIONS = Object.freeze(PERMISSION_ACTIONS);
@@ -162,12 +156,6 @@ const lockAdminOnlyPermissions = (roleKey, permissions) => {
     }
   });
 
-  WORKFLOW_ADMIN_ONLY_ACTIONS.forEach((action) => {
-    if (permissions?.workflow && action in permissions.workflow) {
-      permissions.workflow[action] = false;
-    }
-  });
-
   PERMISSION_ADMIN_ONLY_ACTIONS.forEach((action) => {
     if (permissions?.permissions && action in permissions.permissions) {
       permissions.permissions[action] = false;
@@ -209,7 +197,6 @@ const buildUserPermissions = () => {
     "items",
     "product_database",
     "product_type_templates",
-    "workflow",
     "pis",
     "shipments",
     "containers",
@@ -243,7 +230,6 @@ const buildQcPermissions = () => {
     "items",
     "pis",
     "product_type_templates",
-    "workflow",
     "shipments",
     "containers",
     "samples",
@@ -350,9 +336,6 @@ const isPermissionCellLocked = (role, moduleKey, action) => {
   ) {
     return true;
   }
-  if (moduleKey === "workflow" && WORKFLOW_ADMIN_ONLY_ACTIONS.includes(action)) {
-    return true;
-  }
   return false;
 };
 
@@ -371,11 +354,6 @@ const buildPermissionMeta = () => ({
       roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
       actions: PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS,
       message: "Product type template create/update/archive rights are admin-only.",
-    },
-    workflow: {
-      roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
-      actions: WORKFLOW_ADMIN_ONLY_ACTIONS,
-      message: "Workflow task approve and delete rights are admin-only.",
     },
     permissions: {
       roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
@@ -407,7 +385,6 @@ module.exports = {
   PIS_ADMIN_ONLY_ACTIONS,
   INSPECTION_MANAGER_PIS_ACTIONS,
   PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS,
-  WORKFLOW_ADMIN_ONLY_ACTIONS,
   canRoleUsePisAction,
   clonePermissions: clone,
   buildPermissionMeta,

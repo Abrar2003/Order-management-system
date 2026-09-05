@@ -1,6 +1,5 @@
 import { createPortal } from "react-dom";
 import NotificationDock from "./NotificationDock";
-import NotificationPopupModal from "./NotificationPopupModal";
 import NotificationToast from "./NotificationToast";
 import { useNotifications } from "./useNotifications";
 
@@ -33,11 +32,6 @@ const NotificationBell = ({ className = "", enabled = true }) => {
           </div>
         </div>
       )}
-
-      <NotificationPopupModal
-        summary={notifications.popupSummary}
-        onAcknowledge={notifications.acknowledgePopup}
-      />
 
       <NotificationToast
         notification={notifications.toast}

@@ -23,7 +23,6 @@ const expectedAuditIds = new Set([
   ...Array.from({ length: 16 }, (_, index) => `ITM-${String(index + 1).padStart(2, "0")}`),
   ...Array.from({ length: 5 }, (_, index) => `VEN-${String(index + 1).padStart(2, "0")}`),
   ...Array.from({ length: 3 }, (_, index) => `SAM-${String(index + 1).padStart(2, "0")}`),
-  ...Array.from({ length: 6 }, (_, index) => `WF-${String(index + 1).padStart(2, "0")}`),
   ...Array.from({ length: 3 }, (_, index) => `CMP-${String(index + 1).padStart(2, "0")}`),
   ...Array.from({ length: 4 }, (_, index) => `OTH-${String(index + 1).padStart(2, "0")}`),
   ...Array.from({ length: 3 }, (_, index) => `SEC-${String(index + 1).padStart(2, "0")}`),
@@ -33,7 +32,7 @@ const countBy = (key) => catalog.capabilities.reduce((counts, capability) => {
   return counts;
 }, {});
 
-test("OMS Knowledge Base V2 loads as a frozen, read-only 74-capability catalog", () => {
+test("OMS Knowledge Base V2 loads as a frozen, read-only 68-capability catalog", () => {
   const validation = validateKnowledgeBase();
 
   assert.equal(Object.isFrozen(getKnowledgeBase()), true);
@@ -42,20 +41,20 @@ test("OMS Knowledge Base V2 loads as a frozen, read-only 74-capability catalog",
   assert.equal(catalog.scope.behaviorChange, false);
   assert.deepEqual(catalog.scope.existingCapabilityAdapters, ["packed_goods", "monthly_shipments", "shipment_cbm"]);
   assert.equal(validation.valid, true, validation.errors.join("\n"));
-  assert.equal(validation.stats.capabilities, 74);
-  assert.equal(validation.stats.auditIds, 74);
-  assert.equal(validation.stats.uncertainties, 25);
+  assert.equal(validation.stats.capabilities, 68);
+  assert.equal(validation.stats.auditIds, 68);
+  assert.equal(validation.stats.uncertainties, 24);
   assert.ok(validation.stats.domains >= 10);
-  assert.ok(validation.stats.collections >= 30);
+  assert.ok(validation.stats.collections >= 27);
   assert.ok(validation.stats.relationships >= 20);
   assert.ok(catalog.capabilities.every((entry) => entry.safety.readOnly && !entry.safety.mutationAllowed));
 });
 
 test("Knowledge Base covers every audited capability ID exactly once", () => {
   const actual = catalog.capabilities.map((entry) => entry.auditId);
-  assert.equal(actual.length, 74);
-  assert.equal(new Set(actual).size, 74);
-  assert.equal(new Set(catalog.capabilities.map((entry) => entry.id)).size, 74);
+  assert.equal(actual.length, 68);
+  assert.equal(new Set(actual).size, 68);
+  assert.equal(new Set(catalog.capabilities.map((entry) => entry.id)).size, 68);
   assert.deepEqual(new Set(actual), expectedAuditIds);
 });
 
@@ -65,7 +64,7 @@ test("audited Assistant recommendation counts cannot drift", () => {
     DIRECT_CAPABILITY: 3,
     EXPORT_ONLY: 5,
     EXTRACT_TO_SERVICE_THEN_CAPABILITY: 28,
-    NOT_ASSISTANT_SAFE: 19,
+    NOT_ASSISTANT_SAFE: 13,
     PRESENTATION_ONLY: 1,
     RAW_MONGO: 9,
   });
@@ -74,12 +73,12 @@ test("audited Assistant recommendation counts cannot drift", () => {
 
 test("audited source-class counts cannot drift", () => {
   assert.deepEqual(countBy("sourceClass"), {
-    CANONICAL: 20,
+    CANONICAL: 15,
     CANONICAL_WITH_FALLBACK: 12,
     DERIVED_HELPER: 9,
     DUPLICATED_LOGIC: 23,
     PRESENTATION_ONLY: 2,
-    RAW_COLLECTION: 7,
+    RAW_COLLECTION: 6,
     UNCLEAR: 1,
   });
 });
@@ -188,9 +187,9 @@ test("Packed Goods preserves its audited canonical contract", () => {
   assert.equal(packedGoods.statusSemantics.storedStatusAuthoritative, false);
 });
 
-test("current executable Final PIS truth and all 25 business questions are recorded", () => {
+test("current executable Final PIS truth and all 24 business questions are recorded", () => {
   const finalPis = getCapability("final_pis_check");
-  assert.equal(catalog.uncertainties.length, 25);
+  assert.equal(catalog.uncertainties.length, 24);
   assert.match(finalPis.description, /Master/);
   assert.match(finalPis.sourceOfTruth.fallbackRules.join(" "), /PIS is not a fallback/i);
   assert.ok(finalPis.uncertainties.includes("BQ-10"));

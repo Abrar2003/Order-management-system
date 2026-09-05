@@ -22,12 +22,6 @@ oms/
 |   |   |-- qcImageUpload.config.js
 |   |   `-- redis.js
 |   |-- controllers/
-|   |   |-- workflow/
-|   |   |   |-- _utils.js
-|   |   |   |-- batch.controller.js
-|   |   |   |-- department.controller.js
-|   |   |   |-- task.controller.js
-|   |   |   `-- taskType.controller.js
 |   |   |-- auth.controller.js
 |   |   |-- brand.controller.js
 |   |   |-- complaint.controller.js
@@ -85,7 +79,6 @@ oms/
 |   |   |-- userRole.js
 |   |   |-- vendorRef.js
 |   |   |-- workbookReport.js
-|   |   `-- workflow.js
 |   |-- knowledge/
 |   |   |-- omsKnowledgeBase.catalog.js
 |   |   |-- omsKnowledgeBase.capabilities.js
@@ -100,16 +93,6 @@ oms/
 |   |   |-- rateLimit.middleware.js
 |   |   `-- securityActivityLogger.js
 |   |-- models/
-|   |   |-- workflow/
-|   |   |   |-- Batch.model.js
-|   |   |   |-- Comment.model.js
-|   |   |   |-- Department.model.js
-|   |   |   |-- index.js
-|   |   |   |-- shared.js
-|   |   |   |-- Task.model.js
-|   |   |   |-- TaskAssignment.model.js
-|   |   |   |-- TaskStatusHistory.model.js
-|   |   |   `-- TaskType.model.js
 |   |   |-- authSession.model.js
 |   |   |-- brand.model.js
 |   |   |-- complaint.model.js
@@ -147,7 +130,7 @@ oms/
 |   |   |-- index.js
 |   |   `-- jobNames.js
 |   |-- realtime/
-|   |   `-- workflowSocket.js
+|   |   `-- notificationSocket.js
 |   |-- routers/
 |   |   |-- auth.routes.js
 |   |   |-- brand.route.js
@@ -171,7 +154,6 @@ oms/
 |   |   |-- security.routes.js
 |   |   |-- user.routes.js
 |   |   |-- vendor.routes.js
-|   |   `-- workflow.routes.js
 |   |-- scripts/
 |   |   |-- output/
 |   |   |   |-- pis-pdf-example/
@@ -190,7 +172,6 @@ oms/
 |   |   |-- backfillQcInspectorAssignments.js
 |   |   |-- backfillSingleMasterSizeRemarks.js
 |   |   |-- backfillTotalPoCbm.js
-|   |   |-- backfillWorkflowReworkBeforeApproval.js
 |   |   |-- check-env.js
 |   |   |-- checkCalender.js
 |   |   |-- cleanupLegacyItemSizeFields.js
@@ -209,7 +190,6 @@ oms/
 |   |   |-- script.js
 |   |   |-- seedProductTypeTemplates.js
 |   |   |-- seedRolePermissions.js
-|   |   |-- seedWorkflowTaskTypes.js
 |   |   |-- setWasabiCors.js
 |   |   |-- sync-item-country-from-vendors.js
 |   |   |-- syncScriptDbToMongo.js
@@ -229,13 +209,6 @@ oms/
 |   |   |   |-- labelStorage.service.js
 |   |   |   |-- legacyLabel.repository.js
 |   |   |   `-- modernLabel.repository.js
-|   |   |-- workflow/
-|   |   |   |-- workflowBatchAggregationService.js
-|   |   |   |-- workflowBatchService.js
-|   |   |   |-- workflowPermissionService.js
-|   |   |   |-- workflowRealtimeService.js
-|   |   |   |-- workflowStatusService.js
-|   |   |   `-- workflowTaskGenerationService.js
 |   |   |-- authToken.service.js
 |   |   |-- cache.service.js
 |   |   |-- cacheInvalidation.service.js
@@ -302,6 +275,7 @@ oms/
 |   |   |-- manualOrderValidation.test.js
 |   |   |-- masterSizeRemarks.test.js
 |   |   |-- monthlyShipmentsReport.test.js
+|   |   |-- notificationService.test.js
 |   |   |-- omsAiProvider.test.js
 |   |   |-- omsCapabilityExecution.test.js
 |   |   |-- omsCapabilityPlanner.test.js
@@ -336,7 +310,6 @@ oms/
 |   |   |-- uploadShippingMarksFolderViaApi.test.js
 |   |   |-- validInspectionHistory.test.js
 |   |   |-- vendorSummary.test.js
-|   |   `-- workflowTaskSourceFilter.test.js
 |   |-- uploads/
 |   |   `-- .gitkeep
 |   |-- workers/
@@ -355,10 +328,6 @@ oms/
 |-- client/
 |   `-- OMS/
 |       |-- public/
-|       |   |-- workflow-icons/
-|       |   |   |-- delete.png
-|       |   |   |-- info.png
-|       |   |   `-- rework.png
 |       |   |-- archive.png
 |       |   |-- chat.png
 |       |   |-- delete.png
@@ -370,7 +339,6 @@ oms/
 |       |-- src/
 |       |   |-- api/
 |       |   |   |-- axios.js
-|       |   |   `-- workflowApi.js
 |       |   |-- auth/
 |       |   |   |-- auth.service.js
 |       |   |   |-- auth.utils.js
@@ -392,16 +360,6 @@ oms/
 |       |   |   |-- samples/
 |       |   |   |   |-- ConvertToItemModal.jsx
 |       |   |   |   `-- SampleCreateModal.jsx
-|       |   |   |-- workflow/
-|       |   |   |   |-- WorkflowBatchBulkActionsModal.jsx
-|       |   |   |   |-- WorkflowBatchCreateModal.jsx
-|       |   |   |   |-- WorkflowDepartmentEditorModal.jsx
-|       |   |   |   |-- WorkflowTaskCreateModal.jsx
-|       |   |   |   |-- WorkflowTaskDetailModal.jsx
-|       |   |   |   |-- workflowTaskProgress.js
-|       |   |   |   |-- WorkflowTasksPanel.jsx
-|       |   |   |   |-- WorkflowTaskStageBar.jsx
-|       |   |   |   `-- WorkflowTaskTypeEditorModal.jsx
 |       |   |   |-- AdminRequiredFieldsWarning.jsx
 |       |   |   |-- AlignQcModal.jsx
 |       |   |   |-- AllocateLabelsModal.jsx
@@ -457,13 +415,11 @@ oms/
 |       |   |   |-- useMobileKeyboardHandler.js
 |       |   |   |-- useRememberSearchParams.js
 |       |   |   |-- useShippingInspectors.js
-|       |   |   `-- useWorkflowRealtime.js
 |       |   |-- notifications/
 |       |   |   |-- notificationApi.js
 |       |   |   |-- NotificationBell.jsx
 |       |   |   |-- notificationCard.js
 |       |   |   |-- NotificationDock.jsx
-|       |   |   |-- NotificationPopupModal.jsx
 |       |   |   |-- notificationSocket.js
 |       |   |   |-- NotificationToast.jsx
 |       |   |   `-- useNotifications.js
@@ -526,17 +482,9 @@ oms/
 |       |   |   |-- VendorDetails.jsx
 |       |   |   |-- VendorReports.jsx
 |       |   |   |-- VendorWiseQAReport.jsx
-|       |   |   |-- WeeklySummary.jsx
-|       |   |   |-- WorkflowBatchDetail.jsx
-|       |   |   |-- WorkflowBatches.jsx
-|       |   |   |-- WorkflowDashboard.jsx
-|       |   |   |-- WorkflowDepartments.jsx
-|       |   |   |-- WorkflowMyTasks.jsx
-|       |   |   |-- WorkflowTasks.jsx
-|       |   |   |-- WorkflowTaskTypes.jsx
-|       |   |   `-- WorkflowUploadPending.jsx
+|       |   |   `-- WeeklySummary.jsx
 |       |   |-- realtime/
-|       |   |   `-- workflowSocket.js
+|       |   |   `-- notificationSocket.js
 |       |   |-- routes/
 |       |   |   `-- ProtectedRoute.jsx
 |       |   |-- services/
@@ -578,7 +526,6 @@ oms/
 |       |   |   |-- vendorCodes.js
 |       |   |   |-- vendorSummary.js
 |       |   |   |-- vendorSummary.test.js
-|       |   |   `-- workflowManifest.js
 |       |   |-- App.css
 |       |   |-- App.jsx
 |       |   |-- index.css
@@ -618,7 +565,7 @@ oms/
 |   |-- redis-and-jobs.md
 |   |-- ROLE_ACCESS_MATRIX.md
 |   |-- VPS_MIGRATION.md
-|   `-- WORKFLOW_MODULE_MANUAL_TEST_NOTES.md
+|   `-- PRODUCTION_WORKFLOW_ARCHIVE.md
 |-- .codex
 |-- .gitignore
 |-- .nvmrc

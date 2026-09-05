@@ -2,6 +2,8 @@
 
 **Audit basis:** repository source as of 2026-08-20. **Mode:** source-code-only; no live or production data was queried. **Scope guard:** this document records existing behavior and recommendations only. No OMS business behavior, OMS Assistant integration, or Knowledge Base catalog was changed.
 
+> **Retirement note (2026-09-05):** WF-01 through WF-06 and the workflow portions of OTH-01 below describe the removed Production Workflow system and are historical only. The active runtime catalog now contains 68 capabilities. See `PRODUCTION_WORKFLOW_ARCHIVE.md` for the preserved behavior, database boundary, and reimplementation recommendations.
+
 ## 1. Executive Summary
 
 OMS currently exposes a much larger read/report surface than the Assistant catalog suggests: 74 distinct capability groups across orders, logistics, QC, item/PIS/Product Database, vendor/brand, samples, workflow, complaints, audit, communication, and control-plane domains. The strongest reusable sources are the shared Packed Goods service, Monthly Shipments service, order-progress helper, shipment/PO CBM allocation services, valid-inspection-history service, and workflow services. Most other reports are correct-looking but implemented inside controllers, so they should be extracted before being exposed as deterministic Assistant capabilities.
@@ -121,16 +123,10 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 | SAM-01 | Sample catalog | Operational read | Samples | `GET /samples` | `getSamples` | samples, vendors, brands | Read + related writes | CANONICAL | RAW_MONGO |
 | SAM-02 | Shipped samples | Shipment report | ShippedSamples | `GET /samples/shipped` | `flattenSampleShipmentRows` | samples | Read | DERIVED_HELPER | EXTRACT_TO_SERVICE_THEN_CAPABILITY |
 | SAM-03 | Separate sample workflow list | Operational read | SampleWorkflow | `GET /sample-workflows` | `getSampleWorkflows` | sample_workflows | Read + create | CANONICAL | RAW_MONGO |
-| WF-01 | Workflow dashboard | Admin dashboard | WorkflowDashboard | `GET /workflow/dashboard` | `workflowStatusService#getWorkflowDashboardSummary` | workflow_tasks, users | Read | CANONICAL | NOT_ASSISTANT_SAFE |
-| WF-02 | Workflow batches and batch detail | Operational read | WorkflowBatches, WorkflowBatchDetail | `GET /workflow/batches`, `/:id` | `workflowBatchService` | workflow_batches, workflow_tasks, users | Read + mutations | CANONICAL | NOT_ASSISTANT_SAFE |
-| WF-03 | Workflow task board/list | Operational read | WorkflowTasks, MyTasks, UploadPending | `GET /workflow/tasks` | `workflowStatusService#listWorkflowTasks` | workflow_tasks, workflow_batches, users | Read + mutations | CANONICAL | NOT_ASSISTANT_SAFE |
-| WF-04 | Workflow task detail/history/comments | Detail/history | Workflow task dialogs/detail | `GET /workflow/tasks/:id` | `buildTaskDetail` | workflow_tasks, assignments, status_history, comments | Read + mutations | CANONICAL | NOT_ASSISTANT_SAFE |
-| WF-05 | Workflow assignable users | Sensitive option read | Workflow pages | `GET /workflow/users` | `getWorkflowAssignableUsers` | users | Read | RAW_COLLECTION | NOT_ASSISTANT_SAFE |
-| WF-06 | Workflow task types and departments | Configuration read | WorkflowTaskTypes, WorkflowDepartments | `GET /workflow/task-types`, `/departments` | workflow services/controllers | workflow_task_types, workflow_departments, users | Read + management | CANONICAL | NOT_ASSISTANT_SAFE |
 | CMP-01 | Complaint list and detail | Operational/sensitive read | Complaints | `GET /complaints`, `/:id` | `getComplaints`; `getComplaintById` | complaints | Read + mutations | CANONICAL | NOT_ASSISTANT_SAFE |
 | CMP-02 | Item-related complaints | QC support read | QC/item complaint panels | `GET /complaints/item-related` | `getItemRelatedComplaints` | complaints, items | Read + comments/read receipts | CANONICAL | NOT_ASSISTANT_SAFE |
 | CMP-03 | Complaint categories | Configuration read | Complaints | `GET /complaints/categories` | `getComplaintCategories` | complaint_categories | Read + create | CANONICAL | NOT_ASSISTANT_SAFE |
-| OTH-01 | Notifications, workflow dock, summaries | User-scoped communication | Navbar/dock | `GET /notifications`, `/summary`, `/login-summary` | `notificationService` | notifications, workflow_tasks, users | Read + state writes | CANONICAL | NOT_ASSISTANT_SAFE |
+| OTH-01 | Notifications and unread summary | User-scoped communication | Navbar/dock | `GET /notifications`, `/summary` | `notificationService` | notifications, users | Read + state writes | CANONICAL | NOT_ASSISTANT_SAFE |
 | OTH-02 | Email logs and create/filter options | Sensitive communication | EmailLogs | Intended `GET /email-logs*` (router unmounted) | email log controller | emaillogs, orders, brands, vendors | Read + writes | UNCLEAR | NOT_ASSISTANT_SAFE |
 | OTH-03 | Shared PDF rendering/status | Export infrastructure | Report pages | PDF render POST under reports, items and QC; `GET /reports/pdf/status` | `pdfRenderer` | None; submitted markup | Export | PRESENTATION_ONLY | EXPORT_ONLY |
 | OTH-04 | Queue/job status | Operational control | Async upload/export UI | `GET /jobs/:queueName`, `/:queueName/:jobId` | jobs controller/queue service | Redis/BullMQ queues | Read + retry write | CANONICAL | NOT_ASSISTANT_SAFE |
@@ -626,11 +622,11 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 
 ## 12. Other Business Read Capabilities
 
-### OTH-01 — Notifications and workflow dock
+### OTH-01 — Notifications
 
-- **Representative questions:** “What notifications are unread?”; “Tasks due today in the dock”; “How many critical alerts does this user have?”
-- **Trace:** navigation/dock → `/notifications`, `/summary`, `/login-summary` → `notificationService`.
-- **Rules/output:** User-scoped list filters unread/category/priority/date/search or selects workflow-dock views (due today, approval/hold/upload pending, critical overdue). Hidden/deleted/uploaded workflow tasks are removed. Summaries and cards join related workflow task metadata; read/archive/popup state is mutable.
+- **Representative questions:** “What notifications are unread?”; “Show my comment notifications.”
+- **Trace:** navigation/dock → `/notifications`, `/summary` → `notificationService`.
+- **Rules/output:** User-scoped list filters unread/category/priority/search. Production Workflow notification documents remain stored but are excluded. Read/archive state is mutable; the summary returns the unread count.
 - **Trust:** canonical per-user service but private and stateful; not a business analytics source.
 
 ### OTH-02 — Email logs

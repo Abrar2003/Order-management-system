@@ -1,11 +1,9 @@
 const {
   archiveNotification,
-  getLoginSummary,
   getNotificationSummary,
   listNotifications,
   markAllAsRead,
   markAsRead,
-  markPopupSeen,
 } = require("../services/notificationService");
 
 const getErrorStatusCode = (error = {}) => {
@@ -41,19 +39,6 @@ const getSummary = async (req, res) => {
     return res.status(getErrorStatusCode(error)).json({
       success: false,
       message: error.message || "Failed to fetch notification summary",
-    });
-  }
-};
-
-const getLoginPopupSummary = async (req, res) => {
-  try {
-    const data = await getLoginSummary(req.user);
-    return res.status(200).json({ success: true, data });
-  } catch (error) {
-    console.error("Get Notification Login Summary Error:", error);
-    return res.status(getErrorStatusCode(error)).json({
-      success: false,
-      message: error.message || "Failed to fetch notification login summary",
     });
   }
 };
@@ -103,25 +88,10 @@ const patchArchive = async (req, res) => {
   }
 };
 
-const postPopupSeen = async (req, res) => {
-  try {
-    const data = await markPopupSeen(req.user?._id);
-    return res.status(200).json({ success: true, data });
-  } catch (error) {
-    console.error("Notification Popup Seen Error:", error);
-    return res.status(getErrorStatusCode(error)).json({
-      success: false,
-      message: error.message || "Failed to save popup state",
-    });
-  }
-};
-
 module.exports = {
-  getLoginPopupSummary,
   getNotifications,
   getSummary,
   patchArchive,
   patchRead,
   patchReadAll,
-  postPopupSeen,
 };

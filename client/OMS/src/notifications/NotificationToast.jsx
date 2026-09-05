@@ -25,7 +25,7 @@ const NotificationToast = ({ notification, onClose }) => {
       <span className="om-notification-toast-dot" />
       <span className="om-notification-toast-copy">
         <strong>{card.heading}</strong>
-        <span>{card.taskTitle || notification.message}</span>
+        <span>{card.body || notification.message}</span>
       </span>
     </button>
   );

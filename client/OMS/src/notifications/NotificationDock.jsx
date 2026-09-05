@@ -1,15 +1,10 @@
 import { useNavigate } from "react-router-dom";
 import { NOTIFICATION_TABS, getPriorityLabel } from "./useNotifications";
-import { getNotificationCard, hasWorkflowCardDetails } from "./notificationCard";
+import { getNotificationCard } from "./notificationCard";
 
 const CATEGORY_MARKS = Object.freeze({
-  approval: "A",
-  batch: "B",
   comment: "C",
-  hold: "H",
   system: "S",
-  task: "T",
-  upload: "U",
 });
 
 const formatRelativeTime = (value) => {
@@ -63,9 +58,7 @@ const NotificationDock = ({
       </div>
 
       <div className="om-notification-summary-strip">
-        <span>Critical {Number(summary?.criticalCount || 0)}</span>
-        <span>Due {Number(summary?.todayDueTasksCount || 0)}</span>
-        <span>Overdue {Number(summary?.overdueTasksCount || 0)}</span>
+        <span>{Number(summary?.unreadCount || 0)} unread notifications</span>
       </div>
 
       <div className="om-notification-tabs" role="tablist">
@@ -104,7 +97,6 @@ const NotificationDock = ({
         )}
         {list.map((notification) => {
           const card = getNotificationCard(notification);
-          const showDetails = hasWorkflowCardDetails(card);
           return (
             <article
               key={notification._id}
@@ -130,31 +122,20 @@ const NotificationDock = ({
                       {getPriorityLabel(card.priority)}
                     </span>
                   </span>
-                  {card.taskTitle && (
-                    <span className="om-notification-card-task">{card.taskTitle}</span>
-                  )}
-                  {showDetails && (
-                    <span className="om-notification-card-meta">
-                      {card.assigneeNames && <span>Assignee: {card.assigneeNames}</span>}
-                      {card.assignedByName && <span>Assigned by: {card.assignedByName}</span>}
-                      {card.status && <span className="om-notification-status">{card.status}</span>}
-                      {card.taskType && <span>{card.taskType}</span>}
-                      {card.dueDateText && <span>Due: {card.dueDateText}</span>}
-                    </span>
+                  {card.body && (
+                    <span className="om-notification-card-task">{card.body}</span>
                   )}
                   {card.comment && <span className="om-notification-comment">{card.comment}</span>}
                   <small>{formatRelativeTime(notification.created_at)}</small>
                 </span>
               </button>
-              {!notification.is_live_task && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-link text-secondary"
-                  onClick={() => archive(notification)}
-                >
-                  Archive
-                </button>
-              )}
+              <button
+                type="button"
+                className="btn btn-sm btn-link text-secondary"
+                onClick={() => archive(notification)}
+              >
+                Archive
+              </button>
             </article>
           );
         })}

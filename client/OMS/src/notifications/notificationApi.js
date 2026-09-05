@@ -10,11 +10,6 @@ export const getNotificationSummary = async () => {
   return res.data;
 };
 
-export const getNotificationLoginSummary = async () => {
-  const res = await api.get("/notifications/login-summary");
-  return res.data;
-};
-
 export const markNotificationRead = async (id) => {
   const res = await api.patch(`/notifications/${encodeURIComponent(id)}/read`);
   return res.data;
@@ -27,10 +22,5 @@ export const markAllNotificationsRead = async () => {
 
 export const archiveNotification = async (id) => {
   const res = await api.patch(`/notifications/${encodeURIComponent(id)}/archive`);
-  return res.data;
-};
-
-export const markNotificationPopupSeen = async () => {
-  const res = await api.post("/notifications/popup-seen");
   return res.data;
 };

@@ -63,12 +63,6 @@ const ProductDatabase = lazy(() => import("./pages/ProductDatabase"));
 const ItemDatabase = lazy(() => import("./pages/ItemDatabase"));
 const ProductDatabaseDetails = lazy(() => import("./pages/ProductDatabaseDetails"));
 const ProductTypeTemplates = lazy(() => import("./pages/ProductTypeTemplates"));
-const WorkflowDashboard = lazy(() => import("./pages/WorkflowDashboard"));
-const WorkflowTasks = lazy(() => import("./pages/WorkflowTasks"));
-const WorkflowMyTasks = lazy(() => import("./pages/WorkflowMyTasks"));
-const WorkflowUploadPending = lazy(() => import("./pages/WorkflowUploadPending"));
-const WorkflowTaskTypes = lazy(() => import("./pages/WorkflowTaskTypes"));
-const WorkflowDepartments = lazy(() => import("./pages/WorkflowDepartments"));
 const PermissionManagement = lazy(() => import("./pages/PermissionManagement"));
 const PIS = lazy(() => import("./pages/PIS"));
 const Finishes = lazy(() => import("./pages/Finishes"));
@@ -781,78 +775,6 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <ProductTypeTemplates />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/workflow/dashboard"
-            element={
-              <ProtectedRoute>
-                <WorkflowDashboard />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/workflow/batches"
-            element={
-              <ProtectedRoute>
-                <Navigate to="/workflow/tasks" replace />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/workflow/batches/:batchId"
-            element={
-              <ProtectedRoute>
-                <Navigate to="/workflow/tasks" replace />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/workflow/tasks"
-            element={
-              <ProtectedRoute>
-                <WorkflowTasks />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/workflow/my-tasks"
-            element={
-              <ProtectedRoute>
-                <WorkflowMyTasks />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/workflow/upload-pending"
-            element={
-              <ProtectedRoute>
-                <WorkflowUploadPending />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/workflow/task-types"
-            element={
-              <ProtectedRoute>
-                <WorkflowTaskTypes />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/workflow/departments"
-            element={
-              <ProtectedRoute>
-                <WorkflowDepartments />
               </ProtectedRoute>
             }
           />

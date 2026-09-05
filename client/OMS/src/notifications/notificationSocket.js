@@ -1,9 +1,7 @@
-import { connectWorkflowSocket } from "../realtime/workflowSocket";
+import { connectNotificationSocket as connectSocket } from "../realtime/notificationSocket";
 
 export const connectNotificationSocket = () => {
-  const socket = connectWorkflowSocket();
-  socket.emit("notification:join_user");
-  return socket;
+  return connectSocket();
 };
 
 export const leaveNotificationSocket = (socket) => {

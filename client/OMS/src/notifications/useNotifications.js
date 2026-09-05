@@ -1,37 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   archiveNotification,
-  getNotificationLoginSummary,
   getNotificationSummary,
   getNotifications,
   markAllNotificationsRead,
-  markNotificationPopupSeen,
   markNotificationRead,
 } from "./notificationApi";
-import { getUserFromToken } from "../auth/auth.service";
 import { connectNotificationSocket, leaveNotificationSocket } from "./notificationSocket";
 
 const DEFAULT_LIMIT = 20;
-const POPUP_ACK_PREFIX = "oms_notification_popup_ack";
-
 export const NOTIFICATION_TABS = Object.freeze([
   { key: "all", label: "All" },
   { key: "unread", label: "Unread" },
-  { key: "task", label: "Tasks", view: "tasks_due_today" },
-  { key: "approval", label: "Approval", view: "approval_pending" },
-  { key: "holdApproval", label: "Hold Approval", view: "hold_approval_pending" },
-  { key: "upload", label: "Uploads", view: "upload_pending" },
   { key: "comment", label: "Comments", category: "comment" },
-  { key: "critical", label: "Critical", view: "critical_overdue" },
 ]);
 
 const normalizeText = (value) => String(value || "").trim();
-
-const getPopupAckKey = () => {
-  const user = getUserFromToken();
-  const userKey = normalizeText(user?.id || user?._id);
-  return `${POPUP_ACK_PREFIX}:${userKey || "anonymous"}`;
-};
 
 const getTabParams = (tabKey) => {
   const tab = NOTIFICATION_TABS.find((entry) => entry.key === tabKey) || NOTIFICATION_TABS[0];
@@ -39,7 +23,6 @@ const getTabParams = (tabKey) => {
     unreadOnly: tab.key === "unread" ? "true" : undefined,
     category: tab.category,
     priority: tab.priority,
-    view: tab.view,
   };
 };
 
@@ -49,7 +32,6 @@ export const useNotifications = ({ enabled = true } = {}) => {
   const [notifications, setNotifications] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1, totalRecords: 0 });
   const [summary, setSummary] = useState(null);
-  const [popupSummary, setPopupSummary] = useState(null);
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -97,31 +79,9 @@ export const useNotifications = ({ enabled = true } = {}) => {
     }
   }, [activeTab, enabled]);
 
-  const loadPopupSummary = useCallback(async () => {
-    if (!enabled) return;
-    try {
-      const response = await getNotificationLoginSummary();
-      const data = response?.data || null;
-      if (data?.showPopup && globalThis.sessionStorage?.getItem(getPopupAckKey()) === "true") {
-        setPopupSummary({ ...data, showPopup: false });
-        return;
-      }
-      setPopupSummary(data);
-    } catch {
-      setPopupSummary(null);
-    }
-  }, [enabled]);
-
   useEffect(() => {
     loadSummary();
-    loadPopupSummary();
-  }, [loadPopupSummary, loadSummary]);
-
-  useEffect(() => {
-    if (popupSummary?.showPopup) {
-      setDockOpen(false);
-    }
-  }, [popupSummary?.showPopup]);
+  }, [loadSummary]);
 
   useEffect(() => {
     if (dockOpen) {
@@ -135,14 +95,11 @@ export const useNotifications = ({ enabled = true } = {}) => {
 
     const handleNewNotification = (payload) => {
       if (!payload?._id) return;
-      const activeTabConfig = NOTIFICATION_TABS.find((entry) => entry.key === activeTab);
-      if (!activeTabConfig?.view) {
-        setNotifications((current) =>
-          current.some((entry) => entry._id === payload._id)
-            ? current
-            : [payload, ...current],
-        );
-      }
+      setNotifications((current) =>
+        current.some((entry) => entry._id === payload._id)
+          ? current
+          : [payload, ...current],
+      );
       if (payload.priority !== "silent") {
         setToast(payload);
         if (toastTimerRef.current) globalThis.clearTimeout(toastTimerRef.current);
@@ -178,7 +135,7 @@ export const useNotifications = ({ enabled = true } = {}) => {
   }, [activeTab, dockOpen, enabled, loadNotifications, loadSummary]);
 
   const markRead = useCallback(async (notification) => {
-    if (!notification?._id || notification.is_live_task || notification.read) return notification;
+    if (!notification?._id || notification.read) return notification;
     const response = await markNotificationRead(notification._id);
     const updated = response?.data || { ...notification, read: true };
     setNotifications((current) =>
@@ -198,7 +155,7 @@ export const useNotifications = ({ enabled = true } = {}) => {
   }, []);
 
   const archive = useCallback(async (notification) => {
-    if (!notification?._id || notification.is_live_task) return;
+    if (!notification?._id) return;
     await archiveNotification(notification._id);
     setNotifications((current) => current.filter((entry) => entry._id !== notification._id));
     if (!notification.read) {
@@ -209,16 +166,9 @@ export const useNotifications = ({ enabled = true } = {}) => {
     }
   }, []);
 
-  const acknowledgePopup = useCallback(async () => {
-    await markNotificationPopupSeen();
-    globalThis.sessionStorage?.setItem(getPopupAckKey(), "true");
-    setPopupSummary((current) => ({ ...(current || {}), showPopup: false }));
-  }, []);
-
   const hasMore = pagination.page < pagination.totalPages;
 
   return useMemo(() => ({
-    acknowledgePopup,
     activeTab,
     archive,
     dockOpen,
@@ -230,7 +180,6 @@ export const useNotifications = ({ enabled = true } = {}) => {
     loadingMore,
     markAllRead,
     markRead,
-    popupSummary,
     refreshList: () => loadNotifications({ page: 1 }),
     refreshSummary: loadSummary,
     setActiveTab,
@@ -240,7 +189,6 @@ export const useNotifications = ({ enabled = true } = {}) => {
     unreadCount,
     closeToast: () => setToast(null),
   }), [
-    acknowledgePopup,
     activeTab,
     archive,
     dockOpen,
@@ -254,7 +202,6 @@ export const useNotifications = ({ enabled = true } = {}) => {
     markRead,
     notifications,
     pagination.page,
-    popupSummary,
     summary,
     toast,
     unreadCount,

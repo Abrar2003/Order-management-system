@@ -2,7 +2,7 @@
 
 Use this file when changing the OMS Assistant. It explains the current implementation, its supported behaviour, and the safe place to make each kind of change. Source code is the authority if this file ever disagrees with it. `docs/OMS_ASSISTANT.md` remains the deployment and operations guide; `docs/OMS_SOURCE_TREE.md` is the repository-wide file tree.
 
-The versioned Knowledge Base in `docs/OMS_KNOWLEDGE_BASE.md` is wired into the Assistant as a canonical-first selection layer. Knowledge Base V2 maps all 74 audited OMS capability groups. `omsCapabilityPlanner.service.js` deterministically ranks a compact subset after entity/date resolution, finds token-boundary ambiguities, and prepares safe model context. The catalog remains static metadata: only an explicit server-side adapter registry can execute a capability.
+The versioned Knowledge Base in `docs/OMS_KNOWLEDGE_BASE.md` is wired into the Assistant as a canonical-first selection layer. Knowledge Base V2 maps all 68 active audited OMS capability groups; the removed Production Workflow capabilities are archived separately. `omsCapabilityPlanner.service.js` deterministically ranks a compact subset after entity/date resolution, finds token-boundary ambiguities, and prepares safe model context. The catalog remains static metadata: only an explicit server-side adapter registry can execute a capability.
 
 ## What it is
 
@@ -45,7 +45,7 @@ The assistant does **not** write OMS data, create reports/files, expose aggregat
 
 ## Knowledge-aware canonical-first flow
 
-`searchCapabilities()` ranks V2 catalog entries deterministically. The planner keeps at most eight compact entries, including readiness and adapter availability but no source paths. It detects documented ambiguity phrases inside longer questions and asks a concise clarification only when surrounding wording does not resolve them. The full 74-capability catalog is never sent on every turn.
+`searchCapabilities()` ranks V2 catalog entries deterministically. The planner keeps at most eight compact entries, including readiness and adapter availability but no source paths. It detects documented ambiguity phrases inside longer questions and asks a concise clarification only when surrounding wording does not resolve them. The full 68-capability catalog is never sent on every turn.
 
 `backend/services/omsCapabilityExecution.service.js` owns the explicit registry. `packed_goods` continues to call `packedGoods.service.js` for the Assistant's current ready-to-ship semantics; the page/API/XLS report calls `packedGoodsPeriod.service.js` for inspection-period history. `monthly_shipments` calls `monthlyShipmentsReport.service.js`; `shipment_cbm` calls the CBM allocation service against a bounded PO/item lookup. Adapters use the read-only Assistant connection, carry user scope into their queries, validate allowlisted filters and fields, and bound filtering/grouping/distinct/metrics/sorting to 100 rows/groups with safe provenance and warnings.
 
@@ -108,7 +108,7 @@ Expected analytics and capability validation errors return compact, safe functio
 | Route and navbar visibility | `client/OMS/src/App.jsx`, `client/OMS/src/components/Navbar.jsx` | Page is lazy-loaded at `/oms-assistant`. |
 | HTTP endpoint and safe public errors | `backend/routers/omsChat.routes.js`, `backend/controllers/omsChat.controller.js` | Mounted at both `/oms-chat` and `/api/oms-chat`. |
 | Core prompt, entity/date resolution, deterministic reports, conversation loop | `backend/services/omsChat.service.js` | Main behaviour file. |
-| Static OMS domains, 74 audited capabilities, definitions, ambiguities, status, and deterministic search | `backend/knowledge/omsKnowledgeBase.*`, `backend/services/omsKnowledgeBase.service.js` | Catalog `2.0.0`; never dynamically executes source metadata. |
+| Static OMS domains, 68 active audited capabilities, definitions, ambiguities, status, and deterministic search | `backend/knowledge/omsKnowledgeBase.*`, `backend/services/omsKnowledgeBase.service.js` | Catalog `2.0.0`; never dynamically executes source metadata. |
 | Capability planning | `backend/services/omsCapabilityPlanner.service.js` | Deterministic compact ranking, canonical guidance, and ambiguity handling. |
 | Capability validation, explicit adapters, bounded grouping, and safe provenance | `backend/services/omsCapabilityExecution.service.js` | `packed_goods`, `monthly_shipments`, and `shipment_cbm` are registered direct adapters. |
 | Assistant/forecast Packed Goods dataset | `backend/services/packedGoods.service.js` | Current ready-to-ship semantics; used unchanged by the Assistant and forecast input. |

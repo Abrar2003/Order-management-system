@@ -75,7 +75,6 @@ const Navbar = () => {
   const role = user?.role;
   const normalizedRole = normalizeUserRole(role);
   const { hasPermission, isAdmin, role: permissionRole } = usePermissions();
-  const isWorkflowAdmin = isStrictAdminRole(permissionRole || role);
   const isVendorAdmin = isStrictAdminRole(permissionRole || role) || isAdmin;
 
   const navigate = useNavigate();
@@ -120,11 +119,8 @@ const Navbar = () => {
   const canUploadFinish = hasPermission("finishes", "upload");
   const canViewFinishes = hasPermission("finishes", "view") || canUploadFinish;
   const canViewPis = hasPermission("pis", "view");
-  const canViewWorkflow = hasPermission("workflow", "view");
   const canViewSamples = hasPermission("samples", "view");
   const canAccessOmsAssistant = hasPermission("oms_assistant", "view");
-  const canManageWorkflow = isManagerLikeRole(permissionRole)
-    && hasPermission("workflow", "manage");
 
   const closeAllMenus = useCallback(() => {
     setShowMobileMenu(false);
@@ -521,26 +517,6 @@ const Navbar = () => {
     return items;
   }, [canManageProductDatabase, canViewOrderPages, canViewPis, isQcOnlyRole]);
 
-  const workflowMenuItems = useMemo(() => {
-    if (!canViewWorkflow || isQcOnlyRole) return [];
-
-    const items = [
-      ...(isWorkflowAdmin ? [routeMenuItem("workflow-dashboard", "Dashboard", "/workflow/dashboard")] : []),
-      routeMenuItem("workflow-task-board", "Task Board", "/workflow/tasks"),
-      routeMenuItem("workflow-my-tasks", "My Tasks", "/workflow/my-tasks"),
-      routeMenuItem("workflow-upload-pending", "Upload Pending", "/workflow/upload-pending"),
-    ];
-
-    if (canManageWorkflow) {
-      items.push(
-        routeMenuItem("workflow-task-types", "Task Types", "/workflow/task-types"),
-        routeMenuItem("workflow-departments", "Departments", "/workflow/departments"),
-      );
-    }
-
-    return sortEntriesByLabel(items);
-  }, [canManageWorkflow, canViewWorkflow, isQcOnlyRole, isWorkflowAdmin]);
-
   const settingsMenuItems = useMemo(
     () => {
       const items = [];
@@ -595,7 +571,6 @@ const Navbar = () => {
         { key: "orders", label: "Orders", items: orderMenuItems },
         { key: "reports", label: "Reports", items: reportMenuItems },
         { key: "process", label: "Process", items: processMenuItems },
-        { key: "workflow", label: "Production Workflow", items: workflowMenuItems },
         { key: "update-orders", label: "Update", items: updateOrdersMenuItems },
         { key: "upload-add", label: "Upload", items: uploadAddMenuItems },
         { key: "logs", label: "Logs", items: logMenuItems },
@@ -607,7 +582,6 @@ const Navbar = () => {
       orderMenuItems,
       processMenuItems,
       reportMenuItems,
-      workflowMenuItems,
       settingsMenuItems,
       updateOrdersMenuItems,
       uploadAddMenuItems,
@@ -915,7 +889,7 @@ const Navbar = () => {
             )}
 
             <div className="d-flex align-items-center gap-2 ms-auto">
-              <NotificationBell enabled={canViewWorkflow} />
+              <NotificationBell />
 
               {(generalMenuItems.length > 0 || desktopOverflowSections.length > 0) && (
                 <div className="position-relative">

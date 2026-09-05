@@ -1,30 +1,7 @@
 const mongoose = require("mongoose");
 
 const NOTIFICATION_PRIORITIES = ["critical", "high", "normal", "low", "silent"];
-const NOTIFICATION_CATEGORIES = [
-  "task",
-  "approval",
-  "upload",
-  "hold",
-  "comment",
-  "batch",
-  "system",
-];
-
-const NotificationPreferenceSchema = new mongoose.Schema(
-  {
-    toastEnabled: { type: Boolean, default: true },
-    soundEnabled: { type: Boolean, default: false },
-    popupEnabled: { type: Boolean, default: true },
-    mutedCategories: { type: [String], default: [] },
-    quietHours: {
-      enabled: { type: Boolean, default: false },
-      start: { type: String, default: "21:00" },
-      end: { type: String, default: "09:00" },
-    },
-  },
-  { _id: false },
-);
+const NOTIFICATION_CATEGORIES = ["comment", "system"];
 
 const NotificationSchema = new mongoose.Schema(
   {
@@ -85,7 +62,6 @@ NotificationSchema.index(
 
 module.exports = {
   Notification: mongoose.model("notifications", NotificationSchema),
-  NotificationPreferenceSchema,
   NOTIFICATION_CATEGORIES,
   NOTIFICATION_PRIORITIES,
 };
