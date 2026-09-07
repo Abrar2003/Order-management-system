@@ -1,3 +1,4 @@
+import PreviewImage from "../components/PreviewImage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import Barcode from "react-barcode";
@@ -1844,7 +1845,7 @@ const InspectionReport = () => {
                 <div className="inspection-report-summary-column inspection-report-summary-media inspection-report-summary-media--brand">
                   <div className="inspection-report-brand-panel">
                     {brandLogoSrc ? (
-                      <img
+                      <PreviewImage
                         src={brandLogoSrc}
                         alt={`${orderInfo.brand} logo`}
                         className="inspection-report-brand-logo inspection-report-brand-logo--brand"
@@ -1858,7 +1859,7 @@ const InspectionReport = () => {
                   {bannerFinish && (
                     <div className="inspection-report-brand-panel inspection-report-finish-banner-panel">
                       {bannerFinishSrc ? (
-                        <img
+                        <PreviewImage
                           src={bannerFinishSrc}
                           alt={`${bannerFinishTitle} finish`}
                           className="inspection-report-brand-logo inspection-report-brand-logo--finish"
@@ -1879,7 +1880,7 @@ const InspectionReport = () => {
                 <div className="inspection-report-summary-column inspection-report-summary-media inspection-report-summary-media--product">
                   <div className="inspection-report-brand-panel">
                     {productImageSrc ? (
-                      <img
+                      <PreviewImage
                         src={productImageSrc}
                         alt={`${orderInfo.itemDescription} product`}
                         className="inspection-report-brand-logo inspection-report-brand-logo--product"

@@ -1,3 +1,5 @@
+import PreviewImage from "./PreviewImage";
+
 const normalizeText = (value) => String(value || "").trim();
 
 const ProductImageThumbnail = ({
@@ -20,8 +22,9 @@ const ProductImageThumbnail = ({
   }
 
   return (
-    <img
+    <PreviewImage
       src={imageSrc}
+      originalName={label}
       alt={normalizeText(alt) || label || "Product image"}
       title={label || undefined}
       className={className}

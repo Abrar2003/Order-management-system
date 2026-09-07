@@ -1,3 +1,4 @@
+import PreviewImage from "../components/PreviewImage";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
@@ -998,7 +999,7 @@ const ItemDetails = () => {
                     <div className="inspection-report-summary-column inspection-report-summary-media inspection-report-summary-media--brand">
                       <div className="inspection-report-brand-panel">
                         {brandLogoSrc ? (
-                          <img src={brandLogoSrc} alt={`${brandName} logo`} className="inspection-report-brand-logo inspection-report-brand-logo--brand" />
+                          <PreviewImage src={brandLogoSrc} alt={`${brandName} logo`} className="inspection-report-brand-logo inspection-report-brand-logo--brand" />
                         ) : (
                           <div className="inspection-report-media-empty">{brandName || "Brand"} logo not available</div>
                         )}
@@ -1007,7 +1008,7 @@ const ItemDetails = () => {
                     <div className="inspection-report-summary-column inspection-report-summary-media inspection-report-summary-media--product">
                       <div className="inspection-report-brand-panel">
                         {productImageUrl ? (
-                          <img src={productImageUrl} alt={`${item?.description || item?.code || "Item"} product`} className="inspection-report-brand-logo inspection-report-brand-logo--product" />
+                          <PreviewImage src={productImageUrl} alt={`${item?.description || item?.code || "Item"} product`} className="inspection-report-brand-logo inspection-report-brand-logo--product" />
                         ) : (
                           <div className="inspection-report-image-skeleton"><span>Product Image not available yet</span></div>
                         )}

@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { createPortal } from "react-dom";
+import FilePreviewModal from "../FilePreviewModal";
 import {
   formatComplaintDateTime,
   getFileTypeLabel,
@@ -5,6 +8,7 @@ import {
 } from "./complaintConstants";
 
 const ComplaintFilesDropdown = ({ files = [] }) => {
+  const [previewFile, setPreviewFile] = useState(null);
   const safeFiles = Array.isArray(files) ? files : [];
 
   if (safeFiles.length === 0) {
@@ -18,6 +22,13 @@ const ComplaintFilesDropdown = ({ files = [] }) => {
           key={file._id || `${file.key || "file"}-${index}`}
           className={`complaint-file-link${isComplaintImageFile(file) ? " complaint-file-link--image" : ""}`}
           href={file.url || "#"}
+          onClick={(event) => {
+            if (isComplaintImageFile(file) && file.url) {
+              event.preventDefault();
+              event.stopPropagation();
+              setPreviewFile(file);
+            }
+          }}
           target="_blank"
           rel="noreferrer"
         >
@@ -41,6 +52,17 @@ const ComplaintFilesDropdown = ({ files = [] }) => {
           </span>
         </a>
       ))}
+      {previewFile && createPortal(
+        <FilePreviewModal
+          title="Complaint Image"
+          originalName={previewFile.original_name || previewFile.file_name}
+          url={previewFile.url}
+          previewMode="image"
+          modalClassName="thumbnail-image-preview-modal"
+          onClose={() => setPreviewFile(null)}
+        />,
+        document.body,
+      )}
     </div>
   );
 };

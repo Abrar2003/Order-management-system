@@ -1,3 +1,4 @@
+import PreviewImage from "./PreviewImage";
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import { getCompleteVendorCodes } from "../utils/vendorCodes";
@@ -415,7 +416,7 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
                   onChange={(event) => updateField("front_image", event.target.files?.[0] || null)}
                 />
                 {isEditing && getStoredFinishImageUrl(initialFinish, "front") && (
-                  <img
+                  <PreviewImage
                     src={getStoredFinishImageUrl(initialFinish, "front")}
                     alt={`${initialFinish?.unique_code || "Finish"} front`}
                     className="img-thumbnail mt-2"
@@ -434,7 +435,7 @@ const UploadFinishModal = ({ initialFinish = null, onClose, onSaved }) => {
                   onChange={(event) => updateField("back_image", event.target.files?.[0] || null)}
                 />
                 {isEditing && getStoredFinishImageUrl(initialFinish, "back") && (
-                  <img
+                  <PreviewImage
                     src={getStoredFinishImageUrl(initialFinish, "back")}
                     alt={`${initialFinish?.unique_code || "Finish"} back`}
                     className="img-thumbnail mt-2"

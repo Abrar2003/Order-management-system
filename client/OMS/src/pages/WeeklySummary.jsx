@@ -1,3 +1,4 @@
+import PreviewImage from "../components/PreviewImage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
@@ -813,7 +814,7 @@ const WeeklySummary = () => {
                 </div>
                 {brandLogoSrc ? (
                   <div className="weekly-summary-brand-panel">
-                    <img
+                    <PreviewImage
                       src={brandLogoSrc}
                       alt={`${brandFilter} logo`}
                       className="weekly-summary-brand-logo"

@@ -1,3 +1,4 @@
+import PreviewImage from "../components/PreviewImage";
 import { useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
@@ -659,7 +660,7 @@ const Home = () => {
                         >
                           <td>
                             {brandLogo ? (
-                              <img
+                              <PreviewImage
                                 src={brandLogo}
                                 alt={order?.brand || selectedBrand || "brand"}
                                 className="home-order-brand-logo"

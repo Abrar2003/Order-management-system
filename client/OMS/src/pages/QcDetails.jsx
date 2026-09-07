@@ -1,3 +1,4 @@
+import PreviewImage from "../components/PreviewImage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "../api/axios";
@@ -2892,7 +2893,7 @@ const QcDetails = () => {
                               <td className="text-break">
                                 <div className="d-flex align-items-center gap-2">
                                   {fileStatus.previewUrl && (
-                                    <img
+                                    <PreviewImage
                                       src={fileStatus.previewUrl}
                                       alt={fileStatus.fileName}
                                       className="qc-image-upload-file-preview"

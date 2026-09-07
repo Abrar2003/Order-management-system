@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { getFilePreviewSource } from "../constants/itemFiles";
 
 const FilePreviewModal = ({
@@ -9,19 +9,42 @@ const FilePreviewModal = ({
   modalClassName = "",
   onClose,
 }) => {
+  const modalRef = useRef(null);
+
   useEffect(() => {
+    const previousFocus = document.activeElement;
+    const wasModalOpen = document.body.classList.contains("modal-open");
+    const modal = modalRef.current;
+    modal.querySelector("button")?.focus();
     const handleKeyDown = (event) => {
+      const previews = document.querySelectorAll("[data-file-preview]");
+      if (previews[previews.length - 1] !== modal) return;
       if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
         onClose?.();
+      }
+      if (event.key === "Tab") {
+        const controls = [...modal.querySelectorAll('button, a[href], iframe')];
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
       }
     };
 
     document.body.classList.add("modal-open");
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
 
     return () => {
-      document.body.classList.remove("modal-open");
-      window.removeEventListener("keydown", handleKeyDown);
+      if (!wasModalOpen) document.body.classList.remove("modal-open");
+      window.removeEventListener("keydown", handleKeyDown, true);
+      previousFocus?.focus();
     };
   }, [onClose]);
 
@@ -37,6 +60,13 @@ const FilePreviewModal = ({
   return (
     <div
       className={`modal d-block om-modal-backdrop ${modalClassName}`.trim()}
+      ref={modalRef}
+      data-file-preview=""
+      aria-label={resolvedTitle}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (event.target === event.currentTarget) onClose?.();
+      }}
       tabIndex="-1"
       role="dialog"
       aria-modal="true"

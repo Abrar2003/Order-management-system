@@ -10255,3 +10255,36 @@ button.om-item-order-presence-label {
     width: 100%;
   }
 }
+
+.image-preview-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.image-preview-trigger:focus-visible {
+  outline: 2px solid var(--bs-primary, #0d6efd);
+  outline-offset: 3px;
+}
+
+.thumbnail-image-preview-modal {
+  z-index: 2000;
+}
+
+.thumbnail-image-preview-modal .modal-dialog {
+  max-width: 960px;
+}
+
+.thumbnail-image-preview-modal .modal-body > .d-flex {
+  min-height: 0 !important;
+  padding: 1rem;
+}
+
+.thumbnail-image-preview-modal img {
+  max-height: 70vh !important;
+}

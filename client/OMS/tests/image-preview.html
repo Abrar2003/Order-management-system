@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Image preview check</title>
+<div id="root"></div><pre id="result">Running…</pre>
+<script type="module">
+// Run npm run dev -- --host 127.0.0.1, then open /tests/image-preview.html.
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
+import Thumbnail from '../src/components/ProductImageThumbnail.jsx';
+import Complaints from '../src/components/complaints/ComplaintFilesDropdown.jsx';
+import 'bootstrap/dist/css/bootstrap.min.css';
+import '../src/App.css';
+const src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="tan"/><circle cx="320" cy="240" r="140" fill="sienna"/></svg>');
+const assert = (value, message) => { if (!value) throw Error(message); };
+const click = element => flushSync(() => element.click());
+const key = (key, shiftKey = false) => flushSync(() => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key, shiftKey, bubbles:true})));
+const modal = () => document.querySelector('[data-file-preview]');
+let rowClicks = 0;
+flushSync(() => createRoot(document.getElementById('root')).render(
+  React.createElement('div', {onClick: () => rowClicks++},
+    React.createElement(Thumbnail, {src}), React.createElement(Thumbnail),
+    React.createElement(Complaints, {files:[{url:src, original_name:'photo.png', mime_type:'image/png'}]}))));
+try {
+  const trigger = document.querySelector('.image-preview-trigger');
+  assert(document.querySelectorAll('.image-preview-trigger').length === 1, 'Empty images must not be clickable');
+  trigger.focus(); click(trigger);
+  assert(modal()?.parentElement === document.body, 'Preview must escape ancestor containers');
+  assert(modal().querySelector('img').src === src, 'Selected image must match');
+  assert(rowClicks === 0, 'Preview must not activate row');
+  assert(document.activeElement === modal().querySelector('button'), 'Focus must enter preview');
+  key('Tab', true);
+  assert(document.activeElement.textContent.trim() === 'Close', 'Shift+Tab must wrap');
+  key('Tab');
+  assert(document.activeElement === modal().querySelector('button'), 'Tab must wrap');
+  key('Escape');
+  assert(!modal() && document.activeElement === trigger, 'Escape must close and restore focus');
+  assert(!document.body.classList.contains('modal-open'), 'Scroll must unlock');
+  document.body.classList.add('modal-open');
+  click(trigger); click(modal());
+  assert(!modal(), 'Backdrop must close');
+  assert(document.body.classList.contains('modal-open'), 'Parent scroll lock must remain');
+  document.body.classList.remove('modal-open');
+  click(document.querySelector('.complaint-file-link'));
+  assert(modal()?.querySelector('img'), 'Complaint image must preview');
+  click(modal().querySelector('.btn-close'));
+  assert(!modal(), 'Close button must dismiss');
+  document.getElementById('result').textContent = 'PASS: thumbnail, empty state, portal, row click, focus, Tab, Escape, backdrop, parent scroll lock, complaint image, close';
+} catch(error) { document.getElementById('result').textContent = 'FAIL: ' + error.message; throw error; }
+</script></html>
