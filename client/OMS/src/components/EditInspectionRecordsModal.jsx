@@ -336,6 +336,9 @@ const EditInspectionRecordsModal = ({
         const rejectionImageCount =
           Number(row.stored_rejection_image_count || 0) + newRejectionImages.length;
 
+        if ([vendorOffered, checked, passed, rejected].some((value) => value > vendorRequested)) {
+          throw new Error(`Row ${rowIndex + 1}: inspection quantities cannot exceed requested quantity (${vendorRequested})`);
+        }
         if (checked > vendorOffered) {
           throw new Error(`Row ${rowIndex + 1}: checked quantity cannot exceed offered quantity`);
         }

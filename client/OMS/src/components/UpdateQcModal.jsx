@@ -2489,6 +2489,16 @@ const UpdateQcModal = ({
     const rejectedQuantity = isInspectionRewriteMode
       ? qcRejected
       : currentRequestRejectedBefore + qcRejected;
+    const nextOfferedQuantity = isInspectionRewriteMode
+      ? offeredQuantity
+      : currentRequestOfferedBefore + offeredQuantity;
+    if ([nextOfferedQuantity, nextCurrentRequestCheckedForRejection,
+      nextCurrentRequestPassedForRejection, rejectedQuantity].some(
+      (value) => value > currentRequestRequestedQuantity,
+    )) {
+      setError(`Inspection quantities cannot exceed requested quantity (${currentRequestRequestedQuantity}).`);
+      return;
+    }
     const existingRejectionImageCount = getStoredRejectionImages(
       currentRequestInspectionRecord,
     ).length;

@@ -81,6 +81,21 @@ test("manual inspection quantities enforce whole pieces and allow unclassified c
   }
 });
 
+test("inspection quantities cannot exceed the request, including cumulative updates", () => {
+  for (const quantity of [0, 9, 10]) {
+    assert.equal(getInspectionQuantityError({ offered: quantity, checked: quantity,
+      passed: quantity, requested: 10 }), "");
+  }
+  for (const field of ["offered", "checked", "passed", "rejected"]) {
+    assert.match(getInspectionQuantityError({ offered: 10, checked: 10,
+      requested: 10, [field]: 11 }), /cannot exceed requested quantity/);
+  }
+  assert.match(getInspectionQuantityError({ offered: 6 + 5, requested: 10 }),
+    /cannot exceed requested quantity/);
+  assert.match(getInspectionQuantityError({ offered: 1, requested: 0 }),
+    /cannot exceed requested quantity/);
+});
+
 test("QC aggregate sums stored rejected values and ignores transferred records", () => {
   const result = calculateQcAggregateMetrics(
     { request_type: "FULL", request_history: [] },

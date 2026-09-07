@@ -1781,6 +1781,7 @@ const getInspectionQuantityError = ({
   passed = 0,
   rejected = 0,
   offered = 0,
+  requested = Infinity,
 } = {}) => {
   const quantities = [
     ["Checked", checked],
@@ -1791,6 +1792,9 @@ const getInspectionQuantityError = ({
     ([, value]) => !Number.isFinite(value) || !Number.isInteger(value) || value < 0,
   );
   if (invalid) return `${invalid[0]} quantity must be a non-negative whole number`;
+  if ([offered, checked, passed, rejected].some((value) => value > requested)) {
+    return `Inspection quantities cannot exceed requested quantity (${requested})`;
+  }
   if (checked > offered) return "Checked quantity cannot exceed offered quantity";
   if (passed + rejected > checked) {
     return "Passed and rejected quantities cannot exceed checked quantity";
@@ -4998,6 +5002,9 @@ exports.alignQC = async (req, res) => {
       : Number(quantities?.vendor_provision);
 
     const quantityRequested = quantityRequestedInput;
+    if (vendorProvision > quantityRequested) {
+      return res.status(400).json({ message: "Offered quantity cannot exceed requested quantity" });
+    }
 
     if (
       Number.isNaN(clientDemand) ||
@@ -6897,6 +6904,7 @@ const updateQC = async (req, res) => {
       passed: nextCurrentRequestSamplePassed,
       rejected: nextCurrentRequestRejected,
       offered: nextCurrentRequestOffered,
+      requested: currentRequestRequestedQuantity,
     });
     if (quantityError) return res.status(400).json({ message: quantityError });
 
@@ -13286,6 +13294,15 @@ exports.editInspectionRecords = async (req, res) => {
         ),
         "Vendor requested",
       );
+      const requestEntry = (qc.request_history || []).find(
+        (entry) => String(entry._id) === String(record.request_history_id),
+      );
+      const requestedLimit = Number(
+        requestEntry?.quantity_requested ?? record.vendor_requested ?? qcRequestedQuantityCap,
+      );
+      if (vendorRequested > requestedLimit) {
+        throw new Error(`Requested quantity cannot exceed the original request (${requestedLimit})`);
+      }
       const vendorOffered = parseNonNegativeField(
         row?.vendor_offered ?? record.vendor_offered,
         "Vendor offered",
@@ -13314,6 +13331,7 @@ exports.editInspectionRecords = async (req, res) => {
         passed,
         rejected,
         offered: vendorOffered,
+        requested: vendorRequested,
       });
       if (quantityError) throw new Error(quantityError);
 
