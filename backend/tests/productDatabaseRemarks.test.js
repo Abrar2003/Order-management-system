@@ -5,6 +5,7 @@ const {
   buildProductDatabaseCompletion,
   buildProductDatabaseCompletionRangeSummary,
   buildProductDatabaseCompletionSummary,
+  buildProductDatabaseRow,
   getProductDatabaseMaterialOptions,
   getProductDatabaseCompletionRange,
   normalizeProductDatabaseInput,
@@ -13,6 +14,22 @@ const {
   applyProductDatabaseSave,
   assertProductDatabaseBarcodes,
 } = require("../helpers/productDatabase");
+
+test("Product Database rows expose shared switches and type fields", () => {
+  const row = buildProductDatabaseRow({
+    kd: true,
+    mounting_file_needed: true,
+    product_type: { key: "cabinet", label: "Cabinet" },
+    product_specs: {
+      fields: [{ key: "sub_product_type", value_text: "TV Cabinet" }],
+    },
+  });
+
+  assert.equal(row.kd, true);
+  assert.equal(row.mounting_file_needed, true);
+  assert.equal(row.product_type_label, "Cabinet");
+  assert.equal(row.sub_product_type, "TV Cabinet");
+});
 
 test("Product Database accepts Base 2, Pedestal, and Stretcher item-size remarks", () => {
   const result = normalizeProductDatabaseInput({

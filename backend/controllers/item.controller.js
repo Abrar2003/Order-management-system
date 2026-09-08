@@ -82,6 +82,7 @@ const {
   buildProductDatabaseCompletion,
   buildProductDatabaseCompletionRangeSummary,
   buildProductDatabaseRow,
+  getProductDatabaseSubType,
   getProductDatabaseMaterialOptions,
   normalizeProductDatabaseCompletionRange,
   normalizePdStatus,
@@ -1830,6 +1831,45 @@ const attachProductDatabaseCompletion = (items = [], templateFields = []) =>
     pd_completion: buildProductDatabaseCompletion(item, templateFields),
   }));
 
+const normalizeProductDatabaseFilterValue = (value) =>
+  normalizeTextField(value).toLowerCase();
+
+const itemMatchesProductDatabaseTypeFilters = (
+  item = {},
+  { productType, subProductType } = {},
+) => {
+  const normalizedProductType = normalizeProductDatabaseFilterValue(productType);
+  const normalizedSubProductType = normalizeProductDatabaseFilterValue(subProductType);
+  const typeMatches = !normalizedProductType || [
+    item?.product_type?.key,
+    item?.product_type?.label,
+  ].some((value) => normalizeProductDatabaseFilterValue(value) === normalizedProductType);
+
+  return typeMatches && (
+    !normalizedSubProductType ||
+    normalizeProductDatabaseFilterValue(getProductDatabaseSubType(item?.product_specs)) ===
+      normalizedSubProductType
+  );
+};
+
+const buildProductDatabaseTypeFilterOptions = (items = []) => {
+  const options = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const value = normalizeTextField(item?.product_type?.key || item?.product_type?.label);
+    const label = normalizeTextField(item?.product_type?.label || item?.product_type?.key);
+    if (!value || !label) return;
+    options.set(normalizeProductDatabaseFilterValue(value), { value, label });
+  });
+  return [...options.values()].sort((left, right) => left.label.localeCompare(right.label));
+};
+
+const buildProductDatabaseSubTypeFilterOptions = (items = []) =>
+  normalizeDistinctValues(
+    (Array.isArray(items) ? items : []).map((item) =>
+      getProductDatabaseSubType(item?.product_specs),
+    ),
+  );
+
 const filterItemsByProductDatabaseDetailsRange = (items = [], range = "") => {
   const normalizedRange = normalizeProductDatabaseCompletionRange(range);
   if (!normalizedRange) return Array.isArray(items) ? items : [];
@@ -2811,6 +2851,9 @@ exports.__test__ = {
   buildItemMatch,
   buildFinalPisCheckAccessMatch,
   buildFinalPisCheckMatch,
+  buildProductDatabaseSubTypeFilterOptions,
+  buildProductDatabaseTypeFilterOptions,
+  itemMatchesProductDatabaseTypeFilters,
   parseSizeEntriesPayload,
   requiresPisBarcodes,
 };
@@ -3190,6 +3233,8 @@ exports.getProductDatabaseItems = async (req, res) => {
     const brand = req.query.brand;
     const vendor = req.query.vendor;
     const status = req.query.status;
+    const productType = req.query.product_type;
+    const subProductType = req.query.sub_product_type;
     const detailsRange = normalizeProductDatabaseCompletionRange(req.query.details);
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
@@ -3227,11 +3272,14 @@ exports.getProductDatabaseItems = async (req, res) => {
       baseItemsRaw,
       completionTemplateFields,
     );
-    const statusFilteredItems = baseItems.filter((item) =>
+    const typeFilteredItems = baseItems.filter((item) =>
+      itemMatchesProductDatabaseTypeFilters(item, { productType, subProductType }),
+    );
+    const statusFilteredItems = typeFilteredItems.filter((item) =>
       itemMatchesProductDatabaseStatus(item, status),
     );
     const detailsFilteredBaseItems = filterItemsByProductDatabaseDetailsRange(
-      baseItems,
+      typeFilteredItems,
       detailsRange,
     );
     const matchingItems = filterItemsByProductDatabaseDetailsRange(
@@ -3273,6 +3321,8 @@ exports.getProductDatabaseItems = async (req, res) => {
         brand: normalizeFilterValue(brand) || "",
         vendor: normalizeFilterValue(vendor) || "",
         status: String(status || "").trim() || "all",
+        product_type: normalizeFilterValue(productType) || "",
+        sub_product_type: normalizeFilterValue(subProductType) || "",
         details: detailsRange || "",
         brand_options: normalizeDistinctValues([
           ...(brandsPrimaryRaw || []),
@@ -3280,6 +3330,8 @@ exports.getProductDatabaseItems = async (req, res) => {
           ...(brandNamesRaw || []),
         ]),
         vendor_options: normalizeVendorDisplayList(vendorsRaw),
+        product_type_options: buildProductDatabaseTypeFilterOptions(baseItems),
+        sub_product_type_options: buildProductDatabaseSubTypeFilterOptions(baseItems),
         material_options: getProductDatabaseMaterialOptions(materialItemsRaw),
       },
       pagination: {
@@ -3304,6 +3356,8 @@ exports.exportProductDatabaseItems = async (req, res) => {
     const brand = req.query.brand;
     const vendor = req.query.vendor;
     const status = req.query.status;
+    const productType = req.query.product_type;
+    const subProductType = req.query.sub_product_type;
     const detailsRange = normalizeProductDatabaseCompletionRange(req.query.details);
     const baseMatch = applyItemDataAccess(
       buildItemMatch({ search, brand, vendor }),
@@ -3321,7 +3375,9 @@ exports.exportProductDatabaseItems = async (req, res) => {
       getProductDatabaseCompletionTemplateFields(),
     ]);
     const items = filterItemsByProductDatabaseDetailsRange(
-      attachProductDatabaseCompletion(itemsRaw, completionTemplateFields),
+      attachProductDatabaseCompletion(itemsRaw, completionTemplateFields).filter((item) =>
+        itemMatchesProductDatabaseTypeFilters(item, { productType, subProductType }),
+      ),
       detailsRange,
     );
     const rows = (Array.isArray(items) ? items : []).map((item) => ({
@@ -3387,6 +3443,7 @@ exports.exportProductDatabaseItems = async (req, res) => {
       { key: "kd", header: "K/D" },
       { key: "mounting_file_needed", header: "Mounting File Needed" },
       { key: "product_type", header: "Product Type" },
+      { key: "sub_product_type", header: "Sub Product Type" },
       { key: "item_sizes", header: "Product Sizes" },
       { key: "box_mode", header: "Box Mode" },
       { key: "box_sizes", header: "Box Sizes" },
@@ -3418,6 +3475,7 @@ exports.exportProductDatabaseItems = async (req, res) => {
       product_type: normalizeTextField(
         row?.product_type?.label || row?.product_type?.key,
       ),
+      sub_product_type: normalizeTextField(row?.sub_product_type),
       item_sizes: formatSizesForExport(row?.pd_item_sizes),
       box_mode: normalizeTextField(row?.pd_box_mode),
       box_sizes: formatSizesForExport(row?.pd_box_sizes),
@@ -3554,6 +3612,9 @@ const buildItemDatabaseRow = ({
   latest_inspection_report_qc_id: latestInspectionReport?.qc_id || "",
   product_database_status: productDatabaseRow?.pd_checked || NOT_SET_STATUS,
   product_database: productDatabaseRow,
+  product_type: productDatabaseRow?.product_type || null,
+  product_type_label: productDatabaseRow?.product_type_label || "",
+  sub_product_type: productDatabaseRow?.sub_product_type || "",
   pd_completion: productDatabaseRow?.pd_completion || null,
   item_files: {
     image: item?.image || {}, cad_file: item?.cad_file || {}, pis_file: item?.pis_file || {},

@@ -458,6 +458,8 @@ const ItemDatabase = () => {
                       <th>Image</th>
                       <th>Brand</th>
                       <th>Vendor</th>
+                      <th>Product Type</th>
+                      <th>Sub Type</th>
                       <th>Current Running POs</th>
                       <th>Last Inspected Date</th>
                       <th>Details Filled</th>
@@ -479,6 +481,8 @@ const ItemDatabase = () => {
                         </td>
                         <td>{row.brand || (row.brands || []).join(", ") || "N/A"}</td>
                         <td>{row.vendor || "N/A"}</td>
+                        <td>{row.product_type_label || row.product_type?.label || "N/A"}</td>
+                        <td>{row.sub_product_type || "N/A"}</td>
                         <td>
                           <div className="fw-semibold">{row.current_running_pos || 0}</div>
                           {Array.isArray(row.current_running_po_ids) && row.current_running_po_ids.length > 0 && (
@@ -519,7 +523,7 @@ const ItemDatabase = () => {
                     ))}
                     {rows.length === 0 && (
                       <tr>
-                        <td className="text-center py-4" colSpan={9}>No items found</td>
+                        <td className="text-center py-4" colSpan={11}>No items found</td>
                       </tr>
                     )}
                   </tbody>

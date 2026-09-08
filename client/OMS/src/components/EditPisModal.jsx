@@ -373,6 +373,17 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     normalizeUserRole(user?.role),
   );
   const editScopeLabel = isPisDiffUpdate ? "Master" : "PIS";
+  const restoreDraftForm = (payload = {}) => {
+    const defaults = buildInitialForm(item, { preferMaster: isMasterUpdate });
+    setForm({
+      ...defaults,
+      ...payload,
+      kd: Boolean(payload.kd ?? defaults.kd),
+      mounting_file_needed: Boolean(
+        payload.mounting_file_needed ?? defaults.mounting_file_needed,
+      ),
+    });
+  };
   const {
     clearDraft,
     draftMessage,
@@ -385,6 +396,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     recordId: "",
     form,
     setForm,
+    onDraftRestore: restoreDraftForm,
   });
 
   const itemCode = useMemo(() => toText(item?.code, "N/A"), [item?.code]);

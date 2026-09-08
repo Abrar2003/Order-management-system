@@ -21,6 +21,7 @@ import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { getProductDatabaseEmptyLabel } from "../utils/productDatabaseDisplay";
 import {
   BOX_CARTON_REMARK_OPTIONS,
   BOX_ENTRY_TYPES,
@@ -189,9 +190,9 @@ const getStatusBadgeClass = (value) => {
   return "text-bg-secondary";
 };
 
-const formatNumber = (value) => {
+const formatNumber = (value, emptyLabel = "Not Set") => {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return "Not Set";
+  if (!Number.isFinite(parsed) || parsed <= 0) return emptyLabel;
   return parsed.toFixed(2).replace(/\.?0+$/, "");
 };
 
@@ -574,10 +575,10 @@ const arePayloadsEqualForCompare = (currentPayload = {}, initialPayload = {}) =>
   ) &&
   areProductSpecsEqualForCompare(currentPayload.product_specs, initialPayload.product_specs);
 
-const SizeSummary = ({ entries = [], type = "item" }) => {
+const SizeSummary = ({ entries = [], type = "item", emptyLabel = "Not Set" }) => {
   const rows = Array.isArray(entries) ? entries : [];
   if (rows.length === 0) {
-    return <span className="text-secondary">Not Set</span>;
+    return <span className="text-secondary">{emptyLabel}</span>;
   }
 
   return (
@@ -585,11 +586,12 @@ const SizeSummary = ({ entries = [], type = "item" }) => {
       {rows.map((entry, index) => (
         <div key={`${type}-${index}-${entry?.remark || entry?.box_type || "single"}`}>
           <strong>{formatRemark(entry?.remark || entry?.box_type)}:</strong>{" "}
-          {formatNumber(entry?.L)} x {formatNumber(entry?.B)} x {formatNumber(entry?.H)}
+          {formatNumber(entry?.L, emptyLabel)} x {formatNumber(entry?.B, emptyLabel)} x{" "}
+          {formatNumber(entry?.H, emptyLabel)}
           {type === "item" ? (
-            <span> | Net {formatNumber(entry?.net_weight)}</span>
+            <span> | Net {formatNumber(entry?.net_weight, emptyLabel)}</span>
           ) : (
-            <span> | Gross {formatNumber(entry?.gross_weight)}</span>
+            <span> | Gross {formatNumber(entry?.gross_weight, emptyLabel)}</span>
           )}
         </div>
       ))}
@@ -1262,6 +1264,8 @@ const createProductDatabaseDraft = ({
     singleBarcode: form?.singleBarcode || "",
     masterBarcode: form?.masterBarcode || "",
     innerBarcode: form?.innerBarcode || "",
+    kd: form?.kd === true,
+    mountingFileNeeded: form?.mountingFileNeeded === true,
     productTypeKey: normalizeTemplateKey(form?.productTypeKey),
     productTypeVersion: Number(form?.productTypeVersion || 0),
   },
@@ -1347,8 +1351,10 @@ export const ProductDatabaseModal = ({
               draft.form.masterBarcode ?? getProductDatabaseMasterBarcode(draftItem),
             innerBarcode:
               draft.form.innerBarcode ?? getProductDatabaseInnerBarcode(draftItem),
-            kd: draft.form.kd === true,
-            mountingFileNeeded: draft.form.mountingFileNeeded === true,
+            kd: Boolean(draft.form.kd ?? draftItem?.kd),
+            mountingFileNeeded: Boolean(
+              draft.form.mountingFileNeeded ?? draftItem?.mounting_file_needed,
+            ),
             productTypeKey: normalizeTemplateKey(draft.form.productTypeKey),
             productTypeVersion: Number(draft.form.productTypeVersion || 0),
           }
@@ -2040,10 +2046,18 @@ export const ProductDatabaseModal = ({
           >
         <div className="modal-content">
           <div className="modal-header">
-            <div>
-              <h5 className="modal-title">Product Database</h5>
-              <div className="small text-muted">
-                {item?.code || "N/A"} | {item?.description || item?.name || "N/A"}
+            <div className="d-flex align-items-center gap-3">
+              <ProductImageThumbnail
+                src={item?.product_image_url}
+                originalName={item?.product_image?.originalName}
+                alt={`${item?.code || "Item"} product image`}
+                size="md"
+              />
+              <div>
+                <h5 className="modal-title">Product Database</h5>
+                <div className="small text-muted">
+                  {item?.code || "N/A"} | {item?.description || item?.name || "N/A"}
+                </div>
               </div>
             </div>
             <button type="button" className="btn-close" aria-label="Close" onClick={onClose} />
@@ -2461,6 +2475,18 @@ const ProductDatabase = () => {
   const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeFilterValue(searchParams.get("vendor")),
   );
+  const [productTypeFilter, setProductTypeFilter] = useState(() =>
+    normalizeFilterValue(searchParams.get("product_type")),
+  );
+  const [draftProductTypeFilter, setDraftProductTypeFilter] = useState(() =>
+    normalizeFilterValue(searchParams.get("product_type")),
+  );
+  const [subProductTypeFilter, setSubProductTypeFilter] = useState(() =>
+    normalizeFilterValue(searchParams.get("sub_product_type")),
+  );
+  const [draftSubProductTypeFilter, setDraftSubProductTypeFilter] = useState(() =>
+    normalizeFilterValue(searchParams.get("sub_product_type")),
+  );
   const [statusFilter, setStatusFilter] = useState(() =>
     normalizeFilterValue(searchParams.get("status")),
   );
@@ -2482,6 +2508,8 @@ const ProductDatabase = () => {
   const [filters, setFilters] = useState({
     brand_options: [],
     vendor_options: [],
+    product_type_options: [],
+    sub_product_type_options: [],
   });
   const [pagination, setPagination] = useState({
     page: 1,
@@ -2507,6 +2535,10 @@ const ProductDatabase = () => {
       if (search) params.search = search;
       if (brandFilter !== DEFAULT_FILTER) params.brand = brandFilter;
       if (vendorFilter !== DEFAULT_FILTER) params.vendor = vendorFilter;
+      if (productTypeFilter !== DEFAULT_FILTER) params.product_type = productTypeFilter;
+      if (subProductTypeFilter !== DEFAULT_FILTER) {
+        params.sub_product_type = subProductTypeFilter;
+      }
       if (statusFilter !== DEFAULT_FILTER) params.status = statusFilter;
       if (detailsFilter !== DEFAULT_FILTER) params.details = detailsFilter;
       params.include_product_image_thumbnail = true;
@@ -2528,7 +2560,17 @@ const ProductDatabase = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, detailsFilter, limit, page, search, statusFilter, vendorFilter]);
+  }, [
+    brandFilter,
+    detailsFilter,
+    limit,
+    page,
+    productTypeFilter,
+    search,
+    statusFilter,
+    subProductTypeFilter,
+    vendorFilter,
+  ]);
 
   useEffect(() => {
     fetchRows();
@@ -2541,6 +2583,8 @@ const ProductDatabase = () => {
     const nextSearch = normalizeTextValue(searchParams.get("search"));
     const nextBrand = normalizeFilterValue(searchParams.get("brand"));
     const nextVendor = normalizeFilterValue(searchParams.get("vendor"));
+    const nextProductType = normalizeFilterValue(searchParams.get("product_type"));
+    const nextSubProductType = normalizeFilterValue(searchParams.get("sub_product_type"));
     const nextStatus = normalizeFilterValue(searchParams.get("status"));
     const nextDetails = normalizeDetailsFilterValue(searchParams.get("details"));
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
@@ -2552,6 +2596,10 @@ const ProductDatabase = () => {
     setDraftBrandFilter((prev) => (prev === nextBrand ? prev : nextBrand));
     setVendorFilter((prev) => (prev === nextVendor ? prev : nextVendor));
     setDraftVendorFilter((prev) => (prev === nextVendor ? prev : nextVendor));
+    setProductTypeFilter((prev) => (prev === nextProductType ? prev : nextProductType));
+    setDraftProductTypeFilter((prev) => (prev === nextProductType ? prev : nextProductType));
+    setSubProductTypeFilter((prev) => (prev === nextSubProductType ? prev : nextSubProductType));
+    setDraftSubProductTypeFilter((prev) => (prev === nextSubProductType ? prev : nextSubProductType));
     setStatusFilter((prev) => (prev === nextStatus ? prev : nextStatus));
     setDraftStatusFilter((prev) => (prev === nextStatus ? prev : nextStatus));
     setDetailsFilter((prev) => (prev === nextDetails ? prev : nextDetails));
@@ -2568,6 +2616,10 @@ const ProductDatabase = () => {
     if (search) next.set("search", search);
     if (brandFilter !== DEFAULT_FILTER) next.set("brand", brandFilter);
     if (vendorFilter !== DEFAULT_FILTER) next.set("vendor", vendorFilter);
+    if (productTypeFilter !== DEFAULT_FILTER) next.set("product_type", productTypeFilter);
+    if (subProductTypeFilter !== DEFAULT_FILTER) {
+      next.set("sub_product_type", subProductTypeFilter);
+    }
     if (statusFilter !== DEFAULT_FILTER) next.set("status", statusFilter);
     if (detailsFilter !== DEFAULT_FILTER) next.set("details", detailsFilter);
     if (page !== 1) next.set("page", String(page));
@@ -2581,10 +2633,12 @@ const ProductDatabase = () => {
     detailsFilter,
     limit,
     page,
+    productTypeFilter,
     search,
     searchParams,
     setSearchParams,
     statusFilter,
+    subProductTypeFilter,
     syncedQuery,
     vendorFilter,
   ]);
@@ -2594,6 +2648,8 @@ const ProductDatabase = () => {
     setSearch(normalizeTextValue(draftSearch));
     setBrandFilter(normalizeFilterValue(draftBrandFilter));
     setVendorFilter(normalizeFilterValue(draftVendorFilter));
+    setProductTypeFilter(normalizeFilterValue(draftProductTypeFilter));
+    setSubProductTypeFilter(normalizeFilterValue(draftSubProductTypeFilter));
     setStatusFilter(normalizeFilterValue(draftStatusFilter));
     setPage(1);
   };
@@ -2602,10 +2658,14 @@ const ProductDatabase = () => {
     setDraftSearch("");
     setDraftBrandFilter(DEFAULT_FILTER);
     setDraftVendorFilter(DEFAULT_FILTER);
+    setDraftProductTypeFilter(DEFAULT_FILTER);
+    setDraftSubProductTypeFilter(DEFAULT_FILTER);
     setDraftStatusFilter(DEFAULT_FILTER);
     setSearch("");
     setBrandFilter(DEFAULT_FILTER);
     setVendorFilter(DEFAULT_FILTER);
+    setProductTypeFilter(DEFAULT_FILTER);
+    setSubProductTypeFilter(DEFAULT_FILTER);
     setStatusFilter(DEFAULT_FILTER);
     setDetailsFilter(DEFAULT_FILTER);
     setPage(1);
@@ -2619,6 +2679,10 @@ const ProductDatabase = () => {
       if (search) params.search = search;
       if (brandFilter !== DEFAULT_FILTER) params.brand = brandFilter;
       if (vendorFilter !== DEFAULT_FILTER) params.vendor = vendorFilter;
+      if (productTypeFilter !== DEFAULT_FILTER) params.product_type = productTypeFilter;
+      if (subProductTypeFilter !== DEFAULT_FILTER) {
+        params.sub_product_type = subProductTypeFilter;
+      }
       if (statusFilter !== DEFAULT_FILTER) params.status = statusFilter;
       if (detailsFilter !== DEFAULT_FILTER) params.details = detailsFilter;
 
@@ -2645,7 +2709,15 @@ const ProductDatabase = () => {
     } finally {
       setExporting(false);
     }
-  }, [brandFilter, detailsFilter, search, statusFilter, vendorFilter]);
+  }, [
+    brandFilter,
+    detailsFilter,
+    productTypeFilter,
+    search,
+    statusFilter,
+    subProductTypeFilter,
+    vendorFilter,
+  ]);
 
   const handleDraftSaved = useCallback(({ itemId, draft: nextDraft }) => {
     const draftKey = normalizeTextValue(itemId);
@@ -2759,6 +2831,40 @@ const ProductDatabase = () => {
               </select>
             </div>
             <div className="col-lg-2 col-md-6">
+              <label className="form-label mb-1">Product Type</label>
+              <select
+                className="form-select"
+                value={draftProductTypeFilter}
+                onChange={(event) => setDraftProductTypeFilter(event.target.value)}
+              >
+                <option value={DEFAULT_FILTER}>All Product Types</option>
+                {(Array.isArray(filters.product_type_options)
+                  ? filters.product_type_options
+                  : []).map((productType) => (
+                  <option key={productType.value} value={productType.value}>
+                    {productType.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="col-lg-2 col-md-6">
+              <label className="form-label mb-1">Sub Type</label>
+              <select
+                className="form-select"
+                value={draftSubProductTypeFilter}
+                onChange={(event) => setDraftSubProductTypeFilter(event.target.value)}
+              >
+                <option value={DEFAULT_FILTER}>All Sub Types</option>
+                {(Array.isArray(filters.sub_product_type_options)
+                  ? filters.sub_product_type_options
+                  : []).map((subProductType) => (
+                  <option key={subProductType} value={subProductType}>
+                    {subProductType}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="col-lg-2 col-md-6">
               <label className="form-label mb-1">Approval Status</label>
               <select
                 className="form-select"
@@ -2844,6 +2950,8 @@ const ProductDatabase = () => {
                       <th>Name / Description</th>
                       <th>Brand</th>
                       <th>Vendor</th>
+                      <th>Product Type</th>
+                      <th>Sub Type</th>
                       <th>Product Sizes</th>
                       <th>Box Sizes</th>
                       <th>Details Filled</th>
@@ -2870,12 +2978,24 @@ const ProductDatabase = () => {
                         </td>
                         <td>{row.brand_name || row.brand || row.brands?.join(", ") || "N/A"}</td>
                         <td>{Array.isArray(row.vendors) && row.vendors.length > 0 ? row.vendors.join(", ") : "N/A"}</td>
-                        <td><SizeSummary entries={getDisplayItemSizes(row)} type="item" /></td>
+                        <td>{row.product_type_label || row.product_type?.label || "N/A"}</td>
+                        <td>{row.sub_product_type || "N/A"}</td>
+                        <td>
+                          <SizeSummary
+                            entries={getDisplayItemSizes(row)}
+                            type="item"
+                            emptyLabel={getProductDatabaseEmptyLabel(row.pd_checked)}
+                          />
+                        </td>
                         <td>
                           <div className="small text-secondary mb-1">
                             Mode: {formatBoxMode(getDisplayBoxMode(row))}
                           </div>
-                          <SizeSummary entries={getDisplayBoxSizes(row)} type="box" />
+                          <SizeSummary
+                            entries={getDisplayBoxSizes(row)}
+                            type="box"
+                            emptyLabel={getProductDatabaseEmptyLabel(row.pd_checked)}
+                          />
                         </td>
                         <td>
                           {row?.pd_completion?.total ? (

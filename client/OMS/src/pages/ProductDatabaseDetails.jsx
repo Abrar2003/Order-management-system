@@ -7,23 +7,24 @@ import { ITEM_FILE_OPTIONS, SHIPPING_MARKS_SUB_OPTIONS, getItemFileValues, getSt
 import { ProductDatabaseModal } from "./ProductDatabase";
 import { formatEan13BarcodeDisplay } from "../utils/barcode";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { getProductDatabaseEmptyLabel } from "../utils/productDatabaseDisplay";
 import "../App.css";
 
 const normalizeText = (value) => String(value ?? "").trim();
-const formatValue = (value) => {
-  if (value === null || value === undefined || value === "") return "Not Set";
+const formatValue = (value, emptyLabel = "Not Set") => {
+  if (value === null || value === undefined || value === "") return emptyLabel;
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (Array.isArray(value)) {
-    if (value.length === 0) return "Not Set";
-    return value.map((entry) => formatValue(entry)).join(", ");
+    if (value.length === 0) return emptyLabel;
+    return value.map((entry) => formatValue(entry, emptyLabel)).join(", ");
   }
   if (value instanceof Date) return formatDateDDMMYYYY(value);
   if (typeof value === "object") {
     const entries = Object.entries(value).filter(([, entryValue]) =>
       entryValue !== null && entryValue !== undefined && entryValue !== "",
     );
-    if (entries.length === 0) return "Not Set";
-    return entries.map(([key, entryValue]) => `${formatLabel(key)}: ${formatValue(entryValue)}`).join(" | ");
+    if (entries.length === 0) return emptyLabel;
+    return entries.map(([key, entryValue]) => `${formatLabel(key)}: ${formatValue(entryValue, emptyLabel)}`).join(" | ");
   }
   return String(value);
 };
@@ -34,28 +35,28 @@ const formatLabel = (value) =>
     .replace(/\b\w/g, (character) => character.toUpperCase());
 const formatProductTypeDisplayLabel = (value = "") =>
   normalizeText(value).replace(/\s+v\d+\s*$/i, "");
-const formatNumber = (value) => {
+const formatNumber = (value, emptyLabel = "Not Set") => {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return "Not Set";
+  if (!Number.isFinite(parsed) || parsed <= 0) return emptyLabel;
   return parsed.toFixed(2).replace(/\.?0+$/, "");
 };
-const formatActor = (actor = {}, dateKeys = []) => {
+const formatActor = (actor = {}, dateKeys = [], emptyLabel = "Not Set") => {
   const name = normalizeText(actor?.name);
   const dateKey = dateKeys.find((key) => actor?.[key]);
   const date = dateKey ? formatDateDDMMYYYY(actor[dateKey]) : "";
-  if (!name && !date) return "Not Set";
+  if (!name && !date) return emptyLabel;
   return date ? `${name || "Unknown"} (${date})` : name;
 };
-const getFieldDisplayValue = (field = {}) => {
+const getFieldDisplayValue = (field = {}, emptyLabel = "Not Set") => {
   const valueType = normalizeText(field?.value_type).toLowerCase();
-  if (valueType === "number") return formatNumber(field?.value_number);
-  if (valueType === "boolean") return formatValue(field?.value_boolean);
-  if (valueType === "date") return field?.value_date ? formatDateDDMMYYYY(field.value_date) : "Not Set";
-  if (valueType === "array") return formatValue(field?.value_array);
+  if (valueType === "number") return formatNumber(field?.value_number, emptyLabel);
+  if (valueType === "boolean") return formatValue(field?.value_boolean, emptyLabel);
+  if (valueType === "date") return field?.value_date ? formatDateDDMMYYYY(field.value_date) : emptyLabel;
+  if (valueType === "array") return formatValue(field?.value_array, emptyLabel);
   if (field?.raw_value !== null && field?.raw_value !== undefined && field?.raw_value !== "") {
-    return formatValue(field.raw_value);
+    return formatValue(field.raw_value, emptyLabel);
   }
-  return formatValue(field?.value_text);
+  return formatValue(field?.value_text, emptyLabel);
 };
 const getStatusLabel = (value) => {
   const normalized = normalizeText(value).toLowerCase().replace(/\s+/g, "_");
@@ -133,20 +134,20 @@ const DetailCard = ({ title, children }) => (
   </div>
 );
 
-const KeyValueGrid = ({ rows = [] }) => (
+const KeyValueGrid = ({ rows = [], emptyLabel = "Not Set" }) => (
   <div className="product-database-detail-grid">
     {rows.map((row) => (
       <div key={row.label} className="product-database-detail-field">
         <div className="small text-secondary">{row.label}</div>
-        <div className="fw-semibold">{row.value || "Not Set"}</div>
+        <div className="fw-semibold">{row.value || emptyLabel}</div>
       </div>
     ))}
   </div>
 );
 
-const SizeTable = ({ rows = [], type = "item" }) => {
+const SizeTable = ({ rows = [], type = "item", emptyLabel = "Not Set" }) => {
   if (!Array.isArray(rows) || rows.length === 0) {
-    return <div className="text-secondary small">No sizes stored.</div>;
+    return <div className="text-secondary small">{emptyLabel}</div>;
   }
 
   return (
@@ -166,14 +167,14 @@ const SizeTable = ({ rows = [], type = "item" }) => {
           {rows.map((row, index) => (
             <tr key={`${type}-${index}-${row?.remark || row?.box_type || "entry"}`}>
               <td>{formatLabel(row?.remark || row?.box_type || `Entry ${index + 1}`)}</td>
-              <td>{formatNumber(row?.L)}</td>
-              <td>{formatNumber(row?.B)}</td>
-              <td>{formatNumber(row?.H)}</td>
-              <td>{formatNumber(type === "item" ? row?.net_weight : row?.gross_weight)}</td>
+              <td>{formatNumber(row?.L, emptyLabel)}</td>
+              <td>{formatNumber(row?.B, emptyLabel)}</td>
+              <td>{formatNumber(row?.H, emptyLabel)}</td>
+              <td>{formatNumber(type === "item" ? row?.net_weight : row?.gross_weight, emptyLabel)}</td>
               {type === "box" && (
                 <td>
-                  Inner: {formatNumber(row?.item_count_in_inner)} / Master:{" "}
-                  {formatNumber(row?.box_count_in_master)}
+                  Inner: {formatNumber(row?.item_count_in_inner, emptyLabel)} / Master:{" "}
+                  {formatNumber(row?.box_count_in_master, emptyLabel)}
                 </td>
               )}
             </tr>
@@ -218,6 +219,7 @@ const ProductDatabaseDetails = () => {
   }, [fetchDetails]);
 
   const productDatabase = row?.product_database || {};
+  const emptyLabel = getProductDatabaseEmptyLabel(row?.product_database_status);
   const productDatabasePermissions = productDatabase?.permissions || {};
   const canEditProductDatabase = Boolean(productDatabasePermissions.can_edit);
   const canCheckProductDatabase = Boolean(productDatabasePermissions.can_check);
@@ -382,15 +384,16 @@ const ProductDatabaseDetails = () => {
             <div className="col-xl-6">
               <DetailCard title="Item Summary">
                 <KeyValueGrid
+                  emptyLabel={emptyLabel}
                   rows={[
                     { label: "Item Code", value: row.item_code },
                     { label: "Brand", value: row.brand || (row.brands || []).join(", ") },
                     { label: "Vendor", value: row.vendor },
                     { label: "Current Running POs", value: String(row.current_running_pos || 0) },
-                    { label: "PO IDs", value: (row.current_running_po_ids || []).join(", ") || "Not Set" },
+                    { label: "PO IDs", value: (row.current_running_po_ids || []).join(", ") || emptyLabel },
                     {
                       label: "Last Inspected Date",
-                      value: row.last_inspected_date ? formatDateDDMMYYYY(row.last_inspected_date) : "Not Set",
+                      value: row.last_inspected_date ? formatDateDDMMYYYY(row.last_inspected_date) : emptyLabel,
                     },
                   ]}
                 />
@@ -400,6 +403,7 @@ const ProductDatabaseDetails = () => {
             <div className="col-xl-6">
               <DetailCard title="Basic Product Data">
                 <KeyValueGrid
+                  emptyLabel={emptyLabel}
                   rows={[
                     { label: "Description", value: productDatabase.description },
                     { label: "Country Of Origin", value: productDatabase.country_of_origin },
@@ -409,7 +413,7 @@ const ProductDatabaseDetails = () => {
                         productDatabase.product_type?.label || productDatabase.product_type?.key,
                       ),
                     },
-                    { label: "Last Updated", value: productDatabase.updated_at ? formatDateDDMMYYYY(productDatabase.updated_at) : "Not Set" },
+                    { label: "Last Updated", value: productDatabase.updated_at ? formatDateDDMMYYYY(productDatabase.updated_at) : emptyLabel },
                   ]}
                 />
               </DetailCard>
@@ -418,6 +422,7 @@ const ProductDatabaseDetails = () => {
             <div className="col-xl-6">
               <DetailCard title="Barcodes">
                 <KeyValueGrid
+                  emptyLabel={emptyLabel}
                   rows={[
                     {
                       label: "Single / Master Barcode",
@@ -426,12 +431,14 @@ const ProductDatabaseDetails = () => {
                           productDatabase.pd_barcode ||
                           productDatabase.pis_master_barcode ||
                           productDatabase.pis_barcode,
+                        emptyLabel,
                       ),
                     },
                     {
                       label: "Inner Barcode",
                       value: formatEan13BarcodeDisplay(
                         productDatabase.pd_inner_barcode || productDatabase.pis_inner_barcode,
+                        emptyLabel,
                       ),
                     },
                   ]}
@@ -442,11 +449,12 @@ const ProductDatabaseDetails = () => {
             <div className="col-xl-6">
               <DetailCard title="Product Database Activity">
                 <KeyValueGrid
+                  emptyLabel={emptyLabel}
                   rows={[
-                    { label: "Created By", value: formatActor(productDatabase.pd_created_by, ["created_at"]) },
-                    { label: "Checked By", value: formatActor(productDatabase.pd_checked_by, ["checked_at"]) },
-                    { label: "Approved By", value: formatActor(productDatabase.pd_approved_by, ["approved_at"]) },
-                    { label: "Last Changed By", value: formatActor(productDatabase.pd_last_changed_by, ["changed_at", "updated_at"]) },
+                    { label: "Created By", value: formatActor(productDatabase.pd_created_by, ["created_at"], emptyLabel) },
+                    { label: "Checked By", value: formatActor(productDatabase.pd_checked_by, ["checked_at"], emptyLabel) },
+                    { label: "Approved By", value: formatActor(productDatabase.pd_approved_by, ["approved_at"], emptyLabel) },
+                    { label: "Last Changed By", value: formatActor(productDatabase.pd_last_changed_by, ["changed_at", "updated_at"], emptyLabel) },
                   ]}
                 />
               </DetailCard>
@@ -455,6 +463,7 @@ const ProductDatabaseDetails = () => {
             <div className="col-12">
               <DetailCard title="Item Sizes">
                 <SizeTable
+                  emptyLabel={emptyLabel}
                   rows={getSizeRows(
                     productDatabase.pd_item_sizes,
                     productDatabase.product_specs?.item_sizes,
@@ -470,6 +479,7 @@ const ProductDatabaseDetails = () => {
                   Packaging Mode: {formatLabel(productDatabase.pd_box_mode || productDatabase.product_specs?.box_mode || "individual")}
                 </div>
                 <SizeTable
+                  emptyLabel={emptyLabel}
                   rows={getSizeRows(
                     productDatabase.pd_box_sizes,
                     productDatabase.product_specs?.box_sizes,
@@ -483,9 +493,10 @@ const ProductDatabaseDetails = () => {
               <div className="col-xl-6" key={groupLabel}>
                 <DetailCard title={groupLabel}>
                   <KeyValueGrid
+                    emptyLabel={emptyLabel}
                     rows={fields.map((field) => ({
                       label: field?.label || formatLabel(field?.key),
-                      value: getFieldDisplayValue(field),
+                      value: getFieldDisplayValue(field, emptyLabel),
                     }))}
                   />
                 </DetailCard>
@@ -539,7 +550,11 @@ const ProductDatabaseDetails = () => {
       </div>
       {showEditModal && row?.product_database && (
         <ProductDatabaseModal
-          item={row.product_database}
+          item={{
+            ...row.product_database,
+            product_image_url: productImageUrl,
+            product_image: row.item_files?.image,
+          }}
           onClose={() => setShowEditModal(false)}
           onSaved={handleModalSaved}
         />
@@ -549,4 +564,3 @@ const ProductDatabaseDetails = () => {
 };
 
 export default ProductDatabaseDetails;
-

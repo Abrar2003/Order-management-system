@@ -1299,7 +1299,15 @@ const UpdateQcModal = ({
       : nextForm;
 
     skipNextBarcodeValidationResetRef.current = true;
-    setForm({ qc_rejected: "", rejection_remark: "", ...restoredForm });
+    setForm({
+      qc_rejected: "",
+      rejection_remark: "",
+      ...restoredForm,
+      kd: Boolean(restoredForm.kd ?? form.kd),
+      mounting_file_needed: Boolean(
+        restoredForm.mounting_file_needed ?? form.mounting_file_needed,
+      ),
+    });
     setBarcodeScannedInSession(
       restoredBarcodeScannedInSession,
     );
@@ -1515,8 +1523,15 @@ const UpdateQcModal = ({
       packed_size: getBooleanPrefill("packed_size"),
       finishing: getBooleanPrefill("finishing"),
       branding: getBooleanPrefill("branding"),
-      kd: Boolean(itemMaster?.kd),
-      mounting_file_needed: Boolean(itemMaster?.mounting_file_needed),
+      kd: [latestRequestEntry, recordToPrefill, itemMaster, qc?.item_master, qc]
+        .some((source) => source?.kd === true),
+      mounting_file_needed: [
+        latestRequestEntry,
+        recordToPrefill,
+        itemMaster,
+        qc?.item_master,
+        qc,
+      ].some((source) => source?.mounting_file_needed === true),
       labelRanges: initialLabelRanges,
       remarks: isInspectionRecordUpdate || canRewriteLatestInspectionRecord || isQcUserRewriteMode
         ? initialRemarks

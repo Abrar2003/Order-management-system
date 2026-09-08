@@ -622,6 +622,12 @@ const extractProductDatabaseFields = (item = {}) => {
   };
 };
 
+const getProductDatabaseSubType = (productSpecs = {}) => {
+  const fields = Array.isArray(productSpecs?.fields) ? productSpecs.fields : [];
+  const field = fields.find((entry) => normalizeTemplateKey(entry?.key) === "sub_product_type");
+  return normalizeText(field?.value_text || field?.raw_value);
+};
+
 const normalizeProductDatabaseInput = (
   payload = {},
   { allowBlankBarcodes = false } = {},
@@ -1341,11 +1347,15 @@ const buildProductDatabaseRow = (item = {}, user = {}) => {
     pis_barcode: normalizeText(item?.pis_barcode),
     pis_master_barcode: normalizeText(item?.pis_master_barcode),
     pis_inner_barcode: normalizeText(item?.pis_inner_barcode),
+    kd: item?.kd === true,
+    mounting_file_needed: item?.mounting_file_needed === true,
     pd_item_sizes: state.pd_item_sizes,
     pd_box_sizes: state.pd_box_sizes,
     pd_box_mode: state.pd_box_mode,
     product_type: state.product_type,
+    product_type_label: state.product_type?.label || state.product_type?.key || "",
     product_specs: state.product_specs,
+    sub_product_type: getProductDatabaseSubType(state.product_specs),
     pd_checked: status,
     pd_created_by: item?.pd_created_by || null,
     pd_checked_by: item?.pd_checked_by || null,
@@ -1370,6 +1380,7 @@ module.exports = {
   normalizeProductDatabaseCompletionRange,
   buildPdAuditActor,
   extractProductDatabaseFields,
+  getProductDatabaseSubType,
   normalizeProductDatabaseInput,
   mergeProductDatabaseFields,
   getChangedProductDatabaseFields,
