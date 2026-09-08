@@ -1197,7 +1197,7 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
       checked: false,
       status: PD_STATUSES.CREATED,
       message:
-        "Product Database data changed and remains created. Another eligible manager must check it.",
+        "Product Database data changed and remains created. A manager who did not last change it must check it.",
     };
   }
 
@@ -1205,11 +1205,7 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
     throw new ProductDatabaseError("Only created Product Database records can be checked");
   }
 
-  const creatorId = normalizeId(item?.pd_created_by?.user);
   const lastChangerId = normalizeId(item?.pd_last_changed_by?.user);
-  if (creatorId && actorId === creatorId) {
-    throw new ProductDatabaseError("You cannot check Product Database data that you created", 403);
-  }
   if (lastChangerId && actorId === lastChangerId) {
     throw new ProductDatabaseError("You cannot check Product Database data that you last changed", 403);
   }
@@ -1292,16 +1288,13 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
   const role = normalizeRole(user?.role);
   const actorId = normalizeId(user?._id || user?.id);
   const status = normalizePdStatus(item?.pd_checked);
-  const creatorId = normalizeId(item?.pd_created_by?.user);
   const lastChangerId = normalizeId(item?.pd_last_changed_by?.user);
-  const isCreator = Boolean(creatorId && actorId === creatorId);
   const isLastChanger = Boolean(lastChangerId && actorId === lastChangerId);
   const canEdit = isManagerLikeRole(role);
   const canCheck =
     !isStrictAdmin(role) &&
     isManagerLikeRole(role) &&
     status === PD_STATUSES.CREATED &&
-    !isCreator &&
     !isLastChanger;
 
   let checkBlockedReason = "";
@@ -1311,9 +1304,9 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
     status === PD_STATUSES.CREATED &&
     !canCheck
   ) {
-    if (isCreator || isLastChanger) {
+    if (isLastChanger) {
       checkBlockedReason =
-        "You cannot check this because you created or last changed this PD data.";
+        "You cannot check this because you last changed this PD data.";
     }
   }
 

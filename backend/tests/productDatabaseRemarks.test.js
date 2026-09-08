@@ -175,29 +175,36 @@ test("Product Database does not require barcodes for barcode-exempt items", () =
   assert.equal(item.pd_checked, "approved");
 });
 
-test("Product Database lets managers check and reserves approval for admins", () => {
-  const item = {
+test("Product Database lets every manager type check unless they last changed it", () => {
+  const buildItem = () => ({
     pd_checked: "created",
     pd_box_mode: "individual",
     pd_barcode: "123",
     pd_master_barcode: "123",
     pis_barcode: "123",
     pd_created_by: { user: "creator" },
-    pd_last_changed_by: { user: "creator" },
+    pd_last_changed_by: { user: "updater" },
     pd_history: [],
-  };
-
-  applyProductDatabaseCheck({
-    item,
-    user: { id: "checker", role: "manager" },
   });
-  assert.equal(item.pd_checked, "checked");
+
+  ["manager", "product manager", "inspection manager"].forEach((role) => {
+    const item = buildItem();
+    applyProductDatabaseCheck({
+      item,
+      user: { id: "creator", role },
+    });
+    assert.equal(item.pd_checked, "checked");
+  });
   assert.throws(
-    () => applyProductDatabaseCheck({ item, user: { id: "admin", role: "admin" } }),
+    () => applyProductDatabaseCheck({ item: buildItem(), user: { id: "updater", role: "manager" } }),
+    /last changed/,
+  );
+  assert.throws(
+    () => applyProductDatabaseCheck({ item: buildItem(), user: { id: "admin", role: "admin" } }),
     /Only managers/,
   );
   assert.throws(
-    () => applyProductDatabaseApprove({ item, user: { id: "manager", role: "manager" } }),
+    () => applyProductDatabaseApprove({ item: buildItem(), user: { id: "manager", role: "manager" } }),
     /Only admin/,
   );
 });

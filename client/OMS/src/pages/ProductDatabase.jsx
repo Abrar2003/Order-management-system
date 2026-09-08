@@ -2401,7 +2401,7 @@ export const ProductDatabaseModal = ({
             )}
             {isManager && hasChanges && (
               <div className="alert alert-info mt-3 mb-0">
-                Saving changes will keep this record in Created status. Another eligible manager must check it.
+                Saving changes will keep this record in Created status. A manager who did not last update it must check it.
               </div>
             )}
           </div>
