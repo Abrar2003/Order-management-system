@@ -86,10 +86,10 @@ const buildDataset = async ({
   });
 };
 
-test("defaults to the inclusive Tuesday-Monday week and validates explicit date pairs", () => {
+test("defaults to the inclusive seven days ending today and validates explicit date pairs", () => {
   assert.deepEqual(
-    resolvePackedGoodsPeriod({ now: new Date("2026-08-31T12:00:00Z") }),
-    { from_date: "2026-08-25", to_date: "2026-08-31", is_default_week: true },
+    resolvePackedGoodsPeriod({ now: new Date("2026-09-08T12:00:00Z") }),
+    { from_date: "2026-09-02", to_date: "2026-09-08", is_default_week: true },
   );
   assert.deepEqual(
     resolvePackedGoodsPeriod({ fromDate: "2026-08-25", toDate: "2026-08-31" }),
@@ -105,7 +105,7 @@ test("defaults to the inclusive Tuesday-Monday week and validates explicit date 
   );
 });
 
-test("scans indexed inspection dates, not order_date, and respects Tuesday and Monday inclusively", async () => {
+test("scans indexed inspection dates, not order_date, and respects supplied bounds inclusively", async () => {
   let match;
   const query = {
     select() { return this; },
@@ -253,6 +253,7 @@ test("keeps PO and item rows distinct, applies combined server filters, and batc
   const calls = { selected: 0, qcs: 0, orders: 0, history: 0, items: 0 };
   const qcs = orders.map((order) => ({ _id: order.qc_record._id, order_meta: { order_id: order.order_id } }));
   const dataset = await buildPackedGoodsPeriodDataset({ brands: ["Brand A"], vendor: "Vendor A", orderId: "PO-A" }, {
+    now: new Date("2026-08-31T12:00:00Z"),
     fetchSelectedInspections: async () => { calls.selected += 1; return selected; },
     fetchQcs: async ({ qcIds }) => { calls.qcs += 1; return qcs.filter((qc) => qcIds.includes(qc._id)); },
     fetchOrders: async () => { calls.orders += 1; return orders; },
@@ -278,5 +279,7 @@ test("page and XLS route to the period builder while the Assistant keeps the exi
   assert.match(controllerSource, /Previously Packed Quantity/);
   assert.match(controllerSource, /This Period Packed/);
   assert.match(controllerSource, /Total Packed CBM/);
+  assert.match(controllerSource, /getAllPackedGoods/);
+  assert.match(controllerSource, /buildPackedGoodsDataset/);
   assert.match(capabilitySource, /packedGoods\.service/);
 });

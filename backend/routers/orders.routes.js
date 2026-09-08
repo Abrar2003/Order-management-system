@@ -37,6 +37,7 @@ const {
   getOrdersByBrandAndStatus,
   getOrderSummary,
   getPackedGoods,
+  getAllPackedGoods,
   exportPackedGoods,
   getShippingPending,
   exportShippingPending,
@@ -147,6 +148,7 @@ router.get(
   exportShippingPending,
 );
 router.get("/packed-goods", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getPackedGoods);
+router.get("/packed-goods/all", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getAllPackedGoods);
 router.get(
   "/packed-goods/export",
   authenticate,

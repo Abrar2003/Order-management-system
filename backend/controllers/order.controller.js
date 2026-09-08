@@ -56,6 +56,9 @@ const {
   buildPackedGoodsPeriodDataset,
 } = require("../services/packedGoodsPeriod.service");
 const {
+  buildPackedGoodsDataset,
+} = require("../services/packedGoods.service");
+const {
   applyDataAccessMatch,
   assertBrandVendorAssociations,
   assertUserDataAccess,
@@ -9762,6 +9765,22 @@ exports.getPackedGoods = async (req, res) => {
   }
 };
 
+exports.getAllPackedGoods = async (req, res) => {
+  try {
+    const dataset = await buildPackedGoodsDataset({
+      brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
+      vendor: req.query.vendor,
+      orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+      user: req.user,
+    });
+
+    return res.status(200).json({ success: true, data: dataset.rows, filters: dataset.filters, summary: dataset.summary });
+  } catch (error) {
+    console.error("Get All Packed Goods Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch packed goods", error: error.message });
+  }
+};
+
 exports.exportPackedGoods = async (req, res) => {
   try {
     const exportFormat =
@@ -9816,7 +9835,7 @@ exports.exportPackedGoods = async (req, res) => {
       ? dataset.filters.brand.join(", ")
       : "All Brands";
     const reportRows = [
-      ["Packed Goods Inspection Period Report"],
+      ["Weekly Packed Goods Inspection Period Report"],
       ["From", dataset.filters?.from_date || "", "To", dataset.filters?.to_date || ""],
       [
         "Brand", selectedBrands,
@@ -9839,13 +9858,13 @@ exports.exportPackedGoods = async (req, res) => {
     });
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Packed Goods");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Weekly Packed Goods");
     const fileBuffer = XLSX.write(workbook, {
       type: "buffer",
       bookType: exportFormat,
     });
     const fileDate = new Date().toISOString().slice(0, 10);
-    const fileName = `packed-goods-${fileDate}.${exportFormat}`;
+    const fileName = `weekly-packed-goods-${fileDate}.${exportFormat}`;
 
     res.setHeader(
       "Content-Type",

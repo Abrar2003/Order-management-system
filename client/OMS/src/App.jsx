@@ -27,6 +27,7 @@ const CreateVendor = lazy(() => import("./pages/CreateVendor"));
 const VendorDetails = lazy(() => import("./pages/VendorDetails"));
 const OpenOrders = lazy(() => import("./pages/OpenOrders"));
 const PackedGoods = lazy(() => import("./pages/PackedGoods"));
+const AllPackedGoods = lazy(() => import("./pages/AllPackedGoods"));
 const ShippingPending = lazy(() => import("./pages/ShippingPending"));
 const DailyReport = lazy(() => import("./pages/DailyReport"));
 const Shipments = lazy(() => import("./pages/Shipments"));
@@ -295,6 +296,15 @@ const App = () => {
 
           <Route
             path="/packed-goods"
+            element={
+              <ProtectedRoute>
+                <AllPackedGoods />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/weekly-packed-goods"
             element={
               <ProtectedRoute>
                 <PackedGoods />

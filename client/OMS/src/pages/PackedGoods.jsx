@@ -176,7 +176,7 @@ const downloadBlobResponse = (response, fallbackName, fallbackType) => {
 const PackedGoods = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  useRememberSearchParams(searchParams, setSearchParams, "packed-goods");
+  useRememberSearchParams(searchParams, setSearchParams, "weekly-packed-goods");
   const { hasPermission } = usePermissions();
 
   const initialFilters = buildFilterStateFromSearchParams(searchParams);
@@ -466,7 +466,7 @@ const PackedGoods = () => {
       );
       downloadBlobResponse(
         response,
-        `packed-goods-${new Date().toISOString().slice(0, 10)}.xls`,
+        `weekly-packed-goods-${new Date().toISOString().slice(0, 10)}.xls`,
         "application/vnd.ms-excel",
       );
     } catch (exportError) {
@@ -486,10 +486,10 @@ const PackedGoods = () => {
       await exportElementToPdf({
         element: reportRef.current,
         reportKey: "packed-goods",
-        filename: `packed-goods-${new Date().toISOString().slice(0, 10)}.pdf`,
+        filename: `weekly-packed-goods-${new Date().toISOString().slice(0, 10)}.pdf`,
         landscape: true,
         repeatHeader: {
-          title: "Packed Goods",
+          title: "Weekly Packed Goods",
           subtitle: "Inspection-period packed quantities, shown as of the selected period end.",
         },
       });
@@ -508,7 +508,7 @@ const PackedGoods = () => {
       <div className="page-shell py-3">
         <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
           <div>
-            <h2 className="h4 mb-1">Packed Goods</h2>
+            <h2 className="h4 mb-1">Weekly Packed Goods</h2>
             <p className="text-secondary mb-0">
               Inspection-period packed quantities, shown as of the selected period end.
             </p>
@@ -742,7 +742,7 @@ const PackedGoods = () => {
             <div ref={reportRef} className="packed-goods-pdf-report">
               <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
                 <div>
-                  <h2 className="h4 mb-1">Packed Goods Report</h2>
+                  <h2 className="h4 mb-1">Weekly Packed Goods Report</h2>
                   <p className="text-secondary mb-0">Generated {exportGeneratedAt}</p>
                 </div>
                 <div className="d-flex flex-wrap justify-content-end gap-2">

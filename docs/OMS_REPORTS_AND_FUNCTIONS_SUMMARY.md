@@ -247,7 +247,7 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 
 - **Representative questions:** “How much inspected stock is ready to ship?”; “Packed CBM for vendor X”; “Which POs have no inspection-pending quantity?”
 - **Trace:** `PackedGoods.jsx` → `/orders/packed-goods`/export → `buildPackedGoodsPeriodDataset`. The Assistant adapter and forecast readiness logic continue to use `buildPackedGoodsDataset` unchanged.
-- **Rules/output:** Qualifying `Inspection.passed` records are the source and are summed by inspection date, including AQL visits, so prior and current-period quantities reconcile to QC Details. The default period is Tuesday–Monday in the application business timezone; explicit From and To dates must be supplied together and are inclusive. Shipments are allocated FIFO through the period end using `stuffing_date`. Rows are keyed by PO/order line and item, and expose previously packed, this-period packed, total packed, and total packed CBM.
+- **Rules/output:** Qualifying `Inspection.passed` records are the source and are summed by inspection date, including AQL visits, so prior and current-period quantities reconcile to QC Details. The default period is the inclusive seven days ending today; explicit From and To dates must be supplied together and are inclusive. Shipments are allocated FIFO through the period end using `stuffing_date`. Rows are keyed by PO/order line and item, and expose previously packed, this-period packed, total packed, and total packed CBM.
 - **Frontend:** sends date, brand, vendor, and PO filters to the API. The API returns the rows, filter options, summary, resolved period, and warnings; browser work is limited to sort and page presentation.
 - **Performance:** the selected-period scan uses the existing `inspections.inspection_date` index; the batched QC-history lookup would benefit from a future `{ qc: 1, inspection_date: 1 }` index if production `explain()` shows it is not selective enough. No live database query plan was available during this change.
 
@@ -777,7 +777,7 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 | Upcoming ETD | PO | Open and effective ETD in window | Today + 10 days default, inclusive | Counts, no primary CBM | Today ETD |
 | Shipping Delay | PO | Fully packed before ETD, no shipment, ETD passed | Past relative to start date | Counts/days late | Delayed PO |
 | Today ETD | PO | Original ETD matches client day | Client offset day | Status counts | Upcoming one-day window |
-| Packed Goods | PO/order line + item | Qualifying passed inspection in selected period | Tuesday–Monday default or inclusive From/To inspection dates | Previously/period/total packed + CBM | Inspection history |
+| Packed Goods | PO/order line + item | Qualifying passed inspection in selected period | Seven days ending today by default, or inclusive From/To inspection dates | Previously/period/total packed + CBM | Inspection history |
 | Shipping Pending | Order line + frontend PO | Any unshipped quantity | Optional order-date range | Packed/pending/shipped; no CBM | Pending PO |
 | Shipments | Shipment entry plus placeholders | Shipment exists or order status progressed | Stuffing-date support not wired | Shipment qty/CBM | Containers |
 | Containers | Container | Nonblank container shipment rows | Stuffing date wired | Container qty/CBM/checks | Monthly Shipments |
