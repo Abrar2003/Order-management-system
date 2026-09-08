@@ -10,7 +10,6 @@ const {
   normalizeTemplateKey,
 } = require("./productTypeTemplates");
 const {
-  isAdminLikeRole,
   isManagerLikeRole,
   normalizeUserRoleKey,
 } = require("./userRole");
@@ -67,6 +66,7 @@ const validateRemarkOption = (remark = "", options = [], fieldLabel = "Remark") 
   }
 };
 const normalizeRole = (value) => normalizeUserRoleKey(value);
+const isStrictAdmin = (role) => ["admin", "super_admin"].includes(role);
 const normalizeId = (value) =>
   String(value?._id || value?.user || value || "").trim();
 const normalizeVersion = (value) => {
@@ -1121,8 +1121,7 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
   const currentState = extractProductDatabaseFields(item);
   const adminOverrideRequiredFields =
     payload?.admin_override_required_fields === true;
-  const isStrictAdmin = ["admin", "super_admin"].includes(role);
-  if (adminOverrideRequiredFields && !isStrictAdmin) {
+  if (adminOverrideRequiredFields && !isStrictAdmin(role)) {
     throw new ProductDatabaseError(
       "Only Admin or Super Admin can override required fields.",
       403,
@@ -1169,7 +1168,7 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
 
 const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
   const role = normalizeRole(user?.role);
-  if (isAdminLikeRole(role) || !isManagerLikeRole(role)) {
+  if (isStrictAdmin(role) || !isManagerLikeRole(role)) {
     throw new ProductDatabaseError("Only managers can check Product Database data", 403);
   }
 
@@ -1239,7 +1238,7 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
 
 const applyProductDatabaseApprove = ({ item, payload = {}, user = {} } = {}) => {
   const role = normalizeRole(user?.role);
-  if (!isAdminLikeRole(role)) {
+  if (!isStrictAdmin(role)) {
     throw new ProductDatabaseError("Only admin can approve Product Database data", 403);
   }
 
@@ -1299,7 +1298,7 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
   const isLastChanger = Boolean(lastChangerId && actorId === lastChangerId);
   const canEdit = isManagerLikeRole(role);
   const canCheck =
-    !isAdminLikeRole(role) &&
+    !isStrictAdmin(role) &&
     isManagerLikeRole(role) &&
     status === PD_STATUSES.CREATED &&
     !isCreator &&
@@ -1307,7 +1306,7 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
 
   let checkBlockedReason = "";
   if (
-    !isAdminLikeRole(role) &&
+    !isStrictAdmin(role) &&
     isManagerLikeRole(role) &&
     status === PD_STATUSES.CREATED &&
     !canCheck
@@ -1321,7 +1320,7 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
   return {
     can_edit: canEdit,
     can_check: canCheck,
-    can_approve: isAdminLikeRole(role) && status === PD_STATUSES.CHECKED,
+    can_approve: isStrictAdmin(role) && status === PD_STATUSES.CHECKED,
     check_blocked_reason: checkBlockedReason,
   };
 };

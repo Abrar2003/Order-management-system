@@ -11,6 +11,7 @@ const {
   normalizeProductDatabaseInput,
   applyProductDatabaseBarcodeDefaults,
   applyProductDatabaseApprove,
+  applyProductDatabaseCheck,
   applyProductDatabaseSave,
   assertProductDatabaseBarcodes,
 } = require("../helpers/productDatabase");
@@ -172,6 +173,33 @@ test("Product Database does not require barcodes for barcode-exempt items", () =
   });
 
   assert.equal(item.pd_checked, "approved");
+});
+
+test("Product Database lets managers check and reserves approval for admins", () => {
+  const item = {
+    pd_checked: "created",
+    pd_box_mode: "individual",
+    pd_barcode: "123",
+    pd_master_barcode: "123",
+    pis_barcode: "123",
+    pd_created_by: { user: "creator" },
+    pd_last_changed_by: { user: "creator" },
+    pd_history: [],
+  };
+
+  applyProductDatabaseCheck({
+    item,
+    user: { id: "checker", role: "manager" },
+  });
+  assert.equal(item.pd_checked, "checked");
+  assert.throws(
+    () => applyProductDatabaseCheck({ item, user: { id: "admin", role: "admin" } }),
+    /Only managers/,
+  );
+  assert.throws(
+    () => applyProductDatabaseApprove({ item, user: { id: "manager", role: "manager" } }),
+    /Only admin/,
+  );
 });
 
 test("Product Database defaults required barcodes from PIS", () => {
