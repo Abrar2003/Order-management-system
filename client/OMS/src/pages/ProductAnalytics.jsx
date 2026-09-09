@@ -87,9 +87,24 @@ const HEADER_FORMULAS = Object.freeze({
   inspectionTimeDays: {
     title: "Inspection Time (days)",
     lines: [
-      "Formula: (last inspection createdAt - first inspection createdAt) / (1000 x 60 x 60 x 24).",
-      "For a PO with one inspection, the API uses order date to inspection date.",
-      "The value is rounded to 2 decimals in the API.",
+      "PO formula: last inspection date - first inspection date.",
+      "A PO with one inspection is counted as 1 day; a PO with none shows N/A.",
+      "The subtext is the total number of inspections across the item's POs.",
+    ],
+  },
+  avgPackedTimeDays: {
+    title: "Avg Packed Time (days)",
+    lines: [
+      "PO formula: complete packed date - order date.",
+      "A PO is complete packed when its passed quantity reaches its order quantity.",
+      "The item value averages complete-packed POs only.",
+    ],
+  },
+  avgOfferTimeDays: {
+    title: "Avg Offer Time (days)",
+    lines: [
+      "PO formula: first inspection date - order date.",
+      "The item value averages POs that have an inspection date.",
     ],
   },
   rejectionPercent: {
@@ -264,6 +279,16 @@ const ProductAnalytics = () => {
           if (column === "inspectionTimeDays") {
             return Number.isFinite(Number(row?.inspectionTimeDays))
               ? Number(row.inspectionTimeDays)
+              : null;
+          }
+          if (column === "avgPackedTimeDays") {
+            return Number.isFinite(Number(row?.avgPackedTimeDays))
+              ? Number(row.avgPackedTimeDays)
+              : null;
+          }
+          if (column === "avgOfferTimeDays") {
+            return Number.isFinite(Number(row?.avgOfferTimeDays))
+              ? Number(row.avgOfferTimeDays)
               : null;
           }
           if (column === "rejectionPercent") {
@@ -462,6 +487,28 @@ const ProductAnalytics = () => {
                         </HeaderFormulaTooltip>
                       </th>
                       <th>
+                        <HeaderFormulaTooltip column="avgPackedTimeDays">
+                          <SortHeaderButton
+                            label="Avg Packed Time"
+                            isActive={sortBy === "avgPackedTimeDays"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("avgPackedTimeDays", "desc")}
+                            showNativeTitle={false}
+                          />
+                        </HeaderFormulaTooltip>
+                      </th>
+                      <th>
+                        <HeaderFormulaTooltip column="avgOfferTimeDays">
+                          <SortHeaderButton
+                            label="Avg Offer Time"
+                            isActive={sortBy === "avgOfferTimeDays"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("avgOfferTimeDays", "desc")}
+                            showNativeTitle={false}
+                          />
+                        </HeaderFormulaTooltip>
+                      </th>
+                      <th>
                         <HeaderFormulaTooltip column="avgShippingTimeDays">
                           <SortHeaderButton
                             label="Avg Shipping Time"
@@ -477,7 +524,7 @@ const ProductAnalytics = () => {
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr>
-                        <td colSpan="7" className="text-center py-4">
+                        <td colSpan="9" className="text-center py-4">
                           No data found
                         </td>
                       </tr>
@@ -521,13 +568,20 @@ const ProductAnalytics = () => {
                             </td>
                             <td>{formatWholeNumber(row?.orderQuantity)}</td>
                             <td>{formatWholeNumber(row?.passedQuantity)}</td>
-                            <td>{formatDays(row?.inspectionTimeDays, { maximumFractionDigits: 0 })}</td>
+                            <td>
+                              <div>{formatDays(row?.inspectionTimeDays, { maximumFractionDigits: 0 })}</div>
+                              <div className="text-secondary small">
+                                {formatWholeNumber(row?.inspectionCount)} inspections
+                              </div>
+                            </td>
                             <td>{formatPercent(row?.rejectionPercent)}</td>
+                            <td>{formatDays(row?.avgPackedTimeDays)}</td>
+                            <td>{formatDays(row?.avgOfferTimeDays)}</td>
                             <td>{formatDays(row?.avgShippingTimeDays)}</td>
                           </tr>
                           {isExpanded && (
                             <tr key={`${rowId}-children`} className="product-analytics-detail-row">
-                              <td colSpan="7">
+                              <td colSpan="9">
                                 <div className="product-analytics-detail-wrap">
                                   <table className="table table-sm align-middle mb-0 product-analytics-detail-table">
                                     <thead>
@@ -563,7 +617,12 @@ const ProductAnalytics = () => {
                                           </td>
                                           <td>{formatWholeNumber(poRow?.orderQuantity)}</td>
                                           <td>{formatWholeNumber(poRow?.passedQuantity)}</td>
-                                          <td>{formatDays(poRow?.inspectionTimeDays, { maximumFractionDigits: 0 })}</td>
+                                          <td>
+                                            <div>{formatDays(poRow?.inspectionTimeDays, { maximumFractionDigits: 0 })}</div>
+                                            <div className="text-secondary small">
+                                              {formatWholeNumber(poRow?.inspectionCount)} inspections
+                                            </div>
+                                          </td>
                                           <td>{formatPercent(poRow?.rejectionPercent)}</td>
                                           <td>{poRow?.brand || "-"}</td>
                                           <td>{poRow?.vendor || "-"}</td>

@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const mongoose = require("mongoose");
 const Inspection = require("../models/inspection.model");
 const {
-  _private: { processOrderAnalyticsRow },
+  _private: { groupProductAnalyticsRows, processOrderAnalyticsRow },
 } = require("../controllers/product.controller");
 
 const {
@@ -123,6 +123,41 @@ test("product analytics uses manual rejection instead of unchecked quantity", ()
   });
 
   assert.equal(result.rejectionPercent, 20);
+});
+
+test("product analytics calculates inspection, packed, and offer times", () => {
+  const order = {
+    itemId: "item-1",
+    itemCode: "ITEM-1",
+    quantity: 10,
+    order_date: "2026-08-01",
+    inspections: [
+      { inspection_date: "2026-08-03", passed: 4 },
+      { inspection_date: "2026-08-08", passed: 6 },
+    ],
+  };
+
+  const po = processOrderAnalyticsRow(order);
+  const [item] = groupProductAnalyticsRows([order]);
+
+  assert.equal(po.inspectionCount, 2);
+  assert.equal(po.inspectionTimeDays, 5);
+  assert.equal(po.offerTimeDays, 2);
+  assert.equal(po.packedTimeDays, 7);
+  assert.equal(item.inspectionCount, 2);
+  assert.equal(item.avgPackedTimeDays, 7);
+  assert.equal(item.avgOfferTimeDays, 2);
+});
+
+test("product analytics uses one day for a single inspection", () => {
+  const result = processOrderAnalyticsRow({
+    quantity: 10,
+    order_date: "2026-08-01",
+    inspections: [{ inspection_date: "2026-08-03", passed: 10 }],
+  });
+
+  assert.equal(result.inspectionCount, 1);
+  assert.equal(result.inspectionTimeDays, 1);
 });
 
 test("inspection schema stores manual rejected quantity, defaults old values to zero, and caps images", async () => {

@@ -101,29 +101,30 @@ const processOrderAnalyticsRow = (order = {}) => {
     ? calculateShippingTimeDays(order.order_date, latestShipmentDate)
     : null;
 
+  const inspectionCount = inspections.length;
+  const firstInspectionDate = getInspectionDateValue(inspections[0]);
+  const lastInspectionDate = getInspectionDateValue(inspections[inspectionCount - 1]);
+  const offerTimeDays = firstInspectionDate
+    ? calculateShippingTimeDays(order.order_date, firstInspectionDate)
+    : null;
+  const packedTimeDays = orderQuantity > 0 && passedQuantity >= orderQuantity
+    ? calculateShippingTimeDays(order.order_date, lastInspectionDate)
+    : null;
   let inspectionTimeDays = null;
   const rejectionPercent = orderQuantity > 0
     ? toRoundedNumber((rejectedQuantity / orderQuantity) * 100, 2)
     : null;
 
-  if (inspections.length === 1) {
-    const [inspection] = inspections;
+  if (inspectionCount === 1) {
+    inspectionTimeDays = 1;
+  } else if (inspectionCount >= 2) {
     const inspectionDays = calculateShippingTimeDays(
-      order.order_date,
-      getInspectionDateValue(inspection),
+      firstInspectionDate,
+      lastInspectionDate,
     );
     inspectionTimeDays = inspectionDays === null
       ? null
       : toRoundedNumber(inspectionDays, 2);
-
-  } else if (inspections.length >= 2) {
-    const first = new Date(getInspectionDateValue(inspections[0]));
-    const last = new Date(getInspectionDateValue(inspections[inspections.length - 1]));
-    const inspectionDays = (last - first) / DAY_MS;
-    inspectionTimeDays = Number.isFinite(inspectionDays)
-      ? toRoundedNumber(inspectionDays, 2)
-      : null;
-
   }
 
   return {
@@ -138,9 +139,12 @@ const processOrderAnalyticsRow = (order = {}) => {
     shippingTimeDays: shippingTimeDays === null ? null : toRoundedNumber(shippingTimeDays, 1),
     orderQuantity,
     passedQuantity,
+    inspectionCount,
     shippedQuantity: Math.min(orderQuantity || shippedQuantity, shippedQuantity),
     isFullyShipped,
     inspectionTimeDays,
+    packedTimeDays: packedTimeDays === null ? null : toRoundedNumber(packedTimeDays, 1),
+    offerTimeDays: offerTimeDays === null ? null : toRoundedNumber(offerTimeDays, 1),
     rejectionPercent,
   };
 };
@@ -163,6 +167,7 @@ const groupProductAnalyticsRows = (orders = []) => {
       poCount: 0,
       orderQuantity: 0,
       passedQuantity: 0,
+      inspectionCount: 0,
       shippedQuantity: 0,
       orders: [],
     };
@@ -170,6 +175,7 @@ const groupProductAnalyticsRows = (orders = []) => {
     existing.poCount += 1;
     existing.orderQuantity += poRow.orderQuantity;
     existing.passedQuantity += poRow.passedQuantity;
+    existing.inspectionCount += poRow.inspectionCount;
     existing.shippedQuantity += poRow.shippedQuantity;
     existing.orders.push(poRow);
 
@@ -201,6 +207,7 @@ const groupProductAnalyticsRows = (orders = []) => {
       poCount: group.poCount,
       orderQuantity: group.orderQuantity,
       passedQuantity: group.passedQuantity,
+      inspectionCount: group.inspectionCount,
       shippedQuantity: group.shippedQuantity,
       inspectionTimeDays: averageNumbers(
         orders.map((order) => order.inspectionTimeDays),
@@ -209,6 +216,14 @@ const groupProductAnalyticsRows = (orders = []) => {
       rejectionPercent: averageNumbers(
         orders.map((order) => order.rejectionPercent),
         2,
+      ),
+      avgPackedTimeDays: averageNumbers(
+        orders.map((order) => order.packedTimeDays),
+        1,
+      ),
+      avgOfferTimeDays: averageNumbers(
+        orders.map((order) => order.offerTimeDays),
+        1,
       ),
       avgShippingTimeDays: averageNumbers(shippingValues, 1),
       orders,
