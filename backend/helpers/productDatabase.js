@@ -589,12 +589,17 @@ const normalizeBoxSizeEntries = (
 
 const extractProductDatabaseFields = (item = {}) => {
   const pdBoxMode = detectBoxPackagingMode(item?.pd_box_mode, item?.pd_box_sizes);
-  const pdMasterBarcode = normalizeText(item?.pd_master_barcode || item?.pd_barcode);
+  const pdMasterBarcode = normalizeText(
+    item?.pd_master_barcode ||
+      item?.pd_barcode ||
+      item?.pis_master_barcode ||
+      item?.pis_barcode,
+  );
   return {
     country_of_origin: normalizeText(item?.country_of_origin),
     pd_barcode: pdMasterBarcode,
     pd_master_barcode: pdMasterBarcode,
-    pd_inner_barcode: normalizeText(item?.pd_inner_barcode),
+    pd_inner_barcode: normalizeText(item?.pd_inner_barcode || item?.pis_inner_barcode),
     kd: item?.kd === true,
     mounting_file_needed: item?.mounting_file_needed === true,
     pd_item_sizes: normalizeItemSizeEntries(item?.pd_item_sizes || []),
@@ -840,13 +845,46 @@ const normalizeCbmRawValuesForCompare = (value, key = "") => {
   return value;
 };
 
+const getRawValuesForCompare = (rawValues = {}, fields = []) => {
+  const fieldKeys = new Set(
+    (Array.isArray(fields) ? fields : [])
+      .map((field) => normalizeKey(field?.key))
+      .filter(Boolean),
+  );
+
+  return Object.entries(rawValues && typeof rawValues === "object" ? rawValues : {}).reduce(
+    (accumulator, [key, value]) => {
+      if (!fieldKeys.has(normalizeKey(key))) {
+        accumulator[key] = value;
+      }
+      return accumulator;
+    },
+    {},
+  );
+};
+
 const normalizeProductSpecFieldsForCompare = (fields = []) =>
   (Array.isArray(fields) ? fields : []).map((field) => ({
-    ...field,
+    field_id: field?.field_id || null,
+    key: field?.key || "",
+    label: field?.label || "",
+    group_key: field?.group_key || "",
+    group_label: field?.group_label || "",
+    input_type: field?.input_type || "",
+    value_type: field?.value_type || "",
+    unit: field?.unit || "",
+    value_text: field?.value_text || "",
     value_number:
       isCbmProductSpecField(field) && field?.value_number !== null && field?.value_number !== undefined
         ? roundForCompare(field.value_number)
         : field?.value_number,
+    value_boolean: field?.value_boolean ?? null,
+    value_date: field?.value_date || null,
+    value_array: Array.isArray(field?.value_array) ? field.value_array : [],
+    raw_value:
+      field?.value_type === "object" || field?.input_type === "file"
+        ? field?.raw_value ?? null
+        : null,
   }));
 
 const areSizeEntriesEqualForCompare = (currentEntry = {}, nextEntry = {}) => {
@@ -901,8 +939,12 @@ const areProductSpecsEqualForCompare = (currentSpecs = {}, nextSpecs = {}) => {
   }
 
   return (
-    stableStringify(normalizeCbmRawValuesForCompare(current.raw_values)) ===
-    stableStringify(normalizeCbmRawValuesForCompare(next.raw_values))
+    stableStringify(normalizeCbmRawValuesForCompare(
+      getRawValuesForCompare(current.raw_values, current.fields),
+    )) ===
+    stableStringify(normalizeCbmRawValuesForCompare(
+      getRawValuesForCompare(next.raw_values, next.fields),
+    ))
   );
 };
 

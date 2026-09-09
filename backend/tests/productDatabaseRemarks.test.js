@@ -209,6 +209,83 @@ test("Product Database lets every manager type check unless they last changed it
   );
 });
 
+test("Product Database check ignores legacy raw duplicates but preserves unknown raw changes", () => {
+  const buildItem = () => ({
+    pd_checked: "created",
+    pd_box_mode: "individual",
+    pis_barcode: "123",
+    pd_last_changed_by: { user: "updater" },
+    pd_history: [],
+    product_specs: {
+      fields: [
+        {
+          key: "quantity",
+          input_type: "number",
+          value_type: "number",
+          value_number: 2,
+          raw_value: "2",
+          source_header: "Quantity",
+        },
+        {
+          key: "description",
+          input_type: "text",
+          value_type: "string",
+          value_text: "Name",
+          raw_value: "Name ",
+          source_header: "Description",
+        },
+      ],
+      raw_values: { quantity: "2", description: "Name ", identifier: "001" },
+    },
+  });
+  const buildPayload = (identifier = "001") => ({
+    pd_box_mode: "individual",
+    pd_barcode: "123",
+    product_specs: {
+      fields: [
+        {
+          key: "quantity",
+          input_type: "number",
+          value_type: "number",
+          value_number: 2,
+          raw_value: 2,
+        },
+        {
+          key: "description",
+          input_type: "text",
+          value_type: "string",
+          value_text: "Name",
+          raw_value: "Name",
+        },
+      ],
+      box_mode: "individual",
+      raw_values: { quantity: 2, description: "Name", identifier },
+    },
+  });
+
+  const unchangedItem = buildItem();
+  const unchanged = applyProductDatabaseCheck({
+    item: unchangedItem,
+    payload: buildPayload(),
+    user: { id: "checker", role: "inspection manager" },
+  });
+  assert.deepEqual(
+    { changed: unchanged.changed, checked: unchanged.checked, status: unchanged.status },
+    { changed: false, checked: true, status: "checked" },
+  );
+
+  const changedItem = buildItem();
+  const changed = applyProductDatabaseCheck({
+    item: changedItem,
+    payload: buildPayload("1"),
+    user: { id: "checker", role: "inspection manager" },
+  });
+  assert.deepEqual(
+    { changed: changed.changed, checked: changed.checked, status: changed.status },
+    { changed: true, checked: false, status: "created" },
+  );
+});
+
 test("Product Database defaults required barcodes from PIS", () => {
   assert.deepEqual(
     applyProductDatabaseBarcodeDefaults(

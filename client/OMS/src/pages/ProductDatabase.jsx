@@ -485,6 +485,24 @@ const normalizeCbmRawValuesForCompare = (value, key = "") => {
   return value;
 };
 
+const getRawValuesForCompare = (rawValues = {}, fields = []) => {
+  const fieldKeys = new Set(
+    (Array.isArray(fields) ? fields : [])
+      .map((field) => normalizeTemplateKey(field?.key))
+      .filter(Boolean),
+  );
+
+  return Object.entries(rawValues && typeof rawValues === "object" ? rawValues : {}).reduce(
+    (accumulator, [key, value]) => {
+      if (!fieldKeys.has(normalizeTemplateKey(key))) {
+        accumulator[key] = value;
+      }
+      return accumulator;
+    },
+    {},
+  );
+};
+
 const normalizeProductSpecFieldsForCompare = (fields = []) =>
   (Array.isArray(fields) ? fields : []).map((field) => ({
     ...field,
@@ -548,8 +566,12 @@ const areProductSpecsEqualForCompare = (currentSpecs = {}, nextSpecs = {}) => {
     return false;
   }
   return (
-    stableStringify(normalizeCbmRawValuesForCompare(current.raw_values)) ===
-    stableStringify(normalizeCbmRawValuesForCompare(next.raw_values))
+    stableStringify(normalizeCbmRawValuesForCompare(
+      getRawValuesForCompare(current.raw_values, current.fields),
+    )) ===
+    stableStringify(normalizeCbmRawValuesForCompare(
+      getRawValuesForCompare(next.raw_values, next.fields),
+    ))
   );
 };
 
