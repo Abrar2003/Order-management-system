@@ -8225,8 +8225,9 @@ exports.getVendorReports = async (req, res) => {
 
     const orderRows = await Order.find(applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user))
       .select(
-        "order_id brand vendor status order_date ETD revised_ETD quantity item shipment",
+        "order_id brand vendor status order_date ETD revised_ETD quantity item shipment qc_record",
       )
+      .populate("qc_record", "last_inspected_date")
       .lean();
 
     const orderGroupMap = new Map();
@@ -8247,7 +8248,9 @@ exports.getVendorReports = async (req, res) => {
           quantity_total: 0,
           order_date_utc: null,
           etd_utc: null,
+          last_inspection_utc: null,
           latest_shipment_utc: null,
+          shipment_entries: [],
         });
       }
 
@@ -8281,14 +8284,43 @@ exports.getVendorReports = async (req, res) => {
         entry.etd_utc = effectiveEtdUtc;
       }
 
+      const inspectionDateUtc = toUtcDateOnly(row?.qc_record?.last_inspected_date);
+      if (
+        inspectionDateUtc &&
+        (!entry.last_inspection_utc ||
+          inspectionDateUtc.getTime() > entry.last_inspection_utc.getTime())
+      ) {
+        entry.last_inspection_utc = inspectionDateUtc;
+      }
+
       for (const shipment of Array.isArray(row?.shipment) ? row.shipment : []) {
         const shipmentDateUtc = toUtcDateOnly(shipment?.stuffing_date);
+        const shipmentQuantity = toNonNegativeNumber(shipment?.quantity, 0);
+        if (shipmentDateUtc) {
+          entry.shipment_entries.push({
+            date_utc: shipmentDateUtc,
+            quantity: shipmentQuantity,
+          });
+        }
         if (
           shipmentDateUtc &&
           (!entry.latest_shipment_utc ||
             shipmentDateUtc.getTime() > entry.latest_shipment_utc.getTime())
         ) {
           entry.latest_shipment_utc = shipmentDateUtc;
+        }
+      }
+    }
+
+    for (const entry of orderGroupMap.values()) {
+      let shippedQuantity = 0;
+      for (const shipment of entry.shipment_entries.sort(
+        (left, right) => left.date_utc.getTime() - right.date_utc.getTime(),
+      )) {
+        shippedQuantity += shipment.quantity;
+        if (shippedQuantity >= entry.quantity_total) {
+          entry.complete_shipping_utc = shipment.date_utc;
+          break;
         }
       }
     }
@@ -8433,6 +8465,20 @@ exports.getVendorReports = async (req, res) => {
       }
 
       vendorEntry.brands.add(orderEntry.brand);
+      const packedDelayDays =
+        effectiveEtdUtc && orderEntry.last_inspection_utc
+          ? Math.floor(
+              (effectiveEtdUtc.getTime() - orderEntry.last_inspection_utc.getTime()) /
+                MS_PER_DAY,
+            )
+          : null;
+      const shippingDelayDays =
+        effectiveEtdUtc && orderEntry.complete_shipping_utc
+          ? Math.floor(
+              (effectiveEtdUtc.getTime() - orderEntry.complete_shipping_utc.getTime()) /
+                MS_PER_DAY,
+            )
+          : null;
       vendorEntry.orders.push({
         order_id: orderEntry.order_id,
         brand: orderEntry.brand,
@@ -8442,9 +8488,17 @@ exports.getVendorReports = async (req, res) => {
           ? toISODateString(orderEntry.order_date_utc)
           : "",
         etd: effectiveEtdUtc ? toISODateString(effectiveEtdUtc) : "",
+        last_inspection_date: orderEntry.last_inspection_utc
+          ? toISODateString(orderEntry.last_inspection_utc)
+          : "",
         latest_shipment_date: orderEntry.latest_shipment_utc
           ? toISODateString(orderEntry.latest_shipment_utc)
           : "",
+        complete_shipping_date: orderEntry.complete_shipping_utc
+          ? toISODateString(orderEntry.complete_shipping_utc)
+          : "",
+        packed_delay_days: packedDelayDays,
+        shipping_delay_days: shippingDelayDays,
         delay_days: delayDays,
         delay_reference: delayReference,
         item_count: orderEntry.item_codes.size,

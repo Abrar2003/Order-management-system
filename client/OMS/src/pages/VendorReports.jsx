@@ -164,6 +164,9 @@ const formatVendorOrderDifferenceInDays = (differenceInDays) => {
   return `0 days`;
 };
 
+const formatDelayDays = (days) =>
+  Number.isFinite(days) ? `${days} days` : "N/A";
+
 const formatAverageShippingTime = (averageDays, shippedCount) => {
   const safeCount = Number(shippedCount || 0);
   if (safeCount <= 0 || !Number.isFinite(Number(averageDays))) {
@@ -699,13 +702,15 @@ const VendorReports = () => {
                               />
                             </th>
                             <th>Difference in Days</th>
+                            <th>Packed Delay</th>
+                            <th>Shipping Delay</th>
                             <th>Item Count</th>
                           </tr>
                         </thead>
                         <tbody>
                           {filteredOrders.length === 0 && (
                             <tr>
-                              <td colSpan="9" className="text-center py-3">
+                              <td colSpan="10" className="text-center py-3">
                                 {tableBrandFilter === DEFAULT_ENTITY_FILTER0
                                   ? "No orders for this vendor."
                                   : "No orders found for the selected brand."}
@@ -748,6 +753,8 @@ const VendorReports = () => {
                                 <td>
                                   {formatVendorOrderDifferenceInDays(differenceInDays)}
                                 </td>
+                                <td>{formatDelayDays(orderRow.packed_delay_days)}</td>
+                                <td>{formatDelayDays(orderRow.shipping_delay_days)}</td>
                                 <td>{orderRow.item_count ?? 0}</td>
                               </tr>
                             );
