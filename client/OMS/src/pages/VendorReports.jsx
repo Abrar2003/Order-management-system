@@ -165,7 +165,9 @@ const formatVendorOrderDifferenceInDays = (differenceInDays) => {
 };
 
 const formatDelayDays = (days) =>
-  Number.isFinite(days) ? `${days} days` : "N/A";
+  Number.isFinite(days)
+    ? formatVendorOrderDifferenceInDays(-days)
+    : "N/A";
 
 const formatAverageShippingTime = (averageDays, shippedCount) => {
   const safeCount = Number(shippedCount || 0);
