@@ -588,35 +588,35 @@ const ProductAnalytics = () => {
                                       <tr>
                                         <th>PO</th>
                                         <th>Order Date</th>
-                                        <th>Shipping Date</th>
                                         <th>Shipping Time</th>
                                         <th>Order Qty</th>
-                                        <th>Passed</th>
                                         <th>Inspection Time</th>
                                         <th>Average Rejection (%)</th>
-                                        <th>Brand</th>
+                                        <th>Packed Time</th>
+                                        <th>Offer Time</th>
                                         <th>Vendor</th>
                                       </tr>
                                     </thead>
                                     <tbody>
                                       {childRows.length === 0 ? (
                                         <tr>
-                                          <td colSpan="10" className="text-center text-secondary py-3">
+                                          <td colSpan="9" className="text-center text-secondary py-3">
                                             No PO details found
                                           </td>
                                         </tr>
                                       ) : childRows.map((poRow) => (
                                         <tr key={`${rowId}-${poRow?.orderId}`}>
-                                          <td>{poRow?.orderId || "-"}</td>
+                                          <td>
+                                            <div>{poRow?.orderId || "-"}</div>
+                                            <div className="text-secondary small">{poRow?.brand || "-"}</div>
+                                          </td>
                                           <td>{poRow?.orderDate ? formatDateDDMMYYYY(poRow.orderDate, "-") : "-"}</td>
-                                          <td>{poRow?.shippingDate ? formatDateDDMMYYYY(poRow.shippingDate, "-") : "-"}</td>
                                           <td>
                                             {poRow?.isFullyShipped
                                               ? formatDays(poRow?.shippingTimeDays)
                                               : "-"}
                                           </td>
                                           <td>{formatWholeNumber(poRow?.orderQuantity)}</td>
-                                          <td>{formatWholeNumber(poRow?.passedQuantity)}</td>
                                           <td>
                                             <div>{formatDays(poRow?.inspectionTimeDays, { maximumFractionDigits: 0 })}</div>
                                             <div className="text-secondary small">
@@ -624,7 +624,8 @@ const ProductAnalytics = () => {
                                             </div>
                                           </td>
                                           <td>{formatPercent(poRow?.rejectionPercent)}</td>
-                                          <td>{poRow?.brand || "-"}</td>
+                                          <td>{formatDays(poRow?.packedTimeDays)}</td>
+                                          <td>{formatDays(poRow?.offerTimeDays)}</td>
                                           <td>{poRow?.vendor || "-"}</td>
                                         </tr>
                                       ))}
