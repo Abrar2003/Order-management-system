@@ -2253,6 +2253,10 @@ const ITEM_MASTER_ELIGIBLE_MATCH = Object.freeze({
   ],
 });
 
+const buildPisDiffMissingItemMasterMatch = () => ({
+  $nor: ITEM_MASTER_ELIGIBLE_MATCH.$or,
+});
+
 const getPisDiffBrand = (item = {}) =>
   item?.brand_name
   || item?.brand
@@ -2851,6 +2855,7 @@ exports.__test__ = {
   buildItemMatch,
   buildFinalPisCheckAccessMatch,
   buildFinalPisCheckMatch,
+  buildPisDiffMissingItemMasterMatch,
   buildProductDatabaseSubTypeFilterOptions,
   buildProductDatabaseTypeFilterOptions,
   itemMatchesProductDatabaseTypeFilters,
@@ -4660,21 +4665,26 @@ exports.getPisDiffItems = async (req, res) => {
       pis_checked_flag: { $ne: true },
       is_rectify_imported: { $ne: true },
     };
+    const missingItemMasterMatch = buildPisDiffMissingItemMasterMatch();
     const match = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ search, brand, vendor, country }), req.user),
       uncheckedPisMatch,
+      missingItemMasterMatch,
     );
     const brandOptionsMatch = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ search, vendor, country }), req.user),
       uncheckedPisMatch,
+      missingItemMasterMatch,
     );
     const vendorOptionsMatch = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ search, brand, country }), req.user),
       uncheckedPisMatch,
+      missingItemMasterMatch,
     );
     const codeOptionsMatch = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ brand, vendor, country }), req.user),
       uncheckedPisMatch,
+      missingItemMasterMatch,
     );
 
     const [diffRowsBase, brandOptionRows, vendorOptionRows, codeOptionRows] =

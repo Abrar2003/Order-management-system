@@ -842,7 +842,7 @@ const PISDiffs = () => {
           <h2 className="h4 mb-0">PIS Diffs</h2>
           <div className="d-flex align-items-center gap-2">
             <span className="text-secondary small">
-              Unchecked items where inspected measurements differ from PIS
+              Unchecked items without item master data where inspected measurements differ from PIS
             </span>
             <button
               type="button"

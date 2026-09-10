@@ -6,6 +6,7 @@ const {
   buildItemMatch,
   buildFinalPisCheckAccessMatch,
   buildFinalPisCheckMatch,
+  buildPisDiffMissingItemMasterMatch,
 } = __test__;
 
 test("missing item country leaves the item query unfiltered", () => {
@@ -58,6 +59,13 @@ test("buildFinalPisCheckMatch builds expected filters and excludes rectify items
 test("buildFinalPisCheckMatch ignores country filter if country is 'all'", () => {
   const match = buildFinalPisCheckMatch({ country: "all" });
   assert.equal(match.$and.length, 3); // no country filter added
+});
+
+test("PIS Diffs include only items without master data", () => {
+  const match = buildPisDiffMissingItemMasterMatch();
+  assert.equal(match.$nor.length, 6);
+  assert.deepEqual(match.$nor[0], { "master_item_sizes.0": { $exists: true } });
+  assert.deepEqual(match.$nor.at(-1), { master_country_of_origin: { $exists: true, $ne: "" } });
 });
 
 test("Final PIS Check applies the user's brand and vendor access", () => {

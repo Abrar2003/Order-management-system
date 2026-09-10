@@ -288,6 +288,33 @@ const Navbar = () => {
     ];
   }, [hasPermission, isQcOnlyRole]);
 
+  const itemDetailsMenuItems = useMemo(() => {
+    if (isQcOnlyRole) return [];
+
+    const items = [];
+    if (canViewPis) {
+      items.push(
+        routeMenuItem("pis", "PIS", "/pis"),
+        routeMenuItem("pis-diffs", "PIS Diffs", "/pis-diffs"),
+        routeMenuItem("final-pis-check", "Final PIS Check", "/final-pis-check"),
+        routeMenuItem("qc-report-mismatch", "QC Report Mismatch", "/reports/qc-report-mismatch"),
+      );
+    }
+    if (canAccessAnalytics) {
+      items.push(
+        routeMenuItem(
+          "pis-inspection-master-comparison",
+          "PIS Inspection & Master Mismatch",
+          "/reports/pis-inspection-master-comparison",
+        ),
+      );
+      if (!canViewPis) {
+        items.push(routeMenuItem("qc-report-mismatch", "QC Report Mismatch", "/reports/qc-report-mismatch"));
+      }
+    }
+    return items;
+  }, [canAccessAnalytics, canViewPis, isQcOnlyRole]);
+
   const orderMenuItems = useMemo(() => {
     if (!canViewOrderPages || isQcOnlyRole) return [];
 
@@ -349,13 +376,7 @@ const Navbar = () => {
         : []),
       routeMenuItem("claims", "Claims", "/reports/claims"),
       routeMenuItem("inspected-items-report", "Inspected Items Report", "/reports/inspected-items"),
-      routeMenuItem(
-        "pis-inspection-master-comparison",
-        "PIS Inspection Master Comparison",
-        "/reports/pis-inspection-master-comparison",
-      ),
       routeMenuItem("samples", "Shipped Samples", "/shipped-samples"),
-      routeMenuItem("qc-report-mismatch", "QC Mismatch Report", "/reports/qc-report-mismatch"),
       routeMenuItem("common-errors", "Common Errors", "/reports/common-errors"),
       ...(hasPermission("complaints", "view") && isManagerLikeRole(permissionRole)
         ? [routeMenuItem("complaints", "Complains", "/complaints")]
@@ -426,20 +447,6 @@ const Navbar = () => {
       );
     }
 
-    if (canViewPis) {
-      items.push(
-        routeMenuItem("update-pis-qc-reports", "Final PIS Check", "/pis-diffs"),
-        routeMenuItem("final-pis-check", "Master v/s QC Reports", "/final-pis-check"),
-        routeMenuItem("PIS", "PIS", "/pis"),
-        routeMenuItem(
-          "items-qc-report-mismatch",
-          "QC Report Mismatch",
-          "/reports/qc-report-mismatch",
-        )
-      );
-      
-    }
-
     if (canViewFinishes) {
       items.push(routeMenuItem("finishes", "Finishes", "/finishes"));
     }
@@ -454,7 +461,7 @@ const Navbar = () => {
 
 
     return items;
-  }, [canManageProductDatabase, canViewFinishes, canViewPis, isQcOnlyRole]);
+  }, [canManageProductDatabase, canViewFinishes, isQcOnlyRole]);
 
   const uploadAddMenuItems = useMemo(() => {
     if (isQcOnlyRole) return [];
@@ -569,6 +576,7 @@ const Navbar = () => {
     () =>
       [
         { key: "items", label: "Items", items: itemMenuItems },
+        { key: "item-details", label: "Item Details", items: itemDetailsMenuItems },
         { key: "orders", label: "Orders", items: orderMenuItems },
         { key: "reports", label: "Reports", items: reportMenuItems },
         { key: "process", label: "Process", items: processMenuItems },
@@ -579,6 +587,7 @@ const Navbar = () => {
       ].filter((section) => Array.isArray(section.items) && section.items.length > 0),
     [
       itemMenuItems,
+      itemDetailsMenuItems,
       logMenuItems,
       orderMenuItems,
       processMenuItems,
@@ -594,6 +603,7 @@ const Navbar = () => {
       menuSections.filter(
         (section) =>
           section.key === "items" ||
+          section.key === "item-details" ||
           section.key === "orders" ||
           section.key === "reports" ||
           section.key === "process" ||
@@ -626,6 +636,7 @@ const Navbar = () => {
       menuSections.filter(
         (section) =>
           section.key !== "items" &&
+          section.key !== "item-details" &&
           section.key !== "orders" &&
           section.key !== "reports" &&
           section.key !== "process" &&
