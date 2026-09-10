@@ -56,6 +56,27 @@ test("multiple inspections in one PO count once", () => {
   });
 });
 
+test("counts only distinct POs inspected after Master data creation", () => {
+  const lookup = buildValidInspectionPoLookup(
+    [
+      validRecord("PO-before", { inspection_date: "2026-06-19" }),
+      validRecord("PO-same-day", { inspection_date: "2026-06-20" }),
+      validRecord("PO-1", { inspection_date: "2026-06-21" }),
+      validRecord("PO-2", { inspection_date: "2026-06-22" }),
+      validRecord("PO-3", { inspection_date: "2026-06-23" }),
+    ],
+    {
+      afterInspectionDateByItemCode: new Map([["item-1", "2026-06-20"]]),
+      requireAfterInspectionDate: true,
+    },
+  );
+
+  assert.deepEqual(lookup.get("item-1"), {
+    distinct_po_count: 3,
+    eligible: true,
+  });
+});
+
 test("excludes items with fewer than 3 valid distinct POs", () => {
   const lookup = buildValidInspectionPoLookup([
     validRecord("PO-1"),

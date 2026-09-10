@@ -2851,6 +2851,24 @@ const buildFinalPisCheckMatch = ({ search, brand, vendor, country } = {}) => {
 const buildFinalPisCheckAccessMatch = (filters = {}, user = {}) =>
   applyItemDataAccess(buildFinalPisCheckMatch(filters), user);
 
+const getMasterDataCreatedAtByItemId = async (items = []) => {
+  const itemIds = (Array.isArray(items) ? items : [])
+    .map((item) => item?._id)
+    .filter((itemId) => mongoose.Types.ObjectId.isValid(itemId))
+    .map((itemId) => new mongoose.Types.ObjectId(itemId));
+  if (itemIds.length === 0) return new Map();
+
+  const rows = await PisUpdateLog.aggregate([
+    { $match: { item: { $in: itemIds }, data_scope: AUDIT_SCOPES.MASTER } },
+    { $group: { _id: "$item", created_at: { $min: "$createdAt" } } },
+  ]);
+  return new Map(
+    rows
+      .map((row) => [String(row?._id || ""), row?.created_at])
+      .filter(([itemId, createdAt]) => itemId && createdAt),
+  );
+};
+
 exports.__test__ = {
   buildItemMatch,
   buildFinalPisCheckAccessMatch,
@@ -2881,8 +2899,21 @@ const getFinalPisCheckRowsForQuery = async ({
     .select(FINAL_PIS_CHECK_ITEM_SELECT)
     .sort({ updatedAt: -1, code: 1 })
     .lean();
+  const masterDataCreatedAtByItemId = await getMasterDataCreatedAtByItemId(items);
+  const masterDataCreatedAtByItemCode = new Map(
+    items
+      .map((item) => [
+        normalizeLookupKey(item?.code),
+        masterDataCreatedAtByItemId.get(String(item?._id || "")),
+      ])
+      .filter(([itemCode, createdAt]) => itemCode && createdAt),
+  );
   const validInspectionPoLookup = await getValidInspectionPoLookup(
     items.map((item) => item?.code),
+    {
+      afterInspectionDateByItemCode: masterDataCreatedAtByItemCode,
+      requireAfterInspectionDate: true,
+    },
   );
   const eligibleItems = items.filter((item) =>
     validInspectionPoLookup.get(normalizeLookupKey(item?.code))?.eligible === true,

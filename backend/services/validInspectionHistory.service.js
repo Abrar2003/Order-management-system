@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
+const { parseDateOnly } = require("../helpers/dateOnly");
 
 const MIN_DISTINCT_INSPECTION_POS = 3;
 
@@ -32,7 +33,11 @@ const isValidInspectionHistoryRecord = ({
 
 const buildValidInspectionPoLookup = (
   records = [],
-  { minimumDistinctPos = MIN_DISTINCT_INSPECTION_POS } = {},
+  {
+    minimumDistinctPos = MIN_DISTINCT_INSPECTION_POS,
+    afterInspectionDateByItemCode,
+    requireAfterInspectionDate = false,
+  } = {},
 ) => {
   const poSetsByItem = new Map();
 
@@ -50,6 +55,20 @@ const buildValidInspectionPoLookup = (
     }
 
     const itemKey = normalizeLookupKey(record.item_code);
+    const afterInspectionDate = parseDateOnly(
+      afterInspectionDateByItemCode instanceof Map
+        ? afterInspectionDateByItemCode.get(itemKey)
+        : afterInspectionDateByItemCode?.[itemKey],
+    );
+    const inspectionDate = parseDateOnly(record.inspection_date);
+    if (
+      !inspectionDate ||
+      (requireAfterInspectionDate && !afterInspectionDate) ||
+      (afterInspectionDate && inspectionDate <= afterInspectionDate)
+    ) {
+      continue;
+    }
+
     const poKey = normalizeLookupKey(record.order_id);
     const poSet = poSetsByItem.get(itemKey) || new Set();
     poSet.add(poKey);

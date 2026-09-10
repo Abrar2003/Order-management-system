@@ -1168,9 +1168,9 @@ const FinalPISCheck = () => {
         </div>
 
         <ReportInfoBanner
-          description="Shows inspected-versus-Master discrepancies only for items that have Master data and valid inspection records across at least 3 distinct POs."
+          description="Shows inspected-versus-Master discrepancies only for items with 3 distinct POs inspected after their first Master-data update."
           dataShown="Eligible item code, brand, vendor, inspected size/weight details, Master PIS size/weight details, difference delta, and comments."
-          howItWorks="Includes only items with created Master data and inspections in at least 3 distinct POs, then displays detailed mismatch comparisons. Allows comments and Master PIS updates, with search, brand, vendor, and difference-field filters."
+          howItWorks="Counts only inspection dates after the first Master-data update and includes items with at least 3 distinct POs, then displays detailed mismatch comparisons. Allows comments and Master PIS updates, with search, brand, vendor, and difference-field filters."
         />
 
         <div className="card om-card mb-3">
