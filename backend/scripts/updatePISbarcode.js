@@ -97,6 +97,8 @@ function readBarcodeRows(xlsxPath) {
       row.item_code ||
         row.Item_Code ||
         row.ITEM_CODE ||
+        row.SKU ||
+        row.sku ||
         row.code ||
         row.Code,
     );
@@ -107,6 +109,8 @@ function readBarcodeRows(xlsxPath) {
       row.barcode ||
         row.Barcode ||
         row.BARCODE ||
+        row["EAN CODE"] ||
+        row["EAN Code"] ||
         row.ean ||
         row.EAN,
     );
