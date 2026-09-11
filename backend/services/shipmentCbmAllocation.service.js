@@ -169,9 +169,18 @@ const resolveShipmentRowCbm = ({
   orderQuantity = 0,
   storedPoCbm = 0,
   shipmentQuantity = 0,
+  inspectedBoxSizes = [],
+  inspectedBoxMode = "",
 } = {}) => {
   const shippedQuantity = Math.max(0, Number(shipmentQuantity || 0));
   if (shippedQuantity <= 0) return 0;
+
+  const inspectionCbm = calculateTotalPoCbm({
+    orderQuantity: shippedQuantity,
+    inspectedBoxSizes,
+    inspectedBoxMode,
+  });
+  if (inspectionCbm > 0) return toRoundedCbmValue(inspectionCbm);
 
   const shipmentCbmSummary = resolveOrderRowCbmSummary(itemDoc, shippedQuantity);
   if (Number(shipmentCbmSummary?.total || 0) > 0) {

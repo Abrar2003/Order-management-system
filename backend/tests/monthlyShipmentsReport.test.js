@@ -302,6 +302,26 @@ test("shipment CBM allocation matches the container-page quantity ratio fallback
   assert.equal(report.overall.vendor_totals[0].total_allocated_cbm, 20);
 });
 
+test("shipment CBM prefers the linked QC inspection over a shared item measurement", () => {
+  const allocated = resolveShipmentRowCbm({
+    itemDoc: {
+      inspected_box_mode: "individual",
+      inspected_box_sizes: [
+        { L: 117, B: 9, H: 78 },
+        { L: 62, B: 445, H: 39 },
+      ],
+    },
+    shipmentQuantity: 20,
+    inspectedBoxMode: "individual",
+    inspectedBoxSizes: [
+      { L: 117, B: 9, H: 78 },
+      { L: 62, B: 45, H: 39 },
+    ],
+  });
+
+  assert.equal(allocated, 3.81888);
+});
+
 test("report data loader passes user scope through to the row fetcher", async () => {
   const user = { _id: "user-1", role: "user", allowed_vendors: ["Vendor A"] };
   let seenUser = null;

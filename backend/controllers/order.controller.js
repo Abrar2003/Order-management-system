@@ -3,6 +3,7 @@ const ExcelJS = require("exceljs");
 const path = require("path");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
+const Inspection = require("../models/inspection.model");
 const Item = require("../models/item.model");
 const Sample = require("../models/sample.model");
 const UploadLog = require("../models/uploadLog.model");
@@ -3541,6 +3542,40 @@ const resolveSampleShipmentCbmSummary = (sample = {}, quantity = 0) => {
   };
 };
 
+const inspectionHasBoxMeasurements = (inspection = {}) =>
+  (Array.isArray(inspection?.inspected_box_sizes)
+    ? inspection.inspected_box_sizes
+    : []
+  ).some((entry) =>
+    [entry?.L, entry?.B, entry?.H].every(
+      (value) => Number.isFinite(Number(value)) && Number(value) > 0,
+    ),
+  );
+
+const getInspectionMeasurementTime = (inspection = {}) => {
+  const inspectionDate = parseDateOnly(inspection?.inspection_date);
+  if (inspectionDate) return inspectionDate.getTime();
+  const createdAt = parseDateTime(inspection?.createdAt);
+  return createdAt ? createdAt.getTime() : 0;
+};
+
+const buildLatestShipmentInspectionByQcId = (inspections = []) =>
+  (Array.isArray(inspections) ? inspections : []).reduce((byQcId, inspection) => {
+    if (!inspectionHasBoxMeasurements(inspection)) return byQcId;
+    const qcId = String(inspection?.qc || "").trim();
+    if (!qcId) return byQcId;
+
+    const existing = byQcId.get(qcId);
+    if (
+      !existing ||
+      getInspectionMeasurementTime(inspection) >=
+        getInspectionMeasurementTime(existing)
+    ) {
+      byQcId.set(qcId, inspection);
+    }
+    return byQcId;
+  }, new Map());
+
 const mapOrdersToShipmentRows = (orders = []) =>
   orders.flatMap((order) => {
     const shipmentEntries = Array.isArray(order?.shipment)
@@ -3579,6 +3614,7 @@ const mapOrdersToShipmentRows = (orders = []) =>
       shippable_quantity: Number(order?.shippable_quantity || 0),
       per_item_cbm: Number.isFinite(perItemCbm) ? perItemCbm : 0,
       cbm_source: cbmSummary?.source || null,
+      shipment_inspection: order?.shipmentInspection || null,
     };
 
     if (shipmentEntries.length === 0) {
@@ -3622,6 +3658,8 @@ const mapOrdersToShipmentRows = (orders = []) =>
           shipmentQuantity: Number.isFinite(parsedShipmentQuantity)
             ? parsedShipmentQuantity
             : 0,
+          inspectedBoxSizes: order?.shipmentInspection?.inspected_box_sizes,
+          inspectedBoxMode: order?.shipmentInspection?.inspected_box_mode,
         }),
       };
     });
@@ -3898,6 +3936,19 @@ const getShipmentDataset = async ({
     ]),
   );
 
+  const qcRecordIds = orders
+    .map((order) => order?.qc_record?._id || order?.qc_record)
+    .filter(Boolean);
+  const shipmentInspectionByQcId = buildLatestShipmentInspectionByQcId(
+    qcRecordIds.length > 0
+      ? await Inspection.find({ qc: { $in: qcRecordIds } })
+          .select(
+            "qc inspection_date createdAt inspected_box_sizes inspected_box_mode",
+          )
+          .lean()
+      : [],
+  );
+
   // Remove duplicate orders by order_id
   const uniqueOrders = orders;
 
@@ -3915,6 +3966,10 @@ const getShipmentDataset = async ({
         itemDoc:
           itemMap.get(
             normalizeLooseString(orderEntry?.item?.item_code).toLowerCase(),
+          ) || null,
+        shipmentInspection:
+          shipmentInspectionByQcId.get(
+            String(orderEntry?.qc_record?._id || orderEntry?.qc_record || ""),
           ) || null,
       };
     })
