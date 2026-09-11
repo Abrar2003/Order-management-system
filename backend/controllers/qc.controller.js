@@ -3440,6 +3440,52 @@ const resolveInspectionTransferAvailability = ({
   };
 };
 
+const applyInspectionQuantityTransfer = ({
+  sourceInspection = null,
+  transferQuantity = 0,
+  transferLabels = [],
+  transferNote = "",
+} = {}) => {
+  if (!sourceInspection) return { fullyTransferred: false };
+
+  const quantity = toNonNegativeNumber(transferQuantity, 0);
+  const passed = toNonNegativeNumber(sourceInspection?.passed, 0);
+  const checked = toNonNegativeNumber(sourceInspection?.checked, 0);
+  const offered = toNonNegativeNumber(sourceInspection?.vendor_offered, 0);
+  const rejected = toNonNegativeNumber(sourceInspection?.rejected, 0);
+  const fullyTransferred =
+    quantity >= passed &&
+    Math.max(offered, checked, passed + rejected) <= quantity;
+  const transferredLabels = new Set(normalizeLabels(transferLabels));
+
+  sourceInspection.labels_added = normalizeLabels(
+    normalizeLabels(sourceInspection?.labels_added).filter(
+      (label) => !transferredLabels.has(label),
+    ),
+  );
+  sourceInspection.label_ranges = buildLabelRangesFromLabels(
+    sourceInspection.labels_added,
+  );
+  sourceInspection.remarks = normalizeText(
+    [sourceInspection.remarks, transferNote].filter(Boolean).join(" | "),
+  );
+
+  if (fullyTransferred) {
+    sourceInspection.status = INSPECTION_RECORD_STATUS.TRANSFERRED;
+    return { fullyTransferred: true };
+  }
+
+  sourceInspection.vendor_offered = Math.max(0, offered - quantity);
+  sourceInspection.checked = Math.max(0, checked - quantity);
+  sourceInspection.passed = Math.max(0, passed - quantity);
+  sourceInspection.pending_after = Math.max(
+    0,
+    toNonNegativeNumber(sourceInspection?.pending_after, 0) + quantity,
+  );
+
+  return { fullyTransferred: false };
+};
+
 /**
  * GET /qclist
  * Fetch all QC records (pagination optional)
@@ -3753,6 +3799,7 @@ const resolveInspectionReportDateIso = (inspection = {}) =>
   "";
 
 exports.__test__ = {
+  applyInspectionQuantityTransfer,
   buildFirstInspectionAlignmentPolicy,
   buildApprovedGoodsQuantityByInspectionId,
   calculateQcAggregateMetrics,
@@ -10845,10 +10892,12 @@ exports.transferInspectionRecord = async (req, res) => {
         ? (sourceCbmBefore / sourceCheckedBefore) * transferQuantityRaw
         : 0;
 
-    sourceInspection.status = INSPECTION_RECORD_STATUS.TRANSFERRED;
-    sourceInspection.remarks = normalizeText(
-      [sourceInspection.remarks, transferNoteSource].filter(Boolean).join(" | "),
-    );
+    applyInspectionQuantityTransfer({
+      sourceInspection,
+      transferQuantity: transferQuantityRaw,
+      transferLabels,
+      transferNote: transferNoteSource,
+    });
     sourceInspection.updated_by = buildAuditActor(req.user);
     await sourceInspection.save();
 

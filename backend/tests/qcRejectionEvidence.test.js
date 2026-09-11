@@ -8,6 +8,7 @@ const {
 
 const {
   __test__: {
+    applyInspectionQuantityTransfer,
     calculateQcAggregateMetrics,
     getInspectionQuantityError,
     getRejectionEvidenceError,
@@ -107,6 +108,40 @@ test("QC aggregate sums stored rejected values and ignores transferred records",
   );
 
   assert.equal(result.totalRejected, 2);
+});
+
+test("partial inspection transfers retain the source inspection balance", () => {
+  const sourceInspection = {
+    status: "Inspection Done",
+    vendor_offered: 10,
+    checked: 10,
+    passed: 10,
+    rejected: 0,
+    pending_after: 0,
+    labels_added: [101, 102, 103, 104],
+    label_ranges: [{ start: 101, end: 104 }],
+    remarks: "",
+  };
+
+  const result = applyInspectionQuantityTransfer({
+    sourceInspection,
+    transferQuantity: 4,
+    transferLabels: [101, 102],
+    transferNote: "Transferred 4 to PO TARGET",
+  });
+  const aggregate = calculateQcAggregateMetrics(
+    { request_type: "FULL", request_history: [] },
+    [sourceInspection],
+  );
+
+  assert.equal(result.fullyTransferred, false);
+  assert.equal(sourceInspection.status, "Inspection Done");
+  assert.equal(sourceInspection.vendor_offered, 6);
+  assert.equal(sourceInspection.checked, 6);
+  assert.equal(sourceInspection.passed, 6);
+  assert.equal(sourceInspection.pending_after, 4);
+  assert.deepEqual(sourceInspection.labels_added, [103, 104]);
+  assert.equal(aggregate.totalEffectivePassed, 6);
 });
 
 test("product analytics uses manual rejection instead of unchecked quantity", () => {
