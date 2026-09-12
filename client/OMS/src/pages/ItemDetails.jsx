@@ -8,6 +8,7 @@ import Navbar from "../components/Navbar";
 import FilePreviewModal from "../components/FilePreviewModal";
 import QcItemComplaintsSection from "../components/complaints/QcItemComplaintsSection";
 import SortHeaderButton from "../components/SortHeaderButton";
+import { ClaimPercentageModal } from "./Items";
 import {
   getFilePreviewSource,
   getItemFileValues,
@@ -533,9 +534,11 @@ const ItemDetails = () => {
   const [brandLogoSrc, setBrandLogoSrc] = useState("");
   const [previewFile, setPreviewFile] = useState(null);
   const [deletingFileKey, setDeletingFileKey] = useState("");
+  const [claimPercentageItem, setClaimPercentageItem] = useState(null);
   const [poSortBy, setPoSortBy] = useState("po");
   const [poSortOrder, setPoSortOrder] = useState("asc");
   const canDeleteItemFiles = hasPermission("images_documents", "delete");
+  const canEditItems = hasPermission("items", "edit");
 
   const fetchDetails = useCallback(async () => {
     if (!resolvedItemCode) {
@@ -987,10 +990,16 @@ const ItemDetails = () => {
         {error && <div className="alert alert-danger">{error}</div>}
 
         <div className="card om-card inspection-report-card item-details-main-card">
-          <div className="qc-claim-percentage-corner-tag">
+          <button
+            type="button"
+            className="qc-claim-percentage-corner-tag"
+            onClick={() => setClaimPercentageItem(item)}
+            disabled={!canEditItems}
+            title={canEditItems ? "Edit claim details" : "You do not have permission to edit claim details"}
+          >
             <span>Claim percentage</span>
             <strong>{formatClaimPercentage(claimPercentage)}%</strong>
-          </div>
+          </button>
           <div className="card-body d-grid gap-4">
             {loading ? (
               <div className="text-center py-5">Loading item details...</div>
@@ -1378,6 +1387,16 @@ const ItemDetails = () => {
           previewMode={previewFile.mode}
           modalClassName={previewFile.modalClassName}
           onClose={() => setPreviewFile(null)}
+        />
+      )}
+      {claimPercentageItem && canEditItems && (
+        <ClaimPercentageModal
+          item={claimPercentageItem}
+          onClose={() => setClaimPercentageItem(null)}
+          onSaved={() => {
+            setClaimPercentageItem(null);
+            fetchDetails();
+          }}
         />
       )}
     </>
