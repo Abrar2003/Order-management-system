@@ -1,6 +1,12 @@
 const Order = require("../models/order.model");
-const { applyDataAccessMatch } = require("../services/userDataAccess.service");
-const { normalizeVendorText } = require("../helpers/vendorRef");
+const {
+  applyDataAccessMatch,
+  combineMongoMatches,
+} = require("../services/userDataAccess.service");
+const {
+  buildVendorFilter,
+  normalizeVendorText,
+} = require("../helpers/vendorRef");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -256,9 +262,17 @@ exports.getProductAnalytics = async (req, res) => {
     }
 
     if (brand && brand !== "all") matchStage.brand = brand;
-    if (vendor && vendor !== "all") matchStage.vendor = vendor;
 
-    const scopedMatchStage = applyDataAccessMatch(matchStage, req.user);
+    const normalizedVendor = normalizeVendorText(vendor);
+    const scopedMatchStage = applyDataAccessMatch(
+      normalizedVendor && normalizedVendor.toLowerCase() !== "all"
+        ? combineMongoMatches(
+          matchStage,
+          buildVendorFilter({ field: "vendor", vendorName: normalizedVendor }),
+        )
+        : matchStage,
+      req.user,
+    );
     const scopedOptionsMatch = applyDataAccessMatch({ archived: { $ne: true } }, req.user);
 
     // Fetch available filters for dropdowns
@@ -366,3 +380,5 @@ exports._private = {
   groupProductAnalyticsRows,
   processOrderAnalyticsRow,
 };
+
+exports.groupProductAnalyticsRows = groupProductAnalyticsRows;

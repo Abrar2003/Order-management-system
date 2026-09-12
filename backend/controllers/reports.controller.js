@@ -2365,7 +2365,10 @@ const buildCommonErrorsReportDataset = async ({
     };
   }
 
-  const inspections = await Inspection.find({ qc: { $in: qcIds } })
+  const inspections = await Inspection.find({
+    qc: { $in: qcIds },
+    status: QC_REPORT_MISMATCH_STATUS,
+  })
     .select(
       "qc inspector inspection_date requested_date status inspected_item_sizes inspected_box_sizes inspected_box_mode createdAt",
     )
@@ -3305,4 +3308,8 @@ exports.__test__ = {
   limitRecentInspectionsByItem,
   selectLatestInspectionPerLatestPo,
   sortInspectionsByOrderAndInspectionDate,
+  buildCommonErrorsReportDataset,
 };
+
+exports.buildClaimsReportRow = buildClaimsReportRow;
+exports.isCurrentClaimSystemItem = isCurrentClaimSystemItem;

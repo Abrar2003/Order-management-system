@@ -47,6 +47,7 @@ const ArchivedOrders = lazy(() => import("./pages/ArchivedOrders"));
 const InspectionReport = lazy(() => import("./pages/inspection_report"));
 const InspectorReports = lazy(() => import("./pages/InspectorReports"));
 const VendorReports = lazy(() => import("./pages/VendorReports"));
+const VendorPerformanceReport = lazy(() => import("./pages/VendorPerformanceReport"));
 const VendorWiseQAReport = lazy(() => import("./pages/VendorWiseQAReport"));
 const MonthlyShipmentsReport = lazy(() => import("./pages/MonthlyShipmentsReport"));
 const DelayedPoReports = lazy(() => import("./pages/DelayedPoReports"));
@@ -335,6 +336,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <VendorReports />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/vendor-performance"
+            element={
+              <ProtectedRoute permissionModule="reports">
+                <VendorPerformanceReport />
               </ProtectedRoute>
             }
           />

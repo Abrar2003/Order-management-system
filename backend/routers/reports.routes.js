@@ -8,6 +8,7 @@ const {
   securityLog,
 } = require("../middlewares/securityActivityLogger");
 const reportsController = require("../controllers/reports.controller");
+const vendorPerformanceReportController = require("../controllers/vendorPerformanceReport.controller");
 const {
   getPdfRendererStatus,
   renderHtmlPdf,
@@ -25,6 +26,24 @@ router.post(
     metadata: (req) => ({ report_key: req.body?.reportKey || "" }),
   }),
   renderHtmlPdf,
+);
+
+router.get(
+  "/vendor-performance",
+  auth,
+  requirePermission("reports", "view"),
+  cacheRoute("reports", MEDIUM_CACHE_TTL),
+  vendorPerformanceReportController.getVendorPerformanceReport,
+);
+
+router.get(
+  "/vendor-performance/export",
+  auth,
+  requirePermission("reports", "view"),
+  securityLog("export_excel", "vendor_performance_report", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
+  vendorPerformanceReportController.exportVendorPerformanceReport,
 );
 
 router.get(

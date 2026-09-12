@@ -14,6 +14,7 @@ const PDF_REPORT_KEYS = new Set([
   "pis-diffs",
   "po-status-report",
   "upcoming-etd-report",
+  "vendor-performance-report",
   "weekly-order-summary",
 ]);
 

@@ -341,6 +341,7 @@ const Navbar = () => {
 
     const performanceReports = [
       routeMenuItem("inspector-reports", "Inspector Performance Report", "/reports/inspectors"),
+      routeMenuItem("vendor-performance-report", "Detailed Vendor Performance Report", "/reports/vendor-performance"),
       routeMenuItem("vendor-reports", "Vendor Performance Report", "/reports/vendors"),
       ...(isVendorAdmin ? [routeMenuItem("vendor-details", "Vendor Details", "/vendors")] : []),
       routeMenuItem(
