@@ -28,6 +28,7 @@ import {
   buildItemFileUploadRequest,
   getItemFileValues,
   getPrimaryStoredItemFile,
+  getStoredItemFileUrl,
   ITEM_FILE_OPTIONS,
   isItemFileOptionAvailableForItem,
   shouldOpenFilePreviewExternally,
@@ -1154,6 +1155,7 @@ const QcDetails = () => {
       }))
       .sort((left, right) => left.uniqueCode.localeCompare(right.uniqueCode));
   }, [qc?.item_master?.finish]);
+  const productImageUrl = getStoredItemFileUrl(qc?.item_master?.image);
   const itemMasterFiles = useMemo(
     () =>
       ITEM_MASTER_FILE_OPTIONS.filter((option) =>
@@ -3146,22 +3148,22 @@ const QcDetails = () => {
                       <div className="card h-100 border-0 shadow-sm">
                         <div className="card-body d-grid gap-3">
                           <div className="row g-2">
-                            {[["Front", finish.frontImageUrl], ["Back", finish.backImageUrl]].map(([label, imageUrl]) => (
-                              <div key={label} className="col-6">
+                            {[["Front", finish.frontImageUrl], ["Back", finish.backImageUrl], ["Product Image", productImageUrl]].map(([label, imageUrl]) => (
+                              <div key={label} className="col-4">
                                 <div className="small text-secondary mb-1">{label}</div>
                                 {imageUrl ? (
                                   <button
                                     type="button"
                                     className="finish-image-trigger w-100"
                                     onClick={() => setPreviewFile({
-                                      title: `${finish.uniqueCode} ${label} Finish`,
+                                      title: label === "Product Image" ? `${itemMasterDetails.code} Product Image` : `${finish.uniqueCode} ${label} Finish`,
                                       url: imageUrl,
-                                      originalName: `${finish.uniqueCode}-${label.toLowerCase()}-finish`,
+                                      originalName: label === "Product Image" ? `${itemMasterDetails.code}-product-image` : `${finish.uniqueCode}-${label.toLowerCase()}-finish`,
                                       previewMode: "image",
                                       modalClassName: "finish-image-preview-modal",
                                     })}
                                   >
-                                    <img src={imageUrl} alt={`${finish.uniqueCode} ${label.toLowerCase()} finish`} className="img-fluid rounded border" loading="lazy" decoding="async" style={{ width: "100%", height: "180px", objectFit: "contain", backgroundColor: "#f8f9fa" }} />
+                                    <img src={imageUrl} alt={label === "Product Image" ? `${itemMasterDetails.description} product` : `${finish.uniqueCode} ${label.toLowerCase()} finish`} className="img-fluid rounded border" loading="lazy" decoding="async" style={{ width: "100%", height: "180px", objectFit: "contain", backgroundColor: "#f8f9fa" }} />
                                   </button>
                                 ) : (
                                   <div className="border rounded d-flex align-items-center justify-content-center text-secondary small" style={{ height: "180px", backgroundColor: "#f8f9fa" }}>{label} image not available</div>

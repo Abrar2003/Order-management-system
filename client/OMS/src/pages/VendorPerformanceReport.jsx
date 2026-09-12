@@ -54,6 +54,8 @@ const VendorPerformanceReport = () => {
   const sectionRefs = useRef({});
   const [vendor, setVendor] = useState("");
   const [vendorOptions, setVendorOptions] = useState([]);
+  const [brandOptions, setBrandOptions] = useState([]);
+  const [brandFilters, setBrandFilters] = useState([]);
   const [sections, setSections] = useState(emptySections);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -61,16 +63,20 @@ const VendorPerformanceReport = () => {
   const [exportSections, setExportSections] = useState(["po_delay"]);
   const [exportFormat, setExportFormat] = useState("xlsx");
   const [exporting, setExporting] = useState(false);
+  const [activeSection, setActiveSection] = useState("po_delay");
 
   const loadReport = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
       const response = await api.get("/reports/vendor-performance", {
-        params: vendor ? { vendor } : {},
+        params: vendor ? { vendor, brands: brandFilters.join(",") || undefined } : {},
       });
       setVendorOptions(Array.isArray(response?.data?.filters?.vendor_options)
         ? response.data.filters.vendor_options
+        : []);
+      setBrandOptions(Array.isArray(response?.data?.filters?.brand_options)
+        ? response.data.filters.brand_options
         : []);
       setSections(response?.data?.sections || emptySections());
     } catch (loadError) {
@@ -79,7 +85,7 @@ const VendorPerformanceReport = () => {
     } finally {
       setLoading(false);
     }
-  }, [vendor]);
+  }, [vendor, brandFilters]);
 
   useEffect(() => {
     loadReport();
@@ -93,6 +99,7 @@ const VendorPerformanceReport = () => {
 
   const handleExport = async () => {
     if (!vendor || exportSections.length === 0) return;
+    const previousSection = activeSection;
     try {
       setExporting(true);
       setError("");
@@ -100,6 +107,8 @@ const VendorPerformanceReport = () => {
         const label = SECTION_OPTIONS.find(([key]) => key === section)?.[1] || section;
         const filenameBase = `vendor-${vendor.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${section.replace(/_/g, "-")}`;
         if (exportFormat === "pdf") {
+          setActiveSection(section);
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           await exportElementToPdf({
             element: sectionRefs.current[section],
             reportKey: "vendor-performance-report",
@@ -108,7 +117,7 @@ const VendorPerformanceReport = () => {
           });
         } else {
           const response = await api.get("/reports/vendor-performance/export", {
-            params: { vendor, section, format: "xlsx" },
+            params: { vendor, section, brands: brandFilters.join(",") || undefined, format: "xlsx" },
             responseType: "blob",
           });
           downloadResponse(response, `${filenameBase}.xlsx`);
@@ -118,6 +127,7 @@ const VendorPerformanceReport = () => {
     } catch (exportError) {
       setError(exportError?.response?.data?.message || "Failed to export the selected report table.");
     } finally {
+      setActiveSection(previousSection);
       setExporting(false);
     }
   };
@@ -160,11 +170,29 @@ const VendorPerformanceReport = () => {
                 id="vendor-performance-vendor"
                 className="form-select"
                 value={vendor}
-                onChange={(event) => setVendor(event.target.value)}
+                onChange={(event) => {
+                  setVendor(event.target.value);
+                  setBrandFilters([]);
+                }}
               >
                 <option value="">Select a vendor</option>
                 {vendorOptions.map((option) => <option key={option} value={option}>{option}</option>)}
               </select>
+            </div>
+            <div className="col-md-4">
+              <label className="form-label" htmlFor="vendor-performance-brands">Brands</label>
+              <select
+                id="vendor-performance-brands"
+                className="form-select"
+                multiple
+                size="3"
+                value={brandFilters}
+                disabled={!vendor}
+                onChange={(event) => setBrandFilters(Array.from(event.target.selectedOptions, (option) => option.value))}
+              >
+                {brandOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+              <div className="form-text">Hold Ctrl or Cmd to select multiple brands.</div>
             </div>
             <div className="col-md-3">
               <button type="button" className="btn btn-outline-primary" onClick={loadReport} disabled={loading}>
@@ -179,7 +207,11 @@ const VendorPerformanceReport = () => {
 
         {vendor && !loading && (
           <div className="d-grid gap-3">
-            <section className="card om-card" ref={(node) => { sectionRefs.current.po_delay = node; }}>
+            <nav className="nav nav-tabs" aria-label="Vendor report sections">
+              {SECTION_OPTIONS.map(([key, label]) => <button key={key} type="button" className={`nav-link ${activeSection === key ? "active" : ""}`} aria-current={activeSection === key ? "page" : undefined} disabled={exporting} onClick={() => setActiveSection(key)}>{label}</button>)}
+            </nav>
+
+            {activeSection === "po_delay" && <section className="card om-card" ref={(node) => { sectionRefs.current.po_delay = node; }}>
               <div className="card-header fw-semibold">1. PO-wise delay — complete packed date vs ETD</div>
               <div className="table-responsive">
                 <table className="table table-striped align-middle mb-0">
@@ -189,14 +221,14 @@ const VendorPerformanceReport = () => {
                   </tr>) : <tr><td colSpan="8" className="text-center text-secondary py-3">No completely packed POs with an ETD.</td></tr>}</tbody>
                 </table>
               </div>
-            </section>
+            </section>}
 
-            <section className="card om-card" ref={(node) => { sectionRefs.current.product_analytics = node; }}>
+            {activeSection === "product_analytics" && <section className="card om-card" ref={(node) => { sectionRefs.current.product_analytics = node; }}>
               <div className="card-header fw-semibold">2. Product analytics</div>
               <ProductAnalyticsTable rows={productRows} />
-            </section>
+            </section>}
 
-            <section className="card om-card" ref={(node) => { sectionRefs.current.product_complaints = node; }}>
+            {activeSection === "product_complaints" && <section className="card om-card" ref={(node) => { sectionRefs.current.product_complaints = node; }}>
               <div className="card-header fw-semibold">3. Product claims</div>
               <div className="table-responsive">
                 <table className="table table-striped align-middle mb-0">
@@ -208,9 +240,9 @@ const VendorPerformanceReport = () => {
                   </tr>) : <tr><td colSpan="6" className="text-center text-secondary py-3">No claim tenures found.</td></tr>}</tbody>
                 </table>
               </div>
-            </section>
+            </section>}
 
-            <section className="card om-card" ref={(node) => { sectionRefs.current.shipping_delay = node; }}>
+            {activeSection === "shipping_delay" && <section className="card om-card" ref={(node) => { sectionRefs.current.shipping_delay = node; }}>
               <div className="card-header fw-semibold">4. Shipping delay by ETD</div>
               <div className="table-responsive">
                 <table className="table table-striped align-middle mb-0">
@@ -220,7 +252,7 @@ const VendorPerformanceReport = () => {
                   </tr>) : <tr><td colSpan="8" className="text-center text-secondary py-3">No completely shipped POs with an ETD.</td></tr>}</tbody>
                 </table>
               </div>
-            </section>
+            </section>}
           </div>
         )}
       </main>

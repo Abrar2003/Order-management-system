@@ -1706,6 +1706,7 @@ const ITEM_DETAILS_SELECT = [
   "satin_label",
   "satin_label_required",
   "finish",
+  "claim_percentage",
   "pis_item_sizes",
   "pis_box_sizes",
   "pis_box_mode",

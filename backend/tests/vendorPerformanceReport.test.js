@@ -38,6 +38,22 @@ test("vendor performance flags a lower latest claim percentage as positive", () 
   assert.equal(row.remark, "positive");
 });
 
+test("vendor performance flags missing prior and current tenure claims", () => {
+  const rows = buildClaimRows([
+    {
+      _id: "current-only", code: "CURRENT", vendors: ["Vendor"],
+      claim_tenures: [{ from_date: "2026-05-19", to_date: "2026-08-13", delivered_quantity: 100, rejected_quantity: 5 }],
+    },
+    {
+      _id: "previous-only", code: "PREVIOUS", vendors: ["Vendor"],
+      claim_tenures: [{ from_date: "2025-11-18", to_date: "2026-05-18", delivered_quantity: 100, rejected_quantity: 5 }],
+    },
+  ]);
+  assert.equal(rows.find((row) => row.code === "CURRENT").remark, "negative");
+  assert.equal(rows.find((row) => row.code === "PREVIOUS").current_claim_percentage, 0);
+  assert.equal(rows.find((row) => row.code === "PREVIOUS").remark, "positive");
+});
+
 test("vendor performance includes incomplete POs and flags only overdue ones as overdue", () => {
   const { po_delay: rows } = buildPoSections([{
     order_id: "PO-PENDING", brand: "Brand", vendor: "Vendor", quantity: 5,
@@ -71,7 +87,7 @@ test("vendor performance scopes both selected vendor data sources", async (t) =>
   const res = { body: null, json(body) { this.body = body; return this; }, status() { return this; } };
 
   await getVendorPerformanceReport({
-    query: { vendor: "Vendor B" },
+    query: { vendor: "Vendor B", brands: "Brand A,Brand B" },
     user: { role: "admin", allowed_brands: [{ name: "Brand A" }], allowed_vendors: ["Vendor A"] },
   }, res);
 
@@ -80,6 +96,7 @@ test("vendor performance scopes both selected vendor data sources", async (t) =>
   assert.match(JSON.stringify(orderMatches[1]), /Vendor A/);
   assert.match(JSON.stringify(orderMatches[1]), /Vendor B/);
   assert.match(JSON.stringify(orderMatches[2]), /Vendor B/);
+  assert.match(JSON.stringify(orderMatches[1]), /Brand B/);
   assert.match(JSON.stringify(itemMatches[0]), /Vendor A/);
   assert.match(JSON.stringify(itemMatches[0]), /Vendor B/);
 });

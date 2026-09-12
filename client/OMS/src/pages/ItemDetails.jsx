@@ -63,6 +63,11 @@ const formatCbm = (value) => {
   const formatted = formatNumber(value);
   return formatted;
 };
+const formatClaimPercentage = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "0";
+  return parsed.toFixed(2).replace(/\.?0+$/, "");
+};
 const formatDisplayLbhValue = (value) =>
   formatLbhValue(value, { fallback: "Not Set", suffix: SIZE_UNIT });
 const formatLabel = (value) =>
@@ -561,6 +566,7 @@ const ItemDetails = () => {
   const orders = Array.isArray(details?.orders) ? details.orders : [];
   const brandName = getPrimaryBrand(item);
   const productImageUrl = getStoredItemFileUrl(item?.image);
+  const claimPercentage = Math.max(0, toSafeNumber(item?.claim_percentage));
 
   useEffect(() => {
     if (!brandName) {
@@ -980,7 +986,11 @@ const ItemDetails = () => {
 
         {error && <div className="alert alert-danger">{error}</div>}
 
-        <div className="card om-card inspection-report-card">
+        <div className="card om-card inspection-report-card item-details-main-card">
+          <div className="qc-claim-percentage-corner-tag">
+            <span>Claim percentage</span>
+            <strong>{formatClaimPercentage(claimPercentage)}%</strong>
+          </div>
           <div className="card-body d-grid gap-4">
             {loading ? (
               <div className="text-center py-5">Loading item details...</div>

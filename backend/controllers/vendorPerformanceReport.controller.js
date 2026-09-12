@@ -26,6 +26,19 @@ const ACTIVE_ORDER_MATCH = {
 
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeVendor = (value) => normalizeVendorText(value);
+const normalizeBrandFilters = (value) => [...new Set(
+  (Array.isArray(value) ? value : String(value ?? "").split(","))
+    .map(normalizeText)
+    .filter(Boolean),
+)];
+const buildBrandMatch = (brands = []) => brands.length > 0 ? { brand: { $in: brands } } : {};
+const buildItemBrandMatch = (brands = []) => brands.length > 0 ? {
+  $or: [
+    { brand: { $in: brands } },
+    { brand_name: { $in: brands } },
+    { brands: { $in: brands } },
+  ],
+} : {};
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
@@ -160,40 +173,57 @@ const buildPoSections = (orderRows = []) => {
   };
 };
 
-const buildClaimRows = (items = []) => items
-  .filter(isCurrentClaimSystemItem)
-  .map(buildClaimsReportRow)
-  .map((row) => {
+const claimPercentage = (tenure) => tenure?.delivered_quantity > 0
+  ? Number(((tenure.rejected_quantity / tenure.delivered_quantity) * 100).toFixed(2))
+  : 0;
+
+const buildClaimRows = (items = []) => {
+  const rows = items.filter(isCurrentClaimSystemItem).map(buildClaimsReportRow);
+  const currentTenureEnd = rows
+    .flatMap((row) => row.tenures.map((tenure) => tenure.to_date))
+    .filter(Boolean)
+    .sort()
+    .at(-1) || "";
+
+  return rows.map((row) => {
     const tenures = [...row.tenures]
       .sort((left, right) => String(left.from_date).localeCompare(String(right.from_date)))
-      .map((tenure, index, allTenures) => {
-        const percentage = tenure.delivered_quantity > 0
-          ? Number(((tenure.rejected_quantity / tenure.delivered_quantity) * 100).toFixed(2))
-          : 0;
-        const previous = allTenures[index - 1];
-        const previousPercentage = previous?.delivered_quantity > 0
-          ? Number(((previous.rejected_quantity / previous.delivered_quantity) * 100).toFixed(2))
-          : null;
-        const remark = previousPercentage === null
-          ? "neutral"
-          : percentage < previousPercentage ? "positive" : percentage > previousPercentage ? "negative" : "neutral";
-        return { ...tenure, percentage, remark };
-      });
+      .map((tenure) => ({ ...tenure, percentage: claimPercentage(tenure) }));
+    const current = currentTenureEnd
+      ? tenures.find((tenure) => tenure.to_date === currentTenureEnd)
+      : tenures.at(-1);
+    const previous = currentTenureEnd
+      ? tenures.filter((tenure) => tenure.to_date < currentTenureEnd).at(-1)
+      : tenures.at(-2);
+    const currentPercentage = claimPercentage(current);
+    const previousPercentage = claimPercentage(previous);
+    const remark = currentPercentage === 0 && previousPercentage > 0
+      ? "positive"
+      : currentPercentage > 0 && previousPercentage === 0
+        ? "negative"
+        : currentPercentage < previousPercentage ? "positive" : currentPercentage > previousPercentage ? "negative" : "neutral";
     return {
       ...row,
       tenures,
-      current_claim_percentage: tenures.at(-1)?.percentage ?? 0,
-      remark: tenures.at(-1)?.remark || "neutral",
+      current_claim_percentage: currentPercentage,
+      remark,
     };
   });
+};
 
-const buildVendorPerformanceDataset = async ({ vendor = "", user } = {}) => {
+const buildVendorPerformanceDataset = async ({ vendor = "", brands, user } = {}) => {
   const scopedOrders = await Order.find(scopedActiveOrders(user))
-    .select("vendor")
+    .select("vendor brand")
     .lean();
   const vendorOptions = [...new Set(scopedOrders.map((order) => normalizeVendor(order?.vendor)).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right));
   const selectedVendor = normalizeText(vendor);
+  const selectedBrands = normalizeBrandFilters(brands);
+  const brandOptions = [...new Set(scopedOrders
+    .filter((order) => !selectedVendor || normalizeVendor(order?.vendor).toLowerCase() === selectedVendor.toLowerCase())
+    .map((order) => normalizeText(order?.brand))
+    .filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
   const emptySections = {
     po_delay: { rows: [] },
     product_analytics: { rows: [] },
@@ -201,16 +231,18 @@ const buildVendorPerformanceDataset = async ({ vendor = "", user } = {}) => {
     shipping_delay: { rows: [] },
   };
   if (!selectedVendor) {
-    return { filters: { vendor_options: vendorOptions }, vendor: "", sections: emptySections };
+    return { filters: { vendor_options: vendorOptions, brand_options: brandOptions }, vendor: "", sections: emptySections };
   }
 
-  const orderMatch = scopedActiveOrders(user, buildVendorFilter({ field: "vendor", vendorName: selectedVendor }));
+  const orderMatch = scopedActiveOrders(user, {
+    $and: [buildVendorFilter({ field: "vendor", vendorName: selectedVendor }), buildBrandMatch(selectedBrands)],
+  });
   const orderRows = await Order.find(orderMatch)
     .select("order_id order_date brand vendor status ETD revised_ETD quantity item shipment qc_record")
     .populate("qc_record", "last_inspected_date quantities")
     .lean();
   const productAnalyticsOrderRows = await Order.find(applyDataAccessMatch(
-    { $and: [{ archived: { $ne: true } }, buildVendorFilter({ field: "vendor", vendorName: selectedVendor })] },
+    { $and: [{ archived: { $ne: true } }, buildVendorFilter({ field: "vendor", vendorName: selectedVendor }), buildBrandMatch(selectedBrands)] },
     user,
   ))
     .select("order_id order_date brand vendor quantity item shipment qc_record")
@@ -251,6 +283,7 @@ const buildVendorPerformanceDataset = async ({ vendor = "", user } = {}) => {
     { $and: [
       { "claim_tenures.0": { $exists: true } },
       buildVendorsArrayFilter({ field: "vendors", vendorName: selectedVendor }),
+      buildItemBrandMatch(selectedBrands),
     ] },
     user,
     { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
@@ -261,7 +294,7 @@ const buildVendorPerformanceDataset = async ({ vendor = "", user } = {}) => {
   const poSections = buildPoSections(orderRows);
 
   return {
-    filters: { vendor_options: vendorOptions },
+    filters: { vendor_options: vendorOptions, brand_options: brandOptions, brands: selectedBrands },
     vendor: selectedVendor,
     sections: {
       po_delay: { rows: poSections.po_delay },
@@ -274,7 +307,7 @@ const buildVendorPerformanceDataset = async ({ vendor = "", user } = {}) => {
 
 const getVendorPerformanceReport = async (req, res) => {
   try {
-    return res.json(await buildVendorPerformanceDataset({ vendor: req.query.vendor, user: req.user }));
+    return res.json(await buildVendorPerformanceDataset({ vendor: req.query.vendor, brands: req.query.brands, user: req.user }));
   } catch (error) {
     console.error("Vendor performance report error:", error);
     return res.status(500).json({ message: "Failed to load vendor performance report" });
@@ -302,7 +335,7 @@ const exportVendorPerformanceReport = async (req, res) => {
     return res.status(400).json({ message: "Vendor and a valid report table are required." });
   }
   try {
-    const dataset = await buildVendorPerformanceDataset({ vendor: req.query.vendor, user: req.user });
+    const dataset = await buildVendorPerformanceDataset({ vendor: req.query.vendor, brands: req.query.brands, user: req.user });
     const rows = dataset.sections[section].rows.map((row) => ({
       ...row,
       tenure_summary: Array.isArray(row.tenures)

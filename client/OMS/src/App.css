@@ -490,7 +490,8 @@ small,
   width: 20%;
 }
 
-.qc-details-main-card {
+.qc-details-main-card,
+.item-details-main-card {
   position: relative;
 }
 
