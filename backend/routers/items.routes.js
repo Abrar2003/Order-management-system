@@ -4,6 +4,7 @@ const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const {
   requireAdminOnlyPisEdit,
+  requireNonViewer,
   requirePermission,
 } = require("../middlewares/permission.middleware");
 const {
@@ -367,6 +368,7 @@ router.get(
   "/:itemCode/details",
   auth,
   requirePermission("items", "view"),
+  requireNonViewer,
   securityLog("view", "item", {
     resourceId: (req) => req.params.itemCode,
     metadata: () => ({ records: 1 }),
@@ -379,6 +381,7 @@ router.get(
   "/:itemCode/orders-history",
   auth,
   requirePermission("items", "view"),
+  requireNonViewer,
   securityLog("view", "item_orders_history", {
     resourceId: (req) => req.params.itemCode,
     metadata: () => ({ records: 1 }),

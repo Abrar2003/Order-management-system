@@ -87,6 +87,13 @@ const CheckedEditRoleKeys = new Set([
   "inspection_manager",
 ]);
 
+const requireNonViewer = (req, res, next) => {
+  if (normalizeUserRoleKey(req.user?.role) === "viewer") {
+    return res.status(403).json({ message: "Viewer access is limited to the available read-only pages." });
+  }
+  return next();
+};
+
 const requireCheckedEditAccess = (req, res, next) => {
   try {
     if (!req.user) {
@@ -110,6 +117,7 @@ module.exports = {
   requireAdminOnlyPisEdit,
   requirePermission,
   requirePermissionOrRoles,
+  requireNonViewer,
   requireShipmentEditAccess,
   requireCheckedEditAccess,
 };

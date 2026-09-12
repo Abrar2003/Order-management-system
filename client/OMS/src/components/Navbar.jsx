@@ -16,6 +16,7 @@ import NotificationBell from "../notifications/NotificationBell";
 import {
   isManagerLikeRole,
   isQcOnlyUserRole,
+  isViewerRole,
   isStrictAdminRole,
   normalizeUserRole,
 } from "../auth/permissions";
@@ -105,6 +106,7 @@ const Navbar = () => {
 
   const canAccessQc = hasPermission("qc", "view");
   const isQcOnlyRole = isQcOnlyUserRole(normalizedRole);
+  const isViewer = isViewerRole(permissionRole || role);
   const canManageOrders =
     hasPermission("orders", "edit") ||
     hasPermission("orders", "create") ||
@@ -259,6 +261,12 @@ const Navbar = () => {
 
   const itemMenuItems = useMemo(() => {
     if (!hasPermission("items", "view") || isQcOnlyRole) return [];
+    if (isViewer) {
+      return [
+        routeMenuItem("items-all", "View Items", "/items"),
+        routeMenuItem("item-masters", "Item Masters", "/item-masters"),
+      ];
+    }
 
     const itemDocMenuItems = ITEM_FILE_NAV_OPTIONS
       .filter((option) => ITEM_DOC_FILE_TYPES.has(option.value))
@@ -286,10 +294,10 @@ const Navbar = () => {
         ? [groupMenuItem("items-shipping-marks", "Shipping Marks", shippingMarksMenuItems)]
         : []),
     ];
-  }, [hasPermission, isQcOnlyRole]);
+  }, [hasPermission, isQcOnlyRole, isViewer]);
 
   const itemDetailsMenuItems = useMemo(() => {
-    if (isQcOnlyRole) return [];
+    if (isQcOnlyRole || isViewer) return [];
 
     const items = [];
     if (canViewPis) {
@@ -313,7 +321,7 @@ const Navbar = () => {
       }
     }
     return items;
-  }, [canAccessAnalytics, canViewPis, isQcOnlyRole]);
+  }, [canAccessAnalytics, canViewPis, isQcOnlyRole, isViewer]);
 
   const orderMenuItems = useMemo(() => {
     if (!canViewOrderPages || isQcOnlyRole) return [];
@@ -393,7 +401,7 @@ const Navbar = () => {
   }, [canAccessAnalytics, canManageLabels, hasPermission, isQcOnlyRole]);
 
   const processMenuItems = useMemo(() => {
-    if (isQcOnlyRole) return [];
+    if (isQcOnlyRole || isViewer) return [];
 
     const items = [];
 
@@ -413,7 +421,7 @@ const Navbar = () => {
     }
 
     return items;
-  }, [canManageLabels, canViewSamples, hasPermission, isQcOnlyRole]);
+  }, [canManageLabels, canViewSamples, hasPermission, isQcOnlyRole, isViewer]);
 
   const uploadOrdersMenuItems = useMemo(() => {
     if (!canManageOrders || isQcOnlyRole) return [];
@@ -438,7 +446,7 @@ const Navbar = () => {
   }, [canManageOrders, isQcOnlyRole]);
 
   const updateOrdersMenuItems = useMemo(() => {
-    if (isQcOnlyRole) return [];
+    if (isQcOnlyRole || isViewer) return [];
 
     const items = [];
 
@@ -462,10 +470,10 @@ const Navbar = () => {
 
 
     return items;
-  }, [canManageProductDatabase, canViewFinishes, isQcOnlyRole]);
+  }, [canManageProductDatabase, canViewFinishes, isQcOnlyRole, isViewer]);
 
   const uploadAddMenuItems = useMemo(() => {
-    if (isQcOnlyRole) return [];
+    if (isQcOnlyRole || isViewer) return [];
 
     const items = [];
 
@@ -505,6 +513,7 @@ const Navbar = () => {
     canUploadFinish,
     canViewPis,
     isQcOnlyRole,
+    isViewer,
     uploadOrdersMenuItems,
   ]);
 

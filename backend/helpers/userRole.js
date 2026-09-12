@@ -7,6 +7,7 @@ const USER_ROLES = Object.freeze([
   "QC",
   "dev",
   "user",
+  "viewer",
 ]);
 
 const CANONICAL_ROLES = Object.freeze({
@@ -29,6 +30,7 @@ const CANONICAL_ROLES = Object.freeze({
   qc: "QC",
   dev: "dev",
   user: "user",
+  viewer: "viewer",
 });
 
 const SUPER_ADMIN_LIKE_ROLE_KEYS = Object.freeze(["super_admin"]);

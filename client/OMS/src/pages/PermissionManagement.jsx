@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
-import { isAdminLikeRole, ROLE_LABELS } from "../auth/permissions";
+import { isAdminLikeRole, isViewerRole, ROLE_LABELS } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import {
   filterVendorOptionsByBrandIds,
@@ -32,6 +32,19 @@ const ADMIN_PERMISSION_MIRROR_ROLES = new Set([
   "manager",
   "product_manager",
   "inspection_manager",
+]);
+const VIEWER_VIEW_MODULES = new Set([
+  "dashboard",
+  "orders",
+  "qc",
+  "inspections",
+  "items",
+  "shipments",
+  "containers",
+  "reports",
+  "calendar",
+  "brands",
+  "vendors",
 ]);
 
 const PermissionManagement = () => {
@@ -84,6 +97,9 @@ const PermissionManagement = () => {
   const isLockedCell = useCallback(
     (moduleKey, action) => {
       if (isAdminMirrorRole) return true;
+      if (isViewerRole(selectedRole)) {
+        return action !== "view" || !VIEWER_VIEW_MODULES.has(moduleKey);
+      }
       if (isAdminLikeRole(selectedRole)) return false;
       const lockMeta = meta?.locked?.[moduleKey];
       return Array.isArray(lockMeta?.actions) && lockMeta.actions.includes(action);
@@ -95,8 +111,10 @@ const PermissionManagement = () => {
     (moduleKey) =>
       isAdminMirrorRole
         ? `${selectedRoleLabel} follows Admin permissions.`
+        : isViewerRole(selectedRole)
+          ? "Viewer access is fixed to read-only pages."
         : meta?.locked?.[moduleKey]?.message || "",
-    [isAdminMirrorRole, meta?.locked, selectedRoleLabel],
+    [isAdminMirrorRole, meta?.locked, selectedRole, selectedRoleLabel],
   );
 
   const loadPermissions = useCallback(async () => {

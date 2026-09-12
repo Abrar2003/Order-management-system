@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { getSessionUser } from "../auth/auth.service";
-import { isQcAllowedPagePath, normalizeUserRole } from "../auth/permissions";
+import { isQcAllowedPagePath, isViewerRole, normalizeUserRole } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 
 const BRAND_SCOPE_CHOICE_PATH = "/choose-brand-scope";
@@ -10,6 +10,7 @@ const ProtectedRoute = ({
   children,
   permissionModule = "",
   permissionAction = "view",
+  allowViewer = true,
 }) => {
   const location = useLocation();
   const {
@@ -58,6 +59,10 @@ const ProtectedRoute = ({
     !isQcAllowedPagePath(location.pathname)
   ) {
     return <Navigate to="/qc" replace />;
+  }
+
+  if (!allowViewer && isViewerRole(state.user?.role)) {
+    return <Navigate to="/" replace />;
   }
 
   if (state.user?.requires_brand_scope_choice && !isBrandScopeChoicePath) {

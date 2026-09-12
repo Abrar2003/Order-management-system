@@ -424,7 +424,7 @@ const App = () => {
           <Route
             path="/reports/qc-report-mismatch"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <QcReportMismatch />
               </ProtectedRoute>
             }
@@ -460,7 +460,7 @@ const App = () => {
           <Route
             path="/reports/pis-inspection-master-comparison"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <PisInspectionMasterComparison />
               </ProtectedRoute>
             }
@@ -469,7 +469,7 @@ const App = () => {
           <Route
             path="/product-database"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <ProductDatabase />
               </ProtectedRoute>
             }
@@ -487,7 +487,7 @@ const App = () => {
           <Route
             path="/product-database-details/:id"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <ProductDatabaseDetails />
               </ProtectedRoute>
             }
@@ -532,7 +532,7 @@ const App = () => {
           <Route
             path="/samples"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <Samples />
               </ProtectedRoute>
             }
@@ -541,7 +541,7 @@ const App = () => {
           <Route
             path="/samples/workflow"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <SampleWorkflow />
               </ProtectedRoute>
             }
@@ -559,7 +559,7 @@ const App = () => {
           <Route
             path="/container"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <Container />
               </ProtectedRoute>
             }
@@ -586,7 +586,7 @@ const App = () => {
           <Route
             path="/item-files"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <ItemFilesPage />
               </ProtectedRoute>
             }
@@ -595,7 +595,7 @@ const App = () => {
           <Route
             path="/items/:itemCode/details"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <ItemDetails />
               </ProtectedRoute>
             }
@@ -604,7 +604,7 @@ const App = () => {
           <Route
             path="/items/:itemCode/orders-history"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <ItemOrdersHistory />
               </ProtectedRoute>
             }
@@ -613,7 +613,7 @@ const App = () => {
           <Route
             path="/pis"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <PIS />
               </ProtectedRoute>
             }
@@ -622,7 +622,7 @@ const App = () => {
           <Route
             path="/finishes"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <Finishes />
               </ProtectedRoute>
             }
@@ -640,7 +640,7 @@ const App = () => {
           <Route
             path="/pis-diffs"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <PISDiffs />
               </ProtectedRoute>
             }
@@ -649,7 +649,7 @@ const App = () => {
           <Route
             path="/final-pis-check"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <FinalPISCheck />
               </ProtectedRoute>
             }

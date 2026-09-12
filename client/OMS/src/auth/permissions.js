@@ -7,6 +7,7 @@ export const ROLE_LABELS = Object.freeze({
   qc: "QC",
   dev: "Dev",
   user: "User",
+  viewer: "Viewer",
 });
 
 export const USER_ROLE_OPTIONS = Object.freeze([
@@ -18,6 +19,7 @@ export const USER_ROLE_OPTIONS = Object.freeze([
   { value: "qc", label: ROLE_LABELS.qc },
   { value: "dev", label: ROLE_LABELS.dev },
   { value: "user", label: ROLE_LABELS.user },
+  { value: "viewer", label: ROLE_LABELS.viewer },
 ]);
 
 const ROLE_ALIASES = Object.freeze({
@@ -37,6 +39,7 @@ const ROLE_ALIASES = Object.freeze({
   qc: "qc",
   dev: "dev",
   user: "user",
+  viewer: "viewer",
 });
 
 export const normalizeUserRole = (role) => {
@@ -50,9 +53,11 @@ export const normalizeUserRole = (role) => {
 };
 
 export const isViewOnlyUserRole = (role) =>
-  normalizeUserRole(role) === "user";
+  ["user", "viewer"].includes(normalizeUserRole(role));
 
 export const isViewOnlyUser = (user) => isViewOnlyUserRole(user?.role);
+
+export const isViewerRole = (role) => normalizeUserRole(role) === "viewer";
 
 export const isQcOnlyUserRole = (role) =>
   normalizeUserRole(role) === "qc";

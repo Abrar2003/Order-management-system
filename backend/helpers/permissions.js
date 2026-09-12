@@ -55,6 +55,7 @@ const ROLE_KEYS = Object.freeze([
   "product_manager",
   "inspection_manager",
   "user",
+  "viewer",
   "qc",
   "dev",
 ]);
@@ -83,6 +84,20 @@ const PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS = Object.freeze([
 ]);
 
 const PERMISSION_ADMIN_ONLY_ACTIONS = Object.freeze(PERMISSION_ACTIONS);
+const VIEWER_ROLE_KEY = "viewer";
+const VIEWER_VIEW_MODULES = new Set([
+  "dashboard",
+  "orders",
+  "qc",
+  "inspections",
+  "items",
+  "shipments",
+  "containers",
+  "reports",
+  "calendar",
+  "brands",
+  "vendors",
+]);
 const OMS_ASSISTANT_ADMIN_ROLE_KEYS = new Set(["admin", "super_admin"]);
 const canRoleUseOmsAssistant = (roleKey) =>
   OMS_ASSISTANT_ADMIN_ROLE_KEYS.has(normalizeUserRoleKey(roleKey));
@@ -133,6 +148,16 @@ const applyRequiredPermissionFloors = (roleKey, permissions) => {
 };
 
 const lockAdminOnlyPermissions = (roleKey, permissions) => {
+  if (normalizeUserRoleKey(roleKey) === VIEWER_ROLE_KEY) {
+    PERMISSION_MODULES.forEach(({ key }) => {
+      PERMISSION_ACTIONS.forEach((action) => {
+        if (action !== "view" || !VIEWER_VIEW_MODULES.has(key)) {
+          permissions[key][action] = false;
+        }
+      });
+    });
+  }
+
   PIS_ADMIN_ONLY_ACTIONS.forEach((action) => {
     if (permissions?.pis && action in permissions.pis && !canRoleUsePisAction(roleKey, action)) {
       permissions.pis[action] = false;
@@ -219,6 +244,14 @@ const buildUserPermissions = () => {
   return lockAdminOnlyPermissions("user", permissions);
 };
 
+const buildViewerPermissions = () => {
+  const permissions = createEmptyPermissions();
+
+  VIEWER_VIEW_MODULES.forEach((moduleKey) => grant(permissions, moduleKey, ["view"]));
+
+  return lockAdminOnlyPermissions(VIEWER_ROLE_KEY, permissions);
+};
+
 const buildQcPermissions = () => {
   const permissions = createEmptyPermissions();
 
@@ -255,6 +288,7 @@ const DEFAULT_PERMISSION_BUILDERS = Object.freeze({
   product_manager: buildProductManagerPermissions,
   inspection_manager: buildInspectionManagerPermissions,
   user: buildUserPermissions,
+  viewer: buildViewerPermissions,
   qc: buildQcPermissions,
   dev: buildDevPermissions,
 });
@@ -323,6 +357,9 @@ const sanitizePermissionsForRole = (role, permissions = {}) => {
 
 const isPermissionCellLocked = (role, moduleKey, action) => {
   const roleKey = normalizeRoleKey(role);
+  if (roleKey === VIEWER_ROLE_KEY && (action !== "view" || !VIEWER_VIEW_MODULES.has(moduleKey))) {
+    return true;
+  }
   if (isSuperAdminLikeRole(roleKey)) return false;
   if (moduleKey === "oms_assistant") return !canRoleUseOmsAssistant(roleKey);
   if (moduleKey === "pis" && PIS_ADMIN_ONLY_ACTIONS.includes(action)) {
