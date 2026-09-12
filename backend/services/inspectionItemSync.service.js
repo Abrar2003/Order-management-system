@@ -147,11 +147,10 @@ const isEligibleInspectionForItemSync = (inspection = {}) => {
   if (!status || status === "pending" || isNonMeasurementInspectionStatus(status)) {
     return false;
   }
-  return (
+  return hasModernInspectionData(inspection) && (
     status === "inspection done" ||
     toNumber(inspection?.checked, 0) > 0 ||
-    toNumber(inspection?.passed, 0) > 0 ||
-    hasModernInspectionData(inspection)
+    toNumber(inspection?.passed, 0) > 0
   );
 };
 
