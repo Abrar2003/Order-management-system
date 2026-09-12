@@ -1,4 +1,5 @@
 const COMPARISON_TOLERANCE = 0.01;
+const toHundredths = (value) => Math.trunc((Number(value) + Number.EPSILON) * 100);
 
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeRemark = (value) => normalizeText(value).toLowerCase();
@@ -75,13 +76,15 @@ const evaluateCommonInspectionErrors = (inspection = {}) => {
     masterGrossWeight !== null
   ) {
     const calculatedNetWeight = netWeight * piecesInInner * innerBoxesInMaster;
-    if (calculatedNetWeight + COMPARISON_TOLERANCE >= masterGrossWeight) {
+    const calculatedNetWeightInHundredths = toHundredths(calculatedNetWeight);
+    const masterGrossWeightInHundredths = toHundredths(masterGrossWeight);
+    if (calculatedNetWeightInHundredths > masterGrossWeightInHundredths) {
       errors.push({
         type: "weight",
         label: "Net weight exceeds master gross weight",
-        expected: masterGrossWeight,
-        actual: calculatedNetWeight,
-        difference: calculatedNetWeight - masterGrossWeight,
+        expected: masterGrossWeightInHundredths / 100,
+        actual: calculatedNetWeightInHundredths / 100,
+        difference: (calculatedNetWeightInHundredths - masterGrossWeightInHundredths) / 100,
         formula: `${netWeightParts.length > 1 ? `(${netWeightParts.join(" + ")})` : netWeight} × ${piecesInInner} × ${innerBoxesInMaster}`,
         details: {
           net_weight: netWeight,

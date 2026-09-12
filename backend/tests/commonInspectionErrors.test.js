@@ -28,7 +28,7 @@ const buildInspection = (overrides = {}) => ({
   ...overrides,
 });
 
-test("reports weight error when calculated net weight equals master gross weight", () => {
+test("accepts calculated net weight equal to master gross weight", () => {
   const result = evaluateCommonInspectionErrors(buildInspection({
     inspected_box_sizes: [
       { remark: "inner", item_count_in_inner: 5 },
@@ -36,7 +36,19 @@ test("reports weight error when calculated net weight equals master gross weight
     ],
   }));
 
-  assert.equal(result.errors.some((error) => error.type === "weight"), true);
+  assert.equal(result.errors.some((error) => error.type === "weight"), false);
+});
+
+test("ignores calculated weight fractions after two decimal places", () => {
+  const result = evaluateCommonInspectionErrors(buildInspection({
+    inspected_item_sizes: [{ remark: "item", net_weight: 2.0001 }],
+    inspected_box_sizes: [
+      { remark: "inner", item_count_in_inner: 5 },
+      { remark: "master", box_count_in_master: 3, gross_weight: 30 },
+    ],
+  }));
+
+  assert.equal(result.errors.some((error) => error.type === "weight"), false);
 });
 
 test("does not report weight error when calculated net weight is below gross weight", () => {

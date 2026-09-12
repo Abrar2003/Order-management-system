@@ -252,7 +252,7 @@ const CommonErrorsReport = () => {
         <ReportInfoBanner
           description="Finds inspection records with common weight and component-height calculation errors."
           dataShown="PO, item, inspector, inspection date, inspected item and carton sizes, formulas, recorded values, calculated values, and differences."
-          howItWorks="Flags net weight × pieces per inner × inner boxes per master when it is greater than or equal to master gross weight, and flags only when Top H + Base H + optional Pedestal H is less than Item H. Equal or greater combined height is accepted."
+          howItWorks="Flags net weight × pieces per inner × inner boxes per master when it exceeds master gross weight at two decimal places, and flags only when Top H + Base H + optional Pedestal H is less than Item H. Equal or greater combined height is accepted."
         />
 
         <form className="card om-card p-3 my-3 common-errors-filter-card" onSubmit={applyFilters}>
