@@ -6,7 +6,7 @@ The Production Workflow module was removed from the OMS application on 2026-09-0
 
 No database migration, update, delete, drop, or cleanup command was run. Existing MongoDB documents and indexes remain in place. The removed collections are dormant because the application no longer registers models, routes, socket rooms, pages, permissions, or Assistant catalog entries for them.
 
-This archive does not describe the separate Sample Workflow record system at `/sample-workflows` and `/samples/workflow`. That feature remains available, but its former automatic Production Workflow task creation and task-control panel were removed.
+The separate Sample Workflow record system at `/sample-workflows` and `/samples/workflow` was retired later; its former automatic Production Workflow task creation and task-control panel had already been removed.
 
 ## What the module did
 
@@ -165,7 +165,7 @@ Workflow services emitted task, batch, dashboard, and notification updates after
 
 Creating a Sample Workflow attempted to find users named `Gaurav` and `Anzar`, task type `cad_files`, and department `autocad`. It then created a CAD task under Gaurav's audit identity, assigned it to Anzar, disabled upload, and calculated a due date two days ahead with a Sunday adjustment.
 
-The Sample Workflow page searched production tasks by sample code and rendered three assumed stages: `cad_files`, `miscellaneous`, and `3d_by_cad`. It allowed start, complete, approve, rework, and comment operations. This coupling was removed; Sample Workflow records continue independently.
+The Sample Workflow page searched production tasks by sample code and rendered three assumed stages: `cad_files`, `miscellaneous`, and `3d_by_cad`. It allowed start, complete, approve, rework, and comment operations. This coupling was removed before the Sample Workflow feature itself was retired.
 
 ## Removed source areas
 
@@ -180,7 +180,7 @@ Git history remains the exact source archive. Restore from the parent commit of 
 1. Model business corrections, not a generic task engine. The next system should begin with concrete OMS data-error cases and their owners instead of configurable workflow abstractions.
 2. Use one explicit state machine. The removed code carried both primary and legacy statuses plus compatibility normalization, which made filtering and deadlines harder to reason about.
 3. Remove hard-coded people and task keys. Use role/team ownership or a small database rule chosen by administrators; never search for employee names inside a controller.
-4. Keep Sample Workflow independent. If it needs follow-up work, publish a domain event or create a correction case through an explicit adapter, not title-based task searches.
+4. If sample follow-up work returns, publish a domain event or create a correction case through an explicit adapter, not title-based task searches.
 5. Put authorization on actions. `workflow.view` was too broad for several mutations. Define permissions such as assign, transition, approve, comment, and administer, and enforce ownership in one service.
 6. Keep one authoritative record plus an append-only event trail. Current state and audit history should be updated atomically; derived dashboard counts should be queried or rebuilt, not maintained through many mutation paths.
 7. Use stable entity links. Associate a case with collection/entity ID and error type; do not correlate by display titles, sample codes, or folder names.

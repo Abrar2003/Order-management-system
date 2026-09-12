@@ -2,14 +2,14 @@
 
 ## Scope and version
 
-The runtime Knowledge Base is version **2.0.0** and contains **68 active audited capability groups**. The six removed Production Workflow capabilities are preserved in `PRODUCTION_WORKFLOW_ARCHIVE.md`.
+The runtime Knowledge Base is version **2.0.0** and contains **67 active audited capability groups**. The retired workflow capabilities are preserved in `PRODUCTION_WORKFLOW_ARCHIVE.md`.
 
 V2 is discovery metadata plus the first execution checkpoint. It does **not** register all 49 Assistant-useful capabilities as tools, extract controller-local reports, alter report calculations, change forecasting, or widen raw Mongo access. The explicit server-owned adapter registry contains `packed_goods`, `monthly_shipments`, and `shipment_cbm`; all other capability records remain metadata until an adapter is deliberately registered.
 
 Runtime files:
 
 - `backend/knowledge/omsKnowledgeBase.catalog.js` — domains, collections, relationships, source-of-truth rules, business definitions, risks, and the assembled frozen catalog.
-- `backend/knowledge/omsKnowledgeBase.capabilities.js` — the 68 active audited capability records, concept mappings, ambiguities, and 24 business-confirmation questions.
+- `backend/knowledge/omsKnowledgeBase.capabilities.js` — the 67 active audited capability records, concept mappings, ambiguities, and 23 business-confirmation questions.
 - `backend/knowledge/omsKnowledgeBase.schema.js` — referential, classification, source-path, readiness, and safety validation.
 - `backend/services/omsKnowledgeBase.service.js` — deterministic lookup/search; no embeddings, model, network, or database dependency.
 
@@ -20,7 +20,7 @@ Runtime files:
 | `DIRECT_CAPABILITY` | 3 | Existing reusable canonical implementation |
 | `EXTRACT_TO_SERVICE_THEN_CAPABILITY` | 28 | Current controller/helper logic must become a reusable service first |
 | `CAPABILITY_PLUS_MONGO` | 9 | Bounded business capability plus approved raw projection |
-| `RAW_MONGO` | 9 | Safe scoped projection is the intended future treatment |
+| `RAW_MONGO` | 8 | Safe scoped projection is the intended future treatment |
 | `FORECAST_INPUT` | 0 | None approved; Product Analytics formulas require confirmation |
 | `NOT_ASSISTANT_SAFE` | 13 | Sensitive/control/mutation-adjacent; not executable |
 | `EXPORT_ONLY` | 5 | Workbook/PDF generation only; use underlying data for analytics |
@@ -28,7 +28,7 @@ Runtime files:
 
 | Source class | Count |
 | --- | ---: |
-| `CANONICAL` | 15 |
+| `CANONICAL` | 14 |
 | `CANONICAL_WITH_FALLBACK` | 12 |
 | `DERIVED_HELPER` | 9 |
 | `RAW_COLLECTION` | 6 |
@@ -36,7 +36,7 @@ Runtime files:
 | `DUPLICATED_LOGIC` | 23 |
 | `UNCLEAR` | 1 |
 
-The 68 capabilities span 13 Knowledge Base domains: order management, shipment/logistics, quality control, catalog/master data, product information, samples, complaints, communication, reporting/exports, access/security, audit/history, platform operations, and Assistant platform context.
+The 67 capabilities span 13 Knowledge Base domains: order management, shipment/logistics, quality control, catalog/master data, product information, samples, complaints, communication, reporting/exports, access/security, audit/history, platform operations, and Assistant platform context.
 
 ## Capability metadata contract
 
@@ -117,7 +117,6 @@ Readiness statuses are `ready`, `not_ready`, `blocked_business_confirmation`, `n
 | VEN-05 | `finish_presentation` | Finish vendor/item options and images | PRESENTATION_ONLY | PRESENTATION_ONLY | not_tool_eligible | `backend/controllers/finish.controller.js#getFinishVendorOptions` |
 | SAM-01 | `samples` | Sample catalog | CANONICAL | RAW_MONGO | existing_assistant_feature | `backend/controllers/sample.controller.js#getSamples` |
 | SAM-02 | `shipped_samples` | Shipped samples | DERIVED_HELPER | EXTRACT_TO_SERVICE_THEN_CAPABILITY | not_ready | `backend/controllers/sample.controller.js#flattenSampleShipmentRows` |
-| SAM-03 | `sample_workflow` | Separate sample workflow list | CANONICAL | RAW_MONGO | not_ready | `backend/controllers/sampleWorkflow.controller.js#getSampleWorkflows` |
 | CMP-01 | `complaints` | Complaint list and detail | CANONICAL | NOT_ASSISTANT_SAFE | not_tool_eligible | `backend/controllers/complaint.controller.js#getComplaints` |
 | CMP-02 | `item_complaints` | Item-related complaints | CANONICAL | NOT_ASSISTANT_SAFE | not_tool_eligible | `backend/controllers/complaint.controller.js#getItemRelatedComplaints` |
 | CMP-03 | `complaint_categories` | Complaint categories | CANONICAL | NOT_ASSISTANT_SAFE | not_tool_eligible | `backend/controllers/complaint.controller.js#getComplaintCategories` |
@@ -182,7 +181,7 @@ The catalog records seven explicit ambiguity groups: `delay`, `pending`, `packed
 
 ## Sensitive, export, and presentation boundary
 
-All 19 `NOT_ASSISTANT_SAFE` groups remain `not_tool_eligible`, and their raw Mongo mode is `denied`. This includes upload/edit/PIS audit logs, workflow, complaints, notifications, email logs, job/control state, users/sessions, permissions, security/OAuth, and Assistant internal state. A purpose-built capability may later join a sensitive collection internally only if it returns an explicitly approved projection; the generic raw Mongo deny boundary is unchanged.
+All 13 `NOT_ASSISTANT_SAFE` groups remain `not_tool_eligible`, and their raw Mongo mode is `denied`. This includes upload/edit/PIS audit logs, complaints, notifications, email logs, job/control state, users/sessions, permissions, security/OAuth, and Assistant internal state. A purpose-built capability may later join a sensitive collection internally only if it returns an explicitly approved projection; the generic raw Mongo deny boundary is unchanged.
 
 QC workbook, Item workbook, checked PIS difference export, Final PIS export, and the PDF renderer remain `EXPORT_ONLY`. Finish vendor/item/image support remains `PRESENTATION_ONLY`. Neither class is analytical-ready.
 
@@ -219,13 +218,12 @@ These are metadata/risk records only. V2 does not change the underlying report b
 17. Should checked PIS exports recompute current differences or preserve historical checked-difference state?
 18. Which Item measurement source is authoritative in each user-facing context?
 19. May historical vendor snapshots differ from current Vendor names, and should grouping prefer `vendor_id`?
-20. Should Sample Workflow remain a separate record system long term?
 21. Who may read Email Logs?
 22. May complaint categories ever be Assistant-readable separately?
-23. Which controller-local reports are contractual versus internal UI read models?
-24. Are `/api/*` dual mounts supported contracts or compatibility aliases?
+24. Which controller-local reports are contractual versus internal UI read models?
+25. Are `/api/*` dual mounts supported contracts or compatibility aliases?
 
-The catalog retains stable IDs through `BQ-25` with retired `BQ-23` omitted, and links affected capabilities. Product Analytics is `blocked_business_confirmation`; other capabilities continue to describe current executable behavior without pretending it is a desired future rule.
+The catalog retains stable IDs through `BQ-25` with retired IDs omitted, and links affected capabilities. Product Analytics is `blocked_business_confirmation`; other capabilities continue to describe current executable behavior without pretending it is a desired future rule.
 
 ## Planned execution architecture
 
@@ -253,7 +251,7 @@ V2 metadata does not dynamically import a controller or source path. Future work
 
 ## Validation and maintenance
 
-The validator enforces 68 unique audit IDs and runtime IDs, valid domains/collections/relationships/source files/classes/recommendations/statuses, ambiguity and uncertainty targets, reusable sources for direct capabilities, current controller/helper sources for extraction candidates, and non-readiness for unsafe/export/presentation groups.
+The validator enforces 67 unique audit IDs and runtime IDs, valid domains/collections/relationships/source files/classes/recommendations/statuses, ambiguity and uncertainty targets, reusable sources for direct capabilities, current controller/helper sources for extraction candidates, and non-readiness for unsafe/export/presentation groups.
 
 Run:
 

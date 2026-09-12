@@ -917,17 +917,6 @@ const capabilities = [
     cbmSemantics: cbm({ fallback: "Sample box measurements first, then stored sample cbm multiplied by quantity.", partial: true }), limitations: ["Pure flattener/query should be moved into a reusable read service."],
   }),
   capability({
-    auditId: "SAM-03", id: "sample_workflow", name: "Separate sample workflow list", type: "operational_read",
-    sourceClass: "CANONICAL", assistantRecommendation: "RAW_MONGO",
-    description: "Independent sample_workflows collection with sample identity, status, due dates, shipment, and files.",
-    businessPurpose: "Read the separate sample workflow without joining it to generic workflow tasks by name alone.",
-    collections: ["sample_workflows"], routes: routes("/sample-workflows"), canonicalFile: "backend/controllers/sampleWorkflow.controller.js", canonicalSymbols: ["getSampleWorkflows"],
-    filters: filters("search", "brand", "vendor", "from_date", "to_date"), outputFields: outputs("rows", "filters", "brand", "vendor", "status", "dates", "files"), resultGrain: "sample_workflow",
-    aliases: ["Sample Workflow"], keywords: ["sample due date"], userIntentExamples: ["List sample workflows for vendor X"], dateSemantics: dateSemantics(["updatedAt", "due_date"], "updatedAt", true, "List range filters updatedAt; due date is a stored workflow value."),
-    limitations: ["Independent sample-tracking collection."], uncertainties: ["BQ-20"],
-  }),
-
-  capability({
     auditId: "CMP-01", id: "complaints", name: "Complaint list and detail", type: "operational_sensitive_read",
     sourceClass: "CANONICAL", assistantRecommendation: "NOT_ASSISTANT_SAFE",
     description: "Active/archived complaints with broad search, comments, files, update history, archive data, and per-user read state.",
@@ -1044,7 +1033,6 @@ const businessConceptMappings = [
   { phrase: "Product Database", capabilityIds: ["product_database"], distinction: "Separate pd_* workflow and template-driven completion." },
   { phrase: "Item Database", capabilityIds: ["item_database"], distinction: "Product Database state plus running POs and latest inspection report." },
   { phrase: "vendor master", capabilityIds: ["vendor_master"], distinction: "Current Vendor identity and mappings; operational documents retain snapshots." },
-  { phrase: "sample workflow", capabilityIds: ["sample_workflow"], distinction: "Separate collection unrelated to generic workflow tasks." },
   { phrase: "audit history", capabilityIds: ["order_upload_logs", "order_edit_logs", "pis_update_logs"], distinction: "Historical evidence never overrides live state and is not Assistant-safe." },
 ];
 
@@ -1113,7 +1101,6 @@ const uncertainties = [
   { id: "BQ-17", question: "Should PIS Diff checked exports recompute only items that still differ, or preserve a historical was-checked-with-differences snapshot?", capabilityIds: ["checked_pis_difference_export"] },
   { id: "BQ-18", question: "Which Item measurement source is authoritative for each user-facing context: current inspected, PIS, accepted Master, or Product Database?", capabilityIds: ["pis_data", "pis_differences", "final_pis_check", "pis_inspection_master_comparison", "product_database"] },
   { id: "BQ-19", question: "Are vendor names historical snapshots allowed to differ from current Vendor master names, and should grouping use vendor_id whenever present?", capabilityIds: ["vendor_master", "brand_vendor_options"] },
-  { id: "BQ-20", question: "Should Sample Workflow remain a separate record system long term?", capabilityIds: ["sample_workflow"] },
   { id: "BQ-21", question: "Who should be authorized to read Email Logs?", capabilityIds: ["email_logs"] },
   { id: "BQ-22", question: "Should complaint categories alone ever be Assistant-readable, or should the entire complaints domain remain excluded?", capabilityIds: ["complaint_categories"] },
   { id: "BQ-24", question: "Which controller-local reports are contractual public reports versus internal UI read models?", capabilityIds: capabilities.filter((entry) => entry.sourceOfTruth.controllerLocal).map((entry) => entry.id) },

@@ -41,7 +41,6 @@ oms/
 |   |   |-- qcImageDirectUpload.controller.js
 |   |   |-- reports.controller.js
 |   |   |-- sample.controller.js
-|   |   |-- sampleWorkflow.controller.js
 |   |   |-- security.controller.js
 |   |   |-- user.controller.js
 |   |   `-- vendor.controller.js
@@ -119,7 +118,6 @@ oms/
 |   |   |-- qcEditLog.model.js
 |   |   |-- rolePermission.model.js
 |   |   |-- sample.model.js
-|   |   |-- sampleWorkflow.model.js
 |   |   |-- securityActivityLog.model.js
 |   |   |-- securityAlert.model.js
 |   |   |-- uploadLog.model.js
@@ -150,7 +148,6 @@ oms/
 |   |   |-- qcImages.routes.js
 |   |   |-- reports.routes.js
 |   |   |-- samples.routes.js
-|   |   |-- sampleWorkflow.routes.js
 |   |   |-- security.routes.js
 |   |   |-- user.routes.js
 |   |   |-- vendor.routes.js
@@ -469,7 +466,6 @@ oms/
 |       |   |   |-- QcPage.jsx
 |       |   |   |-- QcReportMismatch.jsx
 |       |   |   |-- Samples.jsx
-|       |   |   |-- SampleWorkflow.jsx
 |       |   |   |-- SecurityDashboard.jsx
 |       |   |   |-- Shipments.jsx
 |       |   |   |-- ShippedSamples.jsx
@@ -497,7 +493,6 @@ oms/
 |       |   |   |-- qcBarcode.service.js
 |       |   |   |-- qcImages.service.js
 |       |   |   |-- samples.service.js
-|       |   |   `-- sampleWorkflow.service.js
 |       |   |-- utils/
 |       |   |   |-- barcode.js
 |       |   |   |-- cbm.js

@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import MeasuredSizeSection from "../MeasuredSizeSection";
 import useBrandOptions from "../../hooks/useBrandOptions";
 import { createSample, updateSample } from "../../services/samples.service";
-import { createSampleWorkflow } from "../../services/sampleWorkflow.service";
 import {
   BOX_PACKAGING_MODES,
   BOX_SIZE_ENTRY_LIMIT,
@@ -97,7 +96,7 @@ const buildSizePayload = ({
   };
 };
 
-const SampleCreateModal = ({ sample = null, onClose, onSaved, isWorkflow = false }) => {
+const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
   const isEdit = Boolean(sample?._id);
   const [form, setForm] = useState(() => initialForm(sample));
   const [saving, setSaving] = useState(false);
@@ -216,8 +215,6 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved, isWorkflow = false
       setSaving(true);
       const response = isEdit
         ? await updateSample(sample._id, payload)
-        : isWorkflow
-        ? await createSampleWorkflow(payload)
         : await createSample(payload);
       onSaved?.(response?.data?.data || response?.data);
       onClose?.();
@@ -233,7 +230,7 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved, isWorkflow = false
       <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
         <form className="modal-content" onSubmit={handleSubmit}>
           <div className="modal-header">
-            <h5 className="modal-title">{isEdit ? "Edit Sample" : isWorkflow ? "Create Sample Workflow" : "Create Sample"}</h5>
+            <h5 className="modal-title">{isEdit ? "Edit Sample" : "Create Sample"}</h5>
             <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
           </div>
           <div className="modal-body d-grid gap-3">
@@ -309,7 +306,7 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved, isWorkflow = false
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-outline-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : isWorkflow ? "Create Sample Workflow" : "Save Sample"}</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save Sample"}</button>
           </div>
         </form>
       </div>

@@ -2,7 +2,7 @@
 
 **Audit basis:** repository source as of 2026-08-20. **Mode:** source-code-only; no live or production data was queried. **Scope guard:** this document records existing behavior and recommendations only. No OMS business behavior, OMS Assistant integration, or Knowledge Base catalog was changed.
 
-> **Retirement note (2026-09-05):** WF-01 through WF-06 and the workflow portions of OTH-01 below describe the removed Production Workflow system and are historical only. The active runtime catalog now contains 68 capabilities. See `PRODUCTION_WORKFLOW_ARCHIVE.md` for the preserved behavior, database boundary, and reimplementation recommendations.
+> **Retirement note (2026-09-12):** SAM-03 and WF-01 through WF-06, plus the workflow portions of OTH-01 below, describe retired systems and are historical only. The active runtime catalog contains 67 capabilities. See `PRODUCTION_WORKFLOW_ARCHIVE.md` for the preserved behavior, database boundary, and reimplementation recommendations.
 
 ## 1. Executive Summary
 
@@ -53,7 +53,7 @@ The audit scanned 133 backend `GET` declarations. Four belong to the unmounted E
 
 The exact page count is **57**. A page is counted when its primary surface reads, filters, aggregates, drills into, or presents business/history data; create-only, sign-in, scope-choice, settings-only, shipment-entry, template-management, and the Assistant consumer page are excluded. Counted pages are:
 
-`ArchivedOrders`, `CommonErrorsReport`, `Complaints`, `Containers`, `DailyReport`, `DailySummary`, `DelayedPoReports`, `EmailLogs`, `FinalPISCheck`, `Finishes`, `Home`, `InspectedItemsReport`, `inspection_report`, `InspectorReports`, `ItemDatabase`, `ItemDetails`, `ItemFilesPage`, `ItemMasters`, `ItemOrdersHistory`, `Items`, `MonthlyShipmentsReport`, `OpenOrders`, `OrderEditLogs`, `Orders`, `OrdersByBrand`, `PackedGoods`, `PendingPoReport`, `PIS`, `PISDiffs`, `PisInspectionMasterComparison`, `PisUpdateLogs`, `PoStatusReport`, `ProductAnalytics`, `ProductDatabase`, `ProductDatabaseDetails`, `QcDetails`, `QcPage`, `QcReportMismatch`, `Samples`, `SampleWorkflow`, `SecurityDashboard`, `Shipments`, `ShippedSamples`, `ShippingDelayReports`, `ShippingPending`, `UpcomingEtdReports`, `UploadLogs`, `VendorDetails`, `VendorReports`, `VendorWiseQAReport`, `WeeklySummary`, `WorkflowBatchDetail`, `WorkflowBatches`, `WorkflowDashboard`, `WorkflowMyTasks`, `WorkflowTasks`, and `WorkflowUploadPending`.
+`ArchivedOrders`, `CommonErrorsReport`, `Complaints`, `Containers`, `DailyReport`, `DailySummary`, `DelayedPoReports`, `EmailLogs`, `FinalPISCheck`, `Finishes`, `Home`, `InspectedItemsReport`, `inspection_report`, `InspectorReports`, `ItemDatabase`, `ItemDetails`, `ItemFilesPage`, `ItemMasters`, `ItemOrdersHistory`, `Items`, `MonthlyShipmentsReport`, `OpenOrders`, `OrderEditLogs`, `Orders`, `OrdersByBrand`, `PackedGoods`, `PendingPoReport`, `PIS`, `PISDiffs`, `PisInspectionMasterComparison`, `PisUpdateLogs`, `PoStatusReport`, `ProductAnalytics`, `ProductDatabase`, `ProductDatabaseDetails`, `QcDetails`, `QcPage`, `QcReportMismatch`, `Samples`, `SecurityDashboard`, `Shipments`, `ShippedSamples`, `ShippingDelayReports`, `ShippingPending`, `UpcomingEtdReports`, `UploadLogs`, `VendorDetails`, `VendorReports`, `VendorWiseQAReport`, `WeeklySummary`, `WorkflowBatchDetail`, `WorkflowBatches`, `WorkflowDashboard`, `WorkflowMyTasks`, `WorkflowTasks`, and `WorkflowUploadPending`.
 
 ### 2.4 Test evidence
 
@@ -122,7 +122,6 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 | VEN-05 | Finish vendor/item options and images | Support/presentation | Finishes | `GET /finishes/vendor-options`, `/vendor-items`, image routes | finish controller | finishes, items, vendors | Read/binary | PRESENTATION_ONLY | PRESENTATION_ONLY |
 | SAM-01 | Sample catalog | Operational read | Samples | `GET /samples` | `getSamples` | samples, vendors, brands | Read + related writes | CANONICAL | RAW_MONGO |
 | SAM-02 | Shipped samples | Shipment report | ShippedSamples | `GET /samples/shipped` | `flattenSampleShipmentRows` | samples | Read | DERIVED_HELPER | EXTRACT_TO_SERVICE_THEN_CAPABILITY |
-| SAM-03 | Separate sample workflow list | Operational read | SampleWorkflow | `GET /sample-workflows` | `getSampleWorkflows` | sample_workflows | Read + create | CANONICAL | RAW_MONGO |
 | CMP-01 | Complaint list and detail | Operational/sensitive read | Complaints | `GET /complaints`, `/:id` | `getComplaints`; `getComplaintById` | complaints | Read + mutations | CANONICAL | NOT_ASSISTANT_SAFE |
 | CMP-02 | Item-related complaints | QC support read | QC/item complaint panels | `GET /complaints/item-related` | `getItemRelatedComplaints` | complaints, items | Read + comments/read receipts | CANONICAL | NOT_ASSISTANT_SAFE |
 | CMP-03 | Complaint categories | Configuration read | Complaints | `GET /complaints/categories` | `getComplaintCategories` | complaint_categories | Read + create | CANONICAL | NOT_ASSISTANT_SAFE |
@@ -546,13 +545,6 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 - **Rules/output:** Reads samples with at least one shipment and flattens one row per entry. Filters search/brand/vendor and client-requested container substring; reports quantity, pending, container, invoice, stuffing date, check state and calculated sample CBM. Summary totals rows, quantity and checked count; options include brands/vendors/containers/sample codes.
 - **Trust:** move the pure flattener and query into a reusable read service. These rows also feed the general Shipment/Container reports.
 
-### SAM-03 — Sample Workflow
-
-- **Representative questions:** “List sample workflows for vendor X”; “Find workflows updated in a date range”; “What is the due date for a sample workflow?”
-- **Trace:** `SampleWorkflow.jsx` → `/sample-workflows` → `getSampleWorkflows` → sample_workflows.
-- **Rules/output:** Uses the same search/brand/vendor/updated-date filters as samples and returns the separate workflow document schema. Creation calculates a default due date two days later, adding a day if Sunday occurs in the interval.
-- **Trust:** this collection is independent from generic `workflow_tasks`; never join them merely because both are called workflow.
-
 ## 10. Workflow Reporting
 
 ### WF-01 — Workflow dashboard
@@ -707,7 +699,6 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 | Vendor master | VEN-01 | Current Vendor identity/brand codes; snapshots remain on operational records |
 | Sample | SAM-01 | Separate sample entity, optionally converted to Item |
 | Shipped sample | SAM-02 | Flattened Sample shipment entry; also appears in shipment/container reports |
-| Sample Workflow | SAM-03 | Separate collection, unrelated to generic workflow tasks |
 | Workflow task | WF-03/WF-04 | Live task state plus assignment/status/comment history |
 | Complaint | CMP-01/CMP-02 | Sensitive free text/files/read receipts |
 | Audit/history | ORD-13/ORD-14/ITM-15 | Historical evidence, never current live state |
@@ -905,7 +896,7 @@ This section is a future integration plan only. No Assistant code, schema catalo
 | DIRECT_CAPABILITY | 3 | SHP-01, SHP-05, SHP-06 | Reuse the existing shared service and preserve access/provenance |
 | EXTRACT_TO_SERVICE_THEN_CAPABILITY | 28 | ORD-02, ORD-04–08, ORD-10–11, SHP-02–04, QC-04–13, ITM-05, ITM-07, ITM-09, ITM-11, ITM-13–14, SAM-02 | Move the existing builder/aggregation intact into a service, add focused tests, then register |
 | CAPABILITY_PLUS_MONGO | 9 | ORD-01, ORD-03, QC-01–02, ITM-01, ITM-04, ITM-06, ITM-12, VEN-01 | Use a bounded capability for business semantics; allow safe raw projection for unmodeled fields |
-| RAW_MONGO | 9 | ORD-09, ORD-12, ITM-03, ITM-16, VEN-02–04, SAM-01, SAM-03 | Safe scoped projection; no custom report logic needed |
+| RAW_MONGO | 8 | ORD-09, ORD-12, ITM-03, ITM-16, VEN-02–04, SAM-01 | Safe scoped projection; no custom report logic needed |
 | FORECAST_INPUT | 0 | None currently | Do not designate one until ITM-14 formulas and the delay definitions are confirmed |
 | NOT_ASSISTANT_SAFE | 19 | ORD-13–15, ITM-15, WF-01–06, CMP-01–03, OTH-01–02, OTH-04, SEC-01–03 | Keep excluded unless a separately permissioned, purpose-limited design is approved |
 | EXPORT_ONLY | 5 | QC-03, ITM-02, ITM-08, ITM-10, OTH-03 | Render/download only; route analytical questions to the underlying dataset |
@@ -1017,10 +1008,8 @@ The 24 explicit report endpoints are: nine order report/view-export declarations
 17. Should PIS Diff checked exports recompute only items that still differ, or preserve a historical “was checked with differences” snapshot?
 18. Which Item measurement source is authoritative for each user-facing context: current inspected, PIS, accepted Master, or Product Database? Existing reports intentionally choose different references.
 19. Are vendor names historical snapshots allowed to differ from current Vendor master names, and should grouping use `vendor_id` whenever present?
-20. Should Sample Workflow remain a separate record system long term, or is any relationship to generic workflow batches/tasks intended?
 21. Who should be authorized to read Email Logs? The current unmounted router requires authentication but no explicit permission.
 22. Should complaint categories alone ever be Assistant-readable, or should the entire complaints domain remain excluded?
-23. Should workflow viewers see every user’s email/role through `/workflow/users`, or only assignable/accessible users?
 24. Which controller-local reports are contractual public reports versus internal UI read models? This determines extraction/versioning priority.
 25. Are the `/api/*` dual mounts a supported external contract or compatibility aliases that can eventually be retired?
 

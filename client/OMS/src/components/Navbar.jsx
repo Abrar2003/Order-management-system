@@ -408,7 +408,6 @@ const Navbar = () => {
     if (canViewSamples) {
       items.push(
         routeMenuItem("samples", "Samples", "/samples"),
-        routeMenuItem("samples-workflow", "Sample Workflow", "/samples/workflow")
       );
     }
 

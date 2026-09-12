@@ -33,7 +33,6 @@ const DailyReport = lazy(() => import("./pages/DailyReport"));
 const Shipments = lazy(() => import("./pages/Shipments"));
 const Container = lazy(() => import("./pages/Container"));
 const Samples = lazy(() => import("./pages/Samples"));
-const SampleWorkflow = lazy(() => import("./pages/SampleWorkflow"));
 const Containers = lazy(() => import("./pages/Containers"));
 const ShippedSamples = lazy(() => import("./pages/ShippedSamples"));
 const Items = lazy(() => import("./pages/Items"));
@@ -534,15 +533,6 @@ const App = () => {
             element={
               <ProtectedRoute allowViewer={false}>
                 <Samples />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/samples/workflow"
-            element={
-              <ProtectedRoute allowViewer={false}>
-                <SampleWorkflow />
               </ProtectedRoute>
             }
           />

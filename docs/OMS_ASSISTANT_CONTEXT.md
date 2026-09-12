@@ -2,7 +2,7 @@
 
 Use this file when changing the OMS Assistant. It explains the current implementation, its supported behaviour, and the safe place to make each kind of change. Source code is the authority if this file ever disagrees with it. `docs/OMS_ASSISTANT.md` remains the deployment and operations guide; `docs/OMS_SOURCE_TREE.md` is the repository-wide file tree.
 
-The versioned Knowledge Base in `docs/OMS_KNOWLEDGE_BASE.md` is wired into the Assistant as a canonical-first selection layer. Knowledge Base V2 maps all 68 active audited OMS capability groups; the removed Production Workflow capabilities are archived separately. `omsCapabilityPlanner.service.js` deterministically ranks a compact subset after entity/date resolution, finds token-boundary ambiguities, and prepares safe model context. The catalog remains static metadata: only an explicit server-side adapter registry can execute a capability.
+The versioned Knowledge Base in `docs/OMS_KNOWLEDGE_BASE.md` is wired into the Assistant as a canonical-first selection layer. Knowledge Base V2 maps all 67 active audited OMS capability groups; removed workflow capabilities are archived separately. `omsCapabilityPlanner.service.js` deterministically ranks a compact subset after entity/date resolution, finds token-boundary ambiguities, and prepares safe model context. The catalog remains static metadata: only an explicit server-side adapter registry can execute a capability.
 
 ## What it is
 
@@ -108,7 +108,7 @@ Expected analytics and capability validation errors return compact, safe functio
 | Route and navbar visibility | `client/OMS/src/App.jsx`, `client/OMS/src/components/Navbar.jsx` | Page is lazy-loaded at `/oms-assistant`. |
 | HTTP endpoint and safe public errors | `backend/routers/omsChat.routes.js`, `backend/controllers/omsChat.controller.js` | Mounted at both `/oms-chat` and `/api/oms-chat`. |
 | Core prompt, entity/date resolution, deterministic reports, conversation loop | `backend/services/omsChat.service.js` | Main behaviour file. |
-| Static OMS domains, 68 active audited capabilities, definitions, ambiguities, status, and deterministic search | `backend/knowledge/omsKnowledgeBase.*`, `backend/services/omsKnowledgeBase.service.js` | Catalog `2.0.0`; never dynamically executes source metadata. |
+| Static OMS domains, 67 active audited capabilities, definitions, ambiguities, status, and deterministic search | `backend/knowledge/omsKnowledgeBase.*`, `backend/services/omsKnowledgeBase.service.js` | Catalog `2.0.0`; never dynamically executes source metadata. |
 | Capability planning | `backend/services/omsCapabilityPlanner.service.js` | Deterministic compact ranking, canonical guidance, and ambiguity handling. |
 | Capability validation, explicit adapters, bounded grouping, and safe provenance | `backend/services/omsCapabilityExecution.service.js` | `packed_goods`, `monthly_shipments`, and `shipment_cbm` are registered direct adapters. |
 | Assistant/forecast Packed Goods dataset | `backend/services/packedGoods.service.js` | Current ready-to-ship semantics; used unchanged by the Assistant and forecast input. |

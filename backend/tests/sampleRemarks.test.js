@@ -2,7 +2,6 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const Sample = require("../models/sample.model");
-const SampleWorkflow = require("../models/sampleWorkflow.model");
 
 const buildItemSizes = () => [
   { remark: "item", L: 10, B: 20, H: 30, net_weight: 1 },
@@ -19,13 +18,4 @@ test("Sample item sizes accept Stretcher and five item entries", () => {
   });
 
   assert.equal(sample.validateSync(), undefined);
-});
-
-test("Sample Workflow item sizes accept Stretcher and five item entries", () => {
-  const sampleWorkflow = new SampleWorkflow({
-    code: "STRETCHER-WORKFLOW-1",
-    item_sizes: buildItemSizes(),
-  });
-
-  assert.equal(sampleWorkflow.validateSync(), undefined);
 });

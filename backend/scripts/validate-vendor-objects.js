@@ -38,7 +38,6 @@ const COLLECTION_SPECS = [
   { collection: "items", arrays: ["vendors"], nestedSingleArrays: [{ arrayPath: "finish", field: "vendor" }] },
   { collection: "qc", single: ["order_meta.vendor"] },
   { collection: "samples", arrays: ["vendor"] },
-  { collection: "sample_workflows", arrays: ["vendor"] },
   { collection: "complaints", single: ["vendor"] },
   { collection: "finish", single: ["vendor"] },
   { collection: "emailLogs", single: ["vendor"] },

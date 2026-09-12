@@ -40,7 +40,6 @@ const Samples = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showCreateWorkflowModal, setShowCreateWorkflowModal] = useState(false);
   const [editingSample, setEditingSample] = useState(null);
   const [convertingSample, setConvertingSample] = useState(null);
   const [uploadingSampleId, setUploadingSampleId] = useState("");
@@ -207,14 +206,9 @@ const Samples = () => {
             <div className="text-secondary small">{pageSummary}</div>
           </div>
           {canMutate && (
-            <div className="d-flex gap-2">
-              <button type="button" className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
-                Create Sample
-              </button>
-              <button type="button" className="btn btn-success" onClick={() => setShowCreateWorkflowModal(true)}>
-                Create Sample Workflow
-              </button>
-            </div>
+            <button type="button" className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
+              Create Sample
+            </button>
           )}
         </div>
 
@@ -383,16 +377,6 @@ const Samples = () => {
           onClose={() => setShowCreateModal(false)}
           onSaved={() => {
             setShowCreateModal(false);
-            fetchSamples();
-          }}
-        />
-      )}
-      {showCreateWorkflowModal && (
-        <SampleCreateModal
-          isWorkflow={true}
-          onClose={() => setShowCreateWorkflowModal(false)}
-          onSaved={() => {
-            setShowCreateWorkflowModal(false);
             fetchSamples();
           }}
         />
