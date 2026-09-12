@@ -7,6 +7,8 @@ const CACHE_PREFIXES = Object.freeze({
   analytics: "analytics:*",
   qc: "qc:*",
   items: "items:*",
+  pisDiffs: "pis-diffs-v2:*",
+  pisDiffReports: "pis-diff-reports-v2:*",
   options: "options:*",
 });
 
@@ -52,16 +54,20 @@ const invalidateQcCaches = () =>
     CACHE_PREFIXES.items,
   ]);
 
+const ITEM_CACHE_PATTERNS = Object.freeze([
+  CACHE_PREFIXES.items,
+  CACHE_PREFIXES.pisDiffs,
+  CACHE_PREFIXES.pisDiffReports,
+  CACHE_PREFIXES.options,
+  CACHE_PREFIXES.analytics,
+  CACHE_PREFIXES.reports,
+  CACHE_PREFIXES.orders,
+  CACHE_PREFIXES.qc,
+  CACHE_PREFIXES.dashboard,
+]);
+
 const invalidateItemCaches = () =>
-  invalidatePatterns([
-    CACHE_PREFIXES.items,
-    CACHE_PREFIXES.options,
-    CACHE_PREFIXES.analytics,
-    CACHE_PREFIXES.reports,
-    CACHE_PREFIXES.orders,
-    CACHE_PREFIXES.qc,
-    CACHE_PREFIXES.dashboard,
-  ]);
+  invalidatePatterns(ITEM_CACHE_PATTERNS);
 
 const invalidateReportCaches = () =>
   invalidatePatterns([
@@ -80,4 +86,5 @@ module.exports = {
   invalidateReportCaches,
   invalidateAllOmsCaches,
   invalidatePatterns,
+  __test__: { ITEM_CACHE_PATTERNS },
 };
