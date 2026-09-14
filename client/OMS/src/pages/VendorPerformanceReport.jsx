@@ -12,7 +12,7 @@ const SECTION_OPTIONS = [
   ["po_delay", "PO-wise delay"],
   ["product_analytics", "Product analytics"],
   ["product_complaints", "Product claims"],
-  ["shipping_delay", "Shipping delay by ETD"],
+  ["shipping_delay", "Stuffing delay"],
 ];
 
 const emptySections = () => Object.fromEntries(
@@ -20,7 +20,7 @@ const emptySections = () => Object.fromEntries(
 );
 
 const formatDays = (value) => {
-  if (!Number.isFinite(Number(value))) return "-";
+  if (value === null || value === undefined || value === "" || !Number.isFinite(Number(value))) return "-";
   const days = Number(value);
   if (days === 0) return "On time";
   return `${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} ${days > 0 ? "delayed" : "early"}`;
@@ -64,6 +64,7 @@ const VendorPerformanceReport = () => {
   const [exportFormat, setExportFormat] = useState("xlsx");
   const [exporting, setExporting] = useState(false);
   const [activeSection, setActiveSection] = useState("po_delay");
+  const [stuffingComparison, setStuffingComparison] = useState("packed");
 
   const loadReport = useCallback(async () => {
     try {
@@ -136,6 +137,8 @@ const VendorPerformanceReport = () => {
   const productRows = sections?.product_analytics?.rows || [];
   const claimRows = sections?.product_complaints?.rows || [];
   const shippingRows = sections?.shipping_delay?.rows || [];
+  const stuffingStatusKey = stuffingComparison === "packed" ? "packed_status" : "etd_status";
+  const stuffingComparisonLabel = stuffingComparison === "packed" ? "final packed" : "ETD";
 
   return (
     <>
@@ -260,13 +263,19 @@ const VendorPerformanceReport = () => {
             </section>}
 
             {activeSection === "shipping_delay" && <section className="card om-card" ref={(node) => { sectionRefs.current.shipping_delay = node; }}>
-              <div className="card-header fw-semibold">4. Shipping delay by ETD</div>
+              <div className="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <span className="fw-semibold">4. Stuffing delay — stuffing date vs {stuffingComparisonLabel}</span>
+                <div className="btn-group btn-group-sm" role="group" aria-label="Stuffing delay comparison">
+                  <button type="button" className={`btn ${stuffingComparison === "packed" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setStuffingComparison("packed")}>Final packed</button>
+                  <button type="button" className={`btn ${stuffingComparison === "etd" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setStuffingComparison("etd")}>ETD</button>
+                </div>
+              </div>
               <div className="table-responsive">
                 <table className="table table-striped align-middle mb-0">
-                  <thead><tr><th>PO</th><th>Brand</th><th>Complete shipping</th><th>Effective ETD</th><th>Difference</th><th>Status</th><th>Items</th><th>Qty</th></tr></thead>
+                  <thead><tr><th>PO</th><th>Brand</th><th>Complete stuffing</th><th>Final packed</th><th className={stuffingComparison === "packed" ? "table-primary" : ""}>Stuffing vs packed</th><th>Effective ETD</th><th className={stuffingComparison === "etd" ? "table-primary" : ""}>Stuffing vs ETD</th><th>Status</th><th>Items</th><th>Qty</th></tr></thead>
                   <tbody>{shippingRows.length ? shippingRows.map((row) => <tr key={`${row.po}-${row.brand}`}>
-                    <td className="fw-semibold">{row.po}</td><td>{row.brand}</td><td>{formatDateDDMMYYYY(row.shipping_date)}</td><td>{formatDateDDMMYYYY(row.etd)}</td><td>{formatDays(row.difference_days)}</td><td><span className={`badge ${statusClass(row.status)}`}>{row.status}</span></td><td>{row.item_count}</td><td>{row.total_quantity}</td>
-                  </tr>) : <tr><td colSpan="8" className="text-center text-secondary py-3">No completely shipped POs with an ETD.</td></tr>}</tbody>
+                    <td className="fw-semibold">{row.po}</td><td>{row.brand}</td><td>{formatDateDDMMYYYY(row.stuffing_date)}</td><td>{formatDateDDMMYYYY(row.final_packed_date)}</td><td className={stuffingComparison === "packed" ? "table-primary" : ""}>{formatDays(row.packed_difference_days)}</td><td>{formatDateDDMMYYYY(row.effective_etd)}</td><td className={stuffingComparison === "etd" ? "table-primary" : ""}>{formatDays(row.etd_difference_days)}</td><td><span className={`badge ${statusClass(row[stuffingStatusKey])}`}>{row[stuffingStatusKey]}</span></td><td>{row.item_count}</td><td>{row.total_quantity}</td>
+                  </tr>) : <tr><td colSpan="10" className="text-center text-secondary py-3">No fully stuffed POs with a final packed date or ETD.</td></tr>}</tbody>
                 </table>
               </div>
             </section>}

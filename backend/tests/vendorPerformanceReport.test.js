@@ -13,7 +13,7 @@ const query = (rows) => ({
   lean: async () => rows,
 });
 
-test("vendor performance keeps packed and shipping ETD comparisons separate", () => {
+test("vendor performance returns both stuffing comparisons", () => {
   const sections = buildPoSections([
     {
       order_id: "PO-1", brand: "Brand", vendor: { name: "Vendor" }, quantity: 5,
@@ -23,7 +23,10 @@ test("vendor performance keeps packed and shipping ETD comparisons separate", ()
     },
   ]);
   assert.equal(sections.po_delay[0].difference_days, 2);
-  assert.equal(sections.shipping_delay[0].difference_days, 5);
+  assert.equal(sections.shipping_delay[0].final_packed_date, "2026-01-12");
+  assert.equal(sections.shipping_delay[0].packed_difference_days, 3);
+  assert.equal(sections.shipping_delay[0].effective_etd, "2026-01-10");
+  assert.equal(sections.shipping_delay[0].etd_difference_days, 5);
 });
 
 test("vendor performance flags a lower latest claim percentage as positive", () => {

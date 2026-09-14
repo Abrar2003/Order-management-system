@@ -131,14 +131,18 @@ const buildPoSections = (orderRows = []) => {
     groups.set(key, group);
   }
 
-  const serialize = (group, actualDate, actualKey, { inspectionPending = false } = {}) => {
-    const days = differenceInDays(actualDate, group.etd);
+  const serialize = (group, actualDate, actualKey, {
+    inspectionPending = false,
+    comparisonDate = group.etd,
+    comparisonKey = "etd",
+  } = {}) => {
+    const days = differenceInDays(actualDate, comparisonDate);
     const isOverdueInspectionPending = inspectionPending && group.etd < today;
     return {
       po: group.po,
       brand: group.brand,
       vendor: group.vendor,
-      etd: toIsoDate(group.etd),
+      [comparisonKey]: toIsoDate(comparisonDate),
       [actualKey]: toIsoDate(actualDate),
       difference_days: days,
       status: inspectionPending
@@ -155,6 +159,22 @@ const buildPoSections = (orderRows = []) => {
     Number(right.difference_days ?? -Infinity) - Number(left.difference_days ?? -Infinity)
     || String(left.po).localeCompare(String(right.po), undefined, { numeric: true })
   );
+  const serializeStuffingDelay = (group) => {
+    const finalPackedDate = group.all_packed ? group.packed_date : null;
+    const packedDifference = differenceInDays(group.shipping_date, finalPackedDate);
+    const etdDifference = differenceInDays(group.shipping_date, group.etd);
+    return {
+      ...serialize(group, group.shipping_date, "stuffing_date", {
+        comparisonDate: finalPackedDate,
+        comparisonKey: "final_packed_date",
+      }),
+      effective_etd: toIsoDate(group.etd),
+      packed_difference_days: packedDifference,
+      packed_status: delayStatus(packedDifference),
+      etd_difference_days: etdDifference,
+      etd_status: delayStatus(etdDifference),
+    };
+  };
 
   return {
     po_delay: [...groups.values()]
@@ -167,8 +187,8 @@ const buildPoSections = (orderRows = []) => {
         : serialize(group, today, "packed_date", { inspectionPending: true }))
       .sort(compareRows),
     shipping_delay: [...groups.values()]
-      .filter((group) => group.all_shipped && group.shipping_date && group.etd)
-      .map((group) => serialize(group, group.shipping_date, "shipping_date"))
+      .filter((group) => group.all_shipped && group.shipping_date && (group.etd || (group.all_packed && group.packed_date)))
+      .map(serializeStuffingDelay)
       .sort(compareRows),
   };
 };
@@ -325,7 +345,7 @@ const EXPORT_COLUMNS = {
     ["code", "Item Code"], ["description", "Description"], ["brand", "Brand"], ["tenure_summary", "Tenures / Claim %"], ["current_claim_percentage", "Current Claim %"], ["remark", "Remark"],
   ],
   shipping_delay: [
-    ["po", "PO"], ["brand", "Brand"], ["shipping_date", "Complete Shipping Date"], ["etd", "Effective ETD"], ["difference_days", "Difference (Days)"], ["status", "Status"], ["item_count", "Items"], ["total_quantity", "Quantity"],
+    ["po", "PO"], ["brand", "Brand"], ["stuffing_date", "Complete Stuffing Date"], ["final_packed_date", "Final Packed Date"], ["packed_difference_days", "Stuffing vs Final Packed (Days)"], ["packed_status", "Stuffing vs Final Packed Status"], ["effective_etd", "Effective ETD"], ["etd_difference_days", "Stuffing vs ETD (Days)"], ["etd_status", "Stuffing vs ETD Status"], ["item_count", "Items"], ["total_quantity", "Quantity"],
   ],
 };
 
