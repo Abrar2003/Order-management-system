@@ -9776,9 +9776,8 @@ exports.getOrderSummary = async (req, res) => {
         ),
       ]),
     );
-    const visibleVendorNames = new Set(vendors.map((vendor) => normalizeLooseString(vendor)));
     const vendorCountryOptions = (await getVendorAccessOptions({ user: req.user }))
-      .filter((vendor) => visibleVendorNames.has(normalizeLooseString(vendor?.name)))
+      .filter((vendor) => vendor.is_active !== false)
       .map((vendor) => ({ name: vendor.name, country: vendor.country }));
 
     return res.status(200).json({

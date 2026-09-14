@@ -112,6 +112,7 @@ function readBarcodeRows(xlsxPath) {
         row.BARCODE ||
         row["EAN CODE"] ||
         row["EANCode (MASTER)"] ||
+        row["EAN CODE (GIGA India)"] ||
         row["EAN Code"] ||
         row.ean ||
         row.EAN,
@@ -123,7 +124,7 @@ function readBarcodeRows(xlsxPath) {
         row.MASTER_BARCODE ||
         row.master ||
         row.master_carton ||
-        row["Master EAN"],
+        row["Master EAN"] ||
         row["EAN MasterCarton (MASTER)"],
     );
 
