@@ -5,6 +5,7 @@ import { normalizeTextOptions } from "../utils/optionText";
 export const useBrandOptions = (extraOptions = []) => {
   const [brands, setBrands] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [vendorCountryOptions, setVendorCountryOptions] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -17,10 +18,16 @@ export const useBrandOptions = (extraOptions = []) => {
         if (cancelled) return;
         setBrands(normalizeTextOptions(response?.data?.brands));
         setVendors(normalizeTextOptions(response?.data?.vendors));
+        setVendorCountryOptions(
+          Array.isArray(response?.data?.vendor_country_options)
+            ? response.data.vendor_country_options
+            : [],
+        );
       } catch {
         if (!cancelled) {
           setBrands([]);
           setVendors([]);
+          setVendorCountryOptions([]);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -47,6 +54,7 @@ export const useBrandOptions = (extraOptions = []) => {
   return {
     brandOptions: options,
     vendorOptions,
+    vendorCountryOptions,
     loadingBrands: loading,
     loadingVendors: loading,
   };

@@ -3,6 +3,7 @@ import { applyRectifiedRows, rectifyPdfOrders } from "../services/orders.service
 import PreviousOrderCheckModal from "./PreviousOrderCheckModal";
 import { formatDateDDMMYYYY } from "../utils/date";
 import useBrandOptions from "../hooks/useBrandOptions";
+import { getCountryOptions } from "../constants/countries";
 import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
@@ -55,6 +56,7 @@ const RectifyPdfModal = ({
 }) => {
   const [file, setFile] = useState(null);
   const [brand, setBrand] = useState("");
+  const [country, setCountry] = useState("");
   const [vendor, setVendor] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -64,14 +66,21 @@ const RectifyPdfModal = ({
   const [activePreviousOrderRow, setActivePreviousOrderRow] = useState(null);
   const {
     brandOptions,
-    vendorOptions,
+    vendorCountryOptions,
     loadingBrands,
     loadingVendors,
   } = useBrandOptions([brand]);
 
   const availableVendorOptions = useMemo(
-    () => normalizeTextOptions([...(Array.isArray(vendorOptions) ? vendorOptions : []), vendor]),
-    [vendorOptions, vendor],
+    () => normalizeTextOptions(
+      (Array.isArray(vendorCountryOptions) ? vendorCountryOptions : [])
+        .filter((entry) =>
+          String(entry?.country || "").trim().toLowerCase()
+          === String(country || "").trim().toLowerCase(),
+        )
+        .map((entry) => entry?.name),
+    ),
+    [country, vendorCountryOptions],
   );
 
   const toDateText = (value) => {
@@ -114,6 +123,10 @@ const RectifyPdfModal = ({
     }
     if (!normalizedBrand) {
       setError("Brand is required.");
+      return;
+    }
+    if (!String(country).trim()) {
+      setError("Country is required.");
       return;
     }
     if (!normalizedVendor) {
@@ -192,6 +205,10 @@ const RectifyPdfModal = ({
     }
     if (!normalizedBrand) {
       setError("Brand is required.");
+      return;
+    }
+    if (!String(country).trim()) {
+      setError("Country is required.");
       return;
     }
     if (!normalizedVendor) {
@@ -287,14 +304,35 @@ const RectifyPdfModal = ({
                 </select>
               </div>
               <div className="col-md-6">
+                <label className="form-label">Country</label>
+                <select
+                  className="form-select"
+                  value={country}
+                  onChange={(e) => {
+                    setCountry(e.target.value);
+                    setVendor("");
+                  }}
+                  disabled={loading}
+                >
+                  <option value="">Select Country</option>
+                  {getCountryOptions(country).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-md-6">
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
                   value={vendor}
                   onChange={(e) => setVendor(e.target.value)}
-                  disabled={loading || loadingVendors}
+                  disabled={loading || loadingVendors || !country}
                 >
-                  <option value="">{loadingVendors ? "Loading vendors..." : "Select Vendor"}</option>
+                  <option value="">
+                    {loadingVendors ? "Loading vendors..." : country ? "Select Vendor" : "Select Country first"}
+                  </option>
                   {availableVendorOptions.map((vendorValue) => (
                     <option key={vendorValue} value={vendorValue}>
                       {vendorValue}

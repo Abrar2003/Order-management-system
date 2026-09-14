@@ -157,7 +157,7 @@ const getVendorAccessOptions = async ({
   const brandQuery = BrandModel.find({}).select("_id name");
   const vendorQuery = VendorModel.find({
     $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
-  }).select("_id name vendor_code brands is_active");
+  }).select("_id name country vendor_code brands is_active");
   const orderQuery = OrderModel.aggregate([
     {
       $project: {
@@ -215,6 +215,7 @@ const getVendorAccessOptions = async ({
   const options = vendors.map((vendor) => ({
     _id: normalizeText(vendor?._id),
     name: normalizeText(vendor?.name),
+    country: normalizeText(vendor?.country),
     vendor_code: Array.isArray(vendor?.vendor_code) ? vendor.vendor_code : [],
     is_active: vendor?.is_active !== false,
     brandMap: new Map(),
@@ -273,6 +274,7 @@ const getVendorAccessOptions = async ({
       return {
         _id: option._id,
         name: option.name,
+        country: option.country,
         vendor_code: option.vendor_code,
         is_active: option.is_active,
         brand_ids: associatedBrands.map((brand) => brand._id),

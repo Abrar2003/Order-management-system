@@ -9776,11 +9776,16 @@ exports.getOrderSummary = async (req, res) => {
         ),
       ]),
     );
+    const visibleVendorNames = new Set(vendors.map((vendor) => normalizeLooseString(vendor)));
+    const vendorCountryOptions = (await getVendorAccessOptions({ user: req.user }))
+      .filter((vendor) => visibleVendorNames.has(normalizeLooseString(vendor?.name)))
+      .map((vendor) => ({ name: vendor.name, country: vendor.country }));
 
     return res.status(200).json({
       vendors,
       brands,
       brand_vendors: brandVendors,
+      vendor_country_options: vendorCountryOptions,
     });
   } catch (error) {
     console.error("Get Order Summary Error:", error);
