@@ -1120,6 +1120,7 @@ const buildItemFileResponse = async (
     fallbackBaseName = "item-file",
     extension = ".pdf",
     requireStorageKey = false,
+    download = false,
   } = {},
 ) => {
   const normalizedFile = normalizeStoredItemFile(file);
@@ -1139,6 +1140,7 @@ const buildItemFileResponse = async (
 
     link = await getSignedObjectUrl(normalizedFile.key, {
       expiresIn: ITEM_FILE_URL_EXPIRES_IN,
+      download,
       filename: buildItemFileDownloadName({
         file: normalizedFile,
         itemCode,
@@ -1169,6 +1171,7 @@ const buildItemFileResponseList = async (
     itemCode = "",
     fallbackBaseName = "item-file",
     extension = ".pdf",
+    download = false,
   } = {},
 ) => {
   const normalizedFiles = normalizeStoredItemFileList(files);
@@ -1180,6 +1183,7 @@ const buildItemFileResponseList = async (
           ? `${fallbackBaseName}-${index + 1}`
           : fallbackBaseName,
         extension,
+        download,
       }),
     ),
   );
@@ -8013,6 +8017,10 @@ exports.getItemFileUrl = async (req, res) => {
     const fileType = normalizeTextField(
       req.params.fileType || req.query.file_type || req.query.fileType || "",
     ).toLowerCase();
+    const download = ["1", "true"].includes(
+      normalizeTextField(req.query.download).toLowerCase(),
+    );
+    const requestedFileKey = normalizeTextField(req.query.file_key || req.query.fileKey);
     const fileConfig = getItemFileConfig(fileType);
     if (!fileConfig) {
       return res.status(400).json({
@@ -8055,15 +8063,21 @@ exports.getItemFileUrl = async (req, res) => {
           itemCode: normalizeTextField(item?.code || itemId),
           fallbackBaseName: fileType,
           extension: fileConfig.defaultExtension,
+          download,
         })
       : [
           await buildItemFileResponse(getPathValue(item, fileConfig.field), {
             itemCode: normalizeTextField(item?.code || itemId),
             fallbackBaseName: fileType,
             extension: fileConfig.defaultExtension,
+            download,
           }),
         ].filter(Boolean);
-    const filePayload = filePayloads[0] || null;
+    const filePayload = requestedFileKey
+      ? filePayloads.find((file) =>
+          [file.key, file.public_id].some((key) => normalizeTextField(key) === requestedFileKey),
+        )
+      : filePayloads[0] || null;
 
     if (!filePayload) {
       return res.status(404).json({

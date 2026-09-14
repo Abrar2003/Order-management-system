@@ -534,6 +534,7 @@ const ItemDetails = () => {
   const [brandLogoSrc, setBrandLogoSrc] = useState("");
   const [previewFile, setPreviewFile] = useState(null);
   const [deletingFileKey, setDeletingFileKey] = useState("");
+  const [downloadingFileKey, setDownloadingFileKey] = useState("");
   const [claimPercentageItem, setClaimPercentageItem] = useState(null);
   const [poSortBy, setPoSortBy] = useState("po");
   const [poSortOrder, setPoSortOrder] = useState("asc");
@@ -973,6 +974,33 @@ const ItemDetails = () => {
     }
   }, [deletingFileKey, fetchDetails, item?._id]);
 
+  const handleDownloadFile = useCallback(async (entry) => {
+    const itemId = String(item?._id || "").trim();
+    const fileType = String(entry?.fileType || entry?.value || "").trim();
+    const fileKey = String(entry?.file?.key || entry?.file?.public_id || "").trim();
+    if (!itemId || !fileType || downloadingFileKey) return;
+
+    try {
+      setDownloadingFileKey(fileKey || fileType);
+      const response = await api.get(
+        `/items/${encodeURIComponent(itemId)}/files/${encodeURIComponent(fileType)}/url`,
+        { params: { download: true, file_key: fileKey } },
+      );
+      const url = String(response?.data?.data?.url || "").trim();
+      if (!url) throw new Error("Download URL is unavailable.");
+      window.location.assign(url);
+    } catch (downloadError) {
+      console.error(downloadError);
+      alert(
+        downloadError?.response?.data?.message
+          || downloadError?.message
+          || `Failed to download ${entry?.label || "file"}.`,
+      );
+    } finally {
+      setDownloadingFileKey("");
+    }
+  }, [downloadingFileKey, item?._id]);
+
   return (
     <>
       <Navbar />
@@ -1102,6 +1130,14 @@ const ItemDetails = () => {
                                   <a href={fileUrl || "#"} target="_blank" rel="noreferrer" className="btn btn-outline-secondary btn-sm rounded-pill" onClick={(event) => { if (!fileUrl) event.preventDefault(); }}>
                                     Open File
                                   </a>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-success btn-sm rounded-pill"
+                                    onClick={() => handleDownloadFile(entry)}
+                                    disabled={!fileKey || Boolean(downloadingFileKey)}
+                                  >
+                                    {downloadingFileKey === fileKey ? "Preparing..." : "Download File"}
+                                  </button>
                                   {canDeleteItemFiles && (
                                     <button
                                       type="button"
@@ -1162,6 +1198,18 @@ const ItemDetails = () => {
                                   >
                                     Open File
                                   </a>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-success btn-sm rounded-pill"
+                                    onClick={() => handleDownloadFile(activeDetailsShippingMarkFile)}
+                                    disabled={!activeDetailsShippingMarkFile?.file || Boolean(downloadingFileKey)}
+                                  >
+                                    {downloadingFileKey === String(
+                                      activeDetailsShippingMarkFile?.file?.key
+                                      || activeDetailsShippingMarkFile?.file?.public_id
+                                      || "",
+                                    ).trim() ? "Preparing..." : "Download File"}
+                                  </button>
                                   {canDeleteItemFiles && (
                                     <button
                                       type="button"

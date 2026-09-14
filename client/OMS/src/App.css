@@ -5183,6 +5183,26 @@ small,
   white-space: normal;
 }
 
+.qc-details-file-select {
+  flex: 0 0 20%;
+  width: 20%;
+}
+
+@media (min-width: 768px) and (max-width: 1199.98px) {
+  .qc-details-file-select {
+    flex-basis: 80%;
+    width: 80%;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .qc-details-file-select {
+    flex-basis: 100%;
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
 .qc-list-mobile-filters {
   display: none;
 }

@@ -568,6 +568,8 @@ const QcDetails = () => {
   const [deletingRelatedFile, setDeletingRelatedFile] = useState(false);
   const [relatedFileUploadProgress, setRelatedFileUploadProgress] = useState(0);
   const [openingRelatedFileType, setOpeningRelatedFileType] = useState("");
+  const [downloadingRelatedFileType, setDownloadingRelatedFileType] = useState("");
+  const [selectedItemMasterFileValue, setSelectedItemMasterFileValue] = useState("");
   const [previewFile, setPreviewFile] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
@@ -1176,10 +1178,22 @@ const QcDetails = () => {
       }),
     [qc?.item_master],
   );
-  const hasAnyItemMasterFile = useMemo(
-    () => itemMasterFiles.some((entry) => hasStoredFile(entry.file)),
+  const downloadableItemMasterFiles = useMemo(
+    () => itemMasterFiles.filter((entry) => hasStoredFile(entry.file)),
     [itemMasterFiles],
   );
+  const selectedItemMasterFile = useMemo(
+    () => downloadableItemMasterFiles.find((entry) => entry.value === selectedItemMasterFileValue) || null,
+    [downloadableItemMasterFiles, selectedItemMasterFileValue],
+  );
+
+  useEffect(() => {
+    setSelectedItemMasterFileValue((current) =>
+      downloadableItemMasterFiles.some((entry) => entry.value === current)
+        ? current
+        : downloadableItemMasterFiles[0]?.value || "",
+    );
+  }, [downloadableItemMasterFiles]);
   const qcImages = useMemo(
     () => {
       const orderId =
@@ -1919,15 +1933,11 @@ const QcDetails = () => {
       if (!fileUrl) {
         const response = await api.get(
           `/items/${encodeURIComponent(qc.item_master._id)}/files/${encodeURIComponent(fileConfig.value)}/url`,
-          {
-          },
         );
         responseFile = response?.data?.data?.file || currentFile;
         fileUrl = String(response?.data?.data?.url || "").trim();
       }
-      if (!fileUrl) {
-        throw new Error(`${fileConfig.label} URL is not available.`);
-      }
+      if (!fileUrl) throw new Error(`${fileConfig.label} URL is not available.`);
 
       if (fileConfig.previewMode === "pdf" || fileConfig.previewMode === "image" || fileConfig.previewMode === "office") {
         if (shouldOpenFilePreviewExternally(fileConfig.previewMode)) {
@@ -1954,6 +1964,48 @@ const QcDetails = () => {
       );
     } finally {
       setOpeningRelatedFileType("");
+    }
+  }, [qc?.item_master]);
+
+  const handleDownloadRelatedFile = useCallback(async (fileTypeOrEntry) => {
+    const directEntry =
+      fileTypeOrEntry && typeof fileTypeOrEntry === "object" ? fileTypeOrEntry : null;
+    const fileType = directEntry?.fileType || directEntry?.value || fileTypeOrEntry;
+    const fileConfig =
+      RELATED_FILE_OPTIONS_BY_VALUE[String(fileType || "").trim().toLowerCase()];
+    if (!fileConfig || fileConfig.scope !== "item_master" || !qc?.item_master?._id) return;
+
+    const currentFile = hasStoredFile(directEntry?.file)
+      ? directEntry.file
+      : getPrimaryStoredItemFile(qc.item_master, fileConfig);
+    if (!hasStoredFile(currentFile)) {
+      alert(`${fileConfig.label} is not uploaded yet.`);
+      return;
+    }
+
+    try {
+      setDownloadingRelatedFileType(directEntry?.value || fileConfig.value);
+      const response = await api.get(
+        `/items/${encodeURIComponent(qc.item_master._id)}/files/${encodeURIComponent(fileConfig.value)}/url`,
+        {
+          params: {
+            download: true,
+            file_key: String(currentFile?.key || currentFile?.public_id || "").trim(),
+          },
+        },
+      );
+      const fileUrl = String(response?.data?.data?.url || "").trim();
+      if (!fileUrl) throw new Error(`${fileConfig.label} download URL is not available.`);
+      window.location.assign(fileUrl);
+    } catch (error) {
+      console.error(error);
+      alert(
+        error?.response?.data?.message
+          || error?.message
+          || `Failed to download ${fileConfig.label}.`,
+      );
+    } finally {
+      setDownloadingRelatedFileType("");
     }
   }, [qc?.item_master]);
 
@@ -3098,7 +3150,7 @@ const QcDetails = () => {
                       type="button"
                       className="btn btn-outline-secondary btn-sm rounded-pill"
                       onClick={() => handleOpenRelatedFile(entry)}
-                      disabled={!hasFile || isOpening}
+                      disabled={!hasFile || isOpening || Boolean(downloadingRelatedFileType)}
                       title={
                         hasFile
                           ? entry.file?.originalName || `Open ${entry.label}`
@@ -3109,6 +3161,26 @@ const QcDetails = () => {
                     </button>
                   );
                 })}
+                <select
+                  className="form-select form-select-sm qc-details-file-select"
+                  value={selectedItemMasterFileValue}
+                  onChange={(event) => setSelectedItemMasterFileValue(event.target.value)}
+                  disabled={downloadableItemMasterFiles.length === 0 || Boolean(downloadingRelatedFileType)}
+                >
+                  {downloadableItemMasterFiles.map((entry) => (
+                    <option key={entry.value} value={entry.value}>
+                      {entry.label}: {entry.file?.originalName || "Uploaded file"}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-outline-success btn-sm rounded-pill"
+                  onClick={() => handleDownloadRelatedFile(selectedItemMasterFile)}
+                  disabled={!selectedItemMasterFile || Boolean(downloadingRelatedFileType)}
+                >
+                  {downloadingRelatedFileType ? "Preparing..." : "Download File"}
+                </button>
                 <button
                   type="button"
                   className="btn btn-outline-secondary btn-sm rounded-pill"
@@ -3123,7 +3195,7 @@ const QcDetails = () => {
                   QC images
                 </button>
               </div>
-              {!hasAnyItemMasterFile && (
+              {downloadableItemMasterFiles.length === 0 && (
                 <div className="small text-muted mt-2">
                   No related item files uploaded yet.
                 </div>
