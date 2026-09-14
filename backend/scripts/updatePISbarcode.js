@@ -97,6 +97,7 @@ function readBarcodeRows(xlsxPath) {
       row.item_code ||
         row.Item_Code ||
         row.ITEM_CODE ||
+        row["Item Code"] ||
         row.SKU ||
         row.sku ||
         row.code ||
@@ -110,6 +111,7 @@ function readBarcodeRows(xlsxPath) {
         row.Barcode ||
         row.BARCODE ||
         row["EAN CODE"] ||
+        row["EANCode (MASTER)"] ||
         row["EAN Code"] ||
         row.ean ||
         row.EAN,
@@ -122,6 +124,7 @@ function readBarcodeRows(xlsxPath) {
         row.master ||
         row.master_carton ||
         row["Master EAN"],
+        row["EAN MasterCarton (MASTER)"],
     );
 
     const innerBarcode = cleanCell(
@@ -203,7 +206,9 @@ async function main() {
     }));
 
   const updatableRows = matchedRows.filter(
-    (row) => !hasExistingPisBarcode(existingItemByCode.get(row.code)),
+    (row) =>
+      !hasExistingPisBarcode(existingItemByCode.get(row.code)) &&
+      (row.exempted || row.barcode || row.masterBarcode || row.innerBarcode),
   );
 
   const unmatchedRows = rows.filter(

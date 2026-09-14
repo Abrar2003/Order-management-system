@@ -179,20 +179,37 @@ const VendorPerformanceReport = () => {
                 {vendorOptions.map((option) => <option key={option} value={option}>{option}</option>)}
               </select>
             </div>
-            <div className="col-md-4">
+            <div className="col-md-4 dropdown">
               <label className="form-label" htmlFor="vendor-performance-brands">Brands</label>
-              <select
+              <button
                 id="vendor-performance-brands"
-                className="form-select"
-                multiple
-                size="3"
-                value={brandFilters}
+                type="button"
+                className="form-select text-start packed-goods-filter-trigger"
+                data-bs-toggle="dropdown"
+                data-bs-auto-close="outside"
                 disabled={!vendor}
-                onChange={(event) => setBrandFilters(Array.from(event.target.selectedOptions, (option) => option.value))}
               >
-                {brandOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
-              <div className="form-text">Hold Ctrl or Cmd to select multiple brands.</div>
+                <span className="text-truncate d-block">
+                  {brandFilters.length ? brandFilters.join(", ") : "All Brands"}
+                </span>
+              </button>
+              <ul className="dropdown-menu packed-goods-filter-menu shadow w-100">
+                {brandOptions.map((option) => (
+                  <li key={option}>
+                    <label className="packed-goods-filter-option">
+                      <input
+                        type="checkbox"
+                        className="form-check-input"
+                        checked={brandFilters.includes(option)}
+                        onChange={() => setBrandFilters((current) => current.includes(option)
+                          ? current.filter((brand) => brand !== option)
+                          : [...current, option])}
+                      />
+                      <span className="packed-goods-filter-option-label">{option}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
             </div>
             <div className="col-md-3">
               <button type="button" className="btn btn-outline-primary" onClick={loadReport} disabled={loading}>
