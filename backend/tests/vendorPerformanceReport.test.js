@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   getVendorPerformanceReport,
-  __test__: { buildClaimRows, buildPoSections },
+  __test__: { buildClaimRows, buildPoSections, buildEffectiveEtdMatch, resolveEtdDateRange },
 } = require("../controllers/vendorPerformanceReport.controller");
 const Order = require("../models/order.model");
 const Item = require("../models/item.model");
@@ -74,6 +74,17 @@ test("vendor performance includes incomplete POs and flags only overdue ones as 
   assert.equal(upcoming.is_overdue_inspection_pending, false);
 });
 
+test("vendor performance ETD range is inclusive and gives revised ETD priority", () => {
+  const range = resolveEtdDateRange({ fromDate: "2026-01-10", toDate: "2026-01-31" });
+  const match = buildEffectiveEtdMatch(range);
+  assert.equal(match.$or[0].revised_ETD.$gte.toISOString(), "2026-01-10T00:00:00.000Z");
+  assert.equal(match.$or[0].revised_ETD.$lt.toISOString(), "2026-02-01T00:00:00.000Z");
+  assert.equal(match.$or[1].revised_ETD, null);
+  assert.equal(match.$or[1].ETD.$lt.toISOString(), "2026-02-01T00:00:00.000Z");
+  assert.equal(resolveEtdDateRange({ fromDate: "2026-02-30" }), null);
+  assert.equal(resolveEtdDateRange({ fromDate: "2026-02-01", toDate: "2026-01-31" }), null);
+});
+
 test("vendor performance scopes both selected vendor data sources", async (t) => {
   const orderMatches = [];
   const itemMatches = [];
@@ -90,7 +101,7 @@ test("vendor performance scopes both selected vendor data sources", async (t) =>
   const res = { body: null, json(body) { this.body = body; return this; }, status() { return this; } };
 
   await getVendorPerformanceReport({
-    query: { vendor: "Vendor B", brands: "Brand A,Brand B" },
+    query: { vendor: "Vendor B", brands: "Brand A,Brand B", from_date: "2026-01-01", to_date: "2026-01-31" },
     user: { role: "admin", allowed_brands: [{ name: "Brand A" }], allowed_vendors: ["Vendor A"] },
   }, res);
 
@@ -102,4 +113,21 @@ test("vendor performance scopes both selected vendor data sources", async (t) =>
   assert.match(JSON.stringify(orderMatches[1]), /Brand B/);
   assert.match(JSON.stringify(itemMatches[0]), /Vendor A/);
   assert.match(JSON.stringify(itemMatches[0]), /Vendor B/);
+  assert.match(JSON.stringify(orderMatches[1]), /2026-02-01T00:00:00.000Z/);
+});
+
+test("vendor performance rejects malformed and reversed ETD dates", async () => {
+  for (const queryParams of [
+    { vendor: "Vendor", from_date: "2026-02-30" },
+    { vendor: "Vendor", from_date: "2026-02-01", to_date: "2026-01-31" },
+  ]) {
+    const res = {
+      statusCode: 200,
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; },
+    };
+    await getVendorPerformanceReport({ query: queryParams, user: { role: "admin" } }, res);
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.message, "Invalid date filters");
+  }
 });

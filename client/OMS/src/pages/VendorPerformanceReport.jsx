@@ -56,6 +56,8 @@ const VendorPerformanceReport = () => {
   const [vendorOptions, setVendorOptions] = useState([]);
   const [brandOptions, setBrandOptions] = useState([]);
   const [brandFilters, setBrandFilters] = useState([]);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [sections, setSections] = useState(emptySections);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -71,7 +73,12 @@ const VendorPerformanceReport = () => {
       setLoading(true);
       setError("");
       const response = await api.get("/reports/vendor-performance", {
-        params: vendor ? { vendor, brands: brandFilters.join(",") || undefined } : {},
+        params: vendor ? {
+          vendor,
+          brands: brandFilters.join(",") || undefined,
+          from_date: fromDate || undefined,
+          to_date: toDate || undefined,
+        } : {},
       });
       setVendorOptions(Array.isArray(response?.data?.filters?.vendor_options)
         ? response.data.filters.vendor_options
@@ -86,7 +93,7 @@ const VendorPerformanceReport = () => {
     } finally {
       setLoading(false);
     }
-  }, [vendor, brandFilters]);
+  }, [vendor, brandFilters, fromDate, toDate]);
 
   useEffect(() => {
     loadReport();
@@ -162,12 +169,12 @@ const VendorPerformanceReport = () => {
         <ReportInfoBanner
           description="Compares one vendor's packed and shipping dates with the effective ETD, product performance, and claims trends."
           dataShown="PO completion dates, ETD variance, product analytics, and claim tenures with the current-versus-previous trend."
-          howItWorks="Select a vendor. All data is filtered on the server using the logged-in user's brand and vendor access."
+          howItWorks="Select a vendor and optionally an inclusive ETD range. All data is filtered on the server using the logged-in user's brand and vendor access."
         />
 
         <div className="card om-card mb-3">
           <div className="card-body row g-2 align-items-end">
-            <div className="col-md-5">
+            <div className="col-md-4">
               <label className="form-label" htmlFor="vendor-performance-vendor">Vendor</label>
               <select
                 id="vendor-performance-vendor"
@@ -182,7 +189,7 @@ const VendorPerformanceReport = () => {
                 {vendorOptions.map((option) => <option key={option} value={option}>{option}</option>)}
               </select>
             </div>
-            <div className="col-md-4 dropdown">
+            <div className="col-md-3 dropdown">
               <label className="form-label" htmlFor="vendor-performance-brands">Brands</label>
               <button
                 id="vendor-performance-brands"
@@ -214,7 +221,31 @@ const VendorPerformanceReport = () => {
                 ))}
               </ul>
             </div>
-            <div className="col-md-3">
+            <div className="col-md-2">
+              <label className="form-label" htmlFor="vendor-performance-from-date">ETD from</label>
+              <input
+                id="vendor-performance-from-date"
+                type="date"
+                className="form-control"
+                value={fromDate}
+                max={toDate || undefined}
+                disabled={!vendor}
+                onChange={(event) => setFromDate(event.target.value)}
+              />
+            </div>
+            <div className="col-md-2">
+              <label className="form-label" htmlFor="vendor-performance-to-date">ETD to</label>
+              <input
+                id="vendor-performance-to-date"
+                type="date"
+                className="form-control"
+                value={toDate}
+                min={fromDate || undefined}
+                disabled={!vendor}
+                onChange={(event) => setToDate(event.target.value)}
+              />
+            </div>
+            <div className="col-md-1">
               <button type="button" className="btn btn-outline-primary" onClick={loadReport} disabled={loading}>
                 {loading ? "Loading..." : "Refresh"}
               </button>

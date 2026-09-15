@@ -18,6 +18,7 @@ const {
   buildClaimsReportRow,
   isCurrentClaimSystemItem,
 } = require("./reports.controller");
+const { parseDateOnly } = require("../helpers/dateOnly");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_ORDER_MATCH = {
@@ -69,6 +70,29 @@ const delayStatus = (days) => {
   return "On time";
 };
 const effectiveEtd = (order) => toUtcDate(order?.revised_ETD) || toUtcDate(order?.ETD);
+const resolveEtdDateRange = ({ fromDate = "", toDate = "" } = {}) => {
+  const hasFromDate = Boolean(normalizeText(fromDate));
+  const hasToDate = Boolean(normalizeText(toDate));
+  const from = hasFromDate ? parseDateOnly(fromDate) : null;
+  const to = hasToDate ? parseDateOnly(toDate) : null;
+  if ((hasFromDate && !from) || (hasToDate && !to) || (from && to && from > to)) return null;
+  return {
+    from,
+    toExclusive: to ? new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate() + 1)) : null,
+  };
+};
+const buildEffectiveEtdMatch = (range) => {
+  if (!range?.from && !range?.toExclusive) return {};
+  const dateMatch = {};
+  if (range.from) dateMatch.$gte = range.from;
+  if (range.toExclusive) dateMatch.$lt = range.toExclusive;
+  return {
+    $or: [
+      { revised_ETD: dateMatch },
+      { revised_ETD: null, ETD: dateMatch },
+    ],
+  };
+};
 const scopedActiveOrders = (user, extraMatch = {}) => applyDataAccessMatch(
   { $and: [...ACTIVE_ORDER_MATCH.$and, extraMatch] },
   user,
@@ -231,7 +255,9 @@ const buildClaimRows = (items = []) => {
   });
 };
 
-const buildVendorPerformanceDataset = async ({ vendor = "", brands, user } = {}) => {
+const buildVendorPerformanceDataset = async ({ vendor = "", brands, fromDate, toDate, user } = {}) => {
+  const etdRange = resolveEtdDateRange({ fromDate, toDate });
+  if (!etdRange) throw new Error("Invalid date filters");
   const scopedOrders = await Order.find(scopedActiveOrders(user))
     .select("vendor brand")
     .lean();
@@ -255,14 +281,23 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, user } = {})
   }
 
   const orderMatch = scopedActiveOrders(user, {
-    $and: [buildVendorFilter({ field: "vendor", vendorName: selectedVendor }), buildBrandMatch(selectedBrands)],
+    $and: [
+      buildVendorFilter({ field: "vendor", vendorName: selectedVendor }),
+      buildBrandMatch(selectedBrands),
+      buildEffectiveEtdMatch(etdRange),
+    ],
   });
   const orderRows = await Order.find(orderMatch)
     .select("order_id order_date brand vendor status ETD revised_ETD quantity item shipment qc_record")
     .populate("qc_record", "last_inspected_date quantities")
     .lean();
   const productAnalyticsOrderRows = await Order.find(applyDataAccessMatch(
-    { $and: [{ archived: { $ne: true } }, buildVendorFilter({ field: "vendor", vendorName: selectedVendor }), buildBrandMatch(selectedBrands)] },
+    { $and: [
+      { archived: { $ne: true } },
+      buildVendorFilter({ field: "vendor", vendorName: selectedVendor }),
+      buildBrandMatch(selectedBrands),
+      buildEffectiveEtdMatch(etdRange),
+    ] },
     user,
   ))
     .select("order_id order_date brand vendor quantity item shipment qc_record")
@@ -304,6 +339,9 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, user } = {})
       { "claim_tenures.0": { $exists: true } },
       buildVendorsArrayFilter({ field: "vendors", vendorName: selectedVendor }),
       buildItemBrandMatch(selectedBrands),
+      ...(etdRange.from || etdRange.toExclusive
+        ? [{ code: { $in: [...new Set(productAnalyticsOrderRows.map((order) => normalizeText(order?.item?.item_code)).filter(Boolean))] } }]
+        : []),
     ] },
     user,
     { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
@@ -314,7 +352,13 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, user } = {})
   const poSections = buildPoSections(orderRows);
 
   return {
-    filters: { vendor_options: vendorOptions, brand_options: brandOptions, brands: selectedBrands },
+    filters: {
+      vendor_options: vendorOptions,
+      brand_options: brandOptions,
+      brands: selectedBrands,
+      from_date: etdRange.from?.toISOString().slice(0, 10) || "",
+      to_date: etdRange.toExclusive ? new Date(etdRange.toExclusive.getTime() - DAY_MS).toISOString().slice(0, 10) : "",
+    },
     vendor: selectedVendor,
     sections: {
       po_delay: { rows: poSections.po_delay },
@@ -327,8 +371,15 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, user } = {})
 
 const getVendorPerformanceReport = async (req, res) => {
   try {
-    return res.json(await buildVendorPerformanceDataset({ vendor: req.query.vendor, brands: req.query.brands, user: req.user }));
+    return res.json(await buildVendorPerformanceDataset({
+      vendor: req.query.vendor,
+      brands: req.query.brands,
+      fromDate: req.query.from_date ?? req.query.fromDate ?? req.query.from,
+      toDate: req.query.to_date ?? req.query.toDate ?? req.query.to,
+      user: req.user,
+    }));
   } catch (error) {
+    if (error.message === "Invalid date filters") return res.status(400).json({ message: error.message });
     console.error("Vendor performance report error:", error);
     return res.status(500).json({ message: "Failed to load vendor performance report" });
   }
@@ -355,7 +406,13 @@ const exportVendorPerformanceReport = async (req, res) => {
     return res.status(400).json({ message: "Vendor and a valid report table are required." });
   }
   try {
-    const dataset = await buildVendorPerformanceDataset({ vendor: req.query.vendor, brands: req.query.brands, user: req.user });
+    const dataset = await buildVendorPerformanceDataset({
+      vendor: req.query.vendor,
+      brands: req.query.brands,
+      fromDate: req.query.from_date ?? req.query.fromDate ?? req.query.from,
+      toDate: req.query.to_date ?? req.query.toDate ?? req.query.to,
+      user: req.user,
+    });
     const rows = dataset.sections[section].rows.map((row) => ({
       ...row,
       tenure_summary: Array.isArray(row.tenures)
@@ -375,6 +432,7 @@ const exportVendorPerformanceReport = async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.send(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
   } catch (error) {
+    if (error.message === "Invalid date filters") return res.status(400).json({ message: error.message });
     console.error("Vendor performance export error:", error);
     return res.status(500).json({ message: "Failed to export vendor performance report" });
   }
@@ -383,5 +441,5 @@ const exportVendorPerformanceReport = async (req, res) => {
 module.exports = {
   getVendorPerformanceReport,
   exportVendorPerformanceReport,
-  __test__: { buildClaimRows, buildPoSections, differenceInDays },
+  __test__: { buildClaimRows, buildPoSections, differenceInDays, resolveEtdDateRange, buildEffectiveEtdMatch },
 };
