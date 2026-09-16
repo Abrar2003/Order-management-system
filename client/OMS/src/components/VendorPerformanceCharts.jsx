@@ -38,7 +38,8 @@ const tenureClaimAverages = (rows) => {
     const to_date = String(tenure?.to_date || "");
     if (!from_date || !to_date) return;
     const key = String(tenure?.tenure_id || `${row?.brand || ""}:${from_date}:${to_date}`);
-    const total = totals.get(key) || { brand: row?.brand || "", from_date, to_date, delivered_quantity: 0, rejected_quantity: 0 };
+    const total = totals.get(key) || { brand: row?.brand || "", from_date, to_date, item_count: 0, delivered_quantity: 0, rejected_quantity: 0 };
+    total.item_count += 1;
     total.delivered_quantity += finiteNumber(tenure?.delivered_quantity) || 0;
     total.rejected_quantity += finiteNumber(tenure?.rejected_quantity) || 0;
     totals.set(key, total);
@@ -98,14 +99,14 @@ const ChartCard = ({ title, children }) => (
   </div>
 );
 
-const HorizontalBars = ({ data, series, valueSuffix = "", height = 300 }) => (
+const HorizontalBars = ({ data, series, valueSuffix = "", height = 300, tooltipContent }) => (
   <div style={{ height }} role="img" aria-label="Vendor performance chart">
     <ResponsiveContainer>
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }} barCategoryGap="20%">
         <CartesianGrid strokeDasharray="3 3" horizontal={false} />
         <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(value) => `${value}${valueSuffix}`} />
         <YAxis type="category" dataKey="label" width={130} tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(value, name) => [`${value}${valueSuffix}`, name]} />
+        <Tooltip content={tooltipContent} formatter={(value, name) => [`${value}${valueSuffix}`, name]} />
         {series.map((entry) => (
           <Bar key={entry.key} dataKey={entry.key} name={entry.name} fill={entry.color} isAnimationActive={false}>
             {entry.colorFor ? data.map((row) => <Cell key={row.label} fill={entry.colorFor(row)} />) : null}
@@ -115,6 +116,11 @@ const HorizontalBars = ({ data, series, valueSuffix = "", height = 300 }) => (
     </ResponsiveContainer>
   </div>
 );
+
+const TenureClaimTooltip = ({ active, payload }) => {
+  const row = active ? payload?.[0]?.payload : null;
+  return row ? <div className="bg-white border rounded shadow-sm p-2 small"><div className="fw-semibold">{row.label}</div><div className="text-danger">Average claim: {row.average_claim_percentage.toFixed(2)}%</div><div>Total items: {row.item_count}</div></div> : null;
+};
 
 const MonthlyDelayTooltip = ({ active, payload }) => {
   const row = active ? payload?.[0]?.payload : null;
@@ -175,7 +181,7 @@ const VendorPerformanceCharts = ({ section, rows = [] }) => {
     {charts.statuses.length > 0 && <div className="col-xl-5"><ChartCard title="PO status breakdown"><HorizontalBars data={charts.statuses} series={[{ key: "count", name: "POs", color: "#0d6efd", colorFor: (row) => STATUS_COLORS[row.label] || STATUS_COLORS.Unknown }]} /></ChartCard></div>}
   </div>;
 
-  if (section === "product_complaints" && charts.claims.length > 0) return <div className="p-3 pb-0"><ChartCard title="Average claim rate by tenure"><HorizontalBars data={charts.claims} valueSuffix="%" height={Math.max(280, charts.claims.length * 34)} series={[{ key: "average_claim_percentage", name: "Average claim", color: "#dc3545" }]} /></ChartCard></div>;
+  if (section === "product_complaints" && charts.claims.length > 0) return <div className="p-3 pb-0"><ChartCard title="Average claim rate by tenure"><HorizontalBars data={charts.claims} valueSuffix="%" height={Math.max(280, charts.claims.length * 34)} tooltipContent={<TenureClaimTooltip />} series={[{ key: "average_claim_percentage", name: "Average claim", color: "#dc3545" }]} /></ChartCard></div>;
 
   if (section === "shipping_delay" && (charts.delays.length || charts.statuses.length)) return <div className="row g-3 p-3 pb-0">
     {charts.delays.length > 0 && <div className="col-xl-7"><ChartCard title="Final packed vs stuffing"><HorizontalBars data={charts.delays} valueSuffix=" days" series={[{ key: "packed_difference_days", name: "Stuffing vs final packed", color: "#6f42c1" }]} /></ChartCard></div>}

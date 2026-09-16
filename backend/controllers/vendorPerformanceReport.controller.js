@@ -267,7 +267,8 @@ const buildTenureClaimAverageRows = (rows = []) => {
     const to_date = String(tenure?.to_date || "");
     if (!from_date || !to_date) return;
     const key = String(tenure?.tenure_id || `${row?.brand || ""}:${from_date}:${to_date}`);
-    const total = totals.get(key) || { brand: row?.brand || "", from_date, to_date, delivered_quantity: 0, rejected_quantity: 0 };
+    const total = totals.get(key) || { brand: row?.brand || "", from_date, to_date, item_count: 0, delivered_quantity: 0, rejected_quantity: 0 };
+    total.item_count += 1;
     total.delivered_quantity += Number(tenure?.delivered_quantity || 0);
     total.rejected_quantity += Number(tenure?.rejected_quantity || 0);
     totals.set(key, total);
@@ -282,6 +283,34 @@ const buildTenureClaimAverageRows = (rows = []) => {
 };
 
 const chartNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
+const average = (rows = [], key) => {
+  const values = rows.map((row) => chartNumber(row?.[key])).filter((value) => value !== null);
+  return values.length ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2)) : null;
+};
+const buildVendorPerformanceSummaries = ({ poRows = [], claimRows = [], shippingRows = [], brands = [] } = {}) => {
+  const selectedBrands = [...new Set(brands.filter(Boolean))];
+  const brandRows = selectedBrands.map((brand) => {
+    const rows = poRows.filter((row) => normalizeText(row?.brand).toLowerCase() === normalizeText(brand).toLowerCase());
+    return { brand, po_count: rows.length, average_delay_days: average(rows, "difference_days") };
+  });
+  const claimTotals = claimRows.reduce((total, row) => ({
+    delivered_quantity: total.delivered_quantity + Number(row?.delivered_quantity || 0),
+    rejected_quantity: total.rejected_quantity + Number(row?.rejected_quantity || 0),
+  }), { delivered_quantity: 0, rejected_quantity: 0 });
+  return {
+    po_delay: { brands: brandRows },
+    product_complaints: {
+      item_count: claimRows.length,
+      average_claim_percentage: claimTotals.delivered_quantity > 0
+        ? Number(((claimTotals.rejected_quantity / claimTotals.delivered_quantity) * 100).toFixed(2))
+        : 0,
+    },
+    shipping_delay: {
+      delayed_po_count: shippingRows.filter((row) => Number(row?.packed_difference_days || 0) > 0).length,
+      average_stuffing_time_days: average(shippingRows, "packed_difference_days"),
+    },
+  };
+};
 const chartRows = (rows, keys) => rows
   .filter((row) => keys.some((key) => chartNumber(row?.[key]) !== null))
   .slice()
@@ -582,6 +611,13 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, fromDate, to
     : [];
   const claimTenureById = new Map(claimTenures.map((tenure) => [String(tenure._id), tenure]));
   const poSections = buildPoSections(orderRows);
+  const claimRows = buildClaimRows(claimItems, claimTenureById);
+  const summaries = buildVendorPerformanceSummaries({
+    poRows: poSections.po_delay,
+    claimRows,
+    shippingRows: poSections.shipping_delay,
+    brands: selectedBrands.length ? selectedBrands : brandOptions,
+  });
 
   return {
     filters: {
@@ -593,10 +629,10 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, fromDate, to
     },
     vendor: selectedVendor,
     sections: {
-      po_delay: { rows: poSections.po_delay },
+      po_delay: { rows: poSections.po_delay, summary: summaries.po_delay },
       product_analytics: { rows: productRows },
-      product_complaints: { rows: buildClaimRows(claimItems, claimTenureById) },
-      shipping_delay: { rows: poSections.shipping_delay },
+      product_complaints: { rows: claimRows, summary: summaries.product_complaints },
+      shipping_delay: { rows: poSections.shipping_delay, summary: summaries.shipping_delay },
     },
   };
 };
@@ -698,5 +734,5 @@ const exportVendorPerformanceReport = async (req, res) => {
 module.exports = {
   getVendorPerformanceReport,
   exportVendorPerformanceReport,
-  __test__: { buildClaimRows, buildTenureClaimAverageRows, buildPoSections, differenceInDays, resolveEtdDateRange, buildEffectiveEtdMatch, buildVendorPerformanceChartSpecs },
+  __test__: { buildClaimRows, buildTenureClaimAverageRows, buildPoSections, buildVendorPerformanceSummaries, differenceInDays, resolveEtdDateRange, buildEffectiveEtdMatch, buildVendorPerformanceChartSpecs },
 };

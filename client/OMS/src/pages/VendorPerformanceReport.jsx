@@ -30,6 +30,11 @@ const formatDays = (value) => {
 const formatPercent = (value) => Number.isFinite(Number(value))
   ? `${Number(value).toFixed(2)}%`
   : "-";
+const formatAverageDays = (value) => Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)} days` : "-";
+
+const SummaryCards = ({ cards = [] }) => <div className="row g-2 p-3 pb-0">
+  {cards.map((card) => <div key={card.label} className="col-sm-6 col-lg-3"><div className="border rounded bg-light h-100 p-3"><div className="small text-secondary">{card.label}</div><div className="fs-5 fw-semibold">{card.value}</div></div></div>)}
+</div>;
 
 const statusClass = (status) => {
   if (status === "Delayed") return "text-bg-danger";
@@ -145,6 +150,9 @@ const VendorPerformanceReport = () => {
   const productRows = sections?.product_analytics?.rows || [];
   const claimRows = sections?.product_complaints?.rows || [];
   const shippingRows = sections?.shipping_delay?.rows || [];
+  const poSummary = sections?.po_delay?.summary?.brands || [];
+  const claimSummary = sections?.product_complaints?.summary || {};
+  const shippingSummary = sections?.shipping_delay?.summary || {};
   const stuffingStatusKey = stuffingComparison === "packed" ? "packed_status" : "etd_status";
   const stuffingComparisonLabel = stuffingComparison === "packed" ? "final packed" : "ETD";
 
@@ -265,6 +273,7 @@ const VendorPerformanceReport = () => {
 
             {activeSection === "po_delay" && <section className="card om-card" ref={(node) => { sectionRefs.current.po_delay = node; }}>
               <div className="card-header fw-semibold">1. PO-wise delay — complete packed date vs ETD</div>
+              <SummaryCards cards={poSummary.flatMap((row) => [{ label: `${row.brand} POs`, value: row.po_count }, { label: `${row.brand} average delay`, value: formatAverageDays(row.average_delay_days) }])} />
               <VendorPerformanceMonthlyDelayChart rows={poRows} />
               <VendorPerformanceCharts section="po_delay" rows={poRows} />
               <div className="table-responsive">
@@ -285,6 +294,7 @@ const VendorPerformanceReport = () => {
 
             {activeSection === "product_complaints" && <section className="card om-card" ref={(node) => { sectionRefs.current.product_complaints = node; }}>
               <div className="card-header fw-semibold">3. Product claims</div>
+              <SummaryCards cards={[{ label: "Items", value: claimSummary.item_count || 0 }, { label: "Average claim", value: formatPercent(claimSummary.average_claim_percentage) }]} />
               <VendorPerformanceMonthlyDelayChart rows={poRows} />
               <VendorPerformanceCharts section="product_complaints" rows={claimRows} />
               <div className="table-responsive">
@@ -307,6 +317,7 @@ const VendorPerformanceReport = () => {
                   <button type="button" className={`btn ${stuffingComparison === "etd" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setStuffingComparison("etd")}>ETD</button>
                 </div>
               </div>
+              <SummaryCards cards={[{ label: "Delayed stuffing POs", value: shippingSummary.delayed_po_count || 0 }, { label: "Average stuffing time", value: formatAverageDays(shippingSummary.average_stuffing_time_days) }]} />
               <VendorPerformanceMonthlyDelayChart rows={shippingRows} dateKey="final_packed_date" delayKey="packed_difference_days" title="Monthly stuffing delay: final packed vs stuffing" />
               <VendorPerformanceCharts section="shipping_delay" rows={shippingRows} />
               <div className="table-responsive">
