@@ -115,9 +115,6 @@ const {
   cleanupLegacyItemSizeFields,
 } = require("../helpers/itemLegacySizeCleanup");
 const {
-  normalizeClaimTenures,
-} = require("../helpers/claimPercentage");
-const {
   buildFormDraftCleanupPipeline,
   buildFormDraftDeletePipeline,
   buildFormDraftUpsertPipeline,
@@ -6948,9 +6945,7 @@ exports.updateItem = async (req, res) => {
       throw createHttpError(400, "claim_percentage is calculated from claim_tenures");
     }
     if (hasOwn(payload, "claim_tenures")) {
-      const claim = normalizeClaimTenures(payload.claim_tenures);
-      setPath("claim_tenures", claim.tenures);
-      setPath("claim_percentage", claim.claim_percentage);
+      throw createHttpError(400, "Use the item claim tenure endpoint to update claims");
     }
 
     if (productTypeContext.productTypeSnapshot) {

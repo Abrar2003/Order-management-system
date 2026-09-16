@@ -13,6 +13,8 @@ test("viewer permissions are read-only even when a mutation is requested", () =>
   const defaults = getDefaultPermissionsForRole("viewer");
   assert.equal(defaults.orders.view, true);
   assert.equal(defaults.orders.edit, false);
+  assert.equal(defaults.product_database.view, true);
+  assert.equal(defaults.product_database.export, false);
   assert.equal(defaults.images_documents.upload, false);
   assert.equal(defaults.pis.view, false);
 

@@ -256,7 +256,7 @@ router.get(
 router.get(
   "/product-database/export",
   auth,
-  requirePermission("product_database", "view"),
+  requirePermission("product_database", "export"),
   securityLog("export_excel", "product_database", {
     metadata: (req) => ({ filters: req.query || {} }),
   }),
@@ -274,7 +274,7 @@ router.get(
 router.get(
   "/item-database/export",
   auth,
-  requirePermission("product_database", "view"),
+  requirePermission("product_database", "export"),
   securityLog("export_excel", "item_database", {
     metadata: (req) => ({ filters: req.query || {} }),
   }),
@@ -291,6 +291,7 @@ router.get(
 router.get(
   "/pis-update-logs",
   auth,
+  requireNonViewer,
   requirePisUpdateLogsView,
   getPisUpdateLogs,
 );

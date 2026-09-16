@@ -3,6 +3,9 @@ const router = express.Router();
 const emailLogsController = require("../controllers/emailLogs.controller");
 const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
+const { requireNonViewer } = require("../middlewares/permission.middleware");
+
+router.use(auth, requireNonViewer);
 
 // Get filter options (brands and vendors)
 router.get("/filters/options", auth, emailLogsController.getFilterOptions);

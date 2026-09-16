@@ -4,9 +4,19 @@ const XLSX = require("xlsx");
 const Inspection = require("../models/inspection.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
+const Brand = require("../models/brand.model");
 const Order = require("../models/order.model");
+const Tenure = require("../models/tenure.model");
 const Vendor = require("../models/vendor.model");
-const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const {
+  applyDataAccessMatch,
+  assertUserDataAccess,
+} = require("../services/userDataAccess.service");
+const { invalidateItemCaches } = require("../services/cacheInvalidation.service");
+const {
+  normalizeClaimTenures,
+  parseTenureDate,
+} = require("../helpers/claimPercentage");
 const {
   getMonthlyShipmentsDrilldownData,
   getMonthlyShipmentsReportData,
@@ -133,17 +143,39 @@ const INSPECTED_ITEMS_ORDER_SELECT = [
   "updatedAt",
 ].join(" ");
 
-const isCurrentClaimSystemItem = (item = {}) =>
-  Array.isArray(item?.claim_tenures) && item.claim_tenures.length > 0;
+const getItemBrand = (item = {}) =>
+  normalizeText(item?.brand_name || item?.brand || item?.brands?.[0]);
 
-const buildClaimsReportRow = (item = {}) => {
-  const tenures = (Array.isArray(item?.claim_tenures) ? item.claim_tenures : []).map((tenure) => ({
-    id: String(tenure?._id || `${tenure?.from_date || ""}-${tenure?.to_date || ""}`),
-    from_date: toISODateString(tenure?.from_date),
-    to_date: toISODateString(tenure?.to_date),
-    delivered_quantity: Number(tenure?.delivered_quantity || 0),
-    rejected_quantity: Number(tenure?.rejected_quantity || 0),
-  }));
+const serializeTenure = (tenure = {}) => ({
+  id: String(tenure?._id || tenure?.id || ""),
+  brand: normalizeText(tenure?.brand),
+  from_date: toISODateString(tenure?.from_date),
+  to_date: toISODateString(tenure?.to_date),
+});
+
+const buildTenureMap = (tenures = []) => new Map(
+  (Array.isArray(tenures) ? tenures : []).map((tenure) => [String(tenure?._id || tenure?.id), tenure]),
+);
+
+const isCurrentClaimSystemItem = (item = {}) =>
+  Array.isArray(item?.claim_tenures) && item.claim_tenures.some((claim) =>
+    claim?.tenure_id || (claim?.from_date && claim?.to_date),
+  );
+
+const buildClaimsReportRow = (item = {}, tenureById = new Map(), selectedTenureId = "") => {
+  const tenures = (Array.isArray(item?.claim_tenures) ? item.claim_tenures : [])
+    .filter((claim) => !selectedTenureId || String(claim?.tenure_id) === String(selectedTenureId))
+    .map((claim) => {
+      const tenure = tenureById.get(String(claim?.tenure_id));
+      return {
+        id: String(claim?._id || claim?.tenure_id || `${claim?.from_date || ""}-${claim?.to_date || ""}`),
+        tenure_id: String(claim?.tenure_id || ""),
+        from_date: toISODateString(tenure?.from_date || claim?.from_date),
+        to_date: toISODateString(tenure?.to_date || claim?.to_date),
+        delivered_quantity: Number(claim?.delivered_quantity || 0),
+        rejected_quantity: Number(claim?.rejected_quantity || 0),
+      };
+    });
   const totals = tenures.reduce(
     (summary, tenure) => ({
       delivered_quantity: summary.delivered_quantity + tenure.delivered_quantity,
@@ -157,7 +189,7 @@ const buildClaimsReportRow = (item = {}) => {
     code: normalizeText(item?.code),
     name: normalizeText(item?.name),
     description: normalizeText(item?.description),
-    brand: normalizeText(item?.brand_name || item?.brand || item?.brands?.[0]),
+    brand: getItemBrand(item),
     vendors: [...new Set((Array.isArray(item?.vendors) ? item.vendors : [])
       .map((vendor) => normalizeText(vendor?.name || vendor))
       .filter(Boolean))],
@@ -169,6 +201,21 @@ const buildClaimsReportRow = (item = {}) => {
       : 0,
   };
 };
+
+const getTenureAccessUser = (user = {}) => ({ ...user, allowed_vendors: ["all"] });
+const applyTenureAccessMatch = (match = {}, user = {}) => applyDataAccessMatch(
+  match,
+  getTenureAccessUser(user),
+  { brandFields: ["brand"], vendorFields: [] },
+);
+
+const buildItemBrandMatch = (brand = "") => ({
+  $or: [{ brand }, { brand_name: brand }, { brands: brand }],
+});
+
+const getAccessibleTenures = async (user) => Tenure.find(
+  applyTenureAccessMatch({}, user),
+).sort({ brand: 1, from_date: -1, to_date: -1 }).lean();
 
 const INSPECTED_ITEM_CRITERIA = Object.freeze({
   INSPECTED: "inspected",
@@ -2070,6 +2117,77 @@ exports.getVendorWiseQaDetailed = async (req, res) => {
   }
 };
 
+exports.getClaimTenures = async (req, res) => {
+  try {
+    const [tenures, brands] = await Promise.all([
+      getAccessibleTenures(req.user),
+      Brand.find(applyDataAccessMatch(
+        {},
+        getTenureAccessUser(req.user),
+        { brandFields: ["name"], vendorFields: [] },
+      )).select("name").sort({ name: 1 }).lean(),
+    ]);
+    return res.status(200).json({
+      success: true,
+      rows: tenures.map(serializeTenure),
+      brands: brands.map((brand) => normalizeText(brand.name)).filter(Boolean),
+    });
+  } catch (error) {
+    console.error("Get Claim Tenures Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch claim tenures." });
+  }
+};
+
+exports.createClaimTenure = async (req, res) => {
+  try {
+    const requestedBrand = normalizeText(req.body?.brand);
+    const fromDate = parseTenureDate(req.body?.from_date, "Tenure from date");
+    const toDate = parseTenureDate(req.body?.to_date, "Tenure to date");
+    if (toDate < fromDate) {
+      return res.status(400).json({ success: false, message: "Tenure to date cannot be before from date." });
+    }
+
+    const brand = await Brand.findOne({
+      name: new RegExp(`^\\s*${escapeRegex(requestedBrand)}\\s*$`, "i"),
+    }).select("name").lean();
+    if (!brand) {
+      return res.status(400).json({ success: false, message: "Select a valid brand." });
+    }
+
+    assertUserDataAccess(getTenureAccessUser(req.user), { brands: [brand.name] });
+    const tenure = await Tenure.create({ brand: brand.name, from_date: fromDate, to_date: toDate });
+    await invalidateItemCaches();
+    return res.status(201).json({ success: true, data: serializeTenure(tenure) });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ success: false, message: "This brand tenure already exists." });
+    }
+    const status = error?.statusCode || 400;
+    console.error("Create Claim Tenure Error:", error);
+    return res.status(status).json({ success: false, message: error?.message || "Failed to create claim tenure." });
+  }
+};
+
+exports.deleteClaimTenure = async (req, res) => {
+  try {
+    const tenureId = String(req.params.tenureId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(tenureId)) {
+      return res.status(400).json({ success: false, message: "Invalid tenure." });
+    }
+    const tenure = await Tenure.findOne(applyTenureAccessMatch({ _id: tenureId }, req.user)).lean();
+    if (!tenure) return res.status(404).json({ success: false, message: "Tenure not found." });
+    if (await Item.exists({ "claim_tenures.tenure_id": tenure._id })) {
+      return res.status(409).json({ success: false, message: "This tenure has claim entries and cannot be deleted." });
+    }
+    await Tenure.deleteOne({ _id: tenure._id });
+    await invalidateItemCaches();
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("Delete Claim Tenure Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to delete claim tenure." });
+  }
+};
+
 exports.getClaimItemByCode = async (req, res) => {
   try {
     const code = normalizeText(req.params.code);
@@ -2084,34 +2202,153 @@ exports.getClaimItemByCode = async (req, res) => {
         { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
       ),
     )
-      .select("code name description claim_tenures claim_percentage")
+      .select("code name description brand brand_name brands claim_tenures claim_percentage")
       .lean();
 
     if (!item) {
       return res.status(404).json({ success: false, message: "Item code was not found." });
     }
 
-    return res.status(200).json({ success: true, data: item });
+    const tenures = await Tenure.find(
+      applyTenureAccessMatch({ brand: getItemBrand(item) }, req.user),
+    ).sort({ from_date: -1, to_date: -1 }).lean();
+
+    return res.status(200).json({
+      success: true,
+      data: { ...item, tenures: tenures.map(serializeTenure) },
+    });
   } catch (error) {
     console.error("Get Claim Item Error:", error);
     return res.status(500).json({ success: false, message: "Failed to verify item code." });
   }
 };
 
+exports.upsertItemClaimTenure = async (req, res) => {
+  try {
+    const itemId = String(req.params.itemId || "").trim();
+    const tenureId = String(req.params.tenureId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId) || !mongoose.Types.ObjectId.isValid(tenureId)) {
+      return res.status(400).json({ success: false, message: "Invalid item or tenure." });
+    }
+
+    const item = await Item.findOne(applyDataAccessMatch(
+      { _id: itemId },
+      req.user,
+      { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
+    ));
+    if (!item) return res.status(404).json({ success: false, message: "Item not found." });
+
+    const tenure = await Tenure.findOne(applyTenureAccessMatch({ _id: tenureId }, req.user)).lean();
+    if (!tenure) return res.status(404).json({ success: false, message: "Tenure not found." });
+    if (getItemBrand(item).toLocaleLowerCase() !== normalizeText(tenure.brand).toLocaleLowerCase()) {
+      return res.status(400).json({ success: false, message: "The selected tenure belongs to a different brand." });
+    }
+
+    const existing = Array.isArray(item.claim_tenures) ? item.claim_tenures : [];
+    if (existing.some((claim) => !claim?.tenure_id)) {
+      return res.status(409).json({ success: false, message: "This item has legacy claim data. Run the claim-tenure backfill first." });
+    }
+    const nextClaims = existing
+      .filter((claim) => String(claim.tenure_id) !== tenureId)
+      .map((claim) => ({
+        tenure_id: String(claim.tenure_id),
+        delivered_quantity: claim.delivered_quantity,
+        rejected_quantity: claim.rejected_quantity,
+      }));
+    nextClaims.push({
+      tenure_id: tenureId,
+      delivered_quantity: req.body?.delivered_quantity,
+      rejected_quantity: req.body?.rejected_quantity,
+    });
+    const claim = normalizeClaimTenures(nextClaims);
+    item.set("claim_tenures", claim.tenures);
+    item.set("claim_percentage", claim.claim_percentage);
+    await item.save();
+    await invalidateItemCaches();
+
+    return res.status(200).json({
+      success: true,
+      data: { ...item.toObject(), claim_percentage: claim.claim_percentage },
+    });
+  } catch (error) {
+    console.error("Upsert Item Claim Tenure Error:", error);
+    return res.status(error?.statusCode || 400).json({
+      success: false,
+      message: error?.message || "Failed to save item claim.",
+    });
+  }
+};
+
+exports.replaceItemClaimTenures = async (req, res) => {
+  try {
+    const itemId = String(req.params.itemId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({ success: false, message: "Invalid item." });
+    }
+    const claim = normalizeClaimTenures(req.body?.claim_tenures);
+    if (claim.tenures.length === 0) {
+      return res.status(400).json({ success: false, message: "At least one claim tenure is required." });
+    }
+    if (claim.tenures.some((entry) => !mongoose.Types.ObjectId.isValid(entry.tenure_id))) {
+      return res.status(400).json({ success: false, message: "Invalid tenure." });
+    }
+
+    const item = await Item.findOne(applyDataAccessMatch(
+      { _id: itemId },
+      req.user,
+      { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
+    ));
+    if (!item) return res.status(404).json({ success: false, message: "Item not found." });
+    if ((Array.isArray(item.claim_tenures) ? item.claim_tenures : []).some((entry) => !entry?.tenure_id)) {
+      return res.status(409).json({ success: false, message: "This item has legacy claim data. Run the claim-tenure backfill first." });
+    }
+
+    const tenureIds = claim.tenures.map((entry) => entry.tenure_id);
+    const tenures = await Tenure.find(applyTenureAccessMatch({ _id: { $in: tenureIds } }, req.user)).lean();
+    if (tenures.length !== tenureIds.length) {
+      return res.status(404).json({ success: false, message: "One or more tenures were not found." });
+    }
+    if (tenures.some((tenure) => getItemBrand(item).toLocaleLowerCase() !== normalizeText(tenure.brand).toLocaleLowerCase())) {
+      return res.status(400).json({ success: false, message: "Every selected tenure must belong to the item brand." });
+    }
+
+    item.set("claim_tenures", claim.tenures);
+    item.set("claim_percentage", claim.claim_percentage);
+    await item.save();
+    await invalidateItemCaches();
+    return res.status(200).json({
+      success: true,
+      data: { ...item.toObject(), claim_percentage: claim.claim_percentage },
+    });
+  } catch (error) {
+    console.error("Replace Item Claim Tenures Error:", error);
+    return res.status(error?.statusCode || 400).json({
+      success: false,
+      message: error?.message || "Failed to save item claims.",
+    });
+  }
+};
+
 exports.getClaimsReport = async (req, res) => {
   try {
-    const items = await Item.find(
-      applyDataAccessMatch(
-        { "claim_tenures.0": { $exists: true } },
-        req.user,
-        { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
-      ),
-    )
+    const tenureId = String(req.query.tenure_id || req.query.tenureId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(tenureId)) {
+      return res.status(400).json({ success: false, message: "Select a valid tenure." });
+    }
+    const tenure = await Tenure.findOne(applyTenureAccessMatch({ _id: tenureId }, req.user)).lean();
+    if (!tenure) return res.status(404).json({ success: false, message: "Tenure not found." });
+
+    const items = await Item.find(applyDataAccessMatch(
+      buildItemBrandMatch(tenure.brand),
+      req.user,
+      { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
+    ))
       .select(CLAIMS_REPORT_SELECT)
       .sort({ updatedAt: -1, code: 1 })
       .lean();
 
-    const allRows = items.filter(isCurrentClaimSystemItem).map(buildClaimsReportRow);
+    const tenureById = buildTenureMap([tenure]);
+    const allRows = items.map((item) => buildClaimsReportRow(item, tenureById, tenureId));
     const rows = allRows.filter((row) => matchesInspectedItemsReportFilters(row, {
       search: req.query.search,
       brand: req.query.brand,
@@ -2120,6 +2357,7 @@ exports.getClaimsReport = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+      tenure: serializeTenure(tenure),
       rows,
       filters: {
         brands: normalizeDistinctTextValues(

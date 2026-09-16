@@ -2480,6 +2480,7 @@ export const ProductDatabaseModal = ({
 };
 
 const ProductDatabase = () => {
+  const { hasPermission } = usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "product-database");
   const [search, setSearch] = useState(() => normalizeTextValue(searchParams.get("search")));
@@ -2797,14 +2798,16 @@ const ProductDatabase = () => {
             <ProductDatabaseStatusPills summary={statusSummary} />
             <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
               <span className="small text-secondary">PD size data approval workflow</span>
-              <button
-                type="button"
-                className="btn btn-outline-primary btn-sm"
-                onClick={handleExportXls}
-                disabled={loading || exporting || Number(pagination.total || 0) === 0}
-              >
-                {exporting ? "Exporting..." : "Export XLS"}
-              </button>
+              {hasPermission("product_database", "export") && (
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={handleExportXls}
+                  disabled={loading || exporting || Number(pagination.total || 0) === 0}
+                >
+                  {exporting ? "Exporting..." : "Export XLS"}
+                </button>
+              )}
             </div>
           </div>
         </div>

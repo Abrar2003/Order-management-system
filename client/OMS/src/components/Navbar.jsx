@@ -265,6 +265,8 @@ const Navbar = () => {
       return [
         routeMenuItem("items-all", "View Items", "/items"),
         routeMenuItem("item-masters", "Item Masters", "/item-masters"),
+        routeMenuItem("item-database", "Item Database", "/item-database"),
+        routeMenuItem("product-database", "Product Database", "/product-database"),
       ];
     }
 
@@ -517,7 +519,11 @@ const Navbar = () => {
   ]);
 
   const logMenuItems = useMemo(() => {
-    if ((!canViewOrderPages && !canViewPis && !canManageProductDatabase) || isQcOnlyRole) {
+    if (
+      (!canViewOrderPages && !canViewPis && !canManageProductDatabase) ||
+      isQcOnlyRole ||
+      isViewer
+    ) {
       return [];
     }
 
@@ -532,7 +538,7 @@ const Navbar = () => {
       items.push(routeMenuItem("pis-update-logs", "PIS Update Logs", "/pis-update-logs"));
     }
     return items;
-  }, [canManageProductDatabase, canViewOrderPages, canViewPis, isQcOnlyRole]);
+  }, [canManageProductDatabase, canViewOrderPages, canViewPis, isQcOnlyRole, isViewer]);
 
   const settingsMenuItems = useMemo(
     () => {

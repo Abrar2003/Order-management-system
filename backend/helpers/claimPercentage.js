@@ -27,11 +27,8 @@ const normalizeClaimTenures = (value = []) => {
 
   const tenures = value.map((entry, index) => {
     const label = `Claim tenure ${index + 1}`;
-    const fromDate = parseTenureDate(entry?.from_date, `${label} from date`);
-    const toDate = parseTenureDate(entry?.to_date, `${label} to date`);
-    if (toDate < fromDate) {
-      throw new Error(`${label} to date cannot be before from date`);
-    }
+    const tenureId = normalizeText(entry?.tenure_id || entry?.tenureId);
+    if (!tenureId) throw new Error(`${label} tenure is required`);
 
     const deliveredQuantity = parseQuantity(
       entry?.delivered_quantity,
@@ -47,19 +44,15 @@ const normalizeClaimTenures = (value = []) => {
     }
 
     return {
-      from_date: fromDate,
-      to_date: toDate,
+      tenure_id: tenureId,
       delivered_quantity: deliveredQuantity,
       rejected_quantity: rejectedQuantity,
     };
   });
 
-  const chronological = [...tenures].sort((left, right) => left.from_date - right.from_date);
-  chronological.slice(1).forEach((tenure, index) => {
-    if (tenure.from_date <= chronological[index].to_date) {
-      throw new Error("Claim tenure date ranges cannot overlap");
-    }
-  });
+  if (new Set(tenures.map((tenure) => tenure.tenure_id)).size !== tenures.length) {
+    throw new Error("An item can have only one claim per tenure");
+  }
 
   const totals = tenures.reduce(
     (summary, tenure) => ({
@@ -80,5 +73,6 @@ const normalizeClaimTenures = (value = []) => {
 };
 
 module.exports = {
+  parseTenureDate,
   normalizeClaimTenures,
 };

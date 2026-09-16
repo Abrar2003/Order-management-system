@@ -5,14 +5,12 @@ const { normalizeClaimTenures } = require("../helpers/claimPercentage");
 test("claim percentage is weighted across every tenure", () => {
   const claim = normalizeClaimTenures([
     {
-      from_date: "2025-01-01",
-      to_date: "2025-03-31",
+      tenure_id: "tenure-1",
       delivered_quantity: 100,
       rejected_quantity: 10,
     },
     {
-      from_date: "2025-04-01",
-      to_date: "2025-07-31",
+      tenure_id: "tenure-2",
       delivered_quantity: 10,
       rejected_quantity: 5,
     },
@@ -23,17 +21,17 @@ test("claim percentage is weighted across every tenure", () => {
   assert.equal(claim.claim_percentage, 13.64);
 });
 
-test("claim tenures reject overlapping dates and rejected quantities above delivery", () => {
+test("claim tenures reject duplicate tenures and rejected quantities above delivery", () => {
   assert.throws(
     () => normalizeClaimTenures([
-      { from_date: "2025-01-01", to_date: "2025-03-31", delivered_quantity: 10, rejected_quantity: 1 },
-      { from_date: "2025-03-31", to_date: "2025-04-30", delivered_quantity: 10, rejected_quantity: 1 },
+      { tenure_id: "tenure-1", delivered_quantity: 10, rejected_quantity: 1 },
+      { tenure_id: "tenure-1", delivered_quantity: 10, rejected_quantity: 1 },
     ]),
-    /cannot overlap/,
+    /only one claim/,
   );
   assert.throws(
     () => normalizeClaimTenures([
-      { from_date: "2025-01-01", to_date: "2025-03-31", delivered_quantity: 10, rejected_quantity: 11 },
+      { tenure_id: "tenure-1", delivered_quantity: 10, rejected_quantity: 11 },
     ]),
     /cannot exceed/,
   );

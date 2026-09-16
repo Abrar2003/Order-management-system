@@ -9,6 +9,42 @@ import "../App.css";
 const DEFAULT_FILTER = "all";
 const formatPercentage = (value) => `${Number(value || 0).toFixed(2).replace(/\.00$/, "")}%`;
 
+const CreateTenureModal = ({ brands, onClose, onSaved }) => {
+  const [brand, setBrand] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (event) => {
+    event.preventDefault();
+    try {
+      setSaving(true);
+      setError("");
+      const response = await api.post("/reports/claims/tenures", {
+        brand,
+        from_date: fromDate,
+        to_date: toDate,
+      });
+      onSaved(response?.data?.data);
+    } catch (saveError) {
+      setError(saveError?.response?.data?.message || "Failed to create tenure.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog"><div className="modal-dialog modal-dialog-centered" role="document"><form className="modal-content" onSubmit={submit}>
+    <div className="modal-header"><h5 className="modal-title">Create tenure</h5><button type="button" className="btn-close" aria-label="Close" disabled={saving} onClick={onClose} /></div>
+    <div className="modal-body"><div className="row g-2">
+      <div className="col-12"><label className="form-label">Brand</label><select className="form-select" value={brand} required disabled={saving} onChange={(event) => setBrand(event.target.value)}><option value="">Select brand</option>{brands.map((entry) => <option key={entry} value={entry}>{entry}</option>)}</select></div>
+      <div className="col-md-6"><label className="form-label">From date</label><input type="date" className="form-control" value={fromDate} required disabled={saving} onChange={(event) => setFromDate(event.target.value)} /></div>
+      <div className="col-md-6"><label className="form-label">To date</label><input type="date" className="form-control" value={toDate} required disabled={saving} onChange={(event) => setToDate(event.target.value)} /></div>
+    </div>{error && <div className="alert alert-danger mt-3 mb-0">{error}</div>}</div>
+    <div className="modal-footer"><button type="button" className="btn btn-outline-secondary" disabled={saving} onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Creating..." : "Create tenure"}</button></div>
+  </form></div></div>;
+};
+
 const RaiseClaimModal = ({ onClose, onSaved }) => {
   const [itemCode, setItemCode] = useState("");
   const [verifiedItem, setVerifiedItem] = useState(null);
@@ -78,6 +114,9 @@ const Claims = () => {
   const canRaiseClaim = hasPermission("items", "edit");
   const [rows, setRows] = useState([]);
   const [filters, setFilters] = useState({ brands: [], vendors: [] });
+  const [tenures, setTenures] = useState([]);
+  const [tenureBrands, setTenureBrands] = useState([]);
+  const [selectedTenureId, setSelectedTenureId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -87,13 +126,31 @@ const Claims = () => {
   const [vendorFilter, setVendorFilter] = useState(DEFAULT_FILTER);
   const [draftVendorFilter, setDraftVendorFilter] = useState(DEFAULT_FILTER);
   const [showRaiseClaim, setShowRaiseClaim] = useState(false);
+  const [showCreateTenure, setShowCreateTenure] = useState(false);
+  const [deletingTenure, setDeletingTenure] = useState(false);
+
+  const loadTenures = useCallback(async () => {
+    try {
+      const response = await api.get("/reports/claims/tenures");
+      setTenures(Array.isArray(response?.data?.rows) ? response.data.rows : []);
+      setTenureBrands(Array.isArray(response?.data?.brands) ? response.data.brands : []);
+    } catch (loadError) {
+      setError(loadError?.response?.data?.message || "Failed to fetch claim tenures.");
+    }
+  }, []);
 
   const loadClaims = useCallback(async () => {
+    if (!selectedTenureId) {
+      setRows([]);
+      setFilters({ brands: [], vendors: [] });
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError("");
       const response = await api.get("/reports/claims", {
-        params: { search: searchInput, brand: brandFilter, vendor: vendorFilter },
+        params: { tenure_id: selectedTenureId, search: searchInput, brand: brandFilter, vendor: vendorFilter },
       });
       setRows(Array.isArray(response?.data?.rows) ? response.data.rows : []);
       setFilters(response?.data?.filters || { brands: [], vendors: [] });
@@ -103,11 +160,17 @@ const Claims = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, searchInput, vendorFilter]);
+  }, [brandFilter, searchInput, selectedTenureId, vendorFilter]);
+
+  useEffect(() => {
+    loadTenures();
+  }, [loadTenures]);
 
   useEffect(() => {
     loadClaims();
   }, [loadClaims]);
+
+  const selectedTenure = tenures.find((tenure) => String(tenure.id) === selectedTenureId);
 
   const handleApplyFilters = (event) => {
     event.preventDefault();
@@ -125,6 +188,21 @@ const Claims = () => {
     setDraftVendorFilter(DEFAULT_FILTER);
   };
 
+  const handleDeleteTenure = async () => {
+    if (!selectedTenure || !window.confirm(`Delete ${selectedTenure.brand} tenure ${formatDateDDMMYYYY(selectedTenure.from_date)} - ${formatDateDDMMYYYY(selectedTenure.to_date)}?`)) return;
+    try {
+      setDeletingTenure(true);
+      setError("");
+      await api.delete(`/reports/claims/tenures/${selectedTenure.id}`);
+      setSelectedTenureId("");
+      await loadTenures();
+    } catch (deleteError) {
+      setError(deleteError?.response?.data?.message || "Failed to delete tenure.");
+    } finally {
+      setDeletingTenure(false);
+    }
+  };
+
   return (
     <>
       <Navbar />
@@ -132,22 +210,21 @@ const Claims = () => {
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
           <div>
             <h2 className="h4 mb-1">Claims</h2>
-            <p className="text-secondary mb-0">Only claims recorded with claim tenures are shown.</p>
+            <p className="text-secondary mb-0">Select a brand tenure to see every item, including items with a 0% claim.</p>
           </div>
           <div className="d-flex gap-2">
             <button type="button" className="btn btn-outline-primary btn-sm" onClick={loadClaims}>
               Refresh
             </button>
             {canRaiseClaim && (
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowRaiseClaim(true)}>
-                Raise Claim
-              </button>
+              <><button type="button" className="btn btn-outline-primary btn-sm" onClick={() => setShowCreateTenure(true)}>Create tenure</button><button type="button" className="btn btn-primary btn-sm" onClick={() => setShowRaiseClaim(true)}>Raise Claim</button></>
             )}
           </div>
         </div>
 
         <div className="card om-card mb-3">
           <div className="card-body">
+            <div className="row g-2 mb-3"><div className="col-md-6"><label className="form-label">Brand tenure</label><select className="form-select" value={selectedTenureId} onChange={(event) => setSelectedTenureId(event.target.value)}><option value="">Select tenure</option>{tenures.map((tenure) => <option key={tenure.id} value={tenure.id}>{tenure.brand} · {formatDateDDMMYYYY(tenure.from_date)} - {formatDateDDMMYYYY(tenure.to_date)}</option>)}</select></div>{canRaiseClaim && <div className="col-md-2 d-flex align-items-end"><button type="button" className="btn btn-outline-danger w-100" disabled={!selectedTenure || deletingTenure} onClick={handleDeleteTenure}>{deletingTenure ? "Deleting..." : "Delete tenure"}</button></div>}</div>
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
                 <label className="form-label">Search (Code / Name / Description)</label>
@@ -192,7 +269,7 @@ const Claims = () => {
                   <th>Description</th>
                   <th>Brand</th>
                   <th>Vendors</th>
-                  <th>Claim Tenures</th>
+                  <th>Tenure</th>
                   <th>Delivered</th>
                   <th>Rejected</th>
                   <th>Claim</th>
@@ -202,20 +279,14 @@ const Claims = () => {
                 {loading ? (
                   <tr><td colSpan="8" className="text-center py-4">Loading claims...</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan="8" className="text-center py-4 text-secondary">No claims updated with the new system.</td></tr>
+                  <tr><td colSpan="8" className="text-center py-4 text-secondary">{selectedTenureId ? "No items match these filters." : "Select a tenure to view its items."}</td></tr>
                 ) : rows.map((row) => (
                   <tr key={row.id}>
                     <td className="fw-semibold">{row.code || "-"}</td>
                     <td>{row.description || row.name || "-"}</td>
                     <td>{row.brand || "-"}</td>
                     <td>{(row.vendors || []).join(", ") || "-"}</td>
-                    <td>
-                      {(row.tenures || []).map((tenure) => (
-                        <div key={tenure.id} className="small">
-                          {formatDateDDMMYYYY(tenure.from_date)} - {formatDateDDMMYYYY(tenure.to_date)}
-                        </div>
-                      ))}
-                    </td>
+                    <td>{selectedTenure ? `${formatDateDDMMYYYY(selectedTenure.from_date)} - ${formatDateDDMMYYYY(selectedTenure.to_date)}` : "-"}</td>
                     <td>{row.delivered_quantity}</td>
                     <td>{row.rejected_quantity}</td>
                     <td><span className="badge text-bg-warning">{formatPercentage(row.claim_percentage)}</span></td>
@@ -235,6 +306,7 @@ const Claims = () => {
           }}
         />
       )}
+      {showCreateTenure && <CreateTenureModal brands={tenureBrands} onClose={() => setShowCreateTenure(false)} onSaved={(tenure) => { setShowCreateTenure(false); setSelectedTenureId(String(tenure?.id || "")); loadTenures(); }} />}
     </>
   );
 };

@@ -28,6 +28,7 @@ import {
 } from "../utils/clientSort";
 import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
 import { formatFixedNumber } from "../utils/measurementDisplay";
+import { formatDateDDMMYYYY } from "../utils/date";
 import { getOptionText, normalizeTextOptions } from "../utils/optionText";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -270,16 +271,10 @@ const formatClaimPercentage = (value) => {
   return parsed.toFixed(2).replace(/\.?0+$/, "");
 };
 
-const getTenureClaimPercentage = (tenure = {}) => { const delivered = Number(tenure?.delivered_quantity) || 0; return delivered > 0 ? ((Number(tenure?.rejected_quantity) || 0) / delivered) * 100 : 0; };
-
-const toDateInputValue = (value) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
-};
-
-const createClaimTenure = (value = {}) => ({
-  from_date: toDateInputValue(value?.from_date),
-  to_date: toDateInputValue(value?.to_date),
+const getTenureClaimPercentage = (claim = {}) => { const delivered = Number(claim?.delivered_quantity) || 0; return delivered > 0 ? ((Number(claim?.rejected_quantity) || 0) / delivered) * 100 : 0; };
+const sameText = (left, right) => String(left || "").trim().toLocaleLowerCase() === String(right || "").trim().toLocaleLowerCase();
+const createClaimTenureEntry = (value = {}) => ({
+  tenure_id: String(value?.tenure_id || ""),
   delivered_quantity: value?.delivered_quantity ?? "",
   rejected_quantity: value?.rejected_quantity ?? "",
 });
@@ -292,58 +287,62 @@ export const ClaimPercentageModal = ({
   onClose,
   onSaved,
 }) => {
-  const [tenures, setTenures] = useState(() => {
+  const [tenures, setTenures] = useState(Array.isArray(item?.tenures) ? item.tenures : []);
+  const [claimTenures, setClaimTenures] = useState(() => {
     const existing = Array.isArray(item?.claim_tenures) ? item.claim_tenures : [];
-    return existing.length > 0 ? existing.map(createClaimTenure) : [createClaimTenure()];
+    return existing.length > 0 ? existing.map(createClaimTenureEntry) : [createClaimTenureEntry()];
   });
+  const [loadingTenures, setLoadingTenures] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const brand = getPrimaryBrand(item);
 
-  const totals = useMemo(
-    () =>
-      tenures.reduce(
-        (summary, tenure) => ({
-          delivered: summary.delivered + (Number(tenure.delivered_quantity) || 0),
-          rejected: summary.rejected + (Number(tenure.rejected_quantity) || 0),
-        }),
-        { delivered: 0, rejected: 0 },
-      ),
-    [tenures],
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingTenures(true);
+    api.get("/reports/claims/tenures")
+      .then((response) => {
+        if (cancelled) return;
+        const rows = Array.isArray(response?.data?.rows) ? response.data.rows : [];
+        setTenures(rows.filter((tenure) => sameText(tenure?.brand, brand)));
+      })
+      .catch((loadError) => {
+        if (!cancelled) setError(loadError?.response?.data?.message || "Failed to load brand tenures.");
+      })
+      .finally(() => { if (!cancelled) setLoadingTenures(false); });
+    return () => { cancelled = true; };
+  }, [brand]);
+
+  const totals = useMemo(() => claimTenures.reduce(
+    (summary, claim) => ({
+      delivered: summary.delivered + (Number(claim.delivered_quantity) || 0),
+      rejected: summary.rejected + (Number(claim.rejected_quantity) || 0),
+    }),
+    { delivered: 0, rejected: 0 },
+  ), [claimTenures]);
+  const calculatedPercentage = getTenureClaimPercentage({
+    delivered_quantity: totals.delivered,
+    rejected_quantity: totals.rejected,
+  });
+  const updateClaimTenure = (index, field, value) => setClaimTenures((current) =>
+    current.map((claim, claimIndex) => claimIndex === index ? { ...claim, [field]: value } : claim),
   );
-  const calculatedPercentage =
-    totals.delivered > 0 ? (totals.rejected / totals.delivered) * 100 : 0;
-
-  const updateTenure = (index, field, value) => {
-    setTenures((current) =>
-      current.map((tenure, tenureIndex) =>
-        tenureIndex === index ? { ...tenure, [field]: value } : tenure,
-      ),
-    );
-  };
+  const selectedTenureIds = new Set(claimTenures.map((claim) => String(claim.tenure_id)).filter(Boolean));
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (tenures.some((tenure) =>
-      !tenure.from_date ||
-      !tenure.to_date ||
-      tenure.delivered_quantity === "" ||
-      tenure.rejected_quantity === "",
-    )) {
-      setError("Complete every tenure row before saving.");
+    if (claimTenures.some((claim) => !claim.tenure_id || claim.delivered_quantity === "" || claim.rejected_quantity === "")) {
+      setError("Select a tenure and enter delivered and rejected quantities for every row.");
       return;
     }
 
     try {
       setSaving(true);
       setError("");
-      const response = await api.patch(`/items/${encodeURIComponent(item._id)}`, {
-        claim_tenures: tenures,
+      const response = await api.put(`/reports/claims/items/${encodeURIComponent(item._id)}/tenures`, {
+        claim_tenures: claimTenures,
       });
-      onSaved(response?.data?.data || {
-        ...item,
-        claim_tenures: tenures,
-        claim_percentage: calculatedPercentage,
-      });
+      onSaved(response?.data?.data || item);
     } catch (saveError) {
       setError(
         saveError?.response?.data?.message
@@ -363,7 +362,7 @@ export const ClaimPercentageModal = ({
             <div>
               <h5 className="modal-title">Claim Percentage</h5>
               <div className="small text-secondary">
-                Item {item?.code || "N/A"}
+                Item {item?.code || "N/A"} · {brand || "No brand"}
               </div>
             </div>
             <button
@@ -377,52 +376,18 @@ export const ClaimPercentageModal = ({
           <div className="modal-body">
             <div className="d-flex justify-content-between align-items-center mb-2">
               <label className="form-label mb-0">Claim tenures</label>
-              <button
-                type="button"
-                className="btn btn-outline-primary btn-sm"
-                disabled={saving}
-                onClick={() => setTenures((current) => [...current, createClaimTenure()])}
-              >
-                Add tenure
-              </button>
+              <button type="button" className="btn btn-outline-primary btn-sm" disabled={saving || loadingTenures || tenures.length <= selectedTenureIds.size} onClick={() => setClaimTenures((current) => [...current, createClaimTenureEntry()])}>Add tenure</button>
             </div>
-            <div className="d-grid gap-3">
-              {tenures.map((tenure, index) => (
-                <div className="border rounded p-3" key={`claim-tenure-${index}`}>
-                  <div className="d-flex justify-content-between align-items-center mb-2">
-                    <span className="fw-semibold">Tenure {index + 1}</span>
-                    {tenures.length > 1 && (
-                      <button
-                        type="button"
-                        className="btn btn-link text-danger btn-sm p-0"
-                        disabled={saving}
-                        onClick={() => setTenures((current) => current.filter((_, row) => row !== index))}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                  <div className="row g-2">
-                    <div className="col-md-6">
-                      <label className="form-label small">From date</label>
-                      <input type="date" className="form-control" value={tenure.from_date} disabled={saving} autoFocus={index === 0} onChange={(event) => updateTenure(index, "from_date", event.target.value)} />
-                    </div>
-                    <div className="col-md-6">
-                      <label className="form-label small">To date</label>
-                      <input type="date" className="form-control" value={tenure.to_date} disabled={saving} onChange={(event) => updateTenure(index, "to_date", event.target.value)} />
-                    </div>
-                    <div className="col-md-6">
-                      <label className="form-label small">Delivered quantity</label>
-                      <input type="number" min="1" step="1" className="form-control" value={tenure.delivered_quantity} disabled={saving} onChange={(event) => updateTenure(index, "delivered_quantity", event.target.value)} />
-                    </div>
-                    <div className="col-md-6">
-                      <label className="form-label small">Rejected quantity</label>
-                      <input type="number" min="0" step="1" className="form-control" value={tenure.rejected_quantity} disabled={saving} onChange={(event) => updateTenure(index, "rejected_quantity", event.target.value)} />
-                    </div>
-                  </div>
-                  <div className="small text-secondary mt-2">Tenure claim percentage: <strong>{formatClaimPercentage(getTenureClaimPercentage(tenure))}%</strong></div>
+            <div className="row g-2">
+              {claimTenures.map((claim, index) => <div className="col-12" key={`claim-tenure-${index}`}><div className="border rounded p-3">
+                <div className="d-flex justify-content-between align-items-center mb-2"><span className="fw-semibold">Tenure {index + 1}</span>{claimTenures.length > 1 && <button type="button" className="btn btn-link text-danger btn-sm p-0" disabled={saving} onClick={() => setClaimTenures((current) => current.filter((_, claimIndex) => claimIndex !== index))}>Remove</button>}</div>
+                <div className="row g-2">
+                  <div className="col-12"><label className="form-label small">Tenure</label><select className="form-select" value={claim.tenure_id} disabled={saving || loadingTenures || tenures.length === 0} onChange={(event) => updateClaimTenure(index, "tenure_id", event.target.value)}><option value="">{loadingTenures ? "Loading tenures..." : "Select tenure"}</option>{tenures.map((tenure) => <option key={tenure.id} value={tenure.id} disabled={String(tenure.id) !== String(claim.tenure_id) && selectedTenureIds.has(String(tenure.id))}>{formatDateDDMMYYYY(tenure.from_date)} - {formatDateDDMMYYYY(tenure.to_date)}</option>)}</select></div>
+                  <div className="col-md-6"><label className="form-label small">Delivered quantity</label><input type="number" min="1" step="1" className="form-control" value={claim.delivered_quantity} disabled={saving || !claim.tenure_id} onChange={(event) => updateClaimTenure(index, "delivered_quantity", event.target.value)} /></div>
+                  <div className="col-md-6"><label className="form-label small">Rejected quantity</label><input type="number" min="0" step="1" className="form-control" value={claim.rejected_quantity} disabled={saving || !claim.tenure_id} onChange={(event) => updateClaimTenure(index, "rejected_quantity", event.target.value)} /></div>
                 </div>
-              ))}
+                <div className="small text-secondary mt-2">Tenure claim percentage: <strong>{formatClaimPercentage(getTenureClaimPercentage(claim))}%</strong></div>
+              </div></div>)}
             </div>
             <div className="alert alert-light border mt-3 mb-0">
               <div>Delivered: <strong>{totals.delivered}</strong> pcs · Rejected: <strong>{totals.rejected}</strong> pcs</div>

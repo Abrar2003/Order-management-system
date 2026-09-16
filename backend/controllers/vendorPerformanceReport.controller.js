@@ -1,6 +1,9 @@
-const XLSX = require("xlsx");
+const ExcelJS = require("exceljs");
+const sharp = require("sharp");
+const mongoose = require("mongoose");
 const Order = require("../models/order.model");
 const Item = require("../models/item.model");
+const Tenure = require("../models/tenure.model");
 const Inspection = require("../models/inspection.model");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
@@ -21,6 +24,8 @@ const {
 const { parseDateOnly } = require("../helpers/dateOnly");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_CHART_ROWS = 12;
+const monthFormatter = new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric", timeZone: "UTC" });
 const ACTIVE_ORDER_MATCH = {
   $and: [{ archived: { $ne: true } }, { status: { $ne: "Cancelled" } }],
 };
@@ -221,8 +226,8 @@ const claimPercentage = (tenure) => tenure?.delivered_quantity > 0
   ? Number(((tenure.rejected_quantity / tenure.delivered_quantity) * 100).toFixed(2))
   : 0;
 
-const buildClaimRows = (items = []) => {
-  const rows = items.filter(isCurrentClaimSystemItem).map(buildClaimsReportRow);
+const buildClaimRows = (items = [], tenureById = new Map()) => {
+  const rows = items.filter(isCurrentClaimSystemItem).map((item) => buildClaimsReportRow(item, tenureById));
   const currentTenureEnd = rows
     .flatMap((row) => row.tenures.map((tenure) => tenure.to_date))
     .filter(Boolean)
@@ -253,6 +258,224 @@ const buildClaimRows = (items = []) => {
       remark,
     };
   });
+};
+
+const buildTenureClaimAverageRows = (rows = []) => {
+  const totals = new Map();
+  rows.forEach((row) => (row.tenures || []).forEach((tenure) => {
+    const from_date = String(tenure?.from_date || "");
+    const to_date = String(tenure?.to_date || "");
+    if (!from_date || !to_date) return;
+    const key = String(tenure?.tenure_id || `${row?.brand || ""}:${from_date}:${to_date}`);
+    const total = totals.get(key) || { brand: row?.brand || "", from_date, to_date, delivered_quantity: 0, rejected_quantity: 0 };
+    total.delivered_quantity += Number(tenure?.delivered_quantity || 0);
+    total.rejected_quantity += Number(tenure?.rejected_quantity || 0);
+    totals.set(key, total);
+  }));
+  return [...totals.values()]
+    .map((total) => ({
+      ...total,
+      label: [total.brand, `${total.from_date} to ${total.to_date}`].filter(Boolean).join(" · "),
+      average_claim_percentage: claimPercentage(total),
+    }))
+    .sort((left, right) => left.from_date.localeCompare(right.from_date) || left.to_date.localeCompare(right.to_date) || left.brand.localeCompare(right.brand));
+};
+
+const chartNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
+const chartRows = (rows, keys) => rows
+  .filter((row) => keys.some((key) => chartNumber(row?.[key]) !== null))
+  .slice()
+  .sort((left, right) => Math.max(...keys.map((key) => Math.abs(chartNumber(right?.[key]) || 0))) - Math.max(...keys.map((key) => Math.abs(chartNumber(left?.[key]) || 0))))
+  .slice(0, MAX_CHART_ROWS);
+const chartPoLabel = (row) => [row?.po, row?.brand].filter(Boolean).join(" / ") || "PO";
+const chartPoStatus = (row) => row?.is_overdue_inspection_pending
+  ? "Inspection overdue"
+  : row?.is_inspection_pending ? "Inspection pending" : row?.status || "Unknown";
+const chartCounts = (rows, getLabel) => Object.entries(rows.reduce((result, row) => {
+  const label = getLabel(row);
+  result[label] = (result[label] || 0) + 1;
+  return result;
+}, {})).map(([label, count]) => ({ label, count }));
+const stuffingStatusCounts = (rows) => rows.reduce((result, row) => {
+  const packed = row?.packed_status || "Unknown";
+  const etd = row?.etd_status || "Unknown";
+  (result[packed] ||= { packed: 0, etd: 0 }).packed += 1;
+  (result[etd] ||= { packed: 0, etd: 0 }).etd += 1;
+  return result;
+}, {});
+const monthlyChartColor = (index, total) => `hsl(${Math.round(index * 360 / Math.max(1, total))} 65% 44%)`;
+const buildMonthlyPoDelayChartSpec = (rows = [], dateKey = "etd", delayKey = "difference_days", title = "Monthly PO delay: ETD vs final packed") => {
+  const chartData = rows
+    .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.[dateKey] || "")) && chartNumber(row?.[delayKey]) !== null)
+    .slice()
+    .sort((left, right) => String(left[dateKey]).localeCompare(String(right[dateKey])) || chartPoLabel(left).localeCompare(chartPoLabel(right)))
+    .map((row) => ({
+      month: String(row[dateKey]).slice(0, 7),
+      label: chartPoLabel(row),
+      difference_days: chartNumber(row[delayKey]),
+    }));
+  const monthStats = chartData.reduce((result, row) => {
+    const stats = result.get(row.month) || { sum: 0, count: 0 };
+    stats.sum += row.difference_days;
+    stats.count += 1;
+    result.set(row.month, stats);
+    return result;
+  }, new Map());
+  const months = [...monthStats.keys()];
+  const monthIndexes = new Map(months.map((month, index) => [month, index]));
+  return {
+    type: "monthly_po_delay",
+    title,
+    data: chartData.map((row) => ({ ...row, color: monthlyChartColor(monthIndexes.get(row.month), months.length), average_delay: monthStats.get(row.month).sum / monthStats.get(row.month).count })),
+  };
+};
+const buildVendorPerformanceChartSpecs = (section, rows = [], poDelayRows = rows) => {
+  const monthlyPoDelay = buildMonthlyPoDelayChartSpec(poDelayRows);
+  if (section === "po_delay") return [
+    monthlyPoDelay,
+    {
+      title: "ETD vs final packed",
+      data: chartRows(rows, ["difference_days"]).map((row) => ({
+        label: chartPoLabel(row),
+        difference_days: chartNumber(row.difference_days),
+        color: row.difference_days > 0 ? "#dc3545" : row.difference_days < 0 ? "#198754" : "#0d6efd",
+      })),
+      series: [{ key: "difference_days", label: "ETD vs final packed (days)", color: "#0d6efd" }],
+    },
+    {
+      title: "PO status breakdown",
+      data: chartCounts(rows, chartPoStatus),
+      series: [{ key: "count", label: "POs", color: "#0d6efd" }],
+    },
+  ];
+  if (section === "product_complaints") return [monthlyPoDelay, {
+    title: "Average claim rate by tenure",
+    data: buildTenureClaimAverageRows(rows),
+    series: [{ key: "average_claim_percentage", label: "Average claim (%)", color: "#dc3545" }],
+  }];
+  if (section === "shipping_delay") {
+    const statusCounts = stuffingStatusCounts(rows);
+    return [
+    buildMonthlyPoDelayChartSpec(rows, "final_packed_date", "packed_difference_days", "Monthly stuffing delay: final packed vs stuffing"),
+    {
+      title: "Final packed vs stuffing",
+      data: chartRows(rows, ["packed_difference_days"]).map((row) => ({
+        label: chartPoLabel(row),
+        packed_difference_days: chartNumber(row.packed_difference_days),
+      })),
+      series: [{ key: "packed_difference_days", label: "Stuffing vs final packed (days)", color: "#6f42c1" }],
+    },
+    {
+      title: "Stuffing status breakdown",
+      data: ["Early", "On time", "Delayed", "Unknown"].map((label) => ({
+        label,
+        packed: statusCounts[label]?.packed || 0,
+        etd: statusCounts[label]?.etd || 0,
+      })).filter((row) => row.packed || row.etd),
+      series: [
+        { key: "packed", label: "vs final packed", color: "#6f42c1" },
+        { key: "etd", label: "vs ETD", color: "#fd7e14" },
+      ],
+    },
+    ];
+  }
+  return monthlyPoDelay.data.length > 0 ? [monthlyPoDelay] : [];
+};
+const escapeSvg = (value) => String(value ?? "").replace(/[&<>"]/g, (character) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
+}[character]));
+const renderHorizontalBarChartSvg = ({ title, data, series }) => {
+  const width = 1000;
+  const height = Math.max(260, 105 + data.length * 38);
+  const left = 235;
+  const right = 80;
+  const top = 58;
+  const bottom = 28;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const values = data.flatMap((row) => series.map((entry) => chartNumber(row?.[entry.key]))).filter((value) => value !== null);
+  const rawMin = Math.min(0, ...values);
+  const rawMax = Math.max(0, ...values);
+  const min = rawMin < 0 ? rawMin * 1.1 : 0;
+  const max = rawMax > 0 ? rawMax * 1.1 : 1;
+  const x = (value) => left + ((value - min) / (max - min || 1)) * plotWidth;
+  const zeroX = x(0);
+  const groupHeight = plotHeight / Math.max(1, data.length);
+  const barHeight = Math.max(7, Math.min(14, (groupHeight - 8) / Math.max(1, series.length)));
+  const grid = Array.from({ length: 5 }, (_, index) => {
+    const value = min + ((max - min) * index / 4);
+    const gridX = x(value);
+    return `<line x1="${gridX}" y1="${top}" x2="${gridX}" y2="${height - bottom}" stroke="#d9dee5"/><text x="${gridX}" y="${height - 8}" text-anchor="middle" font-size="11" fill="#6c757d">${Math.round(value)}</text>`;
+  }).join("");
+  const bars = data.map((row, rowIndex) => {
+    const groupY = top + rowIndex * groupHeight;
+    const labelY = groupY + groupHeight / 2 + 4;
+    const rowBars = series.map((entry, seriesIndex) => {
+      const value = chartNumber(row?.[entry.key]);
+      if (value === null) return "";
+      const startX = x(Math.min(0, value));
+      const endX = x(Math.max(0, value));
+      const y = groupY + 4 + seriesIndex * (barHeight + 3);
+      const valueX = value >= 0 ? endX + 5 : startX - 5;
+      return `<rect x="${startX}" y="${y}" width="${Math.max(1, endX - startX)}" height="${barHeight}" rx="2" fill="${row.color || entry.color}"/><text x="${valueX}" y="${y + barHeight - 2}" text-anchor="${value >= 0 ? "start" : "end"}" font-size="10" fill="#343a40">${value}</text>`;
+    }).join("");
+    return `<text x="${left - 8}" y="${labelY}" text-anchor="end" font-size="11" fill="#343a40">${escapeSvg(String(row.label).slice(0, 36))}</text>${rowBars}`;
+  }).join("");
+  const legend = series.map((entry, index) => `<rect x="${left + index * 165}" y="28" width="12" height="12" rx="2" fill="${entry.color}"/><text x="${left + 18 + index * 165}" y="38" font-size="12" fill="#343a40">${escapeSvg(entry.label)}</text>`).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#ffffff"/><text x="24" y="30" font-size="18" font-weight="700" fill="#212529">${escapeSvg(title)}</text>${legend}${grid}<line x1="${zeroX}" y1="${top}" x2="${zeroX}" y2="${height - bottom}" stroke="#6c757d" stroke-width="1.5"/>${bars}</svg>`;
+};
+const renderMonthlyPoDelayChartSvg = ({ title, data }) => {
+  const width = Math.max(1000, 180 + data.length * 42);
+  const height = 500;
+  const left = 70;
+  const right = 35;
+  const top = 135;
+  const bottom = 70;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const values = data.map((row) => row.difference_days);
+  const rawMin = Math.min(0, ...values);
+  const rawMax = Math.max(0, ...values);
+  const min = rawMin < 0 ? rawMin * 1.1 : 0;
+  const max = rawMax > 0 ? rawMax * 1.1 : 1;
+  const y = (value) => top + ((max - value) / (max - min || 1)) * plotHeight;
+  const zeroY = y(0);
+  const monthGroups = data.reduce((result, row, index) => {
+    const group = result.get(row.month) || { start: index, end: index };
+    group.end = index;
+    result.set(row.month, group);
+    return result;
+  }, new Map());
+  const monthEntries = [...monthGroups.entries()];
+  const monthIndexes = new Map(monthEntries.map(([month], index) => [month, index]));
+  const groupWidth = plotWidth / Math.max(1, monthEntries.length);
+  const maxBarsPerMonth = Math.max(1, ...monthEntries.map(([, group]) => group.end - group.start + 1));
+  const barWidth = Math.max(4, Math.min(8, groupWidth / maxBarsPerMonth));
+  const grid = Array.from({ length: 5 }, (_, index) => {
+    const value = min + ((max - min) * index / 4);
+    const gridY = y(value);
+    return `<line x1="${left}" y1="${gridY}" x2="${width - right}" y2="${gridY}" stroke="#d9dee5"/><text x="${left - 8}" y="${gridY + 4}" text-anchor="end" font-size="11" fill="#6c757d">${Math.round(value)}</text>`;
+  }).join("");
+  const bars = data.map((row, index) => {
+    const group = monthGroups.get(row.month);
+    const groupIndex = monthIndexes.get(row.month);
+    const centerX = left + groupIndex * groupWidth + (index - group.start) * barWidth + barWidth / 2;
+    const valueY = y(row.difference_days);
+    const barY = Math.min(zeroY, valueY);
+    const barHeight = Math.max(1, Math.abs(zeroY - valueY));
+    const valueLabelY = row.difference_days >= 0 ? valueY - 5 : valueY + 14;
+    return `<rect x="${centerX - barWidth / 2}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="2" fill="${row.color || "#0d6efd"}"/><text x="${centerX}" y="${valueLabelY}" text-anchor="middle" font-size="10" fill="#343a40">${row.difference_days}</text>`;
+  }).join("");
+  const averagePoints = monthEntries.map(([month, group], index) => ({
+    x: left + index * groupWidth + groupWidth / 2,
+    value: data[group.start].average_delay,
+  }));
+  const averageLine = `<polyline points="${averagePoints.map((point) => `${point.x},${y(point.value)}`).join(" ")}" fill="none" stroke="#212529" stroke-width="2.5"/>${averagePoints.map((point) => `<circle cx="${point.x}" cy="${y(point.value)}" r="4" fill="#212529"/>`).join("")}`;
+  const months = monthEntries.map(([month], index) => {
+    const centerX = left + index * groupWidth + groupWidth / 2;
+    return `<text x="${centerX}" y="${height - 22}" text-anchor="middle" font-size="12" fill="#343a40">${monthFormatter.format(new Date(`${month}-01T00:00:00Z`))}</text>`;
+  }).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#ffffff"/><text x="24" y="30" font-size="18" font-weight="700" fill="#212529">${escapeSvg(title)}</text><line x1="24" y1="51" x2="40" y2="51" stroke="#212529" stroke-width="2.5"/><circle cx="32" cy="51" r="3" fill="#212529"/><text x="47" y="55" font-size="12" fill="#343a40">Monthly average delay</text><text x="24" y="76" font-size="12" fill="#6c757d">Each bar is one PO, grouped by month. Bar colors identify months; the line is that month’s average delay.</text>${grid}<line x1="${left}" y1="${zeroY}" x2="${width - right}" y2="${zeroY}" stroke="#6c757d" stroke-width="1.5"/>${bars}${averageLine}${months}<text x="22" y="${top + plotHeight / 2}" text-anchor="middle" font-size="12" fill="#343a40" transform="rotate(-90 22 ${top + plotHeight / 2})">Days</text></svg>`;
 };
 
 const buildVendorPerformanceDataset = async ({ vendor = "", brands, fromDate, toDate, user } = {}) => {
@@ -349,6 +572,15 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, fromDate, to
   const claimItems = await Item.find(itemMatch)
     .select("code name description brand brand_name brands vendors claim_tenures claim_percentage")
     .lean();
+  const claimTenureIds = [...new Set(claimItems.flatMap((item) =>
+    (Array.isArray(item?.claim_tenures) ? item.claim_tenures : [])
+      .map((claim) => String(claim?.tenure_id || ""))
+      .filter((id) => mongoose.Types.ObjectId.isValid(id)),
+  ))];
+  const claimTenures = claimTenureIds.length > 0
+    ? await Tenure.find({ _id: { $in: claimTenureIds } }).lean()
+    : [];
+  const claimTenureById = new Map(claimTenures.map((tenure) => [String(tenure._id), tenure]));
   const poSections = buildPoSections(orderRows);
 
   return {
@@ -363,7 +595,7 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, fromDate, to
     sections: {
       po_delay: { rows: poSections.po_delay },
       product_analytics: { rows: productRows },
-      product_complaints: { rows: buildClaimRows(claimItems) },
+      product_complaints: { rows: buildClaimRows(claimItems, claimTenureById) },
       shipping_delay: { rows: poSections.shipping_delay },
     },
   };
@@ -420,17 +652,42 @@ const exportVendorPerformanceReport = async (req, res) => {
         : "",
     }));
     const columns = EXPORT_COLUMNS[section];
-    const data = [columns.map(([, header]) => header), ...rows.map((row) => columns.map(([key]) => row[key] ?? ""))];
-    const worksheet = XLSX.utils.aoa_to_sheet(data);
-    worksheet["!cols"] = columns.map(([key, header], index) => ({
-      wch: Math.min(50, Math.max(12, header.length + 2, ...data.slice(1).map((row) => String(row[index] ?? "").length + 2))),
+    const data = rows.map((row) => columns.map(([key]) => row[key] ?? ""));
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "OMS";
+    const worksheet = workbook.addWorksheet(section.replace(/_/g, " ").slice(0, 31), {
+      pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    });
+    worksheet.columns = columns.map(([, header], index) => ({
+      width: Math.min(50, Math.max(12, header.length + 2, ...data.map((row) => String(row[index] ?? "").length + 2))),
     }));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, section.replace(/_/g, " ").slice(0, 31));
+    let tableRow = 1;
+    for (const spec of buildVendorPerformanceChartSpecs(section, rows, dataset.sections.po_delay.rows).filter((entry) => entry.data.length > 0)) {
+      const imageHeight = spec.type === "monthly_po_delay" ? 500 : Math.max(260, 105 + spec.data.length * 38);
+      const chartSvg = spec.type === "monthly_po_delay"
+        ? renderMonthlyPoDelayChartSvg(spec)
+        : renderHorizontalBarChartSvg(spec);
+      const png = await sharp(Buffer.from(chartSvg)).png().toBuffer();
+      const imageId = workbook.addImage({ buffer: png, extension: "png" });
+      worksheet.addImage(imageId, { tl: { col: 0, row: tableRow - 1 }, ext: { width: spec.type === "monthly_po_delay" ? Math.max(900, 180 + spec.data.length * 42) : 900, height: imageHeight } });
+      const imageRows = Math.ceil(imageHeight / 20) + 1;
+      for (let row = tableRow; row < tableRow + imageRows; row += 1) worksheet.getRow(row).height = 20;
+      tableRow += imageRows;
+    }
+    const headerRow = worksheet.getRow(tableRow);
+    headerRow.values = columns.map(([, header]) => header);
+    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0D6EFD" } };
+    headerRow.alignment = { horizontal: "center" };
+    for (const row of data) worksheet.addRow(row);
+    worksheet.autoFilter = {
+      from: { row: tableRow, column: 1 },
+      to: { row: tableRow, column: columns.length },
+    };
     const fileName = `vendor-${section.replace(/_/g, "-")}-${new Date().toISOString().slice(0, 10)}.xlsx`;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    return res.send(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
+    return res.send(await workbook.xlsx.writeBuffer());
   } catch (error) {
     if (error.message === "Invalid date filters") return res.status(400).json({ message: error.message });
     console.error("Vendor performance export error:", error);
@@ -441,5 +698,5 @@ const exportVendorPerformanceReport = async (req, res) => {
 module.exports = {
   getVendorPerformanceReport,
   exportVendorPerformanceReport,
-  __test__: { buildClaimRows, buildPoSections, differenceInDays, resolveEtdDateRange, buildEffectiveEtdMatch },
+  __test__: { buildClaimRows, buildTenureClaimAverageRows, buildPoSections, differenceInDays, resolveEtdDateRange, buildEffectiveEtdMatch, buildVendorPerformanceChartSpecs },
 };

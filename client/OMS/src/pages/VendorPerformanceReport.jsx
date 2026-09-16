@@ -4,6 +4,7 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import ProductAnalyticsTable from "../components/ProductAnalyticsTable";
 import ReportInfoBanner from "../components/ReportInfoBanner";
+import VendorPerformanceCharts, { VendorPerformanceMonthlyDelayChart } from "../components/VendorPerformanceCharts";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { exportElementToPdf } from "../services/pdfExport.service";
 import "../App.css";
@@ -264,6 +265,8 @@ const VendorPerformanceReport = () => {
 
             {activeSection === "po_delay" && <section className="card om-card" ref={(node) => { sectionRefs.current.po_delay = node; }}>
               <div className="card-header fw-semibold">1. PO-wise delay — complete packed date vs ETD</div>
+              <VendorPerformanceMonthlyDelayChart rows={poRows} />
+              <VendorPerformanceCharts section="po_delay" rows={poRows} />
               <div className="table-responsive">
                 <table className="table table-striped align-middle mb-0">
                   <thead><tr><th>PO</th><th>Brand</th><th>Complete packed</th><th>Effective ETD</th><th>Difference</th><th>Status</th><th>Items</th><th>Qty</th></tr></thead>
@@ -276,11 +279,14 @@ const VendorPerformanceReport = () => {
 
             {activeSection === "product_analytics" && <section className="card om-card" ref={(node) => { sectionRefs.current.product_analytics = node; }}>
               <div className="card-header fw-semibold">2. Product analytics</div>
+              <VendorPerformanceMonthlyDelayChart rows={poRows} />
               <ProductAnalyticsTable rows={productRows} />
             </section>}
 
             {activeSection === "product_complaints" && <section className="card om-card" ref={(node) => { sectionRefs.current.product_complaints = node; }}>
               <div className="card-header fw-semibold">3. Product claims</div>
+              <VendorPerformanceMonthlyDelayChart rows={poRows} />
+              <VendorPerformanceCharts section="product_complaints" rows={claimRows} />
               <div className="table-responsive">
                 <table className="table table-striped align-middle mb-0">
                   <thead><tr><th>Item</th><th>Description</th><th>Brand</th><th>Claim tenures</th><th>Current claim</th><th>Remark</th></tr></thead>
@@ -301,6 +307,8 @@ const VendorPerformanceReport = () => {
                   <button type="button" className={`btn ${stuffingComparison === "etd" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setStuffingComparison("etd")}>ETD</button>
                 </div>
               </div>
+              <VendorPerformanceMonthlyDelayChart rows={shippingRows} dateKey="final_packed_date" delayKey="packed_difference_days" title="Monthly stuffing delay: final packed vs stuffing" />
+              <VendorPerformanceCharts section="shipping_delay" rows={shippingRows} />
               <div className="table-responsive">
                 <table className="table table-striped align-middle mb-0">
                   <thead><tr><th>PO</th><th>Brand</th><th>Complete stuffing</th><th>Final packed</th><th className={stuffingComparison === "packed" ? "table-primary" : ""}>Stuffing vs packed</th><th>Effective ETD</th><th className={stuffingComparison === "etd" ? "table-primary" : ""}>Stuffing vs ETD</th><th>Status</th><th>Items</th><th>Qty</th></tr></thead>

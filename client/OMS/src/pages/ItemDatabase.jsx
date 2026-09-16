@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import { usePermissions } from "../auth/PermissionContext";
 import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -120,6 +121,7 @@ const downloadBlobResponse = (response, fallbackName) => {
 };
 
 const ItemDatabase = () => {
+  const { hasPermission } = usePermissions();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "item-database");
@@ -308,14 +310,16 @@ const ItemDatabase = () => {
           </div>
           <div className="d-flex flex-column align-items-end gap-2">
             <ItemDatabaseStatusPills summary={statusSummary} />
-            <button
-              type="button"
-              className="btn btn-outline-primary btn-sm"
-              onClick={handleExportXls}
-              disabled={exporting || loading || totalRecords === 0}
-            >
-              {exporting ? "Exporting..." : "Export XLS"}
-            </button>
+            {hasPermission("product_database", "export") && (
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={handleExportXls}
+                disabled={exporting || loading || totalRecords === 0}
+              >
+                {exporting ? "Exporting..." : "Export XLS"}
+              </button>
+            )}
           </div>
         </div>
 

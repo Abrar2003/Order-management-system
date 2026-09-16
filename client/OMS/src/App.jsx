@@ -468,7 +468,7 @@ const App = () => {
           <Route
             path="/product-database"
             element={
-              <ProtectedRoute allowViewer={false}>
+              <ProtectedRoute>
                 <ProductDatabase />
               </ProtectedRoute>
             }
@@ -486,7 +486,7 @@ const App = () => {
           <Route
             path="/product-database-details/:id"
             element={
-              <ProtectedRoute allowViewer={false}>
+              <ProtectedRoute>
                 <ProductDatabaseDetails />
               </ProtectedRoute>
             }
@@ -648,7 +648,7 @@ const App = () => {
           <Route
             path="/upload-logs"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <UploadLogs />
               </ProtectedRoute>
             }
@@ -657,7 +657,7 @@ const App = () => {
           <Route
             path="/order-edit-logs"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <OrderEditLogs />
               </ProtectedRoute>
             }
@@ -666,7 +666,7 @@ const App = () => {
           <Route
             path="/pis-update-logs"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowViewer={false}>
                 <PisUpdateLogs />
               </ProtectedRoute>
             }

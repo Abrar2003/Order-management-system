@@ -115,8 +115,11 @@ const productSpecBoxSizeEntrySchema = new mongoose.Schema(
 );
 const claimTenureSchema = new mongoose.Schema(
   {
-    from_date: { type: Date, required: true },
-    to_date: { type: Date, required: true },
+    tenure_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "tenures",
+      required: true,
+    },
     delivered_quantity: { type: Number, required: true, min: 1 },
     rejected_quantity: { type: Number, required: true, min: 0 },
   },

@@ -131,6 +131,41 @@ router.get(
 );
 
 router.get(
+  "/claims/tenures",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.getClaimTenures,
+);
+
+router.post(
+  "/claims/tenures",
+  auth,
+  requirePermission("items", "edit"),
+  reportsController.createClaimTenure,
+);
+
+router.delete(
+  "/claims/tenures/:tenureId",
+  auth,
+  requirePermission("items", "edit"),
+  reportsController.deleteClaimTenure,
+);
+
+router.put(
+  "/claims/items/:itemId/tenures",
+  auth,
+  requirePermission("items", "edit"),
+  reportsController.replaceItemClaimTenures,
+);
+
+router.put(
+  "/claims/items/:itemId/tenures/:tenureId",
+  auth,
+  requirePermission("items", "edit"),
+  reportsController.upsertItemClaimTenure,
+);
+
+router.get(
   "/claims/items/:code",
   auth,
   requirePermission("reports", "view"),

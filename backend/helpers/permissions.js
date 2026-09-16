@@ -91,6 +91,7 @@ const VIEWER_VIEW_MODULES = new Set([
   "qc",
   "inspections",
   "items",
+  "product_database",
   "shipments",
   "containers",
   "reports",

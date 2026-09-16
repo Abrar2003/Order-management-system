@@ -2,6 +2,7 @@ const express = require("express");
 const upload = require("../config/multer.config");
 const authenticate = require("../middlewares/auth.middleware");
 const {
+  requireNonViewer,
   requirePermission,
   requireShipmentEditAccess,
 } = require("../middlewares/permission.middleware");
@@ -113,6 +114,7 @@ router.get(
 router.get(
   "/upload-logs",
   authenticate,
+  requireNonViewer,
   requirePermission("uploads", "view"),
   cacheRoute("orders", MEDIUM_CACHE_TTL),
   getUploadLogs,
@@ -121,6 +123,7 @@ router.get(
 router.get(
   "/edit-logs",
   authenticate,
+  requireNonViewer,
   requirePermission("orders", "view"),
   cacheRoute("orders", MEDIUM_CACHE_TTL),
   getOrderEditLogs,
