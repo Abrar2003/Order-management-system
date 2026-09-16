@@ -151,6 +151,7 @@ const VendorPerformanceReport = () => {
   const claimRows = sections?.product_complaints?.rows || [];
   const shippingRows = sections?.shipping_delay?.rows || [];
   const poSummary = sections?.po_delay?.summary?.brands || [];
+  const combinedPoSummary = sections?.po_delay?.summary?.combined || {};
   const claimSummary = sections?.product_complaints?.summary || {};
   const shippingSummary = sections?.shipping_delay?.summary || {};
   const stuffingStatusKey = stuffingComparison === "packed" ? "packed_status" : "etd_status";
@@ -273,7 +274,7 @@ const VendorPerformanceReport = () => {
 
             {activeSection === "po_delay" && <section className="card om-card" ref={(node) => { sectionRefs.current.po_delay = node; }}>
               <div className="card-header fw-semibold">1. PO-wise delay — complete packed date vs ETD</div>
-              <SummaryCards cards={poSummary.flatMap((row) => [{ label: `${row.brand} POs`, value: row.po_count }, { label: `${row.brand} delayed POs`, value: row.delayed_po_count }, { label: `${row.brand} early POs`, value: row.early_po_count }, { label: `${row.brand} average delay`, value: formatAverageDays(row.average_delay_days) }])} />
+              <SummaryCards cards={[{ label: "All selected brands POs", value: combinedPoSummary.po_count || 0 }, { label: "All selected brands delayed POs", value: combinedPoSummary.delayed_po_count || 0 }, { label: "All selected brands early POs", value: combinedPoSummary.early_po_count || 0 }, { label: "All selected brands average delay", value: formatAverageDays(combinedPoSummary.average_delay_days) }, ...poSummary.flatMap((row) => [{ label: `${row.brand} POs`, value: row.po_count }, { label: `${row.brand} delayed POs`, value: row.delayed_po_count }, { label: `${row.brand} early POs`, value: row.early_po_count }, { label: `${row.brand} average delay`, value: formatAverageDays(row.average_delay_days) }])]} />
               <VendorPerformanceMonthlyDelayChart rows={poRows} />
               <VendorPerformanceCharts section="po_delay" rows={poRows} />
               <div className="table-responsive">

@@ -289,16 +289,22 @@ const average = (rows = [], key) => {
 };
 const buildVendorPerformanceSummaries = ({ poRows = [], claimRows = [], shippingRows = [], brands = [] } = {}) => {
   const selectedBrands = [...new Set(brands.filter(Boolean))];
+  const poStats = (rows) => ({
+    po_count: rows.length,
+    delayed_po_count: rows.filter((row) => Number(row?.difference_days || 0) > 0).length,
+    early_po_count: rows.filter((row) => Number(row?.difference_days || 0) < 0).length,
+    average_delay_days: average(rows, "difference_days"),
+  });
   const brandRows = selectedBrands.map((brand) => {
     const rows = poRows.filter((row) => normalizeText(row?.brand).toLowerCase() === normalizeText(brand).toLowerCase());
-    return { brand, po_count: rows.length, delayed_po_count: rows.filter((row) => Number(row?.difference_days || 0) > 0).length, early_po_count: rows.filter((row) => Number(row?.difference_days || 0) < 0).length, average_delay_days: average(rows, "difference_days") };
+    return { brand, ...poStats(rows) };
   });
   const claimTotals = claimRows.reduce((total, row) => ({
     delivered_quantity: total.delivered_quantity + Number(row?.delivered_quantity || 0),
     rejected_quantity: total.rejected_quantity + Number(row?.rejected_quantity || 0),
   }), { delivered_quantity: 0, rejected_quantity: 0 });
   return {
-    po_delay: { brands: brandRows },
+    po_delay: { combined: poStats(poRows), brands: brandRows },
     product_complaints: {
       item_count: claimRows.length,
       average_claim_percentage: claimTotals.delivered_quantity > 0

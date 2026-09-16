@@ -88,6 +88,7 @@ test("vendor performance summaries retain PO brands and combine claim totals", (
     { brand: "By Boo", po_count: 2, delayed_po_count: 1, early_po_count: 1, average_delay_days: -1 },
     { brand: "Eleonora", po_count: 0, delayed_po_count: 0, early_po_count: 0, average_delay_days: null },
   ]);
+  assert.deepEqual(summaries.po_delay.combined, { po_count: 2, delayed_po_count: 1, early_po_count: 1, average_delay_days: -1 });
   assert.deepEqual(summaries.product_complaints, { item_count: 2, average_claim_percentage: 11.67 });
   assert.deepEqual(summaries.shipping_delay, { delayed_po_count: 2, average_stuffing_time_days: 1.33 });
 });
