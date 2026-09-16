@@ -273,7 +273,7 @@ const VendorPerformanceReport = () => {
 
             {activeSection === "po_delay" && <section className="card om-card" ref={(node) => { sectionRefs.current.po_delay = node; }}>
               <div className="card-header fw-semibold">1. PO-wise delay — complete packed date vs ETD</div>
-              <SummaryCards cards={poSummary.flatMap((row) => [{ label: `${row.brand} POs`, value: row.po_count }, { label: `${row.brand} average delay`, value: formatAverageDays(row.average_delay_days) }])} />
+              <SummaryCards cards={poSummary.flatMap((row) => [{ label: `${row.brand} POs`, value: row.po_count }, { label: `${row.brand} delayed POs`, value: row.delayed_po_count }, { label: `${row.brand} early POs`, value: row.early_po_count }, { label: `${row.brand} average delay`, value: formatAverageDays(row.average_delay_days) }])} />
               <VendorPerformanceMonthlyDelayChart rows={poRows} />
               <VendorPerformanceCharts section="po_delay" rows={poRows} />
               <div className="table-responsive">

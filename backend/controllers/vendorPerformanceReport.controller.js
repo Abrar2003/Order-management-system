@@ -291,7 +291,7 @@ const buildVendorPerformanceSummaries = ({ poRows = [], claimRows = [], shipping
   const selectedBrands = [...new Set(brands.filter(Boolean))];
   const brandRows = selectedBrands.map((brand) => {
     const rows = poRows.filter((row) => normalizeText(row?.brand).toLowerCase() === normalizeText(brand).toLowerCase());
-    return { brand, po_count: rows.length, average_delay_days: average(rows, "difference_days") };
+    return { brand, po_count: rows.length, delayed_po_count: rows.filter((row) => Number(row?.difference_days || 0) > 0).length, early_po_count: rows.filter((row) => Number(row?.difference_days || 0) < 0).length, average_delay_days: average(rows, "difference_days") };
   });
   const claimTotals = claimRows.reduce((total, row) => ({
     delivered_quantity: total.delivered_quantity + Number(row?.delivered_quantity || 0),

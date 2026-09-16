@@ -79,14 +79,14 @@ test("legacy date-range claims do not block unrelated item saves", () => {
 test("vendor performance summaries retain PO brands and combine claim totals", () => {
   const summaries = buildVendorPerformanceSummaries({
     brands: ["By Boo", "Eleonora"],
-    poRows: [{ brand: "By Boo", difference_days: 2 }, { brand: "By Boo", difference_days: 4 }],
+    poRows: [{ brand: "By Boo", difference_days: 2 }, { brand: "By Boo", difference_days: -4 }],
     claimRows: [{ delivered_quantity: 100, rejected_quantity: 10 }, { delivered_quantity: 20, rejected_quantity: 4 }],
     shippingRows: [{ packed_difference_days: 3 }, { packed_difference_days: -1 }, { packed_difference_days: 2 }],
   });
 
   assert.deepEqual(summaries.po_delay.brands, [
-    { brand: "By Boo", po_count: 2, average_delay_days: 3 },
-    { brand: "Eleonora", po_count: 0, average_delay_days: null },
+    { brand: "By Boo", po_count: 2, delayed_po_count: 1, early_po_count: 1, average_delay_days: -1 },
+    { brand: "Eleonora", po_count: 0, delayed_po_count: 0, early_po_count: 0, average_delay_days: null },
   ]);
   assert.deepEqual(summaries.product_complaints, { item_count: 2, average_claim_percentage: 11.67 });
   assert.deepEqual(summaries.shipping_delay, { delayed_po_count: 2, average_stuffing_time_days: 1.33 });
