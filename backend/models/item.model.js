@@ -115,10 +115,15 @@ const productSpecBoxSizeEntrySchema = new mongoose.Schema(
 );
 const claimTenureSchema = new mongoose.Schema(
   {
+    // Kept only so older date-range claims can be saved while the backfill completes.
+    from_date: { type: Date, default: undefined },
+    to_date: { type: Date, default: undefined },
     tenure_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "tenures",
-      required: true,
+      required: function requiresTenureId() {
+        return !(this.from_date && this.to_date);
+      },
     },
     delivered_quantity: { type: Number, required: true, min: 1 },
     rejected_quantity: { type: Number, required: true, min: 0 },

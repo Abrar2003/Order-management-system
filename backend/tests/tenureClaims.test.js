@@ -67,3 +67,11 @@ test("claim tenure deletion removes an unused tenure", async (t) => {
   assert.deepEqual(res.body, { success: true });
   assert.equal(deletedId, tenure._id);
 });
+
+test("legacy date-range claims do not block unrelated item saves", () => {
+  const legacyItem = new Item({ claim_tenures: [{ from_date: "2026-01-01", to_date: "2026-01-31", delivered_quantity: 100, rejected_quantity: 5 }] });
+  const incompleteNewItem = new Item({ claim_tenures: [{ delivered_quantity: 100, rejected_quantity: 5 }] });
+
+  assert.equal(legacyItem.validateSync()?.errors["claim_tenures.0.tenure_id"], undefined);
+  assert.ok(incompleteNewItem.validateSync()?.errors["claim_tenures.0.tenure_id"]);
+});
