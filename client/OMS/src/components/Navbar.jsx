@@ -386,6 +386,7 @@ const Navbar = () => {
         ? [actionMenuItem("check-labels", "Check Labels", "check-labels")]
         : []),
       routeMenuItem("claims", "Claims", "/reports/claims"),
+      routeMenuItem("claim-comparison", "Claim Comparison", "/reports/claim-comparison"),
       routeMenuItem("inspected-items-report", "Inspected Items Report", "/reports/inspected-items"),
       routeMenuItem("samples", "Shipped Samples", "/shipped-samples"),
       routeMenuItem("common-errors", "Common Errors", "/reports/common-errors"),

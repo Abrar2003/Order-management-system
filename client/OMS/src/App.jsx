@@ -59,6 +59,7 @@ const ProductAnalytics = lazy(() => import("./pages/ProductAnalytics"));
 const QcReportMismatch = lazy(() => import("./pages/QcReportMismatch"));
 const InspectedItemsReport = lazy(() => import("./pages/InspectedItemsReport"));
 const Claims = lazy(() => import("./pages/Claims"));
+const ClaimComparison = lazy(() => import("./pages/ClaimComparison"));
 const PisInspectionMasterComparison = lazy(() => import("./pages/PisInspectionMasterComparison"));
 const ProductDatabase = lazy(() => import("./pages/ProductDatabase"));
 const ItemDatabase = lazy(() => import("./pages/ItemDatabase"));
@@ -443,6 +444,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Claims />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/claim-comparison"
+            element={
+              <ProtectedRoute>
+                <ClaimComparison />
               </ProtectedRoute>
             }
           />

@@ -1264,6 +1264,14 @@ small,
   color: var(--om-color-text);
 }
 
+.claim-comparison-increased > * {
+  background-color: rgba(220, 53, 69, 0.16) !important;
+}
+
+.claim-comparison-improved > * {
+  background-color: rgba(25, 135, 84, 0.16) !important;
+}
+
 .table-clickable {
   cursor: pointer;
 }

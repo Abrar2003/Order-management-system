@@ -173,6 +173,13 @@ router.get(
 );
 
 router.get(
+  "/claims/comparison",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.getClaimComparisonReport,
+);
+
+router.get(
   "/claims",
   auth,
   requirePermission("reports", "view"),

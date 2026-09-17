@@ -202,6 +202,49 @@ const buildClaimsReportRow = (item = {}, tenureById = new Map(), selectedTenureI
   };
 };
 
+const buildClaimComparisonRows = (items = [], previousTenureId = "", currentTenureId = "") =>
+  (Array.isArray(items) ? items : []).flatMap((item) => {
+    const claimsByTenureId = new Map((Array.isArray(item?.claim_tenures) ? item.claim_tenures : [])
+      .filter((claim) => claim?.tenure_id)
+      .map((claim) => [String(claim.tenure_id), claim]));
+    const previous = claimsByTenureId.get(String(previousTenureId));
+    const current = claimsByTenureId.get(String(currentTenureId));
+    if (!previous && !current) return [];
+
+    const snapshot = (claim) => {
+      if (!claim) return null;
+      const delivered_quantity = Number(claim?.delivered_quantity || 0);
+      const rejected_quantity = Number(claim?.rejected_quantity || 0);
+      return {
+        delivered_quantity,
+        rejected_quantity,
+        claim_percentage: delivered_quantity > 0
+          ? Number(((rejected_quantity / delivered_quantity) * 100).toFixed(2))
+          : 0,
+      };
+    };
+    const previousSnapshot = snapshot(previous);
+    const currentSnapshot = snapshot(current);
+
+    return [{
+      id: String(item?._id || ""),
+      code: normalizeText(item?.code),
+      name: normalizeText(item?.name),
+      description: normalizeText(item?.description),
+      brand: getItemBrand(item),
+      vendors: [...new Set((Array.isArray(item?.vendors) ? item.vendors : [])
+        .map((vendor) => normalizeText(vendor?.name || vendor))
+        .filter(Boolean))],
+      status: previous && current ? "same" : current ? "new" : "missing",
+      trend: previousSnapshot && currentSnapshot
+        ? currentSnapshot.claim_percentage > previousSnapshot.claim_percentage ? "increased"
+          : currentSnapshot.claim_percentage < previousSnapshot.claim_percentage ? "improved" : "unchanged"
+        : "",
+      previous: previousSnapshot,
+      current: currentSnapshot,
+    }];
+  });
+
 const getTenureAccessUser = (user = {}) => ({ ...user, allowed_vendors: ["all"] });
 const applyTenureAccessMatch = (match = {}, user = {}) => applyDataAccessMatch(
   match,
@@ -2378,6 +2421,58 @@ exports.getClaimsReport = async (req, res) => {
   }
 };
 
+exports.getClaimComparisonReport = async (req, res) => {
+  try {
+    const previousTenureId = String(req.query.previous_tenure_id || req.query.previousTenureId || "").trim();
+    const currentTenureId = String(req.query.current_tenure_id || req.query.currentTenureId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(previousTenureId) || !mongoose.Types.ObjectId.isValid(currentTenureId)) {
+      return res.status(400).json({ success: false, message: "Select two valid tenures." });
+    }
+    if (previousTenureId === currentTenureId) {
+      return res.status(400).json({ success: false, message: "Select two different tenures." });
+    }
+
+    const [previousTenure, currentTenure] = await Promise.all([
+      Tenure.findOne(applyTenureAccessMatch({ _id: previousTenureId }, req.user)).lean(),
+      Tenure.findOne(applyTenureAccessMatch({ _id: currentTenureId }, req.user)).lean(),
+    ]);
+    if (!previousTenure || !currentTenure) return res.status(404).json({ success: false, message: "One or both tenures were not found." });
+    if (normalizeText(previousTenure.brand).toLocaleLowerCase() !== normalizeText(currentTenure.brand).toLocaleLowerCase()) {
+      return res.status(400).json({ success: false, message: "Select two tenures for the same brand." });
+    }
+
+    const allRows = buildClaimComparisonRows(
+      await Item.find(applyDataAccessMatch(
+        buildItemBrandMatch(currentTenure.brand),
+        req.user,
+        { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
+      )).select(CLAIMS_REPORT_SELECT).sort({ code: 1 }).lean(),
+      previousTenure._id,
+      currentTenure._id,
+    );
+    const rows = allRows.filter((row) => matchesInspectedItemsReportFilters(row, { vendor: req.query.vendor }));
+
+    return res.status(200).json({
+      success: true,
+      current_tenure: serializeTenure(currentTenure),
+      previous_tenure: serializeTenure(previousTenure),
+      rows,
+      summary: {
+        missing: rows.filter((row) => row.status === "missing").length,
+        new: rows.filter((row) => row.status === "new").length,
+        same: rows.filter((row) => row.status === "same").length,
+      },
+      filters: {
+        vendors: normalizeDistinctTextValues(allRows.flatMap((row) => row.vendors || []))
+          .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+      },
+    });
+  } catch (error) {
+    console.error("Get Claim Comparison Report Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch claim comparison." });
+  }
+};
+
 exports.getInspectedItemsReport = async (req, res) => {
   try {
     const search = req.query.search;
@@ -3511,6 +3606,7 @@ exports.getMonthlyShipmentsDrilldown = async (req, res) => {
 };
 
 exports.__test__ = {
+  buildClaimComparisonRows,
   isCurrentClaimSystemItem,
   buildClaimsReportRow,
   buildInspectedItemsReportRow,
@@ -3528,4 +3624,5 @@ exports.__test__ = {
 };
 
 exports.buildClaimsReportRow = buildClaimsReportRow;
+exports.buildClaimComparisonRows = buildClaimComparisonRows;
 exports.isCurrentClaimSystemItem = isCurrentClaimSystemItem;

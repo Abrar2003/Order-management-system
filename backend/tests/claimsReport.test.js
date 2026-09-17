@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  __test__: { isCurrentClaimSystemItem, buildClaimsReportRow, matchesInspectedItemsReportFilters },
+  __test__: { buildClaimComparisonRows, isCurrentClaimSystemItem, buildClaimsReportRow, matchesInspectedItemsReportFilters },
 } = require("../controllers/reports.controller");
 
 test("Claims report includes tenure-based claims and calculates their totals", () => {
@@ -34,4 +34,29 @@ test("Claims report includes tenure-based claims and calculates their totals", (
   assert.equal(zeroClaimRow.delivered_quantity, 0);
   assert.equal(zeroClaimRow.rejected_quantity, 0);
   assert.equal(zeroClaimRow.claim_percentage, 0);
+});
+
+test("claim comparison classifies missing, new, and retained claim items", () => {
+  const rows = buildClaimComparisonRows([
+    { _id: "missing", code: "OLD", claim_tenures: [{ tenure_id: "previous", delivered_quantity: 10, rejected_quantity: 1 }] },
+    { _id: "new", code: "NEW", claim_tenures: [{ tenure_id: "current", delivered_quantity: 20, rejected_quantity: 4 }] },
+    { _id: "same", code: "SAME", claim_tenures: [
+      { tenure_id: "previous", delivered_quantity: 10, rejected_quantity: 1 },
+      { tenure_id: "current", delivered_quantity: 20, rejected_quantity: 3 },
+    ] },
+    { _id: "improved", code: "IMPROVED", claim_tenures: [
+      { tenure_id: "previous", delivered_quantity: 10, rejected_quantity: 2 },
+      { tenure_id: "current", delivered_quantity: 20, rejected_quantity: 2 },
+    ] },
+  ], "previous", "current");
+
+  assert.deepEqual(rows.map(({ code, status }) => ({ code, status })), [
+    { code: "OLD", status: "missing" },
+    { code: "NEW", status: "new" },
+    { code: "SAME", status: "same" },
+    { code: "IMPROVED", status: "same" },
+  ]);
+  assert.equal(rows[0].current, null);
+  assert.equal(rows[2].trend, "increased");
+  assert.equal(rows[3].trend, "improved");
 });
