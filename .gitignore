@@ -1,3 +1,5 @@
 outputs
 data
 tmp
+.tmp
+*data
