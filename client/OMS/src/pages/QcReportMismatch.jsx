@@ -218,7 +218,6 @@ const getMismatchMaxLength = (inspections = [], mismatchKey = "") =>
 
 const buildSheetRows = ({
   inspections = [],
-  currentEntries = [],
   labelPrefix = "",
   fields = [],
   snapshotKey = "",
@@ -226,7 +225,6 @@ const buildSheetRows = ({
 } = {}) => {
   const safeInspections = Array.isArray(inspections) ? inspections : [];
   const maxLength = Math.max(
-    Array.isArray(currentEntries) ? currentEntries.length : 0,
     ...safeInspections.map((inspection) =>
       Array.isArray(inspection?.inspection_snapshot?.[snapshotKey])
         ? inspection.inspection_snapshot[snapshotKey].length
@@ -241,7 +239,7 @@ const buildSheetRows = ({
 
   const rows = [];
   for (let index = 0; index < maxLength; index += 1) {
-    const currentEntry = currentEntries[index] || {};
+    const baselineEntry = safeInspections[0]?.inspection_snapshot?.[snapshotKey]?.[index] || {};
 
     fields.forEach((field) => {
       const inspectionCells = safeInspections.map((inspection, inspectionIndex) => {
@@ -252,8 +250,11 @@ const buildSheetRows = ({
         const mismatchKeySet = buildMismatchKeySet(inspection?.[mismatchKey]);
         const mismatchEntryKey = `${index}:${field.key}`;
         const inspectionValue = inspectionEntry?.[field.key];
-        const currentValue = currentEntry?.[field.key];
-        const isComparable = hasComparableFieldData(inspectionValue, currentValue, field);
+        const isComparable = hasComparableFieldData(
+          inspectionValue,
+          baselineEntry?.[field.key],
+          field,
+        );
         const isMismatch = mismatchKeySet.has(mismatchEntryKey);
         const hasInspectionValue = hasFieldData(inspectionValue, field);
 
@@ -266,6 +267,7 @@ const buildSheetRows = ({
           value: hasInspectionValue
             ? formatComparisonValue(inspectionValue, field.type, field.key)
             : "No Data",
+          is_baseline: inspectionIndex === 0,
           is_comparable: isComparable,
           is_mismatch: isMismatch,
         };
@@ -278,7 +280,6 @@ const buildSheetRows = ({
       rows.push({
         key: `${labelPrefix}-${index}-${field.key}`,
         field: `${labelPrefix} ${index + 1} - ${field.label}`,
-        current_value: formatComparisonValue(currentEntry?.[field.key], field.type, field.key),
         inspection_cells: inspectionCells,
         is_mismatch: inspectionCells.some((cell) => cell.is_mismatch),
       });
@@ -290,16 +291,16 @@ const buildSheetRows = ({
 
 const buildBoxModeSheetRows = ({
   inspections = [],
-  currentMode = "",
 } = {}) => {
   const safeInspections = Array.isArray(inspections) ? inspections : [];
-  if (!currentMode && safeInspections.length === 0) {
+  const baselineMode = safeInspections[0]?.inspection_snapshot?.inspected_box_mode || "";
+  if (!baselineMode && safeInspections.length === 0) {
     return [];
   }
 
   const inspectionCells = safeInspections.map((inspection, inspectionIndex) => {
     const inspectionMode = inspection?.inspection_snapshot?.inspected_box_mode || "";
-    const isComparable = hasComparableTextValue(currentMode) &&
+    const isComparable = hasComparableTextValue(baselineMode) &&
       hasComparableTextValue(inspectionMode);
 
     return {
@@ -309,6 +310,7 @@ const buildBoxModeSheetRows = ({
       inspection_date: inspection?.inspection_date || "",
       inspector_name: inspection?.inspector_name || "Unassigned",
       value: isComparable ? formatBoxModeLabel(inspectionMode) : "No Data",
+      is_baseline: inspectionIndex === 0,
       is_comparable: isComparable,
       is_mismatch: Boolean(inspection?.box_mode_mismatch),
     };
@@ -321,7 +323,6 @@ const buildBoxModeSheetRows = ({
   return [{
     key: "box-mode",
     field: "Box Mode",
-    current_value: formatBoxModeLabel(currentMode),
     inspection_cells: inspectionCells,
     is_mismatch: inspectionCells.some((cell) => cell.is_mismatch),
   }];
@@ -886,7 +887,6 @@ const QcReportMismatch = () => {
     if (!selectedRow) return [];
     return buildSheetRows({
       inspections: selectedInspectionRecords,
-      currentEntries: selectedRow?.current_qc_inspected_item_sizes,
       labelPrefix: "Item Size",
       fields: ITEM_SIZE_FIELDS,
       snapshotKey: "inspected_item_sizes",
@@ -898,7 +898,6 @@ const QcReportMismatch = () => {
     if (!selectedRow) return [];
     return buildSheetRows({
       inspections: selectedInspectionRecords,
-      currentEntries: selectedRow?.current_qc_inspected_box_sizes,
       labelPrefix: "Box Size",
       fields: BOX_SIZE_FIELDS,
       snapshotKey: "inspected_box_sizes",
@@ -910,7 +909,6 @@ const QcReportMismatch = () => {
     if (!selectedRow) return [];
     return buildBoxModeSheetRows({
       inspections: selectedInspectionRecords,
-      currentMode: selectedRow?.current_qc_inspected_box_mode,
     });
   }, [selectedInspectionRecords, selectedRow]);
 
@@ -922,7 +920,7 @@ const QcReportMismatch = () => {
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h2 className="h4 mb-0">QC Report Mismatch</h2>
           <span className="small text-secondary">
-            Latest inspection snapshots vs current inspected sizes
+            Latest three inspection snapshots compared with each other
           </span>
         </div>
 
@@ -1330,6 +1328,11 @@ const QcReportMismatch = () => {
                   </span>
                 </div>
 
+                <div className="alert alert-info small mb-3" role="alert">
+                  <strong>Comparison:</strong> Inspection 1 is compared with the other displayed
+                  inspections. Item-master and PIS reference values are not used.
+                </div>
+
                 <section className="mb-4 bg-light p-3 rounded border">
                   <h6 className="mb-2">Comments</h6>
                   <div className="qc-comments-list mb-3" style={{ maxHeight: "150px", overflowY: "auto" }}>
@@ -1491,7 +1494,9 @@ const QcReportMismatch = () => {
                                       <div className="small text-secondary">
                                         {cell.is_mismatch
                                           ? "Mismatch"
-                                          : (cell.is_comparable ? "Matched" : "No comparable data")}
+                                          : (cell.is_comparable
+                                            ? (cell.is_baseline ? "Comparison baseline" : "Matched")
+                                            : "No comparable data")}
                                       </div>
                                     </td>
                                   ))}

@@ -947,15 +947,6 @@ const normalizeInspectionStatusFilter = (value) => {
 
 const QC_REPORT_MISMATCH_ITEM_SELECT = [
   "code",
-  "inspected_item_sizes",
-  "inspected_box_sizes",
-  "inspected_box_mode",
-  "master_item_sizes",
-  "master_box_sizes",
-  "master_box_mode",
-  "pis_item_sizes",
-  "pis_box_sizes",
-  "pis_box_mode",
   "qc_mismatch_comments",
 ].join(" ");
 const QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT = 3;
@@ -2911,10 +2902,11 @@ exports.getQcReportMismatch = async (req, res) => {
     );
 
     const inspectionRows = inspectionsForComparison.map((inspection) => {
-      const currentItemDoc =
-        itemDocByCode.get(normalizeLookupKey(inspection?.item_code)) || {};
-      const mismatch = compareInspectionSizeSnapshot(inspection, currentItemDoc);
-      if (!mismatch.has_comparable_data) {
+      const snapshot = buildNormalizedInspectionSizeState(inspection);
+      if (
+        snapshot.inspected_item_sizes.length === 0 &&
+        snapshot.inspected_box_sizes.length === 0
+      ) {
         return null;
       }
 
@@ -2938,59 +2930,11 @@ exports.getQcReportMismatch = async (req, res) => {
         checked: normalizeNumber(inspection?.checked),
         passed: normalizeNumber(inspection?.passed),
         pending_after: normalizeNumber(inspection?.pending_after),
-        current_qc_inspected_item_sizes:
-          mismatch.current_snapshot.inspected_item_sizes,
-        inspection_inspected_item_sizes:
-          mismatch.inspection_snapshot.inspected_item_sizes,
-        current_qc_inspected_box_sizes:
-          mismatch.current_snapshot.inspected_box_sizes,
-        inspection_inspected_box_sizes:
-          mismatch.inspection_snapshot.inspected_box_sizes,
-        current_qc_inspected_box_mode:
-          mismatch.current_snapshot.inspected_box_mode,
-        inspection_inspected_box_mode:
-          mismatch.inspection_snapshot.inspected_box_mode,
-        mismatch_summary: {
-          has_mismatch: mismatch.has_mismatch,
-          mismatch_count: mismatch.mismatch_count,
-          item_size_mismatch_count: mismatch.item_size_mismatches.length,
-          box_size_mismatch_count: mismatch.box_size_mismatches.length,
-          box_mode_mismatch_count: mismatch.box_mode_mismatch ? 1 : 0,
-        },
-        item_size_mismatches: mismatch.item_size_mismatches,
-        box_size_mismatches: mismatch.box_size_mismatches,
-        box_mode_mismatch: mismatch.box_mode_mismatch,
+        inspection_inspected_item_sizes: snapshot.inspected_item_sizes,
+        inspection_inspected_box_sizes: snapshot.inspected_box_sizes,
+        inspection_inspected_box_mode: snapshot.inspected_box_mode,
       };
     }).filter(Boolean);
-
-    const summary = inspectionRows.reduce(
-      (accumulator, row) => {
-        accumulator.total_inspections += 1;
-        if (row?.mismatch_summary?.has_mismatch) {
-          accumulator.mismatch_inspections += 1;
-        } else {
-          accumulator.clean_inspections += 1;
-        }
-        accumulator.item_size_mismatch_count += Number(
-          row?.mismatch_summary?.item_size_mismatch_count || 0,
-        );
-        accumulator.box_size_mismatch_count += Number(
-          row?.mismatch_summary?.box_size_mismatch_count || 0,
-        );
-        accumulator.box_mode_mismatch_count += Number(
-          row?.mismatch_summary?.box_mode_mismatch_count || 0,
-        );
-        return accumulator;
-      },
-      {
-        total_inspections: 0,
-        mismatch_inspections: 0,
-        clean_inspections: 0,
-        item_size_mismatch_count: 0,
-        box_size_mismatch_count: 0,
-        box_mode_mismatch_count: 0,
-      },
-    );
 
     const groupedRowsMap = new Map();
     inspectionRows.forEach((row) => {
@@ -3008,19 +2952,6 @@ exports.getQcReportMismatch = async (req, res) => {
       if (!currentEntry) {
         const currentItemDoc =
           itemDocByCode.get(normalizeLookupKey(row?.item_code)) || {};
-        const normalizedCurrentSnapshot =
-          buildNormalizedInspectionSizeState(currentItemDoc);
-        const currentSnapshot = {
-          inspected_item_sizes: Array.isArray(row?.current_qc_inspected_item_sizes)
-            ? row.current_qc_inspected_item_sizes
-            : normalizedCurrentSnapshot.inspected_item_sizes,
-          inspected_box_sizes: Array.isArray(row?.current_qc_inspected_box_sizes)
-            ? row.current_qc_inspected_box_sizes
-            : normalizedCurrentSnapshot.inspected_box_sizes,
-          inspected_box_mode:
-            row?.current_qc_inspected_box_mode ||
-            normalizedCurrentSnapshot.inspected_box_mode,
-        };
 
         groupedRowsMap.set(groupKey, {
           id: itemKey
@@ -3044,9 +2975,6 @@ exports.getQcReportMismatch = async (req, res) => {
           passed: 0,
           pending_after: row?.pending_after ?? 0,
           inspection_count: 0,
-          current_qc_inspected_item_sizes: currentSnapshot.inspected_item_sizes,
-          current_qc_inspected_box_sizes: currentSnapshot.inspected_box_sizes,
-          current_qc_inspected_box_mode: currentSnapshot.inspected_box_mode,
           qc_mismatch_comments: currentItemDoc.qc_mismatch_comments || [],
           mismatch_summary: {
             has_mismatch: false,
@@ -3122,51 +3050,69 @@ exports.getQcReportMismatch = async (req, res) => {
           inspected_box_mode: row?.inspection_inspected_box_mode || "",
         },
         mismatch_summary: {
-          has_mismatch: Boolean(row?.mismatch_summary?.has_mismatch),
-          mismatch_count: Number(row?.mismatch_summary?.mismatch_count || 0),
-          item_size_mismatch_count: Number(
-            row?.mismatch_summary?.item_size_mismatch_count || 0,
-          ),
-          box_size_mismatch_count: Number(
-            row?.mismatch_summary?.box_size_mismatch_count || 0,
-          ),
-          box_mode_mismatch_count: Number(
-            row?.mismatch_summary?.box_mode_mismatch_count || 0,
-          ),
+          has_mismatch: false,
+          mismatch_count: 0,
+          item_size_mismatch_count: 0,
+          box_size_mismatch_count: 0,
+          box_mode_mismatch_count: 0,
         },
-        item_size_mismatches: Array.isArray(row?.item_size_mismatches)
-          ? row.item_size_mismatches
-          : [],
-        box_size_mismatches: Array.isArray(row?.box_size_mismatches)
-          ? row.box_size_mismatches
-          : [],
-        box_mode_mismatch: row?.box_mode_mismatch || null,
+        item_size_mismatches: [],
+        box_size_mismatches: [],
+        box_mode_mismatch: null,
       };
 
       group.inspection_records.push(inspectionRecord);
-      group.mismatch_summary.mismatch_count += inspectionRecord.mismatch_summary.mismatch_count;
-      group.mismatch_summary.item_size_mismatch_count +=
-          inspectionRecord.mismatch_summary.item_size_mismatch_count;
-      group.mismatch_summary.box_size_mismatch_count +=
-          inspectionRecord.mismatch_summary.box_size_mismatch_count;
-      group.mismatch_summary.box_mode_mismatch_count +=
-          inspectionRecord.mismatch_summary.box_mode_mismatch_count;
-
-      if (inspectionRecord.mismatch_summary.has_mismatch) {
-        group.mismatch_summary.has_mismatch = true;
-        group.mismatch_summary.mismatch_inspection_count += 1;
-      } else {
-        group.mismatch_summary.clean_inspection_count += 1;
-      }
     });
 
     const groupedRows = [...groupedRowsMap.values()]
       .map((group) => {
-        const sortedInspectionRecords = sortInspectionsByOrderAndInspectionDate(group.inspection_records)
-          .map((inspectionRecord, index) => ({
+        const sortedInspectionRecords = sortInspectionsByOrderAndInspectionDate(group.inspection_records);
+        const baselineSnapshot = sortedInspectionRecords[0]?.inspection_snapshot || null;
+        const comparisonRecords = sortedInspectionRecords.map((inspectionRecord, index) => {
+          const mismatch = index === 0 || !baselineSnapshot
+            ? null
+            : compareInspectionSizeSnapshot(inspectionRecord.inspection_snapshot, baselineSnapshot);
+          const mismatchSummary = {
+            has_mismatch: Boolean(mismatch?.has_mismatch),
+            mismatch_count: Number(mismatch?.mismatch_count || 0),
+            item_size_mismatch_count: mismatch?.item_size_mismatches?.length || 0,
+            box_size_mismatch_count: mismatch?.box_size_mismatches?.length || 0,
+            box_mode_mismatch_count: mismatch?.box_mode_mismatch ? 1 : 0,
+          };
+
+          return {
             ...inspectionRecord,
             sheet_label: `Inspection ${index + 1}`,
-          }));
+            mismatch_summary: mismatchSummary,
+            item_size_mismatches: mismatch?.item_size_mismatches || [],
+            box_size_mismatches: mismatch?.box_size_mismatches || [],
+            box_mode_mismatch: mismatch?.box_mode_mismatch || null,
+          };
+        });
+        const mismatchSummary = comparisonRecords.reduce(
+          (summary, inspectionRecord) => {
+            summary.mismatch_count += inspectionRecord.mismatch_summary.mismatch_count;
+            summary.item_size_mismatch_count += inspectionRecord.mismatch_summary.item_size_mismatch_count;
+            summary.box_size_mismatch_count += inspectionRecord.mismatch_summary.box_size_mismatch_count;
+            summary.box_mode_mismatch_count += inspectionRecord.mismatch_summary.box_mode_mismatch_count;
+            if (inspectionRecord.mismatch_summary.has_mismatch) {
+              summary.has_mismatch = true;
+              summary.mismatch_inspection_count += 1;
+            } else {
+              summary.clean_inspection_count += 1;
+            }
+            return summary;
+          },
+          {
+            has_mismatch: false,
+            mismatch_count: 0,
+            mismatch_inspection_count: 0,
+            clean_inspection_count: 0,
+            item_size_mismatch_count: 0,
+            box_size_mismatch_count: 0,
+            box_mode_mismatch_count: 0,
+          },
+        );
         const orderIds = Array.isArray(group.order_ids)
           ? group.order_ids.filter(Boolean)
           : [];
@@ -3190,7 +3136,8 @@ exports.getQcReportMismatch = async (req, res) => {
             "N/A",
           latest_order_id: undefined,
           inspector_name: group.inspector_names.join(", ") || "Unassigned",
-          inspection_records: sortedInspectionRecords,
+          mismatch_summary: mismatchSummary,
+          inspection_records: comparisonRecords,
         };
       })
       .sort((left, right) => {
@@ -3205,6 +3152,37 @@ exports.getQcReportMismatch = async (req, res) => {
         return getDateTimeValue(right?.inspection_date_value) -
           getDateTimeValue(left?.inspection_date_value);
       });
+
+    const summary = groupedRows.reduce(
+      (accumulator, row) => {
+        (row?.inspection_records || []).forEach((inspectionRecord) => {
+          accumulator.total_inspections += 1;
+          if (inspectionRecord?.mismatch_summary?.has_mismatch) {
+            accumulator.mismatch_inspections += 1;
+          } else {
+            accumulator.clean_inspections += 1;
+          }
+          accumulator.item_size_mismatch_count += Number(
+            inspectionRecord?.mismatch_summary?.item_size_mismatch_count || 0,
+          );
+          accumulator.box_size_mismatch_count += Number(
+            inspectionRecord?.mismatch_summary?.box_size_mismatch_count || 0,
+          );
+          accumulator.box_mode_mismatch_count += Number(
+            inspectionRecord?.mismatch_summary?.box_mode_mismatch_count || 0,
+          );
+        });
+        return accumulator;
+      },
+      {
+        total_inspections: 0,
+        mismatch_inspections: 0,
+        clean_inspections: 0,
+        item_size_mismatch_count: 0,
+        box_size_mismatch_count: 0,
+        box_mode_mismatch_count: 0,
+      },
+    );
 
     const filteredRows = mismatchOnly
       ? groupedRows.filter((row) => row?.mismatch_summary?.has_mismatch)
