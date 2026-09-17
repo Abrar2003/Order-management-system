@@ -32,7 +32,7 @@ const formatPercent = (value) => Number.isFinite(Number(value))
   : "-";
 const formatAverageDays = (value) => Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)} days` : "-";
 
-const SummaryCards = ({ cards = [] }) => <div className="row g-2 p-3 pb-0">
+const SummaryCards = ({ cards = [] }) => <div className="row g-2 p-3 pb-0 vendor-performance-summary">
   {cards.map((card) => <div key={card.label} className="col-sm-6 col-lg-3"><div className="border rounded bg-light h-100 p-3"><div className="small text-secondary">{card.label}</div><div className="fs-5 fw-semibold">{card.value}</div></div></div>)}
 </div>;
 
@@ -128,6 +128,42 @@ const VendorPerformanceReport = () => {
             reportKey: "vendor-performance-report",
             filename: `${filenameBase}.pdf`,
             repeatHeader: { title: label, subtitle: `Vendor: ${vendor}` },
+            extraCss: `
+              .pdf-report .vendor-performance-summary {
+                display: grid !important;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 3mm !important;
+                margin: 0 !important;
+                padding: 4mm !important;
+              }
+              .pdf-report .vendor-performance-summary > [class*="col-"] {
+                width: auto !important;
+                max-width: none !important;
+                padding: 0 !important;
+              }
+              .pdf-report .vendor-performance-summary .border { padding: 3mm !important; }
+              .pdf-report .vendor-performance-summary .small { font-size: 10px !important; line-height: 1.25; }
+              .pdf-report .vendor-performance-summary .fs-5 { font-size: 16px !important; line-height: 1.2; }
+              .pdf-report .vendor-performance-po-table {
+                width: 100% !important;
+                table-layout: fixed !important;
+              }
+              .pdf-report .vendor-performance-po-table th,
+              .pdf-report .vendor-performance-po-table td {
+                padding: 3mm !important;
+                font-size: 16px !important;
+                text-align: left !important;
+                white-space: nowrap !important;
+              }
+              .pdf-report .vendor-performance-po-table th:nth-child(1) { width: 12%; }
+              .pdf-report .vendor-performance-po-table th:nth-child(2) { width: 15%; }
+              .pdf-report .vendor-performance-po-table th:nth-child(3),
+              .pdf-report .vendor-performance-po-table th:nth-child(4) { width: 16%; }
+              .pdf-report .vendor-performance-po-table th:nth-child(5) { width: 18%; }
+              .pdf-report .vendor-performance-po-table th:nth-child(6) { width: 11%; }
+              .pdf-report .vendor-performance-po-table th:nth-child(7),
+              .pdf-report .vendor-performance-po-table th:nth-child(8) { width: 6%; }
+            `,
           });
         } else {
           const response = await api.get("/reports/vendor-performance/export", {
@@ -278,7 +314,7 @@ const VendorPerformanceReport = () => {
               <VendorPerformanceMonthlyDelayChart rows={poRows} />
               <VendorPerformanceCharts section="po_delay" rows={poRows} />
               <div className="table-responsive">
-                <table className="table table-striped align-middle mb-0">
+                <table className="table table-striped align-middle mb-0 vendor-performance-po-table">
                   <thead><tr><th>PO</th><th>Brand</th><th>Complete packed</th><th>Effective ETD</th><th>Difference</th><th>Status</th><th>Items</th><th>Qty</th></tr></thead>
                   <tbody>{poRows.length ? poRows.map((row) => <tr key={`${row.po}-${row.brand}`} className={row.is_overdue_inspection_pending ? "table-danger" : row.is_inspection_pending ? "table-success" : ""}>
                     <td className="fw-semibold">{row.po}</td><td>{row.brand}</td><td>{row.is_inspection_pending ? "Inspection pending" : formatDateDDMMYYYY(row.packed_date)}</td><td>{formatDateDDMMYYYY(row.etd)}</td><td>{formatDays(row.difference_days)}</td><td><span className={`badge ${row.is_overdue_inspection_pending ? "text-bg-danger" : row.is_inspection_pending ? "text-bg-success" : statusClass(row.status)}`}>{row.status}</span></td><td>{row.item_count}</td><td>{row.total_quantity}</td>

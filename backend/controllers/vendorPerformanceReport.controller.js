@@ -51,7 +51,9 @@ const toNumber = (value) => {
 };
 const toUtcDate = (value) => {
   if (!value) return null;
-  const parsed = value instanceof Date ? value : new Date(value);
+  const parsed = typeof value === "string" && /^\d{2}[/-]\d{2}[/-]\d{4}$/.test(value.trim())
+    ? parseDateOnly(value)
+    : value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return new Date(Date.UTC(
     parsed.getUTCFullYear(),
@@ -207,13 +209,8 @@ const buildPoSections = (orderRows = []) => {
 
   return {
     po_delay: [...groups.values()]
-      .filter((group) => group.etd && (
-        (group.all_packed && group.packed_date)
-        || !group.all_packed
-      ))
-      .map((group) => group.all_packed
-        ? serialize(group, group.packed_date, "packed_date")
-        : serialize(group, today, "packed_date", { inspectionPending: true }))
+      .filter((group) => group.etd && group.all_packed && group.packed_date)
+      .map((group) => serialize(group, group.packed_date, "packed_date"))
       .sort(compareRows),
     shipping_delay: [...groups.values()]
       .filter((group) => group.all_shipped && group.shipping_date && (group.etd || (group.all_packed && group.packed_date)))
@@ -358,10 +355,11 @@ const buildMonthlyPoDelayChartSpec = (rows = [], dateKey = "etd", delayKey = "di
   }, new Map());
   const months = [...monthStats.keys()];
   const monthIndexes = new Map(months.map((month, index) => [month, index]));
+  const overallAverageDelay = chartData.length ? chartData.reduce((sum, row) => sum + row.difference_days, 0) / chartData.length : null;
   return {
     type: "monthly_po_delay",
     title,
-    data: chartData.map((row) => ({ ...row, color: monthlyChartColor(monthIndexes.get(row.month), months.length), average_delay: monthStats.get(row.month).sum / monthStats.get(row.month).count })),
+    data: chartData.map((row) => ({ ...row, color: monthlyChartColor(monthIndexes.get(row.month), months.length), average_delay: monthStats.get(row.month).sum / monthStats.get(row.month).count, overall_average_delay: overallAverageDelay })),
   };
 };
 const buildVendorPerformanceChartSpecs = (section, rows = [], poDelayRows = rows) => {
@@ -505,7 +503,9 @@ const renderMonthlyPoDelayChartSvg = ({ title, data }) => {
     x: left + index * groupWidth + groupWidth / 2,
     value: data[group.start].average_delay,
   }));
-  const averageLine = `<polyline points="${averagePoints.map((point) => `${point.x},${y(point.value)}`).join(" ")}" fill="none" stroke="#212529" stroke-width="2.5"/>${averagePoints.map((point) => `<circle cx="${point.x}" cy="${y(point.value)}" r="4" fill="#212529"/>`).join("")}`;
+  const overallAverageDelay = chartNumber(data[0]?.overall_average_delay);
+  const overallAverageLine = overallAverageDelay === null ? "" : `<line x1="${left}" y1="${y(overallAverageDelay)}" x2="${width - right}" y2="${y(overallAverageDelay)}" stroke="#dc3545" stroke-width="2" stroke-dasharray="6 4"/><text x="${width - right}" y="${y(overallAverageDelay) - 6}" text-anchor="end" font-size="11" fill="#dc3545">Overall average: ${overallAverageDelay.toFixed(2)} days</text>`;
+  const averageLine = `<polyline points="${averagePoints.map((point) => `${point.x},${y(point.value)}`).join(" ")}" fill="none" stroke="#000000" stroke-width="2.5"/>${averagePoints.map((point) => `<circle cx="${point.x}" cy="${y(point.value)}" r="4" fill="#000000"/>`).join("")}${overallAverageLine}`;
   const months = monthEntries.map(([month], index) => {
     const centerX = left + index * groupWidth + groupWidth / 2;
     return `<text x="${centerX}" y="${height - 22}" text-anchor="middle" font-size="12" fill="#343a40">${monthFormatter.format(new Date(`${month}-01T00:00:00Z`))}</text>`;

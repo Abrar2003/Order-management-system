@@ -7,6 +7,7 @@ import {
   ComposedChart,
   Line,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -75,8 +76,13 @@ const monthlyDelayChartData = (rows, dateKey, delayKey) => {
       byMonth.set(month, [...(byMonth.get(month) || []), { po: poLabel(row), difference_days: finiteNumber(row[delayKey]) }]);
     });
   const groups = [...byMonth.entries()];
+  const allRows = groups.flatMap(([, rowsForMonth]) => rowsForMonth);
+  const overallAverageDelay = allRows.length
+    ? allRows.reduce((sum, row) => sum + row.difference_days, 0) / allRows.length
+    : null;
   return {
     slots: Math.max(0, ...groups.map(([, rowsForMonth]) => rowsForMonth.length)),
+    overall_average_delay: overallAverageDelay,
     data: groups.map(([month, rowsForMonth], monthIndex) => rowsForMonth.reduce((result, row, index) => ({
       ...result,
       [`po_${index}`]: row.difference_days,
@@ -86,6 +92,7 @@ const monthlyDelayChartData = (rows, dateKey, delayKey) => {
       label: monthFormatter.format(new Date(`${month}-01T00:00:00Z`)),
       color: monthlyColor(monthIndex, groups.length),
       average_delay: rowsForMonth.reduce((sum, row) => sum + row.difference_days, 0) / rowsForMonth.length,
+      overall_average_delay: overallAverageDelay,
     })),
   };
 };
@@ -125,7 +132,8 @@ const TenureClaimTooltip = ({ active, payload }) => {
 const MonthlyDelayTooltip = ({ active, payload }) => {
   const row = active ? payload?.[0]?.payload : null;
   const poRows = (payload || []).filter((entry) => entry.dataKey?.startsWith("po_") && finiteNumber(entry?.value) !== null);
-  return row ? <div className="bg-white border rounded shadow-sm p-2 small"><div className="fw-semibold">{row.label}</div><div>Average delay: {row.average_delay.toFixed(1)} days</div>{poRows.map((entry) => <div key={entry.dataKey}>{row[`${entry.dataKey}_label`]}: {entry.value} days {entry.value > 0 ? "delayed" : entry.value < 0 ? "early" : "on time"}</div>)}</div> : null;
+  const overallAverageDelay = finiteNumber(row?.overall_average_delay);
+  return row ? <div className="bg-white border rounded shadow-sm p-2 small"><div className="fw-semibold">{row.label}</div><div>Monthly average: {row.average_delay.toFixed(1)} days</div><div className="text-danger">Overall average: {overallAverageDelay === null ? "-" : `${overallAverageDelay.toFixed(2)} days`}</div>{poRows.map((entry) => <div key={entry.dataKey}>{row[`${entry.dataKey}_label`]}: {entry.value} days {entry.value > 0 ? "delayed" : entry.value < 0 ? "early" : "on time"}</div>)}</div> : null;
 };
 
 export const VendorPerformanceMonthlyDelayChart = ({ rows = [], dateKey = "etd", delayKey = "difference_days", title = "Monthly PO delay: ETD vs final packed" }) => {
@@ -140,7 +148,8 @@ export const VendorPerformanceMonthlyDelayChart = ({ rows = [], dateKey = "etd",
         <Tooltip content={<MonthlyDelayTooltip />} />
         <Legend verticalAlign="top" height={24} />
         {Array.from({ length: chart.slots }, (_, index) => <Bar key={index} dataKey={`po_${index}`} name="PO delay" legendType="none" fill="#0d6efd" isAnimationActive={false}>{chart.data.map((row) => <Cell key={row.month} fill={row.color} />)}</Bar>)}
-        <Line type="linear" dataKey="average_delay" name="Average delay" stroke="#212529" strokeWidth={2.5} dot={{ r: 4, fill: "#212529" }} isAnimationActive={false} />
+        <ReferenceLine y={chart.overall_average_delay} stroke="#dc3545" strokeWidth={2} strokeDasharray="6 4" label={{ value: `Overall average: ${chart.overall_average_delay.toFixed(2)} days`, position: "insideTopRight", fill: "#dc3545", fontSize: 11 }} />
+        <Line type="linear" dataKey="average_delay" name="Monthly average delay" stroke="#000000" strokeWidth={2.5} dot={{ r: 4, fill: "#000000" }} isAnimationActive={false} />
       </ComposedChart>
     </ResponsiveContainer>
   </div></ChartCard></div>;

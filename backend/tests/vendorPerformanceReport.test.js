@@ -31,6 +31,17 @@ test("vendor performance returns both stuffing comparisons", () => {
   assert.equal(sections.shipping_delay[0].etd_difference_days, 5);
 });
 
+test("vendor performance reads day-first QC packed dates correctly", () => {
+  const sections = buildPoSections([{
+    order_id: "PO-DMY", brand: "Brand", vendor: "Vendor", quantity: 5,
+    status: "Shipped", ETD: "2026-01-24",
+    qc_record: { last_inspected_date: "07/01/2026", quantities: { qc_passed: 5 } },
+    shipment: [{ stuffing_date: "2026-01-17", quantity: 5 }],
+  }]);
+  assert.equal(sections.po_delay[0].packed_date, "2026-01-07");
+  assert.equal(sections.shipping_delay[0].packed_difference_days, 10);
+});
+
 test("vendor performance flags a lower latest claim percentage as positive", () => {
   const [row] = buildClaimRows([{
     _id: "item-1", code: "ITEM-1", vendors: ["Vendor"],
@@ -59,7 +70,7 @@ test("vendor performance flags missing prior and current tenure claims", () => {
   assert.equal(rows.find((row) => row.code === "PREVIOUS").remark, "positive");
 });
 
-test("vendor performance includes incomplete POs and flags only overdue ones as overdue", () => {
+test("vendor performance excludes incomplete POs from PO-wise delay", () => {
   const { po_delay: rows } = buildPoSections([{
     order_id: "PO-PENDING", brand: "Brand", vendor: "Vendor", quantity: 5,
     status: "Under Inspection", ETD: "2020-01-10",
@@ -68,12 +79,7 @@ test("vendor performance includes incomplete POs and flags only overdue ones as 
     order_id: "PO-UPCOMING", brand: "Brand", vendor: "Vendor", quantity: 5,
     status: "Pending", ETD: "2099-01-10", qc_record: {}, shipment: [],
   }]);
-  assert.equal(rows[0].status, "Inspection pending — delayed");
-  assert.equal(rows[0].is_overdue_inspection_pending, true);
-  const upcoming = rows.find((row) => row.po === "PO-UPCOMING");
-  assert.equal(upcoming.status, "Inspection pending");
-  assert.equal(upcoming.is_inspection_pending, true);
-  assert.equal(upcoming.is_overdue_inspection_pending, false);
+  assert.equal(rows.length, 0);
 });
 
 test("vendor performance ETD range is inclusive and gives revised ETD priority", () => {
@@ -103,6 +109,7 @@ test("vendor performance builds filtered chart data for each charted section", (
   assert.equal(poCharts[0].data[0].month, "2026-01");
   assert.equal(poCharts[0].title, "Monthly PO delay: ETD vs final packed");
   assert.equal(poCharts[0].data[0].average_delay, 3);
+  assert.equal(poCharts[0].data[0].overall_average_delay, 3);
   assert.match(poCharts[0].data[0].color, /^hsl\(/);
   assert.equal(poCharts[1].data[0].difference_days, 3);
   assert.equal(claimCharts[1].data[0].current_claim_percentage, 4.5);
