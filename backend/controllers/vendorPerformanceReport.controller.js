@@ -278,7 +278,7 @@ const average = (rows = [], key) => {
   const values = rows.map((row) => chartNumber(row?.[key])).filter((value) => value !== null);
   return values.length ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2)) : null;
 };
-const buildVendorPerformanceSummaries = ({ poRows = [], claimRows = [], shippingRows = [], brands = [] } = {}) => {
+const buildVendorPerformanceSummaries = ({ poRows = [], claimRows = [], shippingRows = [], brands = [], totalItemCount = claimRows.length } = {}) => {
   const selectedBrands = [...new Set(brands.filter(Boolean))];
   const poStats = (rows) => ({
     po_count: rows.length,
@@ -294,10 +294,15 @@ const buildVendorPerformanceSummaries = ({ poRows = [], claimRows = [], shipping
     delivered_quantity: total.delivered_quantity + Number(row?.delivered_quantity || 0),
     rejected_quantity: total.rejected_quantity + Number(row?.rejected_quantity || 0),
   }), { delivered_quantity: 0, rejected_quantity: 0 });
+  const claimedItemCount = claimRows.filter((row) => Number(row?.rejected_quantity || 0) > 0).length;
   return {
     po_delay: { combined: poStats(poRows), brands: brandRows },
     product_complaints: {
-      item_count: claimRows.length,
+      total_item_count: totalItemCount,
+      claimed_item_count: claimedItemCount,
+      claimed_item_percentage: totalItemCount > 0
+        ? Number(((claimedItemCount / totalItemCount) * 100).toFixed(2))
+        : 0,
       average_claim_percentage: claimTotals.delivered_quantity > 0
         ? Number(((claimTotals.rejected_quantity / claimTotals.delivered_quantity) * 100).toFixed(2))
         : 0,
@@ -590,7 +595,6 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, fromDate, to
   });
   const itemMatch = applyDataAccessMatch(
     { $and: [
-      { "claim_tenures.0": { $exists: true } },
       buildVendorsArrayFilter({ field: "vendors", vendorName: selectedVendor }),
       buildItemBrandMatch(selectedBrands),
       ...(etdRange.from || etdRange.toExclusive
@@ -600,9 +604,10 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, fromDate, to
     user,
     { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
   );
-  const claimItems = await Item.find(itemMatch)
+  const reportItems = await Item.find(itemMatch)
     .select("code name description brand brand_name brands vendors claim_tenures claim_percentage")
     .lean();
+  const claimItems = reportItems.filter(isCurrentClaimSystemItem);
   const claimTenureIds = [...new Set(claimItems.flatMap((item) =>
     (Array.isArray(item?.claim_tenures) ? item.claim_tenures : [])
       .map((claim) => String(claim?.tenure_id || ""))
@@ -619,6 +624,7 @@ const buildVendorPerformanceDataset = async ({ vendor = "", brands, fromDate, to
     claimRows,
     shippingRows: poSections.shipping_delay,
     brands: selectedBrands.length ? selectedBrands : brandOptions,
+    totalItemCount: reportItems.length,
   });
 
   return {
