@@ -7,6 +7,7 @@ const {
   buildVendorFilter,
   normalizeVendorText,
 } = require("../helpers/vendorRef");
+const { parseDateOnly } = require("../helpers/dateOnly");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -24,14 +25,7 @@ const toRoundedNumber = (value, decimals = 2) => {
 };
 
 const toUtcDateOnly = (value) => {
-  if (!value) return null;
-  const parsed = value instanceof Date ? value : new Date(value);
-  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
-  return new Date(Date.UTC(
-    parsed.getUTCFullYear(),
-    parsed.getUTCMonth(),
-    parsed.getUTCDate(),
-  ));
+  return parseDateOnly(value);
 };
 
 const toIsoDateOnly = (value) => {
@@ -87,7 +81,7 @@ const processOrderAnalyticsRow = (order = {}) => {
   const inspections = (Array.isArray(order.inspections) ? order.inspections : [])
     .filter((inspection) => getInspectionDateValue(inspection))
     .sort((left, right) =>
-      new Date(getInspectionDateValue(left)) - new Date(getInspectionDateValue(right)),
+      toUtcDateOnly(getInspectionDateValue(left)) - toUtcDateOnly(getInspectionDateValue(right)),
     );
   const orderQuantity = Math.max(0, toFiniteNumber(order.quantity, 0));
   const passedQuantity = inspections.reduce(

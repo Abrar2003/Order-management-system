@@ -42,6 +42,17 @@ test("vendor performance reads day-first QC packed dates correctly", () => {
   assert.equal(sections.shipping_delay[0].packed_difference_days, 10);
 });
 
+test("vendor performance calculates PO delays from Kolkata calendar dates", () => {
+  const sections = buildPoSections([{
+    order_id: "PO-IST", brand: "Brand", vendor: "Vendor", quantity: 5,
+    status: "Inspection Done", ETD: new Date("2026-01-10T20:00:00Z"),
+    qc_record: { last_inspected_date: new Date("2026-01-11T00:30:00Z"), quantities: { qc_passed: 5 } }, shipment: [],
+  }]);
+  assert.equal(sections.po_delay[0].etd, "2026-01-11");
+  assert.equal(sections.po_delay[0].packed_date, "2026-01-11");
+  assert.equal(sections.po_delay[0].difference_days, 0);
+});
+
 test("vendor performance flags a lower latest claim percentage as positive", () => {
   const [row] = buildClaimRows([{
     _id: "item-1", code: "ITEM-1", vendors: ["Vendor"],
@@ -85,10 +96,10 @@ test("vendor performance excludes incomplete POs from PO-wise delay", () => {
 test("vendor performance ETD range is inclusive and gives revised ETD priority", () => {
   const range = resolveEtdDateRange({ fromDate: "2026-01-10", toDate: "2026-01-31" });
   const match = buildEffectiveEtdMatch(range);
-  assert.equal(match.$or[0].revised_ETD.$gte.toISOString(), "2026-01-10T00:00:00.000Z");
-  assert.equal(match.$or[0].revised_ETD.$lt.toISOString(), "2026-02-01T00:00:00.000Z");
+  assert.equal(match.$or[0].revised_ETD.$gte.toISOString(), "2026-01-09T18:30:00.000Z");
+  assert.equal(match.$or[0].revised_ETD.$lt.toISOString(), "2026-01-31T18:30:00.000Z");
   assert.equal(match.$or[1].revised_ETD, null);
-  assert.equal(match.$or[1].ETD.$lt.toISOString(), "2026-02-01T00:00:00.000Z");
+  assert.equal(match.$or[1].ETD.$lt.toISOString(), "2026-01-31T18:30:00.000Z");
   assert.equal(resolveEtdDateRange({ fromDate: "2026-02-30" }), null);
   assert.equal(resolveEtdDateRange({ fromDate: "2026-02-01", toDate: "2026-01-31" }), null);
 });
@@ -98,7 +109,7 @@ test("vendor performance builds filtered chart data for each charted section", (
     po: "PO-1", brand: "Brand", etd: "2026-01-10", difference_days: 3, status: "Delayed",
   }]);
   const claimCharts = buildVendorPerformanceChartSpecs("product_complaints", [{
-    code: "ITEM-1", current_claim_percentage: 4.5,
+    code: "ITEM-1", tenures: [{ tenure_id: "tenure-1", from_date: "2026-01-01", to_date: "2026-01-31", delivered_quantity: 100, rejected_quantity: 4.5 }],
   }]);
   const stuffingCharts = buildVendorPerformanceChartSpecs("shipping_delay", [{
     po: "PO-1", brand: "Brand", final_packed_date: "2026-02-10", packed_difference_days: 1, etd_difference_days: 3,
@@ -112,7 +123,7 @@ test("vendor performance builds filtered chart data for each charted section", (
   assert.equal(poCharts[0].data[0].overall_average_delay, 3);
   assert.match(poCharts[0].data[0].color, /^hsl\(/);
   assert.equal(poCharts[1].data[0].difference_days, 3);
-  assert.equal(claimCharts[1].data[0].current_claim_percentage, 4.5);
+  assert.equal(claimCharts[1].data[0].average_claim_percentage, 4.5);
   assert.equal(stuffingCharts[0].title, "Monthly stuffing delay: final packed vs stuffing");
   assert.equal(stuffingCharts[0].data[0].month, "2026-02");
   assert.deepEqual(stuffingCharts[2].data.find((row) => row.label === "Early"), { label: "Early", packed: 1, etd: 0 });
@@ -147,7 +158,7 @@ test("vendor performance scopes both selected vendor data sources", async (t) =>
   assert.match(JSON.stringify(orderMatches[1]), /Brand B/);
   assert.match(JSON.stringify(itemMatches[0]), /Vendor A/);
   assert.match(JSON.stringify(itemMatches[0]), /Vendor B/);
-  assert.match(JSON.stringify(orderMatches[1]), /2026-02-01T00:00:00.000Z/);
+  assert.match(JSON.stringify(orderMatches[1]), /2026-01-31T18:30:00.000Z/);
 });
 
 test("vendor performance rejects malformed and reversed ETD dates", async () => {

@@ -106,14 +106,18 @@ const ChartCard = ({ title, children }) => (
   </div>
 );
 
-const HorizontalBars = ({ data, series, valueSuffix = "", height = 300, tooltipContent }) => (
-  <div style={{ height }} role="img" aria-label="Vendor performance chart">
+const HorizontalBars = ({ data, series, valueSuffix = "", height = 300, tooltipContent }) => {
+  const values = series.length === 1 ? data.map((row) => finiteNumber(row?.[series[0].key])).filter((value) => value !== null) : [];
+  const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  return <div style={{ height }} role="img" aria-label="Vendor performance chart">
     <ResponsiveContainer>
-      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }} barCategoryGap="20%">
+      <BarChart data={data} layout="vertical" margin={{ top: 28, right: 24, left: 8, bottom: 4 }} barCategoryGap="20%">
         <CartesianGrid strokeDasharray="3 3" horizontal={false} />
         <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(value) => `${value}${valueSuffix}`} />
         <YAxis type="category" dataKey="label" width={130} tick={{ fontSize: 11 }} />
         <Tooltip content={tooltipContent} formatter={(value, name) => [`${value}${valueSuffix}`, name]} />
+        <Legend verticalAlign="top" height={24} />
+        {average !== null && <ReferenceLine x={average} stroke="#212529" strokeWidth={2} strokeDasharray="6 4" label={{ value: `Average: ${average.toFixed(2)}${valueSuffix}`, position: "insideTop", fill: "#212529", fontSize: 11 }} />}
         {series.map((entry) => (
           <Bar key={entry.key} dataKey={entry.key} name={entry.name} fill={entry.color} isAnimationActive={false}>
             {entry.colorFor ? data.map((row) => <Cell key={row.label} fill={entry.colorFor(row)} />) : null}
@@ -121,8 +125,8 @@ const HorizontalBars = ({ data, series, valueSuffix = "", height = 300, tooltipC
         ))}
       </BarChart>
     </ResponsiveContainer>
-  </div>
-);
+  </div>;
+};
 
 const TenureClaimTooltip = ({ active, payload }) => {
   const row = active ? payload?.[0]?.payload : null;
@@ -146,7 +150,10 @@ export const VendorPerformanceMonthlyDelayChart = ({ rows = [], dateKey = "etd",
         <XAxis dataKey="label" interval={0} height={42} tick={{ fontSize: 11 }} />
         <YAxis tick={{ fontSize: 11 }} label={{ value: "Days", angle: -90, position: "insideLeft" }} />
         <Tooltip content={<MonthlyDelayTooltip />} />
-        <Legend verticalAlign="top" height={24} />
+        <Legend verticalAlign="top" height={24} payload={[
+          { value: "Monthly average delay", type: "line", color: "#000000" },
+          { value: "Overall average delay", type: "line", color: "#dc3545" },
+        ]} />
         {Array.from({ length: chart.slots }, (_, index) => <Bar key={index} dataKey={`po_${index}`} name="PO delay" legendType="none" fill="#0d6efd" isAnimationActive={false}>{chart.data.map((row) => <Cell key={row.month} fill={row.color} />)}</Bar>)}
         <ReferenceLine y={chart.overall_average_delay} stroke="#dc3545" strokeWidth={2} strokeDasharray="6 4" label={{ value: `Overall average: ${chart.overall_average_delay.toFixed(2)} days`, position: "insideTopRight", fill: "#dc3545", fontSize: 11 }} />
         <Line type="linear" dataKey="average_delay" name="Monthly average delay" stroke="#000000" strokeWidth={2.5} dot={{ r: 4, fill: "#000000" }} isAnimationActive={false} />

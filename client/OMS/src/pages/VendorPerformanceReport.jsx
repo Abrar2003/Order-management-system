@@ -325,14 +325,12 @@ const VendorPerformanceReport = () => {
 
             {activeSection === "product_analytics" && <section className="card om-card" ref={(node) => { sectionRefs.current.product_analytics = node; }}>
               <div className="card-header fw-semibold">2. Product analytics</div>
-              <VendorPerformanceMonthlyDelayChart rows={poRows} />
               <ProductAnalyticsTable rows={productRows} />
             </section>}
 
             {activeSection === "product_complaints" && <section className="card om-card" ref={(node) => { sectionRefs.current.product_complaints = node; }}>
               <div className="card-header fw-semibold">3. Product claims</div>
               <SummaryCards cards={[{ label: "Items", value: claimSummary.item_count || 0 }, { label: "Average claim", value: formatPercent(claimSummary.average_claim_percentage) }]} />
-              <VendorPerformanceMonthlyDelayChart rows={poRows} />
               <VendorPerformanceCharts section="product_complaints" rows={claimRows} />
               <div className="table-responsive">
                 <table className="table table-striped align-middle mb-0">

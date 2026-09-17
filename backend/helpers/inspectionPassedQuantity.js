@@ -262,9 +262,22 @@ const isQualifyingPackedInspection = (inspection = {}) => {
   );
 };
 
+const getLatestQualifyingInspectionDate = (inspectionRecords = []) =>
+  (Array.isArray(inspectionRecords) ? inspectionRecords : []).reduce(
+    (latestDate, inspection) => {
+      if (!isQualifyingPackedInspection(inspection)) return latestDate;
+      const inspectionDate = toDateOnlyIso(
+        inspection?.inspection_date || inspection?.createdAt,
+      );
+      return inspectionDate > latestDate ? inspectionDate : latestDate;
+    },
+    "",
+  );
+
 module.exports = {
   buildApprovedGoodsQuantityByInspectionId,
   calculateQcAggregateMetrics,
+  getLatestQualifyingInspectionDate,
   getEffectiveRequestPassedQuantity,
   isQualifyingPackedInspection,
   normalizeQcRequestType,

@@ -47,4 +47,6 @@ test("vendor report calculates delays from the final inspection and complete shi
     packed_delay_days: 4, shipping_delay_days: 5, delay_days: 0,
     delay_reference: "latest_shipment_date", item_count: 2, quantity_total: 10,
   });
+  assert.equal(res.body.vendors[0].average_delay_days, -4);
+  assert.equal(res.body.summary.average_delay_days, -4);
 });

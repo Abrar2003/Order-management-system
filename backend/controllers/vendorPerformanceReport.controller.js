@@ -24,6 +24,7 @@ const {
 const { parseDateOnly } = require("../helpers/dateOnly");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const KOLKATA_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const MAX_CHART_ROWS = 12;
 const monthFormatter = new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric", timeZone: "UTC" });
 const ACTIVE_ORDER_MATCH = {
@@ -50,16 +51,7 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 };
 const toUtcDate = (value) => {
-  if (!value) return null;
-  const parsed = typeof value === "string" && /^\d{2}[/-]\d{2}[/-]\d{4}$/.test(value.trim())
-    ? parseDateOnly(value)
-    : value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(Date.UTC(
-    parsed.getUTCFullYear(),
-    parsed.getUTCMonth(),
-    parsed.getUTCDate(),
-  ));
+  return parseDateOnly(value);
 };
 const toIsoDate = (value) => {
   const date = toUtcDate(value);
@@ -86,13 +78,15 @@ const resolveEtdDateRange = ({ fromDate = "", toDate = "" } = {}) => {
   return {
     from,
     toExclusive: to ? new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate() + 1)) : null,
+    fromInstant: from ? new Date(from.getTime() - KOLKATA_OFFSET_MS) : null,
+    toExclusiveInstant: to ? new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate() + 1) - KOLKATA_OFFSET_MS) : null,
   };
 };
 const buildEffectiveEtdMatch = (range) => {
-  if (!range?.from && !range?.toExclusive) return {};
+  if (!range?.fromInstant && !range?.toExclusiveInstant) return {};
   const dateMatch = {};
-  if (range.from) dateMatch.$gte = range.from;
-  if (range.toExclusive) dateMatch.$lt = range.toExclusive;
+  if (range.fromInstant) dateMatch.$gte = range.fromInstant;
+  if (range.toExclusiveInstant) dateMatch.$lt = range.toExclusiveInstant;
   return {
     $or: [
       { revised_ETD: dateMatch },

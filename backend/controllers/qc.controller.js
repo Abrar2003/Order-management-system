@@ -8439,7 +8439,8 @@ exports.getVendorReports = async (req, res) => {
     const vendorMap = new Map();
     let delayedOrdersCount = 0;
     let ordersWithEtdCount = 0;
-    let totalDelayDaysDelayedOnly = 0;
+    let packedDelayOrderCount = 0;
+    let totalPackedDelayDays = 0;
 
     for (const orderEntry of filteredOrders) {
       const status = resolveOrderStatusFromSet([...orderEntry.statuses]);
@@ -8447,6 +8448,13 @@ exports.getVendorReports = async (req, res) => {
       const hasEffectiveEtd = Boolean(effectiveEtdUtc);
       const hasShippedStatus = String(status || "").trim() === "Shipped";
       const actualShippedDateUtc = orderEntry.latest_shipment_utc;
+      const finalPackedDelayDays =
+        effectiveEtdUtc && orderEntry.last_inspection_utc
+          ? Math.floor(
+              (orderEntry.last_inspection_utc.getTime() - effectiveEtdUtc.getTime()) /
+                MS_PER_DAY,
+            )
+          : null;
       const hasEtdCrossed = Boolean(
         hasEffectiveEtd &&
         todayUtc &&
@@ -8485,7 +8493,10 @@ exports.getVendorReports = async (req, res) => {
       }
       if (isDelayed) {
         delayedOrdersCount += 1;
-        totalDelayDaysDelayedOnly += delayDays;
+      }
+      if (finalPackedDelayDays !== null) {
+        packedDelayOrderCount += 1;
+        totalPackedDelayDays += finalPackedDelayDays;
       }
 
       const vendorKey = normalizeText(orderEntry.vendor).toLowerCase();
@@ -8496,6 +8507,7 @@ exports.getVendorReports = async (req, res) => {
           delayed_orders_count: 0,
           orders_with_etd_count: 0,
           total_delay_days: 0,
+          packed_delay_order_count: 0,
           brands: new Set(),
           orders: [],
         });
@@ -8505,20 +8517,17 @@ exports.getVendorReports = async (req, res) => {
       vendorEntry.orders_count += 1;
       if (isDelayed) {
         vendorEntry.delayed_orders_count += 1;
-        vendorEntry.total_delay_days += delayDays;
+      }
+      if (finalPackedDelayDays !== null) {
+        vendorEntry.packed_delay_order_count += 1;
+        vendorEntry.total_delay_days += finalPackedDelayDays;
       }
       if (hasEffectiveEtd) {
         vendorEntry.orders_with_etd_count += 1;
       }
 
       vendorEntry.brands.add(orderEntry.brand);
-      const packedDelayDays =
-        effectiveEtdUtc && orderEntry.last_inspection_utc
-          ? Math.floor(
-              (effectiveEtdUtc.getTime() - orderEntry.last_inspection_utc.getTime()) /
-                MS_PER_DAY,
-            )
-          : null;
+      const packedDelayDays = finalPackedDelayDays === null ? null : -finalPackedDelayDays;
       const shippingDelayDays =
         effectiveEtdUtc && orderEntry.complete_shipping_utc
           ? Math.floor(
@@ -8572,9 +8581,9 @@ exports.getVendorReports = async (req, res) => {
           orders_with_etd_count: entry.orders_with_etd_count,
           total_delay_days: entry.total_delay_days,
           average_delay_days:
-            entry.delayed_orders_count > 0
+            entry.packed_delay_order_count > 0
               ? toRoundedNumber(
-                  entry.total_delay_days / entry.delayed_orders_count,
+                  entry.total_delay_days / entry.packed_delay_order_count,
                   2,
                 )
               : 0,
@@ -8624,10 +8633,10 @@ exports.getVendorReports = async (req, res) => {
         orders_count: filteredOrders.length,
         delayed_orders_count: delayedOrdersCount,
         orders_with_etd_count: ordersWithEtdCount,
-        total_delay_days: totalDelayDaysDelayedOnly,
+        total_delay_days: totalPackedDelayDays,
         average_delay_days:
-          delayedOrdersCount > 0
-            ? toRoundedNumber(totalDelayDaysDelayedOnly / delayedOrdersCount, 2)
+          packedDelayOrderCount > 0
+            ? toRoundedNumber(totalPackedDelayDays / packedDelayOrderCount, 2)
             : 0,
       },
       vendors,

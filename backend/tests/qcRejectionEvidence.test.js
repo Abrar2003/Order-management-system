@@ -184,6 +184,18 @@ test("product analytics calculates inspection, packed, and offer times", () => {
   assert.equal(item.avgOfferTimeDays, 2);
 });
 
+test("product analytics calculates dates from Kolkata calendar days", () => {
+  const result = processOrderAnalyticsRow({
+    quantity: 10,
+    order_date: new Date("2026-08-01T20:00:00Z"),
+    inspections: [{ inspection_date: new Date("2026-08-02T20:00:00Z"), passed: 10 }],
+  });
+
+  assert.equal(result.orderDate, "2026-08-02");
+  assert.equal(result.offerTimeDays, 1);
+  assert.equal(result.packedTimeDays, 1);
+});
+
 test("product analytics uses one day for a single inspection", () => {
   const result = processOrderAnalyticsRow({
     quantity: 10,

@@ -12,6 +12,7 @@ const {
 } = require("../services/packedGoodsPeriod.service");
 const {
   buildApprovedGoodsQuantityByInspectionId,
+  getLatestQualifyingInspectionDate,
   isQualifyingPackedInspection,
 } = require("../helpers/inspectionPassedQuantity");
 
@@ -85,6 +86,18 @@ const buildDataset = async ({
     fetchItems: async () => items,
   });
 };
+
+test("latest qualifying inspection date ignores failed inspection attempts", () => {
+  assert.equal(
+    getLatestQualifyingInspectionDate([
+      makeInspection({ date: "2026-08-27", passed: 5 }),
+      makeInspection({ date: "2026-08-29", passed: 0 }),
+      makeInspection({ date: "2026-08-31", passed: 2, status: "rejected" }),
+      makeInspection({ date: "2026-08-30", passed: 3 }),
+    ]),
+    "2026-08-30",
+  );
+});
 
 test("defaults to the inclusive seven days ending today and validates explicit date pairs", () => {
   assert.deepEqual(

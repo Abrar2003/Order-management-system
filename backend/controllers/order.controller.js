@@ -34,6 +34,9 @@ const {
   normalizeOrderStatus,
 } = require("../helpers/orderStatus");
 const {
+  getLatestQualifyingInspectionDate,
+} = require("../helpers/inspectionPassedQuantity");
+const {
   syncOrderGroup,
   purgeOmsEventsForConfiguredBrandCalendars,
 } = require("../services/gcalSync");
@@ -12048,6 +12051,21 @@ exports.finalizeOrder = async (req, res) => {
     const qcRecord = order?.qc_record
       ? await QC.findById(order.qc_record).select("quantities.qc_passed")
       : await QC.findOne({ order: order._id }).select("quantities.qc_passed");
+    const latestPassedInspectionDate = qcRecord
+      ? getLatestQualifyingInspectionDate(
+          await Inspection.find({ qc: qcRecord._id })
+            .select("inspection_date passed status goods_not_ready createdAt")
+            .lean(),
+        )
+      : "";
+    if (
+      latestPassedInspectionDate &&
+      toISODateString(parsedStuffingDate) < latestPassedInspectionDate
+    ) {
+      return res.status(400).json({
+        message: `Stuffing date cannot be before the inspection passed date (${formatDateOnlyDDMMYYYY(latestPassedInspectionDate)}).`,
+      });
+    }
     const beforeSnapshot = buildOrderEditLogSnapshot(order);
     const updatedAt = new Date();
 
