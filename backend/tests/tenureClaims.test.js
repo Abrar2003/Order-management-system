@@ -81,7 +81,11 @@ test("vendor performance summaries retain PO brands and combine claim totals", (
     brands: ["By Boo", "Eleonora"],
     poRows: [{ brand: "By Boo", difference_days: 2 }, { brand: "By Boo", difference_days: -4 }],
     claimRows: [{ delivered_quantity: 100, rejected_quantity: 10 }, { delivered_quantity: 20, rejected_quantity: 4 }],
-    shippingRows: [{ packed_difference_days: 3 }, { packed_difference_days: -1 }, { packed_difference_days: 2 }],
+    shippingRows: [
+      { packed_difference_days: 3, etd_difference_days: 4 },
+      { packed_difference_days: -1, etd_difference_days: -2 },
+      { packed_difference_days: 2, etd_difference_days: 1 },
+    ],
   });
 
   assert.deepEqual(summaries.po_delay.brands, [
@@ -90,5 +94,10 @@ test("vendor performance summaries retain PO brands and combine claim totals", (
   ]);
   assert.deepEqual(summaries.po_delay.combined, { po_count: 2, delayed_po_count: 1, early_po_count: 1, average_delay_days: -1 });
   assert.deepEqual(summaries.product_complaints, { item_count: 2, average_claim_percentage: 11.67 });
-  assert.deepEqual(summaries.shipping_delay, { delayed_po_count: 2, average_stuffing_time_days: 1.33 });
+  assert.deepEqual(summaries.shipping_delay, {
+    po_count: 3,
+    delayed_by_etd_po_count: 2,
+    early_by_etd_po_count: 1,
+    average_stuffing_time_days: 1.33,
+  });
 });

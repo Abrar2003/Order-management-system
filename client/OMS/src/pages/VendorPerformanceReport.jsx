@@ -310,7 +310,7 @@ const VendorPerformanceReport = () => {
 
             {activeSection === "po_delay" && <section className="card om-card" ref={(node) => { sectionRefs.current.po_delay = node; }}>
               <div className="card-header fw-semibold">1. PO-wise delay — complete packed date vs ETD</div>
-              <SummaryCards cards={[{ label: "All selected brands POs", value: combinedPoSummary.po_count || 0 }, { label: "All selected brands delayed POs", value: combinedPoSummary.delayed_po_count || 0 }, { label: "All selected brands early POs", value: combinedPoSummary.early_po_count || 0 }, { label: "All selected brands average delay", value: formatAverageDays(combinedPoSummary.average_delay_days) }, ...poSummary.flatMap((row) => [{ label: `${row.brand} POs`, value: row.po_count }, { label: `${row.brand} delayed POs`, value: row.delayed_po_count }, { label: `${row.brand} early POs`, value: row.early_po_count }, { label: `${row.brand} average delay`, value: formatAverageDays(row.average_delay_days) }])]} />
+              <SummaryCards cards={[{ label: "All selected brands POs", value: combinedPoSummary.po_count || 0 }, { label: "All selected brands packed delayed by ETD", value: combinedPoSummary.delayed_po_count || 0 }, { label: "All selected brands early POs", value: combinedPoSummary.early_po_count || 0 }, { label: "All selected brands average delay", value: formatAverageDays(combinedPoSummary.average_delay_days) }, ...poSummary.flatMap((row) => [{ label: `${row.brand} POs`, value: row.po_count }, { label: `${row.brand} packed delayed by ETD`, value: row.delayed_po_count }, { label: `${row.brand} early POs`, value: row.early_po_count }, { label: `${row.brand} average delay`, value: formatAverageDays(row.average_delay_days) }])]} />
               <VendorPerformanceMonthlyDelayChart rows={poRows} />
               <VendorPerformanceCharts section="po_delay" rows={poRows} />
               <div className="table-responsive">
@@ -352,7 +352,12 @@ const VendorPerformanceReport = () => {
                   <button type="button" className={`btn ${stuffingComparison === "etd" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setStuffingComparison("etd")}>ETD</button>
                 </div>
               </div>
-              <SummaryCards cards={[{ label: "Delayed stuffing POs", value: shippingSummary.delayed_po_count || 0 }, { label: "Average stuffing time", value: formatAverageDays(shippingSummary.average_stuffing_time_days) }]} />
+              <SummaryCards cards={[
+                { label: "Total stuffed POs", value: shippingSummary.po_count || 0 },
+                { label: "Stuffed delayed by ETD", value: shippingSummary.delayed_by_etd_po_count || 0 },
+                { label: "Stuffed early by ETD", value: shippingSummary.early_by_etd_po_count || 0 },
+                { label: "Average stuffing time after Packed", value: formatAverageDays(shippingSummary.average_stuffing_time_days) },
+              ]} />
               <VendorPerformanceMonthlyDelayChart rows={shippingRows} dateKey="final_packed_date" delayKey="packed_difference_days" title="Monthly stuffing delay: final packed vs stuffing" />
               <VendorPerformanceCharts section="shipping_delay" rows={shippingRows} />
               <div className="table-responsive">

@@ -24,7 +24,8 @@ const STATUS_COLORS = {
   "Inspection overdue": "#dc3545",
   Unknown: "#6c757d",
 };
-const monthlyColor = (index, total) => `hsl(${Math.round(index * 360 / Math.max(1, total))} 65% 44%)`;
+const MONTHLY_COLORS = ["#2563eb", "#059669", "#7c3aed", "#db2777", "#ca8a04", "#0891b2", "#65a30d", "#4f46e5", "#0f766e", "#9333ea", "#be123c", "#475569"];
+const monthlyColor = (index) => MONTHLY_COLORS[index % MONTHLY_COLORS.length];
 
 const finiteNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
 const chartRows = (rows, keys) => rows
@@ -137,13 +138,13 @@ const MonthlyDelayTooltip = ({ active, payload }) => {
   const row = active ? payload?.[0]?.payload : null;
   const poRows = (payload || []).filter((entry) => entry.dataKey?.startsWith("po_") && finiteNumber(entry?.value) !== null);
   const overallAverageDelay = finiteNumber(row?.overall_average_delay);
-  return row ? <div className="bg-white border rounded shadow-sm p-2 small"><div className="fw-semibold">{row.label}</div><div>Monthly average: {row.average_delay.toFixed(1)} days</div><div className="text-danger">Overall average: {overallAverageDelay === null ? "-" : `${overallAverageDelay.toFixed(2)} days`}</div>{poRows.map((entry) => <div key={entry.dataKey}>{row[`${entry.dataKey}_label`]}: {entry.value} days {entry.value > 0 ? "delayed" : entry.value < 0 ? "early" : "on time"}</div>)}</div> : null;
+  return row ? <div className="bg-white border rounded shadow-sm p-2 small"><div className="fw-semibold">{row.label}</div><div>Monthly average: {row.average_delay.toFixed(1)} days</div><div style={{ color: "#f97316" }}>Overall average: {overallAverageDelay === null ? "-" : `${overallAverageDelay.toFixed(2)} days`}</div>{poRows.map((entry) => <div key={entry.dataKey}>{row[`${entry.dataKey}_label`]}: {entry.value} days {entry.value > 0 ? "delayed" : entry.value < 0 ? "early" : "on time"}</div>)}</div> : null;
 };
 
 export const VendorPerformanceMonthlyDelayChart = ({ rows = [], dateKey = "etd", delayKey = "difference_days", title = "Monthly PO delay: ETD vs final packed" }) => {
   const chart = useMemo(() => monthlyDelayChartData(rows, dateKey, delayKey), [rows, dateKey, delayKey]);
   if (chart.data.length === 0) return null;
-  return <div className="p-3 pb-0"><ChartCard title={title}><div style={{ height: 440 }} role="img" aria-label={title}>
+  return <div className="p-3 pb-0"><ChartCard title={title}><div className="small fw-semibold text-end mb-1" style={{ color: "#f97316" }}>Overall average: {chart.overall_average_delay.toFixed(2)} days</div><div style={{ height: 440 }} role="img" aria-label={title}>
     <ResponsiveContainer>
       <ComposedChart data={chart.data} margin={{ top: 24, right: 24, left: 8, bottom: 12 }} barCategoryGap={0} barGap={0}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -151,12 +152,12 @@ export const VendorPerformanceMonthlyDelayChart = ({ rows = [], dateKey = "etd",
         <YAxis tick={{ fontSize: 11 }} label={{ value: "Days", angle: -90, position: "insideLeft" }} />
         <Tooltip content={<MonthlyDelayTooltip />} />
         <Legend verticalAlign="top" height={24} payload={[
-          { value: "Monthly average delay", type: "line", color: "#000000" },
-          { value: "Overall average delay", type: "line", color: "#dc3545" },
+          { value: "Monthly average delay", type: "line", color: "#111827" },
+          { value: "Overall average delay", type: "line", color: "#f97316" },
         ]} />
-        {Array.from({ length: chart.slots }, (_, index) => <Bar key={index} dataKey={`po_${index}`} name="PO delay" legendType="none" fill="#0d6efd" isAnimationActive={false}>{chart.data.map((row) => <Cell key={row.month} fill={row.color} />)}</Bar>)}
-        <ReferenceLine y={chart.overall_average_delay} stroke="#dc3545" strokeWidth={2} strokeDasharray="6 4" label={{ value: `Overall average: ${chart.overall_average_delay.toFixed(2)} days`, position: "insideTopRight", fill: "#dc3545", fontSize: 11 }} />
-        <Line type="linear" dataKey="average_delay" name="Monthly average delay" stroke="#000000" strokeWidth={2.5} dot={{ r: 4, fill: "#000000" }} isAnimationActive={false} />
+        {Array.from({ length: chart.slots }, (_, index) => <Bar key={index} dataKey={`po_${index}`} name="PO delay" legendType="none" fill="#0d6efd" isAnimationActive={false}>{chart.data.map((row) => <Cell key={row.month} fill={row.color} fillOpacity={0.82} />)}</Bar>)}
+        <ReferenceLine y={chart.overall_average_delay} stroke="#f97316" strokeWidth={2} strokeDasharray="6 4" />
+        <Line type="linear" dataKey="average_delay" name="Monthly average delay" stroke="#111827" strokeWidth={3.5} dot={{ r: 5, fill: "#111827", stroke: "#fff", strokeWidth: 2 }} isAnimationActive={false} />
       </ComposedChart>
     </ResponsiveContainer>
   </div></ChartCard></div>;

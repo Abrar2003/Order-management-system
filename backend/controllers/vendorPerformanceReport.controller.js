@@ -303,7 +303,9 @@ const buildVendorPerformanceSummaries = ({ poRows = [], claimRows = [], shipping
         : 0,
     },
     shipping_delay: {
-      delayed_po_count: shippingRows.filter((row) => Number(row?.packed_difference_days || 0) > 0).length,
+      po_count: shippingRows.length,
+      delayed_by_etd_po_count: shippingRows.filter((row) => Number(row?.etd_difference_days || 0) > 0).length,
+      early_by_etd_po_count: shippingRows.filter((row) => Number(row?.etd_difference_days || 0) < 0).length,
       average_stuffing_time_days: average(shippingRows, "packed_difference_days"),
     },
   };
