@@ -559,10 +559,10 @@ const VendorReports = () => {
               Orders: {summary.orders_count ?? 0}
             </span>
             <span className="om-summary-chip">
-              Delayed Orders: {summary.delayed_orders_count ?? 0}
+              Packed Delayed by ETD: {summary.delayed_orders_count ?? 0}
             </span>
             <span className="om-summary-chip">
-              Avg Delay: {summary.average_delay_days ?? 0} days
+              Avg Packed Delay: {summary.average_delay_days ?? 0} days
             </span>
           </div>
         </div>
@@ -634,10 +634,10 @@ const VendorReports = () => {
                         Orders: {vendorEntry.orders_count ?? 0}
                       </span>
                       <span className="om-summary-chip">
-                        Delayed: {vendorEntry.delayed_orders_count ?? 0}
+                        Packed Delayed by ETD: {vendorEntry.delayed_orders_count ?? 0}
                       </span>
                       <span className="om-summary-chip">
-                        Avg Delay: {vendorEntry.average_delay_days ?? 0} days
+                        Avg Packed Delay: {vendorEntry.average_delay_days ?? 0} days
                       </span>
                       <span className="om-summary-chip">
                         Avg Lead Time: {formatAverageShippingTime(

@@ -44,9 +44,35 @@ test("vendor report calculates delays from the final inspection and complete shi
     order_id: "PO-1", brand: "Brand", vendor: "Vendor", status: "Shipped",
     order_date: "2026-01-01", etd: "2026-01-15", last_inspection_date: "2026-01-11",
     latest_shipment_date: "2026-01-10", complete_shipping_date: "2026-01-10",
-    packed_delay_days: 4, shipping_delay_days: 5, delay_days: 0,
-    delay_reference: "latest_shipment_date", item_count: 2, quantity_total: 10,
+    packed_delay_days: 4, shipping_delay_days: 5, delay_days: -4,
+    delay_reference: "packed_date", item_count: 2, quantity_total: 10,
   });
   assert.equal(res.body.vendors[0].average_delay_days, -4);
   assert.equal(res.body.summary.average_delay_days, -4);
+});
+
+test("vendor report uses the detailed report's packed PO population", async (t) => {
+  t.mock.method(Order, "find", () => asQuery([
+    {
+      order_id: "PO-LATE", brand: "Brand", vendor: "Vendor", status: "Inspection Done",
+      order_date: "2026-01-01", ETD: "2026-01-10", quantity: 5,
+      item: { item_code: "ITEM-1" }, qc_record: { last_inspected_date: "2026-01-15" }, shipment: [],
+    },
+    {
+      order_id: "PO-EARLY", brand: "Brand", vendor: "Vendor", status: "Shipped",
+      order_date: "2026-01-01", ETD: "2026-01-10", quantity: 5,
+      item: { item_code: "ITEM-2" }, qc_record: { last_inspected_date: "2026-01-08" },
+      shipment: [{ stuffing_date: "2026-01-09", quantity: 5 }],
+    },
+  ]));
+
+  const res = response();
+  await getVendorReports({
+    query: { timeline: "custom", from_date: "2026-01-01", to_date: "2026-01-31" },
+    user: { role: "admin", allowed_brands: [], allowed_vendors: ["all"] },
+  }, res);
+
+  assert.equal(res.body.summary.orders_count, 2);
+  assert.equal(res.body.summary.delayed_orders_count, 1);
+  assert.equal(res.body.summary.average_delay_days, 1.5);
 });

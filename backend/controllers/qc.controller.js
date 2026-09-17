@@ -115,6 +115,11 @@ const {
   normalizeVendorDisplayList,
   normalizeVendorText,
 } = require("../helpers/vendorRef");
+const {
+  buildPoSections,
+  buildEffectiveEtdMatch,
+  resolveEtdDateRange,
+} = require("./vendorPerformanceReport.controller");
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 const MIN_REJECTION_IMAGE_COUNT = 2;
@@ -8270,11 +8275,17 @@ exports.getVendorReports = async (req, res) => {
       return res.status(400).json({ message: "Invalid timeline filters" });
     }
 
-    const orderRows = await Order.find(applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user))
+    const etdRange = resolveEtdDateRange({
+      fromDate: timelineRange.from_date_iso,
+      toDate: timelineRange.to_date_iso,
+    });
+    const orderRows = await Order.find(applyDataAccessMatch({
+      $and: [ACTIVE_ORDER_MATCH, buildEffectiveEtdMatch(etdRange)],
+    }, req.user))
       .select(
         "order_id brand vendor status order_date ETD revised_ETD quantity item shipment qc_record",
       )
-      .populate("qc_record", "last_inspected_date")
+      .populate("qc_record", "last_inspected_date quantities")
       .lean();
 
     const orderGroupMap = new Map();
@@ -8372,19 +8383,7 @@ exports.getVendorReports = async (req, res) => {
       }
     }
 
-    const todayUtc = toUtcDayStart(new Date());
-    const timelineOrders = [...orderGroupMap.values()].filter((entry) => {
-      const status = resolveOrderStatusFromSet([...entry?.statuses || []]);
-      const isFullyShipped = String(status || "").trim() === "Shipped";
-
-      if (!isFullyShipped || !entry?.latest_shipment_utc) return false;
-      return (
-        entry.latest_shipment_utc.getTime() >=
-          timelineRange.from_date_utc.getTime() &&
-        entry.latest_shipment_utc.getTime() <
-          timelineRange.to_date_exclusive_utc.getTime()
-      );
-    });
+    const timelineOrders = buildPoSections(orderRows).po_delay;
     const brandOptionsBase = selectedVendor
       ? timelineOrders.filter((entry) => entry.vendor === selectedVendor)
       : timelineOrders;
@@ -8400,17 +8399,16 @@ exports.getVendorReports = async (req, res) => {
 
     const filteredOrders = timelineOrders.filter((entry) => {
       if (selectedBrand && entry?.brand !== selectedBrand) return false;
-      if (selectedVendor && entry?.vendor !== selectedVendor) return false;
+      if (selectedVendor && normalizeText(entry?.vendor).toLowerCase() !== normalizeText(selectedVendor).toLowerCase()) return false;
       return true;
     });
 
     const vendorShippingStatsMap = new Map();
-    for (const orderEntry of timelineOrders) {
-      if (selectedBrand && orderEntry?.brand !== selectedBrand) continue;
-      if (selectedVendor && orderEntry?.vendor !== selectedVendor) continue;
-
-      const latestShipmentUtc = orderEntry.latest_shipment_utc;
-      const orderDateUtc = orderEntry.order_date_utc;
+    for (const delayRow of filteredOrders) {
+      const key = `${normalizeText(delayRow.vendor).toLowerCase()}__${String(delayRow.brand || "").trim().toLowerCase()}__${String(delayRow.po || "").trim().toLowerCase()}`;
+      const orderEntry = orderGroupMap.get(key);
+      const latestShipmentUtc = orderEntry?.latest_shipment_utc;
+      const orderDateUtc = orderEntry?.order_date_utc;
 
       if (!latestShipmentUtc || !orderDateUtc) {
         continue;
@@ -8422,7 +8420,7 @@ exports.getVendorReports = async (req, res) => {
           (latestShipmentUtc.getTime() - orderDateUtc.getTime()) / MS_PER_DAY,
         ),
       );
-      const vendorKey = normalizeText(orderEntry.vendor).toLowerCase();
+      const vendorKey = normalizeText(delayRow.vendor).toLowerCase();
 
       if (!vendorShippingStatsMap.has(vendorKey)) {
         vendorShippingStatsMap.set(vendorKey, {
@@ -8442,67 +8440,22 @@ exports.getVendorReports = async (req, res) => {
     let packedDelayOrderCount = 0;
     let totalPackedDelayDays = 0;
 
-    for (const orderEntry of filteredOrders) {
-      const status = resolveOrderStatusFromSet([...orderEntry.statuses]);
-      const effectiveEtdUtc = orderEntry.etd_utc;
-      const hasEffectiveEtd = Boolean(effectiveEtdUtc);
-      const hasShippedStatus = String(status || "").trim() === "Shipped";
-      const actualShippedDateUtc = orderEntry.latest_shipment_utc;
-      const finalPackedDelayDays =
-        effectiveEtdUtc && orderEntry.last_inspection_utc
-          ? Math.floor(
-              (orderEntry.last_inspection_utc.getTime() - effectiveEtdUtc.getTime()) /
-                MS_PER_DAY,
-            )
-          : null;
-      const hasEtdCrossed = Boolean(
-        hasEffectiveEtd &&
-        todayUtc &&
-        effectiveEtdUtc.getTime() < todayUtc.getTime(),
-      );
+    for (const delayRow of filteredOrders) {
+      const delayDays = Number(delayRow.difference_days);
+      const isDelayed = delayDays > 0;
+      const key = `${normalizeText(delayRow.vendor).toLowerCase()}__${String(delayRow.brand || "").trim().toLowerCase()}__${String(delayRow.po || "").trim().toLowerCase()}`;
+      const orderEntry = orderGroupMap.get(key);
+      const effectiveEtdUtc = toUtcDateOnly(delayRow.etd);
 
-      let delayDays = 0;
-      let isDelayed = false;
-      let delayReference = hasShippedStatus ? "latest_shipment_date" : "today";
+      ordersWithEtdCount += 1;
+      packedDelayOrderCount += 1;
+      totalPackedDelayDays += delayDays;
+      if (isDelayed) delayedOrdersCount += 1;
 
-      if (hasEffectiveEtd && hasShippedStatus) {
-        if (
-          actualShippedDateUtc &&
-          actualShippedDateUtc.getTime() > effectiveEtdUtc.getTime()
-        ) {
-          isDelayed = true;
-          delayReference = "latest_shipment_date";
-        }
-      } else if (hasEffectiveEtd && hasEtdCrossed) {
-        isDelayed = true;
-        delayReference = "today";
-      }
-
-      if (isDelayed) {
-        const delayEndDate = hasShippedStatus ? actualShippedDateUtc : todayUtc;
-        if (delayEndDate) {
-          const rawDelay = Math.floor(
-            (delayEndDate.getTime() - effectiveEtdUtc.getTime()) / MS_PER_DAY,
-          );
-          delayDays = Math.max(0, rawDelay);
-        }
-      }
-
-      if (hasEffectiveEtd) {
-        ordersWithEtdCount += 1;
-      }
-      if (isDelayed) {
-        delayedOrdersCount += 1;
-      }
-      if (finalPackedDelayDays !== null) {
-        packedDelayOrderCount += 1;
-        totalPackedDelayDays += finalPackedDelayDays;
-      }
-
-      const vendorKey = normalizeText(orderEntry.vendor).toLowerCase();
+      const vendorKey = normalizeText(delayRow.vendor).toLowerCase();
       if (!vendorMap.has(vendorKey)) {
         vendorMap.set(vendorKey, {
-          vendor: orderEntry.vendor,
+          vendor: delayRow.vendor,
           orders_count: 0,
           delayed_orders_count: 0,
           orders_with_etd_count: 0,
@@ -8515,50 +8468,42 @@ exports.getVendorReports = async (req, res) => {
 
       const vendorEntry = vendorMap.get(vendorKey);
       vendorEntry.orders_count += 1;
-      if (isDelayed) {
-        vendorEntry.delayed_orders_count += 1;
-      }
-      if (finalPackedDelayDays !== null) {
-        vendorEntry.packed_delay_order_count += 1;
-        vendorEntry.total_delay_days += finalPackedDelayDays;
-      }
-      if (hasEffectiveEtd) {
-        vendorEntry.orders_with_etd_count += 1;
-      }
+      if (isDelayed) vendorEntry.delayed_orders_count += 1;
+      vendorEntry.packed_delay_order_count += 1;
+      vendorEntry.total_delay_days += delayDays;
+      vendorEntry.orders_with_etd_count += 1;
 
-      vendorEntry.brands.add(orderEntry.brand);
-      const packedDelayDays = finalPackedDelayDays === null ? null : -finalPackedDelayDays;
+      vendorEntry.brands.add(delayRow.brand);
+      const packedDelayDays = -delayDays;
       const shippingDelayDays =
-        effectiveEtdUtc && orderEntry.complete_shipping_utc
+        effectiveEtdUtc && orderEntry?.complete_shipping_utc
           ? Math.floor(
               (effectiveEtdUtc.getTime() - orderEntry.complete_shipping_utc.getTime()) /
                 MS_PER_DAY,
             )
           : null;
       vendorEntry.orders.push({
-        order_id: orderEntry.order_id,
-        brand: orderEntry.brand,
-        vendor: orderEntry.vendor,
-        status,
-        order_date: orderEntry.order_date_utc
+        order_id: delayRow.po,
+        brand: delayRow.brand,
+        vendor: delayRow.vendor,
+        status: delayRow.po_status,
+        order_date: orderEntry?.order_date_utc
           ? toISODateString(orderEntry.order_date_utc)
           : "",
-        etd: effectiveEtdUtc ? toISODateString(effectiveEtdUtc) : "",
-        last_inspection_date: orderEntry.last_inspection_utc
-          ? toISODateString(orderEntry.last_inspection_utc)
-          : "",
-        latest_shipment_date: orderEntry.latest_shipment_utc
+        etd: delayRow.etd,
+        last_inspection_date: delayRow.packed_date,
+        latest_shipment_date: orderEntry?.latest_shipment_utc
           ? toISODateString(orderEntry.latest_shipment_utc)
           : "",
-        complete_shipping_date: orderEntry.complete_shipping_utc
+        complete_shipping_date: orderEntry?.complete_shipping_utc
           ? toISODateString(orderEntry.complete_shipping_utc)
           : "",
         packed_delay_days: packedDelayDays,
         shipping_delay_days: shippingDelayDays,
         delay_days: delayDays,
-        delay_reference: delayReference,
-        item_count: orderEntry.item_codes.size,
-        quantity_total: orderEntry.quantity_total,
+        delay_reference: "packed_date",
+        item_count: delayRow.item_count,
+        quantity_total: delayRow.total_quantity,
       });
     }
 

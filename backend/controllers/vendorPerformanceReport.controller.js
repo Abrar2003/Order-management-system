@@ -736,5 +736,8 @@ const exportVendorPerformanceReport = async (req, res) => {
 module.exports = {
   getVendorPerformanceReport,
   exportVendorPerformanceReport,
+  buildPoSections,
+  buildEffectiveEtdMatch,
+  resolveEtdDateRange,
   __test__: { buildClaimRows, buildTenureClaimAverageRows, buildPoSections, buildVendorPerformanceSummaries, differenceInDays, resolveEtdDateRange, buildEffectiveEtdMatch, buildVendorPerformanceChartSpecs },
 };
