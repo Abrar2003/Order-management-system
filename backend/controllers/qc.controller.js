@@ -3,6 +3,7 @@ const Inspection = require("../models/inspection.model");
 const Inspector = require("../models/inspector.model");
 const User = require("../models/user.model");
 const Item = require("../models/item.model");
+const Tenure = require("../models/tenure.model");
 const Finish = require("../models/finish.model");
 const QcEditLog = require("../models/qcEditLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
@@ -12566,7 +12567,7 @@ exports.getQCById = async (req, res) => {
     const itemCode = normalizeText(
       qcData?.item?.item_code || qcData?.order?.item?.item_code || "",
     );
-    const itemMaster = itemCode
+    let itemMaster = itemCode
       ? await Item.findOne(
         applyDataAccessMatch(
           {
@@ -12587,6 +12588,23 @@ exports.getQCById = async (req, res) => {
           )
           .lean()
       : null;
+    if (itemMaster?.claim_tenures?.length) {
+      const tenureIds = itemMaster.claim_tenures
+        .map((claim) => claim?.tenure_id)
+        .filter((id) => mongoose.Types.ObjectId.isValid(id));
+      const tenures = tenureIds.length
+        ? await Tenure.find({ _id: { $in: tenureIds } }).select("_id from_date to_date").lean()
+        : [];
+      const tenureById = new Map(tenures.map((tenure) => [String(tenure._id), tenure]));
+      itemMaster = {
+        ...itemMaster,
+        claim_tenures: itemMaster.claim_tenures.map((claim) => ({
+          ...claim,
+          from_date: claim.from_date || tenureById.get(String(claim.tenure_id))?.from_date,
+          to_date: claim.to_date || tenureById.get(String(claim.tenure_id))?.to_date,
+        })),
+      };
+    }
     const itemFinishEntries = Array.isArray(itemMaster?.finish)
       ? itemMaster.finish
       : [];
