@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const instance = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
+  baseURL: import.meta.env?.VITE_API_BASE_URL || "/api",
   withCredentials: true,
 });
 
@@ -33,6 +33,7 @@ const isVendorRefObject = (value) =>
     Object.prototype.hasOwnProperty.call(value, "vendorId") ||
     Object.prototype.hasOwnProperty.call(value, "country")
   ) &&
+  !Array.isArray(value.brand_ids) &&
   (value.name || value.vendor_name || value.vendorName || value.label || value.value);
 
 const getVendorDisplayName = (value) => {
@@ -60,7 +61,7 @@ const normalizeVendorArray = (values = []) => {
   ].sort((left, right) => left.localeCompare(right));
 };
 
-const normalizeApiVendorRefs = (value, key = "") => {
+export const normalizeApiVendorRefs = (value, key = "") => {
   if (Array.isArray(value)) {
     if (VENDOR_ARRAY_KEYS.has(key)) return normalizeVendorArray(value);
     return value.map((entry) => normalizeApiVendorRefs(entry));
