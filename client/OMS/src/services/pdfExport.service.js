@@ -144,7 +144,7 @@ export const exportElementToPdf = async ({
     clone.style.removeProperty("top");
   }
 
-  clone.querySelectorAll("thead button, th button").forEach((button) => {
+  clone.querySelectorAll("thead button, th button, button.image-preview-trigger").forEach((button) => {
     const span = document.createElement("span");
     Array.from(button.attributes).forEach((attr) => {
       span.setAttribute(attr.name, attr.value);

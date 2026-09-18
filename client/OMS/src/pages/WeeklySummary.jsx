@@ -1,4 +1,3 @@
-import PreviewImage from "../components/PreviewImage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
@@ -578,6 +577,12 @@ const WeeklySummary = () => {
     [filters.from_date, filters.to_date, fromDateFilter, report?.vendors, sortBy, sortOrder, toDateFilter],
   );
 
+  const logoBrandName = useMemo(() => {
+    if (brandFilter !== DEFAULT_ENTITY_FILTER) return String(brandFilter || "").trim();
+    const brands = Array.isArray(filters.brand_options) ? filters.brand_options : [];
+    return brands.length === 1 ? String(brands[0] || "").trim() : "";
+  }, [brandFilter, filters.brand_options]);
+
   const handleSortColumn = useCallback((column, defaultDirection = "asc") => {
     setSortBy((prevSortBy) => {
       if (prevSortBy === column) {
@@ -609,7 +614,7 @@ const WeeklySummary = () => {
   }, [defaultDateRange.fromDate, defaultDateRange.toDate]);
 
   useEffect(() => {
-    const brandName = brandFilter === DEFAULT_ENTITY_FILTER ? "" : String(brandFilter || "").trim();
+    const brandName = logoBrandName;
     if (!brandName) {
       setBrandLogoSrc("");
       setBrandLogoLoading(false);
@@ -657,7 +662,7 @@ const WeeklySummary = () => {
     return () => {
       cancelled = true;
     };
-  }, [brandFilter]);
+  }, [logoBrandName]);
 
   const handleConfirmAndExport = useCallback(async () => {
     if (
@@ -690,6 +695,10 @@ const WeeklySummary = () => {
           title: "Weekly Order Summary",
           subtitle: `${formatDateDDMMYYYY(filters.from_date)} - ${formatDateDDMMYYYY(filters.to_date)}`,
         },
+        extraCss: `
+          .weekly-summary-report-header { display: flex !important; justify-content: space-between !important; align-items: flex-start !important; flex-wrap: nowrap !important; width: 100%; }
+          .weekly-summary-report-header .weekly-summary-brand-panel { margin-left: auto !important; flex: 0 0 auto; }
+        `,
       });
     } catch (err) {
       console.error("Weekly order summary export failed:", err);
@@ -805,7 +814,7 @@ const WeeklySummary = () => {
         <div ref={reportRef} className="weekly-summary-export-surface d-grid gap-3">
           <div className="card om-card">
             <div className="card-body">
-              <div className="d-flex justify-content-between align-items-start flex-wrap gap-3">
+              <div className="weekly-summary-report-header d-flex justify-content-between align-items-start flex-wrap gap-3">
                 <div>
                   <h3 className="h5 mb-1">Weekly Order Summary</h3>
                   <div className="text-secondary small">
@@ -814,9 +823,9 @@ const WeeklySummary = () => {
                 </div>
                 {brandLogoSrc ? (
                   <div className="weekly-summary-brand-panel">
-                    <PreviewImage
+                    <img
                       src={brandLogoSrc}
-                      alt={`${brandFilter} logo`}
+                      alt={`${logoBrandName} logo`}
                       className="weekly-summary-brand-logo"
                     />
                   </div>
