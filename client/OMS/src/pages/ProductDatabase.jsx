@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.service";
 import {
-  isManagerLikeRole,
   isStrictAdminRole,
   normalizeUserRole,
 } from "../auth/permissions";
@@ -1326,8 +1325,6 @@ export const ProductDatabaseModal = ({
   const { hasPermission } = usePermissions();
   const user = getUserFromToken();
   const normalizedRole = normalizeUserRole(user?.role);
-  const isAdmin = isStrictAdminRole(normalizedRole);
-  const isManager = isManagerLikeRole(normalizedRole) && !isAdmin;
   const canOverrideRequiredFields = isStrictAdminRole(normalizedRole);
   const canViewProductTypeTemplates = hasPermission("product_type_templates", "view");
   const canEdit = Boolean(item?.permissions?.can_edit);
@@ -1633,7 +1630,7 @@ export const ProductDatabaseModal = ({
   );
   const hasChanges = !arePayloadsEqualForCompare(currentPayload, initialPayload);
   const canCheck = Boolean(item?.permissions?.can_check) && !hasChanges;
-  const canApprove = isAdmin && (item?.pd_checked === "checked" || hasChanges);
+  const canApprove = Boolean(item?.permissions?.can_approve) && !hasChanges;
   const currentBoxMode = detectBoxPackagingMode(
     currentPayload.pd_box_mode,
     currentPayload.pd_box_sizes,
@@ -2452,7 +2449,7 @@ export const ProductDatabaseModal = ({
                 {savingAction === "save" ? "Saving..." : "Save Changes"}
               </button>
             )}
-            {isManager && (
+            {canEdit && (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -2462,7 +2459,7 @@ export const ProductDatabaseModal = ({
                 {savingAction === "check" ? "Checking..." : "Check"}
               </button>
             )}
-            {isAdmin && (
+            {canApprove && (
               <button
                 type="button"
                 className="btn btn-success"

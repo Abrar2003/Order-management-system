@@ -166,16 +166,19 @@ test("Product Database does not require barcodes for barcode-exempt items", () =
     payload: { kd: true },
     user: { id: "creator", role: "manager" },
   });
-  item.pd_checked = "checked";
+  applyProductDatabaseCheck({
+    item,
+    user: { id: "checker", role: "admin" },
+  });
   applyProductDatabaseApprove({
     item,
-    user: { id: "approver", role: "admin" },
+    user: { id: "approver", role: "super admin" },
   });
 
   assert.equal(item.pd_checked, "approved");
 });
 
-test("Product Database lets every manager type check unless they last changed it", () => {
+test("Product Database blocks only its creator from checking and reserves approval for Super Admin", () => {
   const buildItem = () => ({
     pd_checked: "created",
     pd_box_mode: "individual",
@@ -187,25 +190,36 @@ test("Product Database lets every manager type check unless they last changed it
     pd_history: [],
   });
 
-  ["manager", "product manager", "inspection manager"].forEach((role) => {
+  ["manager", "product manager", "inspection manager", "admin"].forEach((role) => {
     const item = buildItem();
     applyProductDatabaseCheck({
       item,
-      user: { id: "creator", role },
+      user: { id: "updater", role },
     });
     assert.equal(item.pd_checked, "checked");
   });
   assert.throws(
-    () => applyProductDatabaseCheck({ item: buildItem(), user: { id: "updater", role: "manager" } }),
-    /last changed/,
+    () => applyProductDatabaseCheck({ item: buildItem(), user: { id: "creator", role: "manager" } }),
+    /created/,
   );
   assert.throws(
-    () => applyProductDatabaseCheck({ item: buildItem(), user: { id: "admin", role: "admin" } }),
-    /Only managers/,
+    () => applyProductDatabaseApprove({ item: buildItem(), user: { id: "admin", role: "admin" } }),
+    /Only Super Admin/,
   );
+
+  const approvedItem = buildItem();
+  applyProductDatabaseCheck({
+    item: approvedItem,
+    user: { id: "updater", role: "admin" },
+  });
+  applyProductDatabaseApprove({
+    item: approvedItem,
+    user: { id: "super-admin", role: "super admin" },
+  });
+  assert.equal(approvedItem.pd_checked, "approved");
   assert.throws(
-    () => applyProductDatabaseApprove({ item: buildItem(), user: { id: "manager", role: "manager" } }),
-    /Only admin/,
+    () => applyProductDatabaseApprove({ item: buildItem(), payload: { kd: true }, user: { id: "super-admin", role: "super admin" } }),
+    /Only unchanged checked/,
   );
 });
 

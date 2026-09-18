@@ -308,7 +308,7 @@ router.patch(
 router.post(
   "/:id/product-database/check",
   auth,
-  authorize("manager"),
+  authorize("admin"),
   requirePermission("product_database", "approve"),
   invalidateItemsOnSuccess,
   checkProductDatabaseItem,
@@ -317,7 +317,7 @@ router.post(
 router.post(
   "/:id/product-database/approve",
   auth,
-  authorize("admin"),
+  authorize("super_admin"),
   requirePermission("product_database", "approve"),
   invalidateItemsOnSuccess,
   approveProductDatabaseItem,

@@ -11,6 +11,7 @@ const {
 } = require("./productTypeTemplates");
 const {
   isManagerLikeRole,
+  isSuperAdminLikeRole,
   normalizeUserRoleKey,
 } = require("./userRole");
 const {
@@ -1210,8 +1211,8 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
 
 const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
   const role = normalizeRole(user?.role);
-  if (isStrictAdmin(role) || !isManagerLikeRole(role)) {
-    throw new ProductDatabaseError("Only managers can check Product Database data", 403);
+  if (!isManagerLikeRole(role)) {
+    throw new ProductDatabaseError("Only admin or manager can check Product Database data", 403);
   }
 
   const actor = buildPdAuditActor(user);
@@ -1247,9 +1248,9 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
     throw new ProductDatabaseError("Only created Product Database records can be checked");
   }
 
-  const lastChangerId = normalizeId(item?.pd_last_changed_by?.user);
-  if (lastChangerId && actorId === lastChangerId) {
-    throw new ProductDatabaseError("You cannot check Product Database data that you last changed", 403);
+  const creatorId = normalizeId(item?.pd_created_by?.user);
+  if (creatorId && actorId === creatorId) {
+    throw new ProductDatabaseError("You cannot check Product Database data that you created", 403);
   }
 
   item.pd_checked = PD_STATUSES.CHECKED;
@@ -1276,8 +1277,8 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
 
 const applyProductDatabaseApprove = ({ item, payload = {}, user = {} } = {}) => {
   const role = normalizeRole(user?.role);
-  if (!isStrictAdmin(role)) {
-    throw new ProductDatabaseError("Only admin can approve Product Database data", 403);
+  if (!isSuperAdminLikeRole(role)) {
+    throw new ProductDatabaseError("Only Super Admin can approve Product Database data", 403);
   }
 
   const actor = buildPdAuditActor(user);
@@ -1291,20 +1292,11 @@ const applyProductDatabaseApprove = ({ item, payload = {}, user = {} } = {}) => 
   assertProductDatabaseBarcodes(nextState, item);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
-  if (changedFields.length === 0 && previousStatus !== PD_STATUSES.CHECKED) {
-    throw new ProductDatabaseError("Only checked Product Database records can be approved");
+  if (previousStatus !== PD_STATUSES.CHECKED || changedFields.length > 0) {
+    throw new ProductDatabaseError("Only unchanged checked Product Database records can be approved");
   }
 
   const now = new Date();
-  if (changedFields.length > 0) {
-    setProductDatabaseFields(item, nextState);
-    ensureCreatedActor(item, actor, now);
-    item.pd_last_changed_by = {
-      ...actor,
-      changed_at: now,
-    };
-  }
-
   item.pd_checked = PD_STATUSES.APPROVED;
   item.pd_approved_by = {
     ...actor,
@@ -1330,32 +1322,30 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
   const role = normalizeRole(user?.role);
   const actorId = normalizeId(user?._id || user?.id);
   const status = normalizePdStatus(item?.pd_checked);
-  const lastChangerId = normalizeId(item?.pd_last_changed_by?.user);
-  const isLastChanger = Boolean(lastChangerId && actorId === lastChangerId);
+  const creatorId = normalizeId(item?.pd_created_by?.user);
+  const isCreator = Boolean(creatorId && actorId === creatorId);
   const canEdit = isManagerLikeRole(role);
   const canCheck =
-    !isStrictAdmin(role) &&
     isManagerLikeRole(role) &&
     status === PD_STATUSES.CREATED &&
-    !isLastChanger;
+    !isCreator;
 
   let checkBlockedReason = "";
   if (
-    !isStrictAdmin(role) &&
     isManagerLikeRole(role) &&
     status === PD_STATUSES.CREATED &&
     !canCheck
   ) {
-    if (isLastChanger) {
+    if (isCreator) {
       checkBlockedReason =
-        "You cannot check this because you last changed this PD data.";
+        "You cannot check this because you created this PD data.";
     }
   }
 
   return {
     can_edit: canEdit,
     can_check: canCheck,
-    can_approve: isStrictAdmin(role) && status === PD_STATUSES.CHECKED,
+    can_approve: isSuperAdminLikeRole(role) && status === PD_STATUSES.CHECKED,
     check_blocked_reason: checkBlockedReason,
   };
 };
