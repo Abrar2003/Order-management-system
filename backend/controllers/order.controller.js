@@ -3275,6 +3275,8 @@ const buildPoBucketDataset = async ({
         total_pending_inspection_quantity: 0,
         total_cbm: 0,
         total_pending_cbm: 0,
+        total_shipping_pending_cbm: 0,
+        total_packing_pending_cbm: 0,
         item_codes: new Set(),
       });
     }
@@ -3314,6 +3316,18 @@ const buildPoBucketDataset = async ({
       0,
       Number(cbmSummary?.total || 0) - shippedCbm,
     );
+    groupedEntry.total_shipping_pending_cbm += resolveShipmentRowCbm({
+      itemDoc,
+      orderQuantity: lineProgress.order_quantity,
+      storedPoCbm,
+      shipmentQuantity: lineProgress.inspected_unshipped_quantity,
+    });
+    groupedEntry.total_packing_pending_cbm += resolveShipmentRowCbm({
+      itemDoc,
+      orderQuantity: lineProgress.order_quantity,
+      storedPoCbm,
+      shipmentQuantity: lineProgress.pending_inspection_quantity,
+    });
     groupedEntry.order_date = resolveEarlierDate(
       groupedEntry.order_date,
       orderEntry?.order_date,
@@ -3373,6 +3387,12 @@ const buildPoBucketDataset = async ({
       total_cbm: resolvedTotalCbm,
       total_po_cbm: resolvedTotalCbm,
       total_pending_cbm: toRoundedCbmValue(groupedEntry.total_pending_cbm),
+      total_shipping_pending_cbm: toRoundedCbmValue(
+        groupedEntry.total_shipping_pending_cbm,
+      ),
+      total_packing_pending_cbm: toRoundedCbmValue(
+        groupedEntry.total_packing_pending_cbm,
+      ),
       item_codes: [...groupedEntry.item_codes].sort((left, right) =>
         left.localeCompare(right, undefined, {
           numeric: true,
@@ -6773,6 +6793,8 @@ exports.getVendorSummaryByBrand = async (req, res) => {
           partialShippedOrders: new Set(),
           shippedOrders: new Set(),
           onTimeOrders: new Set(),
+          totalShippingPendingCbm: 0,
+          totalPackingPendingCbm: 0,
         });
       }
 
@@ -6784,6 +6806,12 @@ exports.getVendorSummaryByBrand = async (req, res) => {
       const isDelayEligible = DELAY_ELIGIBLE_STATUSES.has(totalStatus);
 
       vendorEntry.orders.add(orderId);
+      vendorEntry.totalShippingPendingCbm += Number(
+        row?.total_shipping_pending_cbm || 0,
+      );
+      vendorEntry.totalPackingPendingCbm += Number(
+        row?.total_packing_pending_cbm || 0,
+      );
 
       if (
         Number(row?.total_quantity || 0) > 0 &&
@@ -6830,6 +6858,12 @@ exports.getVendorSummaryByBrand = async (req, res) => {
         totalPartialShipped: entry.partialShippedOrders.size,
         totalShipped: entry.shippedOrders.size,
         totalOnTime: entry.onTimeOrders.size,
+        totalShippingPendingCbm: toRoundedCbmValue(
+          entry.totalShippingPendingCbm,
+        ),
+        totalPackingPendingCbm: toRoundedCbmValue(
+          entry.totalPackingPendingCbm,
+        ),
       }))
       .sort((left, right) => {
         const delayedCompare =

@@ -3225,6 +3225,16 @@ small,
   font-weight: 700;
 }
 
+.home-orders-by-brand-table tbody td.home-pending-cbm-column,
+.home-orders-by-brand-table tfoot td.home-pending-cbm-column {
+  font-weight: 400;
+}
+
+.home-orders-by-brand-table .home-pending-cbm-column {
+  width: 11rem;
+  white-space: nowrap;
+}
+
 .home-calendar-wrapper {
   position: relative;
   width: 100%;
@@ -7600,6 +7610,10 @@ small,
     text-align: left;
   }
 
+  .home-orders-by-brand-table .home-pending-cbm-column {
+    width: 100%;
+  }
+
   .home-orders-by-brand-table tbody td:nth-child(n+2),
   .home-orders-by-brand-table tfoot td:nth-child(n+2) {
     text-align: left;
@@ -7635,8 +7649,10 @@ small,
   .home-orders-by-brand-table td:nth-child(3)::before { content: "Pending"; }
   .home-orders-by-brand-table td:nth-child(4)::before { content: "On Time"; }
   .home-orders-by-brand-table td:nth-child(5)::before { content: "Delayed"; }
-  .home-orders-by-brand-table td:nth-child(6)::before { content: "Partial Shipped"; }
-  .home-orders-by-brand-table td:nth-child(7)::before { content: "Shipped"; }
+  .home-orders-by-brand-table td:nth-child(6)::before { content: "Packed"; }
+  .home-orders-by-brand-table td:nth-child(7)::before { content: "Partial Shipped"; }
+  .home-orders-by-brand-table td:nth-child(8)::before { content: "Shipped"; }
+  .home-orders-by-brand-table td:nth-child(9)::before { content: "Total Pending CBM"; }
 
   .home-today-etd-table td:nth-child(1)::before { content: "Brand"; }
   .home-today-etd-table td:nth-child(2)::before { content: "Vendor"; }

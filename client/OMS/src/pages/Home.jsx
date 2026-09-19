@@ -10,6 +10,7 @@ import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { getOptionText } from "../utils/optionText";
 import { hasOpenVendorOrders } from "../utils/vendorSummary";
+import { formatCbm } from "../utils/cbm";
 import "../App.css";
 
 const DEFAULT_TODAY_ETD_SORT_BY = "ETD";
@@ -141,6 +142,12 @@ const Home = () => {
           acc.totalDelayedOrders += toNumber(summary?.totalDelayedOrders);
           acc.totalShipped += toNumber(summary?.totalShipped);
           acc.totalPartialShipped += toNumber(summary?.totalPartialShipped);
+          acc.totalShippingPendingCbm += toNumber(
+            summary?.totalShippingPendingCbm,
+          );
+          acc.totalPackingPendingCbm += toNumber(
+            summary?.totalPackingPendingCbm,
+          );
           return acc;
         },
         {
@@ -151,6 +158,8 @@ const Home = () => {
           totalDelayedOrders: 0,
           totalPartialShipped: 0,
           totalShipped: 0,
+          totalShippingPendingCbm: 0,
+          totalPackingPendingCbm: 0,
         },
       ),
     [visibleVendorSummary],
@@ -471,6 +480,7 @@ const Home = () => {
                       <th>Packed</th>
                       <th>Partial Shipped</th>
                       <th>Shipped</th>
+                      <th className="home-pending-cbm-column">Total Pending CBM</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -549,13 +559,18 @@ const Home = () => {
                           >
                             {summary.totalShipped ?? 0}
                           </td>
+                          <td className="home-pending-cbm-column">
+                            Shipping: {formatCbm(summary.totalShippingPendingCbm)}
+                            <br />
+                            Packing: {formatCbm(summary.totalPackingPendingCbm)}
+                          </td>
                         </tr>
                       );
                     })}
 
                     {visibleVendorSummary.length === 0 && (
                       <tr>
-                        <td colSpan="8" className="text-center py-4">
+                        <td colSpan="9" className="text-center py-4">
                           No {vendorScope === "active" ? "active " : ""}vendors
                           found for {selectedBrand}
                         </td>
@@ -573,6 +588,11 @@ const Home = () => {
                         <td>{vendorTotals.totalPacked}</td>
                         <td>{vendorTotals.totalPartialShipped}</td>
                         <td>{vendorTotals.totalShipped}</td>
+                        <td className="home-pending-cbm-column">
+                          Shipping: {formatCbm(vendorTotals.totalShippingPendingCbm)}
+                          <br />
+                          Packing: {formatCbm(vendorTotals.totalPackingPendingCbm)}
+                        </td>
                       </tr>
                     </tfoot>
                   )}
