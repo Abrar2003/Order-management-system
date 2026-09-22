@@ -561,6 +561,9 @@ const Shipments = () => {
       },
       quantity: Number(row?.order_quantity || 0),
       shipment: Array.isArray(row?.shipment) ? row.shipment : [],
+      qc_record: {
+        quantities: { qc_passed: Number(row?.passed_quantity || 0) },
+      },
       status: row?.status || "",
     };
 

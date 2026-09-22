@@ -198,6 +198,7 @@ const ProductDatabaseDetails = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
   const [productImageUrl, setProductImageUrl] = useState("");
+  const [brandLogoSrc, setBrandLogoSrc] = useState("");
   const [openingFileType, setOpeningFileType] = useState("");
 
   const fetchDetails = useCallback(async () => {
@@ -219,6 +220,9 @@ const ProductDatabaseDetails = () => {
   }, [fetchDetails]);
 
   const productDatabase = row?.product_database || {};
+  const brandName = normalizeText(
+    row?.brand || (Array.isArray(row?.brands) && row.brands.length > 0 ? row.brands[0] : ""),
+  );
   const emptyLabel = getProductDatabaseEmptyLabel(row?.product_database_status);
   const productDatabasePermissions = productDatabase?.permissions || {};
   const canEditProductDatabase = Boolean(productDatabasePermissions.can_edit);
@@ -290,6 +294,25 @@ const ProductDatabaseDetails = () => {
       });
     return () => { cancelled = true; };
   }, [row?.id, row?.item_files?.image]);
+
+  useEffect(() => {
+    if (!brandName) {
+      setBrandLogoSrc("");
+      return undefined;
+    }
+
+    let cancelled = false;
+    api.get(`/brands/${encodeURIComponent(brandName)}/logo`, { responseType: "blob" })
+      .then((response) => {
+        if (cancelled) return;
+        const reader = new FileReader();
+        reader.onloadend = () => !cancelled && setBrandLogoSrc(String(reader.result || ""));
+        reader.onerror = () => !cancelled && setBrandLogoSrc("");
+        reader.readAsDataURL(response.data);
+      })
+      .catch(() => !cancelled && setBrandLogoSrc(""));
+    return () => { cancelled = true; };
+  }, [brandName]);
 
   const handlePreviewFile = async (entry) => {
     const itemId = String(row?.id || "").trim();
@@ -380,7 +403,7 @@ const ProductDatabaseDetails = () => {
 
         {!loading && row && (
           <div className="row g-4">
-          <div className="col-xl-6"><DetailCard title="Item Files">{productImageUrl && <button type="button" className="btn p-0 border-0 mb-3" onClick={() => handlePreviewFile({ label: "Product Image", value: "product_image", file: row.item_files.image, previewMode: "image" })}><img src={productImageUrl} alt={`${row.item_code || "Item"} product`} className="img-fluid rounded border" style={{ maxHeight: "260px", objectFit: "contain" }} /></button>}{itemFiles.length ? <div className="d-flex flex-wrap gap-2">{itemFiles.map((entry, index) => <button key={`${entry.value}-${index}`} type="button" className="btn btn-outline-primary btn-sm" onClick={() => handlePreviewFile(entry)} disabled={Boolean(openingFileType)}>{openingFileType === entry.value ? "Opening..." : entry.label}</button>)}</div> : <div className="text-secondary small">No item files uploaded.</div>}</DetailCard></div>
+          <div className="col-xl-6"><DetailCard title="Item Files">{(brandLogoSrc || productImageUrl) && <div className="product-database-image-row">{brandLogoSrc && <img src={brandLogoSrc} alt={`${brandName} logo`} className="product-database-brand-logo" />}{productImageUrl && <button type="button" className="btn p-0 border-0" onClick={() => handlePreviewFile({ label: "Product Image", value: "product_image", file: row.item_files.image, previewMode: "image" })}><img src={productImageUrl} alt={`${row.item_code || "Item"} product`} className="product-database-product-image rounded border" /></button>}</div>}{itemFiles.length ? <div className="d-flex flex-wrap gap-2">{itemFiles.map((entry, index) => <button key={`${entry.value}-${index}`} type="button" className="btn btn-outline-primary btn-sm" onClick={() => handlePreviewFile(entry)} disabled={Boolean(openingFileType)}>{openingFileType === entry.value ? "Opening..." : entry.label}</button>)}</div> : <div className="text-secondary small">No item files uploaded.</div>}</DetailCard></div>
             <div className="col-xl-6">
               <DetailCard title="Item Summary">
                 <KeyValueGrid
@@ -395,16 +418,6 @@ const ProductDatabaseDetails = () => {
                       label: "Last Inspected Date",
                       value: row.last_inspected_date ? formatDateDDMMYYYY(row.last_inspected_date) : emptyLabel,
                     },
-                  ]}
-                />
-              </DetailCard>
-            </div>
-
-            <div className="col-xl-6">
-              <DetailCard title="Basic Product Data">
-                <KeyValueGrid
-                  emptyLabel={emptyLabel}
-                  rows={[
                     { label: "Description", value: productDatabase.description },
                     { label: "Country Of Origin", value: productDatabase.country_of_origin },
                     {
@@ -414,6 +427,16 @@ const ProductDatabaseDetails = () => {
                       ),
                     },
                     { label: "Last Updated", value: productDatabase.updated_at ? formatDateDDMMYYYY(productDatabase.updated_at) : emptyLabel },
+                  ]}
+                />
+                <h4 className="h6 mt-4 mb-3">Product Database Activity</h4>
+                <KeyValueGrid
+                  emptyLabel={emptyLabel}
+                  rows={[
+                    { label: "Created By", value: formatActor(productDatabase.pd_created_by, ["created_at"], emptyLabel) },
+                    { label: "Checked By", value: formatActor(productDatabase.pd_checked_by, ["checked_at"], emptyLabel) },
+                    { label: "Approved By", value: formatActor(productDatabase.pd_approved_by, ["approved_at"], emptyLabel) },
+                    { label: "Last Changed By", value: formatActor(productDatabase.pd_last_changed_by, ["changed_at", "updated_at"], emptyLabel) },
                   ]}
                 />
               </DetailCard>
@@ -446,21 +469,7 @@ const ProductDatabaseDetails = () => {
               </DetailCard>
             </div>
 
-            <div className="col-xl-6">
-              <DetailCard title="Product Database Activity">
-                <KeyValueGrid
-                  emptyLabel={emptyLabel}
-                  rows={[
-                    { label: "Created By", value: formatActor(productDatabase.pd_created_by, ["created_at"], emptyLabel) },
-                    { label: "Checked By", value: formatActor(productDatabase.pd_checked_by, ["checked_at"], emptyLabel) },
-                    { label: "Approved By", value: formatActor(productDatabase.pd_approved_by, ["approved_at"], emptyLabel) },
-                    { label: "Last Changed By", value: formatActor(productDatabase.pd_last_changed_by, ["changed_at", "updated_at"], emptyLabel) },
-                  ]}
-                />
-              </DetailCard>
-            </div>
-
-            <div className="col-12">
+            <div className="col-lg-6">
               <DetailCard title="Item Sizes">
                 <SizeTable
                   emptyLabel={emptyLabel}
@@ -473,7 +482,7 @@ const ProductDatabaseDetails = () => {
               </DetailCard>
             </div>
 
-            <div className="col-12">
+            <div className="col-lg-6">
               <DetailCard title="Box Sizes">
                 <div className="small text-secondary mb-2">
                   Packaging Mode: {formatLabel(productDatabase.pd_box_mode || productDatabase.product_specs?.box_mode || "individual")}

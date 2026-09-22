@@ -3803,6 +3803,7 @@ const QcDetails = () => {
       {showEditShippingModal && canShowEditShippingButton && (
         <EditOrderModal
           order={qc?.order}
+          qcRecord={qc}
           onClose={() => setShowEditShippingModal(false)}
           onSuccess={() => {
             setShowEditShippingModal(false);

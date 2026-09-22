@@ -1,7 +1,17 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { deriveOrderProgress } = require("../helpers/orderStatus");
+const { deriveOrderProgress, getShippableQuantity } = require("../helpers/orderStatus");
+
+test("shipment is capped at the inspected passed quantity", () => {
+  assert.equal(
+    getShippableQuantity({
+      orderQuantity: 20,
+      qcRecord: { quantities: { qc_passed: 19 } },
+    }),
+    19,
+  );
+});
 
 test("a completed latest inspection takes priority over an older open request", () => {
   const progress = deriveOrderProgress({

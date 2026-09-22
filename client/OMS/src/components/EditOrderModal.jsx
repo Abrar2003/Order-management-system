@@ -101,7 +101,7 @@ const buildAdjustedShipmentPreview = (shipmentRows, targetQuantity) => {
   return adjustedRows;
 };
 
-const EditOrderModal = ({ order, onClose, onSuccess }) => {
+const EditOrderModal = ({ order, qcRecord = null, onClose, onSuccess }) => {
   const { hasPermission } = usePermissions();
   const user = getUserFromToken();
   const hasRoleShipmentEditAccess = hasShipmentEditRole(user?.role);
@@ -122,6 +122,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
   const [brandOptionsLoading, setBrandOptionsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [loadedQcRecord, setLoadedQcRecord] = useState(null);
   const {
     inspectors,
     inspectorById,
@@ -155,6 +156,21 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     };
   }, []);
 
+  const qcId = String(
+    order?.qc_record && typeof order.qc_record === "object"
+      ? order.qc_record._id
+      : order?.qc_record || "",
+  ).trim();
+  useEffect(() => {
+    if (qcRecord?.quantities || order?.qc_record?.quantities || !qcId) return undefined;
+
+    let cancelled = false;
+    api.get(`/qc/${encodeURIComponent(qcId)}`)
+      .then((response) => !cancelled && setLoadedQcRecord(response?.data?.data || null))
+      .catch(() => !cancelled && setLoadedQcRecord(null));
+    return () => { cancelled = true; };
+  }, [order?.qc_record?.quantities, qcId, qcRecord?.quantities]);
+
   const targetQuantity = Number(form.quantity);
   const inputTotalShipped = useMemo(
     () =>
@@ -164,6 +180,11 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       }, 0),
     [form.shipment],
   );
+  const qcQuantities = qcRecord?.quantities || order?.qc_record?.quantities || loadedQcRecord?.quantities;
+  const hasQcProgress = Boolean(qcQuantities);
+  const passedQuantity = Math.max(0, toSafeNumber(qcQuantities?.qc_passed));
+  const passedNotShippedQuantity = Math.max(0, passedQuantity - inputTotalShipped);
+  const pendingInspectionQuantity = Math.max(0, targetQuantity - passedQuantity);
 
   const adjustedShipmentPreview = useMemo(
     () => buildAdjustedShipmentPreview(form.shipment, targetQuantity),
@@ -609,6 +630,13 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
 
             <div className="d-flex flex-wrap gap-2">
               <span className="om-summary-chip">Input shipped: {inputTotalShipped}</span>
+              {hasQcProgress && (
+                <>
+                  <span className="om-summary-chip">QC passed: {passedQuantity}</span>
+                  <span className="om-summary-chip">Passed, not shipped: {passedNotShippedQuantity}</span>
+                  <span className="om-summary-chip">Pending inspection: {pendingInspectionQuantity}</span>
+                </>
+              )}
               {canEditShipmentDetails && (
                 <>
                   <span className="om-summary-chip">

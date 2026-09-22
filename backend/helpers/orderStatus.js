@@ -127,6 +127,14 @@ const getShipmentQuantityTotal = (shipmentEntries = []) =>
     0,
   );
 
+const getShippableQuantity = ({ orderQuantity = 0, qcRecord = null } = {}) => {
+  const passedQuantity = toNonNegativeNumber(qcRecord?.quantities?.qc_passed, 0);
+  const normalizedOrderQuantity = toNonNegativeNumber(orderQuantity, 0);
+  return normalizedOrderQuantity > 0
+    ? Math.min(normalizedOrderQuantity, passedQuantity)
+    : passedQuantity;
+};
+
 const resolveShippedQuantity = ({
   shipmentEntries = [],
   shippedQuantity = null,
@@ -187,12 +195,10 @@ const deriveOrderProgress = ({
     shippedQuantity,
     orderQuantity: resolvedOrderQuantity,
   });
-  const passedQuantity = resolvedOrderQuantity > 0
-    ? Math.min(
-        resolvedOrderQuantity,
-        toNonNegativeNumber(resolvedQcRecord?.quantities?.qc_passed, 0),
-      )
-    : toNonNegativeNumber(resolvedQcRecord?.quantities?.qc_passed, 0);
+  const passedQuantity = getShippableQuantity({
+    orderQuantity: resolvedOrderQuantity,
+    qcRecord: resolvedQcRecord,
+  });
   const pendingInspectionQuantity = Math.max(
     0,
     resolvedOrderQuantity - passedQuantity,
@@ -301,6 +307,7 @@ module.exports = {
   deriveOrderProgress,
   deriveOrderStatus,
   getShipmentQuantityTotal,
+  getShippableQuantity,
   hasOpenQcRequest,
   normalizeOrderStatus,
   normalizeRequestHistoryStatus,

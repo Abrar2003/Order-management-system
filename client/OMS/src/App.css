@@ -3060,6 +3060,35 @@ small,
   white-space: normal;
 }
 
+.product-database-image-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 260px;
+  margin-bottom: 1rem;
+}
+
+.product-database-brand-logo,
+.product-database-product-image {
+  display: block;
+  max-height: 260px;
+  object-fit: contain;
+}
+
+.product-database-brand-logo {
+  max-width: 35%;
+}
+
+.product-database-image-row > button {
+  flex: 1;
+  min-width: 0;
+}
+
+.product-database-product-image {
+  width: 100%;
+  max-width: 100%;
+}
+
 .inspected-items-report-pill-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));

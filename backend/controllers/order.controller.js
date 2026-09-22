@@ -31,6 +31,7 @@ const {
   deriveGroupedOrderStatus,
   deriveOrderProgress,
   deriveOrderStatus,
+  getShippableQuantity,
   normalizeOrderStatus,
 } = require("../helpers/orderStatus");
 const {
@@ -11086,6 +11087,14 @@ exports.editOrder = async (req, res) => {
     const updatedAt = new Date();
     const shouldRebuildShipment = hasShipment || hasQuantity;
     let adjustedShipment = Array.isArray(order.shipment) ? order.shipment : [];
+    let qcRecord = null;
+    if (order.qc_record && mongoose.Types.ObjectId.isValid(order.qc_record)) {
+      qcRecord = await QC.findById(order.qc_record);
+    }
+    if (!qcRecord) {
+      qcRecord = await QC.findOne({ order: order._id });
+    }
+
     if (shouldRebuildShipment) {
       const shipmentSource = hasShipment
         ? payload.shipment
@@ -11098,6 +11107,14 @@ exports.editOrder = async (req, res) => {
           message: shipmentError?.message || "Invalid shipment payload",
         });
       }
+      if (
+        getShipmentQuantityTotal(normalizedShipmentSource) >
+        getShippableQuantity({ orderQuantity: nextQuantity, qcRecord })
+      ) {
+        return res.status(400).json({
+          message: "shipping quantity cannot exceed available qc passed quantity",
+        });
+      }
       adjustedShipment = fitShipmentEntriesToOrderQuantity(
         normalizedShipmentSource,
         nextQuantity,
@@ -11108,14 +11125,6 @@ exports.editOrder = async (req, res) => {
       );
     }
     const shippedQuantity = getShipmentQuantityTotal(adjustedShipment);
-
-    let qcRecord = null;
-    if (order.qc_record && mongoose.Types.ObjectId.isValid(order.qc_record)) {
-      qcRecord = await QC.findById(order.qc_record);
-    }
-    if (!qcRecord) {
-      qcRecord = await QC.findOne({ order: order._id });
-    }
 
     if (qcRecord) {
       qcRecord.item = qcRecord.item || {};
