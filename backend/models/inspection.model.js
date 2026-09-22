@@ -171,6 +171,7 @@ const InspectionSchema = new mongoose.Schema(
 
     qc_update_count: { type: Number, default: 0, min: 0 },
     qc_update_window_started_at: { type: Date, default: null },
+    is_approved: { type: Boolean, default: false },
 
     request_history_id: {
       type: mongoose.Schema.Types.ObjectId,

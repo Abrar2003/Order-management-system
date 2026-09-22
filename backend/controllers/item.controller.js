@@ -4695,6 +4695,12 @@ exports.getPisDiffItems = async (req, res) => {
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
 
+    const approvedQcIds = await Inspection.distinct("qc", { is_approved: true });
+    const approvedItemCodes = approvedQcIds.length > 0
+      ? await QC.find({ _id: { $in: approvedQcIds } }).distinct("item.item_code")
+      : [];
+    const approvedInspectionMatch = { code: { $in: approvedItemCodes } };
+
     const uncheckedPisMatch = {
       pis_checked_flag: { $ne: true },
       is_rectify_imported: { $ne: true },
@@ -4704,21 +4710,25 @@ exports.getPisDiffItems = async (req, res) => {
       applyItemDataAccess(buildItemMatch({ search, brand, vendor, country }), req.user),
       uncheckedPisMatch,
       missingItemMasterMatch,
+      approvedInspectionMatch,
     );
     const brandOptionsMatch = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ search, vendor, country }), req.user),
       uncheckedPisMatch,
       missingItemMasterMatch,
+      approvedInspectionMatch,
     );
     const vendorOptionsMatch = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ search, brand, country }), req.user),
       uncheckedPisMatch,
       missingItemMasterMatch,
+      approvedInspectionMatch,
     );
     const codeOptionsMatch = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ brand, vendor, country }), req.user),
       uncheckedPisMatch,
       missingItemMasterMatch,
+      approvedInspectionMatch,
     );
 
     const [diffRowsBase, brandOptionRows, vendorOptionRows, codeOptionRows] =

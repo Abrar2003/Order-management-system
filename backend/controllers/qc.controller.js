@@ -7360,6 +7360,7 @@ const updateQC = async (req, res) => {
       });
 
       if (isQcUser && !allowAdminRewrite && inspectionRecord) {
+        inspectionRecord.is_approved = false;
         const currentUpdateCount = Number(
           qcUserRequestAvailability?.currentUpdateCount || 0,
         );
@@ -7704,6 +7705,31 @@ exports.updateQC = async (req, res) =>
     req,
     res,
   });
+
+exports.approveInspectionRecord = async (req, res) => {
+  try {
+    if (!isManagerLikeRole(req.user?.role)) {
+      return res.status(403).json({ message: "Only managers and admins can approve inspection records" });
+    }
+    const qcId = String(req.params.id || "").trim();
+    const recordId = String(req.params.recordId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(qcId) || !mongoose.Types.ObjectId.isValid(recordId)) {
+      return res.status(400).json({ message: "Invalid QC or inspection record id" });
+    }
+    const qc = await QC.findOne(applyDataAccessMatch({ _id: qcId }, req.user));
+    if (!qc) return res.status(404).json({ message: "QC record not found" });
+    const inspection = await Inspection.findOne({ _id: recordId, qc: qc._id });
+    if (!inspection) return res.status(404).json({ message: "Inspection record not found" });
+
+    inspection.is_approved = true;
+    inspection.updated_by = buildAuditActor(req.user);
+    qc.updated_by = buildAuditActor(req.user);
+    await Promise.all([inspection.save(), qc.save()]);
+    return res.json({ message: "Inspection record approved" });
+  } catch (err) {
+    return res.status(400).json({ message: err.message || "Failed to approve inspection record" });
+  }
+};
 
 exports.scanBarcodeUpload = async (req, res) => {
   try {

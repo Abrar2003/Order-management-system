@@ -273,6 +273,13 @@ router.patch(
   qcController.editInspectionRecords,
 );
 
+router.patch(
+  "/:id/inspection-record/:recordId/approve",
+  auth,
+  invalidateQcOnSuccess,
+  qcController.approveInspectionRecord,
+);
+
 router.get(
   "/:id/inspection-record/:recordId/transfer-target",
   auth,

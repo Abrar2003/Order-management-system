@@ -594,6 +594,7 @@ const QcDetails = () => {
   const [shippingSortOrder, setShippingSortOrder] = useState("desc");
   const [deletingQcImages, setDeletingQcImages] = useState(false);
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
+  const [approvingInspectionId, setApprovingInspectionId] = useState("");
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -689,6 +690,7 @@ const QcDetails = () => {
   });
   const canTransferInspectionRecords = isAdmin;
   const canDeleteInspectionRecords = isStrictAdmin;
+  const canApproveInspectionRecords = isAdmin;
   const canFinalizeShipping = hasShipmentPrivilegeRole(normalizedRole);
   const derivedOrderStatus = useMemo(
     () => getDerivedOrderStatus({ order: qc?.order || {}, qc }),
@@ -2304,6 +2306,19 @@ const QcDetails = () => {
     [canDeleteInspectionRecords, fetchQcDetails, handleBackNavigation, id],
   );
 
+  const handleApproveInspectionRecord = useCallback(async (recordId) => {
+    if (!canApproveInspectionRecords || !recordId) return;
+    try {
+      setApprovingInspectionId(String(recordId));
+      await api.patch(`/qc/${id}/inspection-record/${recordId}/approve`);
+      await fetchQcDetails();
+    } catch (err) {
+      alert(err?.response?.data?.message || "Failed to approve inspection record.");
+    } finally {
+      setApprovingInspectionId("");
+    }
+  }, [canApproveInspectionRecords, fetchQcDetails, id]);
+
   const handleOpenQcImageGallery = useCallback((index = 0) => {
     if (qcImages.length === 0) return;
     const nextIndex = Math.min(
@@ -3471,6 +3486,18 @@ const QcDetails = () => {
                                             onClick={() => setInspectionRecordToUpdate(row.inspectionRecord)}
                                           >
                                             Update
+                                          </button>
+                                        </li>
+                                      )}
+                                      {canApproveInspectionRecords && !row.inspectionRecord?.is_approved && (
+                                        <li>
+                                          <button
+                                            type="button"
+                                            className="dropdown-item"
+                                            disabled={approvingInspectionId === String(row.recordId)}
+                                            onClick={() => handleApproveInspectionRecord(row.recordId)}
+                                          >
+                                            {approvingInspectionId === String(row.recordId) ? "Approving..." : "Approve"}
                                           </button>
                                         </li>
                                       )}

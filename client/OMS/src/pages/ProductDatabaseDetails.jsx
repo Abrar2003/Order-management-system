@@ -272,6 +272,11 @@ const ProductDatabaseDetails = () => {
       return groups;
     }, new Map());
   }, [productDatabase?.product_specs?.fields]);
+  const basicInfoFields = (specGroups.get("Basic Info") || []).filter(
+    (field) => !["item number", "description", "barcode number"].includes(
+      normalizeText(field?.label || formatLabel(field?.key)).toLowerCase(),
+    ),
+  );
   const itemFiles = useMemo(() => {
     const source = row?.item_files || {};
     return [...ITEM_FILE_OPTIONS.filter((option) => option.value !== "shipping_marks"), ...SHIPPING_MARKS_SUB_OPTIONS].flatMap((option) => getItemFileValues(source, option).map((file) => ({ ...option, file }))).filter((entry) => hasStoredItemFile(entry.file));
@@ -427,26 +432,6 @@ const ProductDatabaseDetails = () => {
                       ),
                     },
                     { label: "Last Updated", value: productDatabase.updated_at ? formatDateDDMMYYYY(productDatabase.updated_at) : emptyLabel },
-                  ]}
-                />
-                <h4 className="h6 mt-4 mb-3">Product Database Activity</h4>
-                <KeyValueGrid
-                  emptyLabel={emptyLabel}
-                  rows={[
-                    { label: "Created By", value: formatActor(productDatabase.pd_created_by, ["created_at"], emptyLabel) },
-                    { label: "Checked By", value: formatActor(productDatabase.pd_checked_by, ["checked_at"], emptyLabel) },
-                    { label: "Approved By", value: formatActor(productDatabase.pd_approved_by, ["approved_at"], emptyLabel) },
-                    { label: "Last Changed By", value: formatActor(productDatabase.pd_last_changed_by, ["changed_at", "updated_at"], emptyLabel) },
-                  ]}
-                />
-              </DetailCard>
-            </div>
-
-            <div className="col-xl-6">
-              <DetailCard title="Barcodes">
-                <KeyValueGrid
-                  emptyLabel={emptyLabel}
-                  rows={[
                     {
                       label: "Single / Master Barcode",
                       value: formatEan13BarcodeDisplay(
@@ -464,6 +449,20 @@ const ProductDatabaseDetails = () => {
                         emptyLabel,
                       ),
                     },
+                    ...basicInfoFields.map((field) => ({
+                      label: field?.label || formatLabel(field?.key),
+                      value: getFieldDisplayValue(field, emptyLabel),
+                    })),
+                  ]}
+                />
+                <h4 className="h6 mt-4 mb-3">Product Database Activity</h4>
+                <KeyValueGrid
+                  emptyLabel={emptyLabel}
+                  rows={[
+                    { label: "Created By", value: formatActor(productDatabase.pd_created_by, ["created_at"], emptyLabel) },
+                    { label: "Checked By", value: formatActor(productDatabase.pd_checked_by, ["checked_at"], emptyLabel) },
+                    { label: "Approved By", value: formatActor(productDatabase.pd_approved_by, ["approved_at"], emptyLabel) },
+                    { label: "Last Changed By", value: formatActor(productDatabase.pd_last_changed_by, ["changed_at", "updated_at"], emptyLabel) },
                   ]}
                 />
               </DetailCard>
@@ -498,7 +497,7 @@ const ProductDatabaseDetails = () => {
               </DetailCard>
             </div>
 
-            {[...specGroups.entries()].map(([groupLabel, fields]) => (
+            {[...specGroups.entries()].filter(([groupLabel]) => groupLabel !== "Basic Info").map(([groupLabel, fields]) => (
               <div className="col-xl-6" key={groupLabel}>
                 <DetailCard title={groupLabel}>
                   <KeyValueGrid

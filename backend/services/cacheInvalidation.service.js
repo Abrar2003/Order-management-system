@@ -52,6 +52,8 @@ const invalidateQcCaches = () =>
     CACHE_PREFIXES.reports,
     CACHE_PREFIXES.analytics,
     CACHE_PREFIXES.items,
+    CACHE_PREFIXES.pisDiffs,
+    CACHE_PREFIXES.pisDiffReports,
   ]);
 
 const ITEM_CACHE_PATTERNS = Object.freeze([
