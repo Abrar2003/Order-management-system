@@ -32,7 +32,6 @@ const findBrandByName = async (brandName = "", selectFields = "", user = {}) => 
     (await findOne(queryByNameCaseInsensitive))
   );
 };
-
 const toStoredLogoBuffer = (brand = {}) => {
   const rawLogo = brand?.logo;
   if (Buffer.isBuffer(rawLogo)) {
@@ -193,7 +192,6 @@ exports.getAllBrands = async (req, res) => {
     });
   }
 };
-
 exports.getBrandLogo = async (req, res) => {
   try {
     const brandName = String(req.params?.name || req.query?.brand || "").trim();
@@ -294,43 +292,6 @@ exports.createBrand = async (req, res) => {
     res.status(500).json({
       error: "Failed to create brand",
       details: error.message,
-    });
-  }
-};
-
-exports.getBrandCalendar = async (req, res) => {
-  try {
-    const brandName = String(req.params?.name || req.query?.brand || "").trim();
-    if (!brandName) {
-      return res.status(400).json({ message: "brand is required" });
-    }
-
-    const brandDoc = await findBrandByName(brandName, "name calendar", req.user);
-
-    if (!brandDoc) {
-      return res.status(404).json({ message: "Brand not found" });
-    }
-
-    const calendarId = String(brandDoc?.calendar || "").trim();
-    if (!calendarId) {
-      return res.status(404).json({
-        message: "Calendar is not configured for this brand",
-      });
-    }
-
-    const timezone = String(req.query?.timezone || "UTC").trim() || "UTC";
-    const embedUrl = `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(calendarId)}&ctz=${encodeURIComponent(timezone)}`;
-
-    return res.status(200).json({
-      brand: brandDoc.name,
-      calendarId,
-      embedUrl,
-    });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({
-      message: "Failed to fetch brand calendar",
-      error: error.message,
     });
   }
 };

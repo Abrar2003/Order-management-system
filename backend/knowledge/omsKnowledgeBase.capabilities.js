@@ -869,11 +869,11 @@ const capabilities = [
   capability({
     auditId: "VEN-03", id: "brand_identity", name: "Brand identity, logo, and calendar", type: "master_data_configuration_read",
     sourceClass: "CANONICAL", assistantRecommendation: "RAW_MONGO",
-    description: "Configured brand identity, normalized logo metadata, and calendar embed configuration.",
-    businessPurpose: "Read brand identity/configuration; logos and calendar embeds are presentation data, not business events.",
-    collections: ["brands"], routes: routes("/brands", "/brands/logo", "/brands/:name/logo", "/brands/:name/calendar"), canonicalFile: "backend/controllers/brand.controller.js", canonicalSymbols: ["getAllBrands", "getBrandLogo", "getBrandCalendar"],
+    description: "Configured brand identity, normalized logo metadata, and Google Calendar sync configuration.",
+    businessPurpose: "Read brand identity/configuration; logos and calendar settings are configuration data, not business events.",
+    collections: ["brands"], routes: routes("/brands", "/brands/logo", "/brands/:name/logo"), canonicalFile: "backend/controllers/brand.controller.js", canonicalSymbols: ["getAllBrands", "getBrandLogo"],
     filters: filters("brand"), outputFields: outputs("brand", "configuration"), resultGrain: "brand", aliases: ["brand list"], keywords: ["brand logo", "brand calendar"], userIntentExamples: ["List configured brands"],
-    limitations: ["Calendar response is an embed URL and does not query calendar events; binary logos are not analytical output."],
+    limitations: ["Calendar settings configure backend sync and do not query calendar events; binary logos are not analytical output."],
   }),
   capability({
     auditId: "VEN-04", id: "finishes", name: "Finish catalog", type: "master_data_read",

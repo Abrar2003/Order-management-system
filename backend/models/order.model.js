@@ -148,6 +148,12 @@ Order_Schema.index(
   { name: "orders_order_brand_vendor_idx" },
 );
 
+// The dashboard calendar finds current revised ETDs first, then original ETDs.
+Order_Schema.index(
+  { brand: 1, revised_ETD: 1, ETD: 1, order_id: 1 },
+  { name: "orders_brand_effective_etd_calendar_idx" },
+);
+
 // PO + item lookups are used heavily for duplicate detection and previous-order replacement.
 Order_Schema.index(
   { order_id: 1, "item.item_code": 1 },

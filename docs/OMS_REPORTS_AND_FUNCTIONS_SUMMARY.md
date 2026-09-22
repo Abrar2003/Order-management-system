@@ -768,7 +768,7 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 | Upcoming ETD | PO | Open and effective ETD in window | Today + 10 days default, inclusive | Counts, no primary CBM | Today ETD |
 | Shipping Delay | PO | Fully packed before ETD, no shipment, ETD passed | Past relative to start date | Counts/days late | Delayed PO |
 | Today ETD | PO | Original ETD matches client day | Client offset day | Status counts | Upcoming one-day window |
-| Packed Goods | PO/order line + item | Qualifying passed inspection in selected period | Seven days ending today by default, or inclusive From/To inspection dates | Previously/period/total packed + CBM | Inspection history |
+| Packed Goods | PO/order line + item | Qualifying passed inspection in selected period | Last completed Tuesday-to-Monday week by default, or inclusive From/To inspection dates | Previously/period/total packed + CBM | Inspection history |
 | Shipping Pending | Order line + frontend PO | Any unshipped quantity | Optional order-date range | Packed/pending/shipped; no CBM | Pending PO |
 | Shipments | Shipment entry plus placeholders | Shipment exists or order status progressed | Stuffing-date support not wired | Shipment qty/CBM | Containers |
 | Containers | Container | Nonblank container shipment rows | Stuffing date wired | Container qty/CBM/checks | Monthly Shipments |

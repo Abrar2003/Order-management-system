@@ -70,7 +70,7 @@ const buildDataset = async ({
   history = selected,
   orders = [],
   items = [],
-  now = new Date("2026-08-31T12:00:00Z"),
+  now = new Date("2026-09-01T12:00:00Z"),
   ...filters
 } = {}) => {
   const qcs = orders.map((order) => ({
@@ -99,10 +99,10 @@ test("latest qualifying inspection date ignores failed inspection attempts", () 
   );
 });
 
-test("defaults to the inclusive seven days ending today and validates explicit date pairs", () => {
+test("defaults to the last completed Tuesday-through-Monday week and validates explicit date pairs", () => {
   assert.deepEqual(
     resolvePackedGoodsPeriod({ now: new Date("2026-09-08T12:00:00Z") }),
-    { from_date: "2026-09-02", to_date: "2026-09-08", is_default_week: true },
+    { from_date: "2026-09-01", to_date: "2026-09-07", is_default_week: true },
   );
   assert.deepEqual(
     resolvePackedGoodsPeriod({ fromDate: "2026-08-25", toDate: "2026-08-31" }),
@@ -266,7 +266,7 @@ test("keeps PO and item rows distinct, applies combined server filters, and batc
   const calls = { selected: 0, qcs: 0, orders: 0, history: 0, items: 0 };
   const qcs = orders.map((order) => ({ _id: order.qc_record._id, order_meta: { order_id: order.order_id } }));
   const dataset = await buildPackedGoodsPeriodDataset({ brands: ["Brand A"], vendor: "Vendor A", orderId: "PO-A" }, {
-    now: new Date("2026-08-31T12:00:00Z"),
+    now: new Date("2026-09-01T12:00:00Z"),
     fetchSelectedInspections: async () => { calls.selected += 1; return selected; },
     fetchQcs: async ({ qcIds }) => { calls.qcs += 1; return qcs.filter((qc) => qcIds.includes(qc._id)); },
     fetchOrders: async () => { calls.orders += 1; return orders; },

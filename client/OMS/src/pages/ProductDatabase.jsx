@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.service";
 import {
+  isManagerLikeRole,
   isStrictAdminRole,
   normalizeUserRole,
 } from "../auth/permissions";
@@ -1325,6 +1326,7 @@ export const ProductDatabaseModal = ({
   const { hasPermission } = usePermissions();
   const user = getUserFromToken();
   const normalizedRole = normalizeUserRole(user?.role);
+  const isManager = isManagerLikeRole(normalizedRole);
   const canOverrideRequiredFields = isStrictAdminRole(normalizedRole);
   const canViewProductTypeTemplates = hasPermission("product_type_templates", "view");
   const canEdit = Boolean(item?.permissions?.can_edit);

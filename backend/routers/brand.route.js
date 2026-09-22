@@ -69,14 +69,6 @@ router.get(
   brandController.getBrandLogo,
 );
 
-router.get(
-  "/:name/calendar",
-  auth,
-  requirePermission("calendar", "view"),
-  cacheRoute("options", MEDIUM_CACHE_TTL),
-  brandController.getBrandCalendar,
-);
-
 router.post(
     "/create-brand",
     auth,

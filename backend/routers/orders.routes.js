@@ -34,6 +34,7 @@ const {
   getOrdersByFiltersDb,
   getOrderById,
   getVendorSummaryByBrand,
+  getEtdCalendarOrders,
   getTodayEtdOrdersByBrand,
   getOrdersByBrandAndStatus,
   getOrderSummary,
@@ -365,6 +366,7 @@ router.patch(
   finalizeOrder,
 );
 
+router.get("/etd-calendar", authenticate, requirePermission("dashboard", "view"), cacheRoute("dashboard", SHORT_CACHE_TTL), getEtdCalendarOrders);
 router.get("/today-etd-orders", authenticate, requirePermission("dashboard", "view"), cacheRoute("dashboard", SHORT_CACHE_TTL), getTodayEtdOrdersByBrand);
 
 // Get vendor summary by brand

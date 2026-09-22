@@ -195,6 +195,11 @@ export const getUpcomingEtdReport = async (params = {}) => {
   return res.data;
 };
 
+export const getEtdCalendarOrders = async (params = {}) => {
+  const res = await axios.get("/orders/etd-calendar", { params });
+  return res.data;
+};
+
 export const getShippingDelayReport = async (params = {}) => {
   const res = await axios.get("/orders/shipping-delay-report", { params });
   return res.data;

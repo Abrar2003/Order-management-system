@@ -2973,6 +2973,95 @@ const derivePoLineProgress = ({ orderEntry = {}, qcRecord = null } = {}) => {
 const computeGroupedPoStatus = (statuses = []) =>
   deriveGroupedOrderStatus(statuses);
 
+const APP_TIMEZONE_OFFSET_MINUTES = -330;
+
+const resolveEtdCalendarRange = (startValue, endValue) => {
+  const startRange = resolveClientDayRange(
+    startValue,
+    APP_TIMEZONE_OFFSET_MINUTES,
+  );
+  const endRange = resolveClientDayRange(
+    endValue,
+    APP_TIMEZONE_OFFSET_MINUTES,
+  );
+
+  if (!startRange || !endRange || startRange.dayStart >= endRange.dayStart) {
+    return null;
+  }
+
+  return { start: startRange.dayStart, end: endRange.dayStart };
+};
+
+const buildEffectiveEtdCalendarMatch = (range = null) => {
+  if (!range?.start || !range?.end) return {};
+
+  const dateMatch = { $gte: range.start, $lt: range.end };
+  return {
+    $or: [
+      { revised_ETD: dateMatch },
+      { revised_ETD: null, ETD: dateMatch },
+    ],
+  };
+};
+
+const buildEtdCalendarGroupKey = (orderEntry = {}) =>
+  [
+    normalizeOrderKey(orderEntry?.order_id),
+    normalizeBrandKey(orderEntry?.brand),
+    normalizeVendorKey(orderEntry?.vendor),
+  ].join("__");
+
+const buildEtdCalendarRows = (
+  orderEntries = [],
+  { candidateGroupKeys = new Set(), range = null } = {},
+) => {
+  const groupedOrders = new Map();
+
+  for (const orderEntry of orderEntries) {
+    const groupKey = buildEtdCalendarGroupKey(orderEntry);
+    const effectiveEtd = resolveEffectiveOrderEtdDate(orderEntry);
+    if (!groupKey || !candidateGroupKeys.has(groupKey) || !effectiveEtd) {
+      continue;
+    }
+
+    if (!groupedOrders.has(groupKey)) {
+      groupedOrders.set(groupKey, {
+        id: String(orderEntry?._id || ""),
+        order_id: normalizeOrderKey(orderEntry?.order_id),
+        vendor: getVendorName(orderEntry?.vendor) || "N/A",
+        brand: normalizeLooseString(orderEntry?.brand) || "N/A",
+        country: String(orderEntry?.vendor?.country || "").trim(),
+        etd: effectiveEtd,
+        statuses: [],
+      });
+    }
+
+    const groupedEntry = groupedOrders.get(groupKey);
+    groupedEntry.etd = resolveEarlierDate(groupedEntry.etd, effectiveEtd);
+    groupedEntry.statuses.push(orderEntry?.status);
+  }
+
+  return [...groupedOrders.values()]
+    .filter(
+      (entry) =>
+        !range ||
+        (entry.etd >= range.start && entry.etd < range.end),
+    )
+    .map((entry) => ({
+      id: entry.id,
+      order_id: entry.order_id,
+      vendor: entry.vendor,
+      etd: toISODateString(entry.etd),
+      status: computeGroupedPoStatus(entry.statuses),
+      brand: entry.brand,
+      country: entry.country,
+    }))
+    .sort((left, right) =>
+      left.etd.localeCompare(right.etd) ||
+      left.order_id.localeCompare(right.order_id, undefined, { numeric: true }),
+    );
+};
+
 const computePoBucketFromTotals = (groupedEntry = {}) => {
   const totalQuantity = Math.max(0, Number(groupedEntry?.total_quantity || 0));
   const totalShippedQuantity = Math.max(
@@ -6890,6 +6979,63 @@ exports.getVendorSummaryByBrand = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+exports.getEtdCalendarOrders = async (req, res) => {
+  try {
+    const range = resolveEtdCalendarRange(req.query?.start, req.query?.end);
+    if (!range) {
+      return res.status(400).json({
+        message: "start and end must be valid, ordered YYYY-MM-DD dates",
+      });
+    }
+
+    const baseMatch = buildOrderListMatch({
+      brand: req.query?.brand,
+      includeVendor: false,
+      includeStatus: false,
+      user: req.user,
+    });
+    const candidateRows = await Order.find({
+      $and: [baseMatch, buildEffectiveEtdCalendarMatch(range)],
+    })
+      .select("_id order_id brand vendor")
+      .lean();
+    const candidateGroupKeys = new Set(
+      candidateRows.map(buildEtdCalendarGroupKey),
+    );
+    const candidateOrderIds = [
+      ...new Set(
+        candidateRows
+          .map((orderEntry) => normalizeLooseString(orderEntry?.order_id))
+          .filter(Boolean),
+      ),
+    ];
+
+    if (candidateOrderIds.length === 0) {
+      return res.status(200).json({ success: true, count: 0, data: [] });
+    }
+
+    const groupMatch = buildOrderListMatch({
+      brand: req.query?.brand,
+      includeVendor: false,
+      includeStatus: false,
+      user: req.user,
+    });
+    groupMatch.order_id = { $in: candidateOrderIds };
+    const groupRows = await Order.find(groupMatch)
+      .select("_id order_id brand vendor ETD revised_ETD status")
+      .lean();
+    const data = buildEtdCalendarRows(groupRows, {
+      candidateGroupKeys,
+      range,
+    });
+
+    return res.status(200).json({ success: true, count: data.length, data });
+  } catch (error) {
+    console.error("Get ETD Calendar Orders Error:", error);
+    return res.status(500).json({ message: "Failed to load PO ETD calendar" });
+  }
+};
+
 exports.getTodayEtdOrdersByBrand = async (req, res) => {
   try {
     const brand = normalizeFilterValue(req.params.brand ?? req.query.brand);
@@ -12426,4 +12572,10 @@ exports.reSync = async (req, res) => {
       error: getErrInfo(error),
     });
   }
+};
+
+exports.__test__ = {
+  buildEtdCalendarRows,
+  buildEffectiveEtdCalendarMatch,
+  resolveEtdCalendarRange,
 };

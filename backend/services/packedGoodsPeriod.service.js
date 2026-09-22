@@ -86,9 +86,11 @@ const resolvePackedGoodsPeriod = ({ fromDate = "", toDate = "", now = new Date()
 
   if (!normalizedFrom) {
     const today = parseDateOnly(toDateOnlyIso(now));
+    const daysSinceLastMonday = ((today.getUTCDay() + 6) % 7) || 7;
+    const to = addUtcDays(today, -daysSinceLastMonday);
     return {
-      from_date: toDateOnlyIso(addUtcDays(today, -6)),
-      to_date: toDateOnlyIso(today),
+      from_date: toDateOnlyIso(addUtcDays(to, -6)),
+      to_date: toDateOnlyIso(to),
       is_default_week: true,
     };
   }
