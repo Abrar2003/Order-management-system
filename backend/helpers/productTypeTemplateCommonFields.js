@@ -58,6 +58,16 @@ const addVisibility = (field, parentKey) => {
   };
 };
 
+const addVisibilityOptions = (field, parentKey, values) => {
+  field.validation = {
+    ...(field.validation || {}),
+    visible_when: {
+      ...(field.validation?.visible_when || {}),
+      [parentKey]: values,
+    },
+  };
+};
+
 const booleanField = (key, label, order, extra = {}) => ({
   key,
   label,
@@ -141,8 +151,25 @@ const applyCommonProductDatabaseFields = (template = {}) => {
     "Storage",
     0,
   ));
+  upsertField(template, storage, ["storage_type"], {
+    key: "storage_type",
+    label: "Storage Type",
+    order: 5,
+    input_type: "select",
+    value_type: "string",
+    required: true,
+    options: ["Drawer", "Shelf", "Both"],
+    validation: { visible_when: { storage_enabled: [true] } },
+  });
   storage.fields.forEach((field) => {
-    if (field.key !== "storage_enabled") addVisibility(field, "storage_enabled");
+    if (field.key === "storage_enabled") return;
+    addVisibility(field, "storage_enabled");
+    if (["drawer_count", "drawer_weight_capacity", "handles_on_drawers", "drawer_channels", "extendable"].includes(field.key)) {
+      addVisibilityOptions(field, "storage_type", ["Drawer", "Both"]);
+    }
+    if (["shelf_count", "shelf_load_capacity"].includes(field.key)) {
+      addVisibilityOptions(field, "storage_type", ["Shelf", "Both"]);
+    }
   });
 
   upsertField(template, hardware, ["hardware_enabled", "hardware"], booleanField(
