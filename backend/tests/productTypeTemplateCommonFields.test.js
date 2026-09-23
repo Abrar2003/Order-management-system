@@ -36,7 +36,7 @@ test("common product fields are moved, conditional, and idempotent", () => {
     storage_enabled: [true], storage_type: ["Shelf", "Both"],
   });
   assert.deepEqual(field(template, "compartment_count").validation.visible_when, {
-    storage_enabled: [true], storage_type: ["Both"],
+    storage_enabled: [true], storage_type: ["Drawer", "Shelf", "Both"],
   });
   assert.equal(field(template, "adjustable_feet").validation.visible_when.hardware_enabled[0], true);
   assert.deepEqual(field(template, "allen_bolts_size").validation.visible_when, {

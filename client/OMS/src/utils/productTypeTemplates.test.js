@@ -84,12 +84,17 @@ test("storage details remain hidden until a matching storage type is selected", 
   const shelfField = {
     validation: { visible_when: { storage_enabled: [true], storage_type: ["Shelf", "Both"] } },
   };
+  const generalField = {
+    validation: { visible_when: { storage_enabled: [true], storage_type: ["Drawer", "Shelf", "Both"] } },
+  };
 
   assert.equal(isTemplateFieldVisible(drawerField, { storage_enabled: true }), false);
   assert.equal(isTemplateFieldVisible(drawerField, { storage_enabled: true, storage_type: "Shelf" }), false);
   assert.equal(isTemplateFieldVisible(drawerField, { storage_enabled: true, storage_type: "Drawer" }), true);
   assert.equal(isTemplateFieldVisible(shelfField, { storage_enabled: true, storage_type: "Drawer" }), false);
   assert.equal(isTemplateFieldVisible(shelfField, { storage_enabled: true, storage_type: "Both" }), true);
+  assert.equal(isTemplateFieldVisible(generalField, { storage_enabled: true }), false);
+  assert.equal(isTemplateFieldVisible(generalField, { storage_enabled: true, storage_type: "Shelf" }), true);
 });
 
 test("disabled storage and hardware fields save as N/A", () => {

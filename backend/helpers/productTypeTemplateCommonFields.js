@@ -164,7 +164,7 @@ const applyCommonProductDatabaseFields = (template = {}) => {
   storage.fields.forEach((field) => {
     if (["storage_enabled", "storage_type"].includes(field.key)) return;
     addVisibility(field, "storage_enabled");
-    let storageTypes = ["Both"];
+    let storageTypes = ["Drawer", "Shelf", "Both"];
     if (["drawer_count", "drawer_weight_capacity", "handles_on_drawers", "drawer_channels", "extendable"].includes(field.key)) {
       storageTypes = ["Drawer", "Both"];
     }
