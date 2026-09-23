@@ -424,6 +424,7 @@ const Items = () => {
   const canEditItems = hasPermission("items", "edit");
   const canCreateItems = hasPermission("items", "create") && canEditPis;
   const canUploadItemFiles = hasPermission("images_documents", "upload");
+  const canUpdateShippingMark = isManagerLikeRole(role);
   const canCreateComplaints =
     hasPermission("complaints", "create") && isManagerLikeRole(role);
 
@@ -437,6 +438,7 @@ const Items = () => {
   const [exporting, setExporting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [savingComplaint, setSavingComplaint] = useState(false);
+  const [updatingShippingMarkItemId, setUpdatingShippingMarkItemId] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [searchInput, setSearchInput] = useState(() =>
@@ -823,6 +825,36 @@ const Items = () => {
       setSavingComplaint(false);
     }
   }, []);
+
+  const handleShippingMarkUpdatedToggle = useCallback(async (item) => {
+    const qcId = String(item?.latest_inspection_report_qc_id || "").trim();
+    const itemId = String(item?._id || "").trim();
+    if (!canUpdateShippingMark || !qcId || !itemId || updatingShippingMarkItemId) return;
+
+    const shippingMarkUpdated = !Boolean(item?.shipping_mark_updated);
+    if (!window.confirm(
+      `Mark shipping mark as ${shippingMarkUpdated ? "updated" : "not updated"} for ${item?.code || "this item"}?`,
+    )) return;
+
+    try {
+      setUpdatingShippingMarkItemId(itemId);
+      setError("");
+      setSuccess("");
+      await api.patch(`/qc/${qcId}/shipping-mark-updated`, {
+        shipping_mark_updated: shippingMarkUpdated,
+      });
+      setRows((currentRows) => currentRows.map((row) =>
+        String(row?._id || "") === itemId
+          ? { ...row, shipping_mark_updated: shippingMarkUpdated }
+          : row,
+      ));
+      setSuccess(`Shipping mark for ${item?.code || "item"} marked ${shippingMarkUpdated ? "updated" : "not updated"}.`);
+    } catch (updateError) {
+      setError(updateError?.response?.data?.message || "Failed to update shipping mark status.");
+    } finally {
+      setUpdatingShippingMarkItemId("");
+    }
+  }, [canUpdateShippingMark, updatingShippingMarkItemId]);
 
   const activeItemFilePickerConfig = useMemo(
     () =>
@@ -1302,6 +1334,30 @@ const Items = () => {
                                   title="Create complain"
                                 >
                                   Complain
+                                </button>
+                              )}
+                              {canUpdateShippingMark && (
+                                <button
+                                  type="button"
+                                  className={
+                                    item?.shipping_mark_updated
+                                      ? "items-action-btn items-action-btn-success"
+                                      : "items-action-btn"
+                                  }
+                                  onClick={() => handleShippingMarkUpdatedToggle(item)}
+                                  disabled={
+                                    Boolean(updatingShippingMarkItemId)
+                                    || !item?.latest_inspection_report_qc_id
+                                  }
+                                  title={
+                                    item?.latest_inspection_report_qc_id
+                                      ? "Update shipping mark status for the latest inspection"
+                                      : "No inspection report available yet"
+                                  }
+                                >
+                                  {item?.shipping_mark_updated
+                                    ? "Shipping Mark Updated"
+                                    : "Shipping Mark Not Updated"}
                                 </button>
                               )}
                               {canUploadItemFiles && itemId && (

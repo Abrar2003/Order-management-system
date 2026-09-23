@@ -1309,6 +1309,19 @@ small,
   color: var(--om-color-text);
 }
 
+.items-action-btn-success {
+  border-color: rgba(72, 145, 107, 0.42);
+  background: rgba(222, 244, 229, 0.92);
+  color: #216b42;
+}
+
+.items-action-btn-success:hover,
+.items-action-btn-success:focus-visible {
+  border-color: #216b42;
+  background: rgba(202, 235, 213, 0.96);
+  color: #165333;
+}
+
 .claim-comparison-increased > * {
   background-color: rgba(220, 53, 69, 0.16) !important;
 }

@@ -3166,7 +3166,7 @@ const buildLatestInspectionReportLookup = async (itemCodes = []) => {
       "item.item_code": new RegExp(`^\\s*${escapeRegex(code)}\\s*$`, "i"),
     })),
   })
-    .select("_id item.item_code last_inspected_date inspection_record updatedAt createdAt")
+    .select("_id item.item_code last_inspected_date inspection_record shipping_mark_updated updatedAt createdAt")
     .lean();
 
   const latestByItemCode = new Map();
@@ -3193,12 +3193,15 @@ const buildLatestInspectionReportLookup = async (itemCodes = []) => {
     latestByItemCode.set(itemCodeKey, {
       qc_id: String(qcDoc?._id || "").trim(),
       last_inspected_date: normalizeTextField(qcDoc?.last_inspected_date),
+      shipping_mark_updated: Boolean(qcDoc?.shipping_mark_updated),
       sortTimestamp,
     });
   });
 
   return latestByItemCode;
 };
+
+exports.__test__.buildLatestInspectionReportLookup = buildLatestInspectionReportLookup;
 
 const buildInspectionReportMismatchLookup = async (items = []) => {
   const itemByCode = new Map(
@@ -4354,6 +4357,7 @@ exports.getItems = async (req, res) => {
         latest_inspection_report_qc_id: latestInspectionReport?.qc_id || "",
         latest_inspection_report_date:
           latestInspectionReport?.last_inspected_date || "",
+        shipping_mark_updated: Boolean(latestInspectionReport?.shipping_mark_updated),
       };
     });
     const shouldAttachThumbnails =
