@@ -76,3 +76,40 @@ test("conditional template fields are visible and saved only when their parents 
     ["hinges_type", "hinge_mounting_type", "hinge_sub_type"],
   );
 });
+
+test("disabled storage and hardware fields save as N/A", () => {
+  const sectionTemplate = {
+    ...template,
+    groups: [
+      {
+        key: "storage",
+        label: "Storage",
+        fields: [
+          { key: "storage_enabled", label: "Storage", input_type: "boolean", value_type: "boolean" },
+          { key: "drawer_count", label: "Drawers", input_type: "number", value_type: "number", validation: { visible_when: { storage_enabled: [true] } } },
+        ],
+      },
+      {
+        key: "hardware",
+        label: "Hardware",
+        fields: [
+          { key: "hardware_enabled", label: "Hardware", input_type: "boolean", value_type: "boolean" },
+          { key: "allen_bolts", label: "Allen Bolts", input_type: "boolean", value_type: "boolean", validation: { visible_when: { hardware_enabled: [true] } } },
+        ],
+      },
+    ],
+  };
+  const fields = buildProductTypePayload({
+    template: sectionTemplate,
+    selectedProductTypeKey: "cabinet",
+    formState: { fieldValues: { storage_enabled: false, hardware_enabled: false } },
+  }).product_specs.fields;
+
+  assert.deepEqual(
+    Object.fromEntries(fields.map((entry) => [
+      entry.key,
+      entry.value_type === "boolean" ? entry.value_boolean : entry.value_text,
+    ])),
+    { storage_enabled: false, drawer_count: "N/A", hardware_enabled: false, allen_bolts: "N/A" },
+  );
+});

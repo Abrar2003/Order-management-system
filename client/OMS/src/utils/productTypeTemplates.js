@@ -202,6 +202,13 @@ const findSizeEntryByRemark = (entries = [], remark = "") => {
   );
 };
 
+const isNotApplicableSectionField = (field = {}, fieldValues = {}) => {
+  const groupKey = normalizeTemplateKey(field?.group_key);
+  const enabledKey = groupKey === "hardware" ? "hardware_enabled" :
+    groupKey === "storage" ? "storage_enabled" : "";
+  return enabledKey && field?.key !== enabledKey && fieldValues?.[enabledKey] === false;
+};
+
 export const createProductTypeFormState = ({ item = {}, template = null } = {}) => {
   const specs = item?.product_specs || {};
   const flattenedFields = flattenTemplateFields(template || {});
@@ -264,7 +271,10 @@ export const createProductTypeFormState = ({ item = {}, template = null } = {}) 
     }
 
     const existingValueEntry = findFieldValueEntry(specs?.fields, field);
-    if (existingValueEntry) {
+    if (
+      existingValueEntry &&
+      extractProductSpecFieldValue(existingValueEntry) !== "N/A"
+    ) {
       fieldValues[fieldKey] = extractProductSpecFieldValue(existingValueEntry);
       return;
     }
@@ -618,6 +628,14 @@ const buildFieldValuePayload = (field = {}, value) => {
   return basePayload;
 };
 
+const buildNotApplicableFieldValuePayload = (field = {}) => ({
+  ...buildFieldValuePayload(
+    { ...field, input_type: "text", value_type: "string" },
+    "N/A",
+  ),
+  input_type: normalizeTemplateKey(field?.input_type),
+});
+
 const toMeaningfulSizePayloadEntry = (entry = {}) => {
   const hasMeaningfulSizeValue = (value) => {
     if (isBlankValue(value)) return false;
@@ -690,7 +708,14 @@ export const buildProductTypePayload = ({
 
   flattenTemplateFields(template).forEach((field) => {
     const fieldKey = normalizeTemplateKey(field?.key);
-    if (!isTemplateFieldVisible(field, formState?.fieldValues)) return;
+    if (!isTemplateFieldVisible(field, formState?.fieldValues)) {
+      if (isNotApplicableSectionField(field, formState?.fieldValues)) {
+        const payloadEntry = buildNotApplicableFieldValuePayload(field);
+        productFields.push(payloadEntry);
+        rawValues[fieldKey] = "N/A";
+      }
+      return;
+    }
     const inputType = normalizeTemplateKey(field?.input_type);
 
     if (!includeSizeFields && (inputType === "item_size" || inputType === "box_size")) {

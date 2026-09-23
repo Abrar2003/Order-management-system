@@ -10,6 +10,7 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "seed:product-types": "node scripts/seedProductTypeTemplates.js",
+    "update:product-type-common-fields": "node scripts/addCommonProductTypeTemplateFields.js",
     "seed:cabinet-sub-product-type": "node scripts/addCabinetSubProductTypeTemplate.js",
     "wasabi:cors": "node scripts/setWasabiCors.js",
     "export:pis:pdf": "node scripts/exportPisPdfExample.js",

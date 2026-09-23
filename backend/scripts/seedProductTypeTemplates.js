@@ -4,6 +4,7 @@ const { loadEnvFiles } = require("../config/loadEnv");
 const connectDB = require("../config/connectDB");
 const ProductTypeTemplate = require("../models/productTypeTemplate.model");
 const { prepareTemplatePayload } = require("../helpers/productTypeTemplates");
+const { applyCommonProductDatabaseFields } = require("../helpers/productTypeTemplateCommonFields");
 
 const buildField = ({
   key,
@@ -98,8 +99,8 @@ const buildBoxSizeField = (config = {}) =>
     value_type: "array",
   });
 
-const buildTableTemplate = () =>
-  prepareTemplatePayload({
+const buildTableTemplate = () => {
+  const template = {
     key: "table",
     label: "Table",
     description:
@@ -586,7 +587,9 @@ const buildTableTemplate = () =>
         ],
       },
     ],
-  });
+  };
+  return prepareTemplatePayload(applyCommonProductDatabaseFields(template));
+};
 
 const seedTemplate = async (payload = {}) => {
   const existing = await ProductTypeTemplate.findOne({
