@@ -3118,18 +3118,16 @@ const QcDetails = () => {
             <span>Claim percentage</span>
             <strong>{formatClaimPercentage(claimPercentage)}%</strong>
           </button>
-          {(isAdmin || shippingMarkUpdated) && (
-            <button
-              type="button"
-              className={`qc-shipping-mark-corner-tag border-0${shippingMarkUpdated ? " is-updated" : ""}`}
-              onClick={handleShippingMarkUpdatedToggle}
-              disabled={!isAdmin || updatingShippingMark}
-              title={isAdmin ? "Toggle shipping mark status" : "Shipping mark status"}
-            >
-              <span>Shipping mark</span>
-              <strong>{shippingMarkUpdated ? "Updated" : "Mark updated"}</strong>
-            </button>
-          )}
+          <button
+            type="button"
+            className={`qc-shipping-mark-corner-tag border-0${shippingMarkUpdated ? " is-updated" : ""}`}
+            onClick={handleShippingMarkUpdatedToggle}
+            disabled={!isAdmin || updatingShippingMark}
+            title={isAdmin ? "Toggle shipping mark status" : "Shipping mark status"}
+          >
+            <span>Shipping mark</span>
+            <strong>{shippingMarkUpdated ? "Updated" : "Not Updated"}</strong>
+          </button>
           <div className="card-body d-grid gap-4">
             <section>
               <h3 className="h6 mb-3 qc-details-section-title">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${getOptionText(qc?.order?.vendor || qc?.order_meta?.vendor) || "N/A"} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
