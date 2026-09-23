@@ -656,6 +656,14 @@ itemSchema.index({ "product_specs.fields.value_number": 1 });
 itemSchema.index({ "product_specs.fields.value_boolean": 1 });
 
 itemSchema.pre("validate", function syncBarcodeAliases() {
+  if (
+    this.assembly_file?.key
+    || this.assembly_file?.public_id
+    || this.assembly_file?.link
+  ) {
+    this.kd = true;
+  }
+
   const hasSelectedPath = (...paths) =>
     paths.some((path) => this.isSelected(path));
 
