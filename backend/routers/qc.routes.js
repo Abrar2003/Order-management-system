@@ -107,6 +107,14 @@ router.patch(
 );
 
 router.patch(
+  "/:id/shipping-mark-updated",
+  auth,
+  requirePermission("qc", "edit"),
+  invalidateQcOnSuccess,
+  qcController.updateShippingMarkUpdated,
+);
+
+router.patch(
   "/goods-not-ready/:id",
   auth,
   requirePermission("qc", "edit"),

@@ -444,6 +444,10 @@ const qcSchema = new mongoose.Schema(
         default: false,
       },
     },
+    shipping_mark_updated: {
+      type: Boolean,
+      default: false,
+    },
     remarks: {
       type: String,
     },

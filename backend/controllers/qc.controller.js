@@ -5699,6 +5699,49 @@ exports.updateQcCheckedStatus = async (req, res) => {
   }
 };
 
+exports.updateShippingMarkUpdated = async (req, res) => {
+  try {
+    if (!isManagerLikeRole(req.user?.role)) {
+      return res.status(403).json({
+        message: "Only managers and admins can update shipping mark status",
+      });
+    }
+    if (!hasOwn(req.body, "shipping_mark_updated")) {
+      return res.status(400).json({ message: "shipping_mark_updated is required" });
+    }
+
+    const rawValue = req.body.shipping_mark_updated;
+    const normalizedValue = String(rawValue ?? "").trim().toLowerCase();
+    if (
+      typeof rawValue !== "boolean" &&
+      !["true", "false", "1", "0"].includes(normalizedValue)
+    ) {
+      return res.status(400).json({
+        message: "shipping_mark_updated must be true or false",
+      });
+    }
+
+    const shippingMarkUpdated = rawValue === true || normalizedValue === "true" || normalizedValue === "1";
+    const qc = await QC.findOneAndUpdate(
+      applyDataAccessMatch({ _id: req.params.id }, req.user),
+      {
+        $set: {
+          shipping_mark_updated: shippingMarkUpdated,
+          updated_by: buildAuditActor(req.user),
+        },
+      },
+      { new: true, runValidators: true },
+    ).lean();
+
+    if (!qc) return res.status(404).json({ message: "QC record not found" });
+    return res.json({ shipping_mark_updated: qc.shipping_mark_updated });
+  } catch (err) {
+    return res.status(400).json({
+      message: err.message || "Failed to update shipping mark status",
+    });
+  }
+};
+
 /**
  * PATCH /update-qc/:id
  * QC inspector updates checked / passed with allocated labels

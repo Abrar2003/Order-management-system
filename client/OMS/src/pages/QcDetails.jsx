@@ -595,6 +595,7 @@ const QcDetails = () => {
   const [deletingQcImages, setDeletingQcImages] = useState(false);
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
   const [approvingInspectionId, setApprovingInspectionId] = useState("");
+  const [updatingShippingMark, setUpdatingShippingMark] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -703,6 +704,7 @@ const QcDetails = () => {
   });
   const canShowEditShippingButton =
     isAdmin && hasShippingRecords;
+  const shippingMarkUpdated = Boolean(qc?.shipping_mark_updated);
 
   const pendingAlignmentInfo = useMemo(
     () => getQcPendingAlignmentInfo(qc),
@@ -1900,6 +1902,21 @@ const QcDetails = () => {
       setLoading(false);
     }
   }, [id]);
+
+  const handleShippingMarkUpdatedToggle = useCallback(async () => {
+    if (!isAdmin || updatingShippingMark) return;
+    try {
+      setUpdatingShippingMark(true);
+      await api.patch(`/qc/${id}/shipping-mark-updated`, {
+        shipping_mark_updated: !shippingMarkUpdated,
+      });
+      await fetchQcDetails();
+    } catch (err) {
+      alert(err?.response?.data?.message || "Failed to update shipping mark status.");
+    } finally {
+      setUpdatingShippingMark(false);
+    }
+  }, [fetchQcDetails, id, isAdmin, shippingMarkUpdated, updatingShippingMark]);
 
   const handleOpenRelatedFilePicker = useCallback(() => {
     if (
@@ -3101,6 +3118,18 @@ const QcDetails = () => {
             <span>Claim percentage</span>
             <strong>{formatClaimPercentage(claimPercentage)}%</strong>
           </button>
+          {(isAdmin || shippingMarkUpdated) && (
+            <button
+              type="button"
+              className={`qc-shipping-mark-corner-tag border-0${shippingMarkUpdated ? " is-updated" : ""}`}
+              onClick={handleShippingMarkUpdatedToggle}
+              disabled={!isAdmin || updatingShippingMark}
+              title={isAdmin ? "Toggle shipping mark status" : "Shipping mark status"}
+            >
+              <span>Shipping mark</span>
+              <strong>{shippingMarkUpdated ? "Updated" : "Mark updated"}</strong>
+            </button>
+          )}
           <div className="card-body d-grid gap-4">
             <section>
               <h3 className="h6 mb-3 qc-details-section-title">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${getOptionText(qc?.order?.vendor || qc?.order_meta?.vendor) || "N/A"} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>

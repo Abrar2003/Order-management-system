@@ -524,16 +524,61 @@ small,
   line-height: 1;
 }
 
+.qc-shipping-mark-corner-tag {
+  position: absolute;
+  z-index: 2;
+  top: 1rem;
+  right: 11.5rem;
+  display: grid;
+  min-width: 9.5rem;
+  padding: 0.65rem 1rem;
+  border: 1px solid rgba(120, 113, 108, 0.3);
+  border-radius: 0.85rem;
+  background: #f5f5f4;
+  color: #57534e;
+  box-shadow: 0 0.45rem 1.1rem rgba(87, 83, 78, 0.1);
+  text-align: center;
+}
+
+.qc-shipping-mark-corner-tag.is-updated {
+  border-color: rgba(22, 163, 74, 0.35);
+  background: linear-gradient(145deg, #f0fdf4, #dcfce7);
+  color: #15803d;
+}
+
+.qc-shipping-mark-corner-tag span {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.qc-shipping-mark-corner-tag strong {
+  margin-top: 0.12rem;
+  font-size: 1rem;
+  line-height: 1.1;
+}
+
+.qc-shipping-mark-corner-tag:disabled {
+  cursor: default;
+}
+
 .qc-details-main-card > .card-body {
   padding-top: 1.35rem;
 }
 
 .qc-details-main-card .qc-details-section-title {
-  padding-right: 11rem;
+  padding-right: 21rem;
 }
 
 @media (max-width: 767.98px) {
   .qc-claim-percentage-corner-tag {
+    position: static;
+    width: fit-content;
+    margin: 1rem 1rem 0 auto;
+  }
+
+  .qc-shipping-mark-corner-tag {
     position: static;
     width: fit-content;
     margin: 1rem 1rem 0 auto;
