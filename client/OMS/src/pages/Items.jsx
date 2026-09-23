@@ -1341,8 +1341,8 @@ const Items = () => {
                                   type="button"
                                   className={
                                     item?.shipping_mark_updated
-                                      ? "items-action-btn items-action-btn-success"
-                                      : "items-action-btn"
+                                      ? "items-action-btn items-shipping-mark-action items-action-btn-success"
+                                      : "items-action-btn items-shipping-mark-action"
                                   }
                                   onClick={() => handleShippingMarkUpdatedToggle(item)}
                                   disabled={

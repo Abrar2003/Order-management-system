@@ -882,6 +882,10 @@ small,
   color: var(--om-color-danger);
 }
 
+.items-shipping-mark-action {
+  grid-column: 1 / -1;
+}
+
 .items-upload-action {
   grid-column: 1 / -1;
   display: grid;
