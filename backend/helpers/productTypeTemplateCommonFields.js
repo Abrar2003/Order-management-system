@@ -162,14 +162,16 @@ const applyCommonProductDatabaseFields = (template = {}) => {
     validation: { visible_when: { storage_enabled: [true] } },
   });
   storage.fields.forEach((field) => {
-    if (field.key === "storage_enabled") return;
+    if (["storage_enabled", "storage_type"].includes(field.key)) return;
     addVisibility(field, "storage_enabled");
+    let storageTypes = ["Both"];
     if (["drawer_count", "drawer_weight_capacity", "handles_on_drawers", "drawer_channels", "extendable"].includes(field.key)) {
-      addVisibilityOptions(field, "storage_type", ["Drawer", "Both"]);
+      storageTypes = ["Drawer", "Both"];
     }
     if (["shelf_count", "shelf_load_capacity"].includes(field.key)) {
-      addVisibilityOptions(field, "storage_type", ["Shelf", "Both"]);
+      storageTypes = ["Shelf", "Both"];
     }
+    addVisibilityOptions(field, "storage_type", storageTypes);
   });
 
   upsertField(template, hardware, ["hardware_enabled", "hardware"], booleanField(

@@ -77,6 +77,21 @@ test("conditional template fields are visible and saved only when their parents 
   );
 });
 
+test("storage details remain hidden until a matching storage type is selected", () => {
+  const drawerField = {
+    validation: { visible_when: { storage_enabled: [true], storage_type: ["Drawer", "Both"] } },
+  };
+  const shelfField = {
+    validation: { visible_when: { storage_enabled: [true], storage_type: ["Shelf", "Both"] } },
+  };
+
+  assert.equal(isTemplateFieldVisible(drawerField, { storage_enabled: true }), false);
+  assert.equal(isTemplateFieldVisible(drawerField, { storage_enabled: true, storage_type: "Shelf" }), false);
+  assert.equal(isTemplateFieldVisible(drawerField, { storage_enabled: true, storage_type: "Drawer" }), true);
+  assert.equal(isTemplateFieldVisible(shelfField, { storage_enabled: true, storage_type: "Drawer" }), false);
+  assert.equal(isTemplateFieldVisible(shelfField, { storage_enabled: true, storage_type: "Both" }), true);
+});
+
 test("disabled storage and hardware fields save as N/A", () => {
   const sectionTemplate = {
     ...template,
