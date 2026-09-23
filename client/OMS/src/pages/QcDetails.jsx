@@ -1905,10 +1905,15 @@ const QcDetails = () => {
 
   const handleShippingMarkUpdatedToggle = useCallback(async () => {
     if (!isAdmin || updatingShippingMark) return;
+    const nextShippingMarkUpdated = !shippingMarkUpdated;
+    if (!window.confirm(
+      `Mark shipping mark as ${nextShippingMarkUpdated ? "updated" : "not updated"}?`,
+    )) return;
+
     try {
       setUpdatingShippingMark(true);
       await api.patch(`/qc/${id}/shipping-mark-updated`, {
-        shipping_mark_updated: !shippingMarkUpdated,
+        shipping_mark_updated: nextShippingMarkUpdated,
       });
       await fetchQcDetails();
     } catch (err) {
