@@ -144,6 +144,8 @@ log "Installing backend dependencies"
 cd "$BACKEND_DIR"
 npm ci --omit=dev
 NODE_ENV=production npm run check:env
+npm run update:table-template-fields
+npm run seed:table-sub-product-type
 
 log "Installing frontend dependencies"
 cd "$FRONTEND_DIR"

@@ -250,11 +250,11 @@ const buildTableTemplate = () => {
               B: ["w"],
             },
           }),
-          buildField({
-            key: "seating_capacity",
-            label: "Seating Capacity",
-            order: 60,
-            source_headers: ["Number of People who can sit"],
+          buildNumberField({
+            key: "table_top_thickness",
+            label: "Table Top Thickness",
+            order: 55,
+            source_headers: ["Table Top Thickness", "Table Top Thikness"],
           }),
           buildNumberField({
             key: "leg_clearance_from_floor",
@@ -336,6 +336,12 @@ const buildTableTemplate = () => {
             order: 20,
             source_headers: ["Outer Shape"],
           }),
+          buildField({
+            key: "seating_capacity",
+            label: "Seating Capacity",
+            order: 25,
+            source_headers: ["Number of People who can sit"],
+          }),
           buildBooleanField({
             key: "top_has_backing",
             label: "Table Top Has Backing",
@@ -347,12 +353,6 @@ const buildTableTemplate = () => {
             label: "Backing Material",
             order: 40,
             source_headers: ["Backing under table top Materia"],
-          }),
-          buildNumberField({
-            key: "table_top_thickness",
-            label: "Table Top Thickness",
-            order: 45,
-            source_headers: ["Table Top Thickness", "Table Top Thikness"],
           }),
           buildNumberField({
             key: "number_of_legs",

@@ -86,15 +86,15 @@ const BARCODE_MODES = Object.freeze({
 });
 const PRODUCT_DATABASE_TABLE_TEMPLATE_KEY = "table";
 const PRODUCT_DATABASE_TABLE_TEMPLATE_VERSION = 1;
-const PRODUCT_DATABASE_TABLE_DETAILS_GROUP_KEY = "table_details";
-const PRODUCT_DATABASE_TABLE_DETAILS_GROUP_LABEL = "Table Details";
 const PRODUCT_DATABASE_TABLE_V1_FIELDS = Object.freeze([
   {
     key: "table_top_thickness",
     label: "Table Top Thickness",
     input_type: "number",
     value_type: "number",
-    order: 45,
+    order: 55,
+    group_key: "sizes",
+    group_label: "Sizes",
     source_headers: ["Table Top Thickness", "Table Top Thikness"],
   },
   {
@@ -104,6 +104,8 @@ const PRODUCT_DATABASE_TABLE_V1_FIELDS = Object.freeze([
     value_type: "array",
     unit: "cm",
     order: 75,
+    group_key: "table_details",
+    group_label: "Table Details",
     validation: { max_entries: 4 },
     source_headers: [
       "Distances Between Legs",
@@ -254,30 +256,42 @@ const mergeProductDatabaseTableV1Fields = (template = null) => {
         fields: Array.isArray(group?.fields) ? [...group.fields] : [],
       }))
     : [];
-  let tableDetailsGroup = groups.find(
-    (group) =>
-      normalizeTemplateKey(group?.key) === PRODUCT_DATABASE_TABLE_DETAILS_GROUP_KEY,
-  );
-
-  if (!tableDetailsGroup) {
-    tableDetailsGroup = {
-      key: PRODUCT_DATABASE_TABLE_DETAILS_GROUP_KEY,
-      label: PRODUCT_DATABASE_TABLE_DETAILS_GROUP_LABEL,
-      order: 40,
-      is_active: true,
-      fields: [],
-    };
-    groups.push(tableDetailsGroup);
-  }
-
   let changed = groups.length !== (Array.isArray(template?.groups) ? template.groups.length : 0);
   PRODUCT_DATABASE_TABLE_V1_FIELDS.forEach((fallbackField) => {
-    const fieldIndex = tableDetailsGroup.fields.findIndex(
+    let targetGroup = groups.find(
+      (group) => normalizeTemplateKey(group?.key) === fallbackField.group_key,
+    );
+    if (!targetGroup) {
+      targetGroup = {
+        key: fallbackField.group_key,
+        label: fallbackField.group_label,
+        order: fallbackField.group_key === "sizes" ? 20 : 40,
+        is_active: true,
+        fields: [],
+      };
+      groups.push(targetGroup);
+      changed = true;
+    }
+
+    const sourceGroup = groups.find((group) =>
+      (group.fields || []).some(
+        (field) => normalizeTemplateKey(field?.key) === fallbackField.key,
+      ),
+    );
+    if (sourceGroup && sourceGroup !== targetGroup) {
+      const sourceFieldIndex = sourceGroup.fields.findIndex(
+        (field) => normalizeTemplateKey(field?.key) === fallbackField.key,
+      );
+      targetGroup.fields.push(sourceGroup.fields.splice(sourceFieldIndex, 1)[0]);
+      changed = true;
+    }
+
+    const fieldIndex = targetGroup.fields.findIndex(
       (field) => normalizeTemplateKey(field?.key) === fallbackField.key,
     );
 
     if (fieldIndex === -1) {
-      tableDetailsGroup.fields.push({
+      targetGroup.fields.push({
         ...fallbackField,
         required: false,
         searchable: false,
@@ -291,7 +305,7 @@ const mergeProductDatabaseTableV1Fields = (template = null) => {
       return;
     }
 
-    const existingField = tableDetailsGroup.fields[fieldIndex];
+    const existingField = targetGroup.fields[fieldIndex];
     const nextField = {
       ...fallbackField,
       ...existingField,
@@ -309,7 +323,7 @@ const mergeProductDatabaseTableV1Fields = (template = null) => {
     };
 
     if (stableStringify(existingField) !== stableStringify(nextField)) {
-      tableDetailsGroup.fields[fieldIndex] = nextField;
+      targetGroup.fields[fieldIndex] = nextField;
       changed = true;
     }
   });
