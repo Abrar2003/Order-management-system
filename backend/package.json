@@ -11,6 +11,7 @@
     "dev": "nodemon index.js",
     "seed:product-types": "node scripts/seedProductTypeTemplates.js",
     "update:table-template-fields": "node scripts/moveTableTemplateFields.js",
+    "update:table-product-spec-groups": "node scripts/syncTableProductSpecGroups.js",
     "update:product-type-common-fields": "node scripts/addCommonProductTypeTemplateFields.js",
     "seed:cabinet-sub-product-type": "node scripts/addCabinetSubProductTypeTemplate.js",
     "seed:table-sub-product-type": "node scripts/addTableSubProductTypeTemplate.js",
