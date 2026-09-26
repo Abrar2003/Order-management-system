@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildProductTypePayload,
   isTemplateFieldVisible,
+  sortTemplateFormFields,
   validateProductTypeFormState,
 } from "./productTypeTemplates.js";
 
@@ -131,5 +132,17 @@ test("disabled storage and hardware fields save as N/A", () => {
       entry.value_type === "boolean" ? entry.value_boolean : entry.value_text,
     ])),
     { storage_enabled: false, drawer_count: "N/A", hardware_enabled: false, allen_bolts: "N/A" },
+  );
+});
+
+test("form fields place booleans last without disturbing the other field order", () => {
+  assert.deepEqual(
+    sortTemplateFormFields([
+      { key: "first", input_type: "text" },
+      { key: "enabled", input_type: "boolean" },
+      { key: "second", input_type: "select" },
+      { key: "visible", input_type: "boolean" },
+    ]).map((field) => field.key),
+    ["first", "second", "enabled", "visible"],
   );
 });

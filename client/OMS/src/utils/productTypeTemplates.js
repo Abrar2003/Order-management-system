@@ -63,6 +63,13 @@ export const sortTemplateGroups = (groups = []) =>
     }))
     .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0));
 
+export const sortTemplateFormFields = (fields = []) =>
+  [...fields].sort(
+    (left, right) =>
+      Number(normalizeTemplateKey(left?.input_type) === "boolean") -
+      Number(normalizeTemplateKey(right?.input_type) === "boolean"),
+  );
+
 export const flattenTemplateFields = (template = {}) =>
   sortTemplateGroups(template?.groups).flatMap((group) =>
     (Array.isArray(group?.fields) ? group.fields : []).map((field) => ({

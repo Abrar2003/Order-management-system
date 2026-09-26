@@ -4,6 +4,7 @@ import {
   flattenTemplateFields,
   isTemplateFieldVisible,
   normalizeTemplateKey,
+  sortTemplateFormFields,
   sortTemplateGroups,
 } from "../utils/productTypeTemplates";
 
@@ -503,12 +504,14 @@ const ProductTypeDynamicForm = ({
       {visibleGroups.map((group) => {
         const groupKey = normalizeTemplateKey(group?.key);
         const isOpen = openGroups.includes(groupKey);
-        const groupFields = flattenTemplateFields({ groups: [group] }).filter((field) => {
-          if (!isTemplateFieldVisible(field, fieldValues)) return false;
-          if (!hideSizeFields) return true;
-          const inputType = normalizeTemplateKey(field?.input_type);
-          return inputType !== "item_size" && inputType !== "box_size";
-        });
+        const groupFields = sortTemplateFormFields(
+          flattenTemplateFields({ groups: [group] }).filter((field) => {
+            if (!isTemplateFieldVisible(field, fieldValues)) return false;
+            if (!hideSizeFields) return true;
+            const inputType = normalizeTemplateKey(field?.input_type);
+            return inputType !== "item_size" && inputType !== "box_size";
+          }),
+        );
 
         return (
           <section key={groupKey} className="card om-card om-product-type-group-card">
