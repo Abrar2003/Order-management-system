@@ -18,6 +18,46 @@ class LiveLabelProjectionService {
     this.LabelTransaction = LabelTransactionModel;
   }
 
+  async upsertTransaction(inspectorId, history = {}, now = new Date()) {
+    const action = String(history?.action || '').trim();
+    const historyId = history?._id;
+    if (!inspectorId || !historyId || !action) {
+      throw new Error('A saved inspector label history entry is required for live mirroring');
+    }
+
+    const labels = normalizeLabels(history.labels);
+    const previousLabels = normalizeLabels(history.previous_labels);
+    const nextLabels = normalizeLabels(history.next_labels);
+    await this.LabelTransaction.updateOne(
+      {
+        'migration.legacy_inspector': inspectorId,
+        'migration.legacy_history_id': historyId,
+      },
+      {
+        $set: {
+          inspector: inspectorId,
+          action,
+          labels: normalizeLabels(history.labels),
+          previous_labels: normalizeLabels(history.previous_labels),
+          next_labels: normalizeLabels(history.next_labels),
+          from_inspector: history.from_inspector || null,
+          to_inspector: history.to_inspector || null,
+          actor: history.actor || {},
+          recorded_at: history.recorded_at || now,
+          remarks: String(history.remarks || '').trim(),
+          migration: {
+            migrated: false,
+            source: 'live_legacy_mirror',
+            migrated_at: now,
+            legacy_inspector: inspectorId,
+            legacy_history_id: historyId,
+          },
+        },
+      },
+      { upsert: true },
+    );
+  }
+
   async mirrorInspectorChange({ inspectorId, history = {} } = {}) {
     const action = String(history?.action || '').trim();
     const historyId = history?._id;
@@ -74,34 +114,34 @@ class LiveLabelProjectionService {
     // ponytail: idempotent upserts allow sync-failure replay; use a Mongo transaction if modern-only writes need atomicity.
     if (operations.length > 0) await this.Label.bulkWrite(operations, { ordered: true });
 
-    await this.LabelTransaction.updateOne(
-      {
-        'migration.legacy_inspector': inspectorId,
-        'migration.legacy_history_id': historyId,
-      },
-      {
-        $set: {
-          inspector: inspectorId,
-          action,
-          labels,
-          previous_labels: previousLabels,
-          next_labels: nextLabels,
-          from_inspector: history.from_inspector || null,
-          to_inspector: history.to_inspector || null,
-          actor: history.actor || {},
-          recorded_at: history.recorded_at || now,
-          remarks: String(history.remarks || '').trim(),
-          migration: {
-            migrated: false,
-            source: 'live_legacy_mirror',
-            migrated_at: now,
-            legacy_inspector: inspectorId,
-            legacy_history_id: historyId,
-          },
-        },
-      },
-      { upsert: true },
+    await this.upsertTransaction(inspectorId, history, now);
+  }
+
+  async mirrorTransfer({
+    sourceInspectorId,
+    targetInspectorId,
+    sourceHistory = {},
+    targetHistory = {},
+  } = {}) {
+    const labels = normalizeLabels(sourceHistory.labels);
+    if (!sourceInspectorId || !targetInspectorId || labels.length === 0) {
+      throw new Error('Source, target, and labels are required for a live transfer mirror');
+    }
+
+    // ponytail: one conditional update makes replay safe; use a Mongo transaction for modern-only transfer authority.
+    const result = await this.Label.updateMany(
+      { number: { $in: labels }, owner_inspector: sourceInspectorId },
+      { $set: { owner_inspector: targetInspectorId } },
     );
+    if (Number(result?.matchedCount) !== labels.length) {
+      throw new Error('Modern transfer ownership no longer matches the legacy source');
+    }
+
+    const now = new Date();
+    await Promise.all([
+      this.upsertTransaction(sourceInspectorId, sourceHistory, now),
+      this.upsertTransaction(targetInspectorId, targetHistory, now),
+    ]);
   }
 }
 

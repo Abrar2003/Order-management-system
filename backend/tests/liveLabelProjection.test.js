@@ -75,3 +75,45 @@ test('live rejection clears ownership and retains a rejection projection', async
   assert.equal(update.rejected_by_inspector, 'inspector-1');
   assert.ok(update.rejected_at instanceof Date);
 });
+
+test('live transfer changes owner only when every serial still belongs to the source', async () => {
+  const { projector, transactionWrites } = createProjector();
+  const transferWrites = [];
+  projector.Label.updateMany = async (filter, update) => {
+    transferWrites.push({ filter, update });
+    return { matchedCount: 2 };
+  };
+
+  await projector.mirrorTransfer({
+    sourceInspectorId: 'source',
+    targetInspectorId: 'target',
+    sourceHistory: {
+      _id: 'source-history', action: 'transfer_out', labels: [1, 2],
+      previous_labels: [1, 2], next_labels: [], to_inspector: 'target',
+    },
+    targetHistory: {
+      _id: 'target-history', action: 'transfer_in', labels: [1, 2],
+      previous_labels: [], next_labels: [1, 2], from_inspector: 'source',
+    },
+  });
+
+  assert.deepEqual(transferWrites, [{
+    filter: { number: { $in: [1, 2] }, owner_inspector: 'source' },
+    update: { $set: { owner_inspector: 'target' } },
+  }]);
+  assert.equal(transactionWrites.length, 2);
+});
+
+test('live transfer stops when its modern owner check is stale', async () => {
+  const { projector } = createProjector();
+  projector.Label.updateMany = async () => ({ matchedCount: 1 });
+
+  await assert.rejects(
+    projector.mirrorTransfer({
+      sourceInspectorId: 'source', targetInspectorId: 'target',
+      sourceHistory: { _id: 'source-history', action: 'transfer_out', labels: [1, 2] },
+      targetHistory: { _id: 'target-history', action: 'transfer_in', labels: [1, 2] },
+    }),
+    /no longer matches/,
+  );
+});

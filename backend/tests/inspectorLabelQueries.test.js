@@ -4,6 +4,7 @@ const test = require('node:test');
 const Inspector = require('../models/inspector.model');
 const Inspection = require('../models/inspection.model');
 const inspectorController = require('../controllers/inspector.controller');
+const labelStorageService = require('../services/labels/labelStorage.service');
 const { __test__ } = inspectorController;
 
 test('global label checks query only requested labels', async (t) => {
@@ -42,19 +43,23 @@ test('transfer updates only legacy allocation arrays without hydrating or saving
   const findById = Inspector.findById;
   const bulkWrite = Inspector.bulkWrite;
   const inspectionFind = Inspection.find;
+  const mirrorLegacyWrite = labelStorageService.mirrorLegacyWrite;
   const source = { _id: 'source', user: 'source-user', alloted_labels: [10, 11], rejected_labels: [], labels_allotted_by: null };
   const target = { _id: 'target', user: 'target-user', alloted_labels: [], rejected_labels: [], labels_allotted_by: null };
   const writes = [];
+  const mirrors = [];
   t.after(() => {
     Inspector.find = find;
     Inspector.findById = findById;
     Inspector.bulkWrite = bulkWrite;
     Inspection.find = inspectionFind;
+    labelStorageService.mirrorLegacyWrite = mirrorLegacyWrite;
   });
   Inspector.findById = (id) => ({ lean: async () => (id === 'source' ? source : target) });
   Inspector.find = () => ({ select() { return this; }, populate() { return this; }, lean: async () => [] });
   Inspector.bulkWrite = async (updates) => { writes.push(updates); };
   Inspection.find = () => ({ select() { return this; }, lean: async () => [] });
+  labelStorageService.mirrorLegacyWrite = async (...args) => { mirrors.push(args); };
   const response = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
 
   await inspectorController.transferLabels({
@@ -67,4 +72,6 @@ test('transfer updates only legacy allocation arrays without hydrating or saving
   assert.equal(writes.length, 1);
   assert.deepEqual(writes[0][0].updateOne.update.$set.alloted_labels, [11]);
   assert.deepEqual(writes[0][1].updateOne.update.$set.alloted_labels, [10]);
+  assert.equal(mirrors.length, 1);
+  assert.equal(mirrors[0][1], 'transfer');
 });

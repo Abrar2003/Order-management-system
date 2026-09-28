@@ -842,6 +842,26 @@ exports.transferLabels = async (req, res) => {
     const targetNextLabels = normalizeInspectorLabels([...targetAllocated, ...normalizedLabels]);
     const recordedAt = new Date();
     const actor = buildLabelHistoryActor(req.user);
+    const sourceHistory = {
+      _id: new mongoose.Types.ObjectId(),
+      action: 'transfer_out',
+      labels: normalizedLabels,
+      previous_labels: sourceAllocated,
+      next_labels: sourceNextLabels,
+      to_inspector: targetInspector._id,
+      actor,
+      recorded_at: recordedAt,
+    };
+    const targetHistory = {
+      _id: new mongoose.Types.ObjectId(),
+      action: 'transfer_in',
+      labels: normalizedLabels,
+      previous_labels: targetAllocated,
+      next_labels: targetNextLabels,
+      from_inspector: sourceInspector._id,
+      actor,
+      recorded_at: recordedAt,
+    };
     const updates = [
       {
         updateOne: {
@@ -849,10 +869,7 @@ exports.transferLabels = async (req, res) => {
           update: {
             $set: { alloted_labels: sourceNextLabels, labels_allotted_by: req.user?._id || sourceInspector.labels_allotted_by },
             $push: {
-              label_allocation_history: {
-                action: 'transfer_out', labels: normalizedLabels, previous_labels: sourceAllocated,
-                next_labels: sourceNextLabels, to_inspector: targetInspector._id, actor, recorded_at: recordedAt,
-              },
+              label_allocation_history: sourceHistory,
             },
           },
         },
@@ -863,16 +880,28 @@ exports.transferLabels = async (req, res) => {
           update: {
             $set: { alloted_labels: targetNextLabels, labels_allotted_by: req.user?._id || targetInspector.labels_allotted_by },
             $push: {
-              label_allocation_history: {
-                action: 'transfer_in', labels: normalizedLabels, previous_labels: targetAllocated,
-                next_labels: targetNextLabels, from_inspector: sourceInspector._id, actor, recorded_at: recordedAt,
-              },
+              label_allocation_history: targetHistory,
             },
           },
         },
       },
     ];
     await Inspector.bulkWrite(updates, { ordered: true });
+    await labelStorageService.mirrorLegacyWrite(sourceInspector._id, 'transfer', {
+      payload: {
+        labels: normalizedLabels,
+        source_inspector: sourceInspector._id,
+        target_inspector: targetInspector._id,
+        source_history_id: sourceHistory._id,
+        target_history_id: targetHistory._id,
+      },
+      modernWrite: () => liveLabelProjection.mirrorTransfer({
+        sourceInspectorId: sourceInspector._id,
+        targetInspectorId: targetInspector._id,
+        sourceHistory,
+        targetHistory,
+      }),
+    });
 
     return res.json({
       message: `${normalizedLabels.length} label(s) transferred successfully`,
