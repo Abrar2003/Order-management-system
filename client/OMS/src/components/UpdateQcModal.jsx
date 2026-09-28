@@ -110,6 +110,41 @@ const isPositiveBarcodeText = (value) => {
   return /^\d+$/.test(normalized) && !/^0+$/.test(normalized);
 };
 
+const isValidEan13 = (value) => {
+  const ean = normalizeBarcodeText(value).replace(/[\s-]+/g, "");
+  if (!/^\d{13}$/.test(ean)) return false;
+  const sum = ean.slice(0, 12).split("").reduce(
+    (total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 1 : 3),
+    0,
+  );
+  return Number(ean[12]) === (10 - (sum % 10)) % 10;
+};
+
+const getPisLogisticsEans = (item = {}) => {
+  const values = Array.isArray(item?.pis_logistics_eans) && item.pis_logistics_eans.length
+    ? item.pis_logistics_eans
+    : [item?.pis_logistics_ean || item?.pis_master_barcode || item?.pis_barcode];
+  return values
+    .map((value) => normalizeBarcodeText(value).replace(/[\s-]+/g, ""))
+    .filter(isValidEan13);
+};
+const getPisLogisticsEan = (item = {}) => getPisLogisticsEans(item)[0] || "";
+const getPisMasterBarcode = (item = {}) =>
+  normalizeBarcodeText(
+    item?.pis_master_barcode || item?.pis_barcode || getPisLogisticsEan(item),
+  );
+
+const requiresLogisticsEanScanValidation = (item = {}) =>
+  item?.barcode_exempted !== true &&
+  Boolean(getPisLogisticsEan(item)) &&
+  Boolean(String(
+    item?.logistics_ean?.key ||
+      item?.logistics_ean?.url ||
+      item?.logistics_ean?.link ||
+      item?.logistics_ean?.public_id ||
+      "",
+  ).trim());
+
 const normalizeStatusText = (value) => String(value ?? "").trim().toLowerCase();
 
 const isGoodsNotReadyText = (value) => normalizeStatusText(value) === "goods not ready";
@@ -168,12 +203,12 @@ const QC_BARCODE_VALIDATION_TYPE_MAP = QC_BARCODE_VALIDATION_TYPES.reduce(
 const getQcBarcodeValidationOption = (type = "") =>
   QC_BARCODE_VALIDATION_TYPE_MAP[type] || QC_BARCODE_VALIDATION_TYPE_MAP.individual;
 
-const getQcBarcodeValidationRequirements = (type = "") =>
-  getQcBarcodeValidationOption(type).value === "inner_master"
+const getQcBarcodeValidationRequirements = (type = "", item = {}) => {
+  const requirements = getQcBarcodeValidationOption(type).value === "inner_master"
     ? [
       {
         key: "master",
-        label: "Master",
+        label: "PIS Master",
         pisKey: "pis_master_barcode",
         inputKey: "barcode",
       },
@@ -187,11 +222,33 @@ const getQcBarcodeValidationRequirements = (type = "") =>
     : [
       {
         key: "individual",
-        label: "Individual",
-        pisKey: "pis_barcode",
+        label: "PIS Master",
+        pisKey: "pis_master_barcode",
         inputKey: "barcode",
       },
     ];
+  for (const [logisticsIndex] of getPisLogisticsEans(item).entries()) {
+    requirements.push({
+      key: `logistics-${logisticsIndex}`,
+      label: `Logistics EAN ${logisticsIndex + 1}`,
+      pisKey: "pis_logistics_ean",
+      inputKey: "inspected_logistics_eans",
+      logisticsIndex,
+    });
+  }
+  return requirements;
+};
+
+const getPisBarcodeForRequirement = (item = {}, requirement = {}) =>
+  requirement.pisKey === "pis_logistics_ean"
+    ? getPisLogisticsEans(item)[requirement.logisticsIndex || 0] || ""
+    : requirement.pisKey === "pis_master_barcode"
+      ? getPisMasterBarcode(item)
+      : item?.[requirement.pisKey];
+const getLogisticsScanIndex = (target = "") => {
+  const match = /^logistics:(\d+)$/.exec(target);
+  return match ? Number(match[1]) : -1;
+};
 
 const getBoxModeForQcBarcodeValidationType = (type = "") =>
   getQcBarcodeValidationOption(type).value === "inner_master"
@@ -925,6 +982,7 @@ const UpdateQcModal = ({
     offeredQuantity: "",
     barcode: "",
     inner_barcode: "",
+    inspected_logistics_eans: getPisLogisticsEans(qc?.item_master).map(() => ""),
     packed_size: false,
     finishing: false,
     branding: false,
@@ -975,6 +1033,7 @@ const UpdateQcModal = ({
   const [barcodeScannerStatus, setBarcodeScannerStatus] = useState("");
   const [barcodeScannedInSession, setBarcodeScannedInSession] = useState(false);
   const [innerBarcodeScannedInSession, setInnerBarcodeScannedInSession] = useState(false);
+  const [logisticsEanScannedInSession, setLogisticsEanScannedInSession] = useState([]);
   const [barcodeValidationType, setBarcodeValidationType] = useState("individual");
   const [barcodeValidated, setBarcodeValidated] = useState(false);
   const [barcodeValidationError, setBarcodeValidationError] = useState("");
@@ -1123,15 +1182,10 @@ const UpdateQcModal = ({
   const lockBarcodeField =
     (qc?.master_barcode || qc?.barcode) > 0 && !canEditLockedQcFields;
   const lockInnerBarcodeField = qc?.inner_barcode > 0 && !canEditLockedQcFields;
-  const barcodeValidationItemMaster = isInspectionRecordUpdate
-    ? buildInspectionRecordMeasurementSource(inspectionRecord)
-    : qc?.item_master || {};
-  const barcodeValidationExempted =
-    qc?.item_master?.barcode_exempted === true ||
-    barcodeValidationItemMaster?.barcode_exempted === true;
+  const barcodeValidationItemMaster = qc?.item_master || {};
   const requiresBarcodeValidation =
     isQcUser &&
-    !barcodeValidationExempted &&
+    requiresLogisticsEanScanValidation(barcodeValidationItemMaster) &&
     !(isInspectionRecordUpdate && isCurrentUserLabelExempt);
   const qcBarcodeValidationLocked =
     requiresBarcodeValidation && !barcodeValidated;
@@ -1208,6 +1262,7 @@ const UpdateQcModal = ({
       barcodeValidation: {
         barcodeScannedInSession,
         innerBarcodeScannedInSession,
+        logisticsEanScannedInSession,
         barcodeValidationType,
         barcodeValidated,
         barcodeValidationError,
@@ -1218,6 +1273,7 @@ const UpdateQcModal = ({
       form,
       barcodeScannedInSession,
       innerBarcodeScannedInSession,
+      logisticsEanScannedInSession,
       barcodeValidationType,
       barcodeValidated,
       barcodeValidationError,
@@ -1241,13 +1297,25 @@ const UpdateQcModal = ({
     const restoredInnerBarcodeScannedInSession = Boolean(
       validation.innerBarcodeScannedInSession,
     );
+    const restoredLogisticsEanScannedInSession = Array.isArray(
+      validation.logisticsEanScannedInSession,
+    ) ? validation.logisticsEanScannedInSession : [];
     const restoredHasRequiredScans = getQcBarcodeValidationRequirements(
       restoredBarcodeValidationType,
+      barcodeValidationItemMaster,
     ).every((requirement) => {
       if (requirement.inputKey === "inner_barcode") {
         return (
           restoredInnerBarcodeScannedInSession &&
           Boolean(normalizeComparableBarcode(nextForm.inner_barcode))
+        );
+      }
+      if (requirement.inputKey === "inspected_logistics_eans") {
+        return (
+          restoredLogisticsEanScannedInSession[requirement.logisticsIndex] === true &&
+          Boolean(normalizeComparableBarcode(
+            nextForm.inspected_logistics_eans?.[requirement.logisticsIndex],
+          ))
         );
       }
       return (
@@ -1314,6 +1382,7 @@ const UpdateQcModal = ({
     setInnerBarcodeScannedInSession(
       restoredInnerBarcodeScannedInSession,
     );
+    setLogisticsEanScannedInSession(restoredLogisticsEanScannedInSession);
     setBarcodeValidationType(
       restoredBarcodeValidationType,
     );
@@ -1520,6 +1589,9 @@ const UpdateQcModal = ({
         canViewStoredBarcodes && isPositiveBarcodeText(storedInnerBarcode)
           ? String(storedInnerBarcode)
           : "",
+      inspected_logistics_eans: getPisLogisticsEans(
+        barcodeValidationItemMaster,
+      ).map(() => ""),
       packed_size: getBooleanPrefill("packed_size"),
       finishing: getBooleanPrefill("finishing"),
       branding: getBooleanPrefill("branding"),
@@ -1592,6 +1664,7 @@ const UpdateQcModal = ({
     });
     setBarcodeScannedInSession(false);
     setInnerBarcodeScannedInSession(false);
+    setLogisticsEanScannedInSession([]);
     setBarcodeScannerStatus("");
     setBarcodeScannerError("");
     setBarcodeUploadLoading(false);
@@ -1645,6 +1718,7 @@ const UpdateQcModal = ({
     barcodeValidationType,
     form.barcode,
     form.inner_barcode,
+    form.inspected_logistics_eans,
   ]);
 
   useEffect(() => {
@@ -1725,16 +1799,28 @@ const UpdateQcModal = ({
     const applyDetectedBarcode = (rawValue) => {
       const parsedNumericBarcode = String(rawValue || "").trim().replace(/\D/g, "");
       if (!parsedNumericBarcode) return false;
+      const logisticsIndex = getLogisticsScanIndex(barcodeScannerTarget);
 
       setBarcodeUploadError("");
       setBarcodeUploadStatus("");
-      setForm((prev) => ({
-        ...prev,
-        [barcodeScannerTarget]: parsedNumericBarcode,
-      }));
+      setForm((prev) => logisticsIndex >= 0
+        ? {
+          ...prev,
+          inspected_logistics_eans: prev.inspected_logistics_eans.map(
+            (ean, index) => index === logisticsIndex ? parsedNumericBarcode : ean,
+          ),
+        }
+        : { ...prev, [barcodeScannerTarget]: parsedNumericBarcode });
       if (barcodeScannerTarget === "inner_barcode") {
         setInnerBarcodeScannedInSession(true);
         setBarcodeScannerStatus(`Inner barcode scanned: ${parsedNumericBarcode}`);
+      } else if (logisticsIndex >= 0) {
+        setLogisticsEanScannedInSession((previous) => {
+          const next = [...previous];
+          next[logisticsIndex] = true;
+          return next;
+        });
+        setBarcodeScannerStatus(`Logistics EAN ${logisticsIndex + 1} scanned: ${parsedNumericBarcode}`);
       } else {
         setBarcodeScannedInSession(true);
         setBarcodeScannerStatus(
@@ -1826,7 +1912,7 @@ const UpdateQcModal = ({
       setBarcodeScannerError("");
       setBarcodeScannerStatus("Starting camera...");
 
-      const { BrowserMultiFormatReader } = await import("@zxing/browser");
+      const { BrowserMultiFormatOneDReader } = await import("@zxing/browser");
 
       if (cancelled) return;
 
@@ -1835,7 +1921,7 @@ const UpdateQcModal = ({
         throw new Error("Unable to start scanner preview.");
       }
 
-      const reader = new BrowserMultiFormatReader();
+      const reader = new BrowserMultiFormatOneDReader();
       barcodeReaderRef.current = reader;
 
       setBarcodeScannerStatus("Scanning...");
@@ -2112,8 +2198,13 @@ const UpdateQcModal = ({
   };
 
   const openBarcodeUploadDialog = (targetField = "barcode") => {
+    const logisticsIndex = getLogisticsScanIndex(targetField);
     const isTargetLocked =
-      targetField === "inner_barcode" ? lockInnerBarcodeField : lockBarcodeField;
+      targetField === "inner_barcode"
+        ? lockInnerBarcodeField
+        : logisticsIndex >= 0
+          ? false
+          : lockBarcodeField;
     if ((!isCurrentUserLabelExempt && isTargetLocked) || barcodeUploadLoading) {
       return;
     }
@@ -2150,13 +2241,24 @@ const UpdateQcModal = ({
       }
 
       const uploadTarget = barcodeUploadTargetRef.current || "barcode";
-      setForm((prev) => ({
-        ...prev,
-        [uploadTarget]: scannedBarcode,
-      }));
+      const logisticsIndex = getLogisticsScanIndex(uploadTarget);
+      setForm((prev) => logisticsIndex >= 0
+        ? {
+          ...prev,
+          inspected_logistics_eans: prev.inspected_logistics_eans.map(
+            (ean, index) => index === logisticsIndex ? scannedBarcode : ean,
+          ),
+        }
+        : { ...prev, [uploadTarget]: scannedBarcode });
 
       if (isQcUser && uploadTarget === "inner_barcode") {
         setInnerBarcodeScannedInSession(true);
+      } else if (isQcUser && logisticsIndex >= 0) {
+        setLogisticsEanScannedInSession((previous) => {
+          const next = [...previous];
+          next[logisticsIndex] = true;
+          return next;
+        });
       } else if (isQcUser) {
         setBarcodeScannedInSession(true);
       }
@@ -2168,6 +2270,8 @@ const UpdateQcModal = ({
         `${
           uploadTarget === "inner_barcode"
             ? "Inner barcode"
+            : logisticsIndex >= 0
+              ? `Logistics EAN ${logisticsIndex + 1}`
             : barcodeValidationType === "individual"
               ? "Individual barcode"
               : "Master barcode"
@@ -2324,7 +2428,10 @@ const UpdateQcModal = ({
 
   const validateSelectedBarcode = () => {
     const validationOption = getQcBarcodeValidationOption(barcodeValidationType);
-    const requirements = getQcBarcodeValidationRequirements(validationOption.value);
+    const requirements = getQcBarcodeValidationRequirements(
+      validationOption.value,
+      barcodeValidationItemMaster,
+    );
 
     setBarcodeValidationError("");
     setBarcodeValidationStatus("");
@@ -2333,12 +2440,19 @@ const UpdateQcModal = ({
       const scannedValue =
         requirement.inputKey === "inner_barcode"
           ? form.inner_barcode
-          : form.barcode;
-      const expectedValue = barcodeValidationItemMaster?.[requirement.pisKey];
+          : requirement.inputKey === "inspected_logistics_eans"
+            ? form.inspected_logistics_eans?.[requirement.logisticsIndex]
+            : form.barcode;
+      const expectedValue = getPisBarcodeForRequirement(
+        barcodeValidationItemMaster,
+        requirement,
+      );
       const wasScanned =
         requirement.inputKey === "inner_barcode"
           ? innerBarcodeScannedInSession
-          : barcodeScannedInSession;
+          : requirement.inputKey === "inspected_logistics_eans"
+            ? logisticsEanScannedInSession[requirement.logisticsIndex] === true
+            : barcodeScannedInSession;
       const typeLabel = requirement.label.toLowerCase();
       const normalizedScanned = normalizeComparableBarcode(scannedValue);
       const normalizedExpected = normalizeComparableBarcode(expectedValue);
@@ -2609,9 +2723,9 @@ const UpdateQcModal = ({
           allowFallback: true,
         })
         : qc?.item_master || {};
-    const submitBarcodeValidationExempted =
-      qc?.item_master?.barcode_exempted === true ||
-      existingItemMaster?.barcode_exempted === true;
+    const submitBarcodeValidationExempted = !requiresLogisticsEanScanValidation(
+      barcodeValidationItemMaster,
+    );
     const existingInspectedBoxMode = detectBoxPackagingMode(
       existingItemMaster?.inspected_box_mode,
       existingItemMaster?.inspected_box_sizes,
@@ -2890,6 +3004,9 @@ const UpdateQcModal = ({
     const innerBarcodeValue = shouldReadInnerBarcode
       ? form.inner_barcode.trim()
       : "";
+    const logisticsEanValues = (form.inspected_logistics_eans || []).map((value) =>
+      normalizeBarcodeText(value).replace(/[\s-]+/g, ""),
+    );
     const currentMasterBarcodeValue =
       [
         existingItemMaster?.master_barcode,
@@ -2951,19 +3068,24 @@ const UpdateQcModal = ({
 
       for (const requirement of getQcBarcodeValidationRequirements(
         selectedBarcodeValidationOption.value,
+        barcodeValidationItemMaster,
       )) {
         const expectedPisBarcode = normalizeComparableBarcode(
-          existingItemMaster?.[requirement.pisKey],
+          getPisBarcodeForRequirement(barcodeValidationItemMaster, requirement),
         );
         const scannedBarcode = normalizeComparableBarcode(
           requirement.inputKey === "inner_barcode"
             ? innerBarcodeParsed
-            : effectiveMasterBarcodeValue,
+            : requirement.inputKey === "inspected_logistics_eans"
+              ? logisticsEanValues[requirement.logisticsIndex]
+              : effectiveMasterBarcodeValue,
         );
         const requiredScanWasCaptured =
           requirement.inputKey === "inner_barcode"
             ? innerBarcodeScannedInSession
-            : barcodeScannedInSession;
+            : requirement.inputKey === "inspected_logistics_eans"
+              ? logisticsEanScannedInSession[requirement.logisticsIndex] === true
+              : barcodeScannedInSession;
         const requirementLabel = requirement.label.toLowerCase();
 
         if (!requiredScanWasCaptured) {
@@ -3077,6 +3199,14 @@ const UpdateQcModal = ({
         payload.barcode_validation_type = selectedBarcodeValidationOption.value;
         payload.barcode_validated = true;
         payload.barcode_scanned = barcodeScannedInSession;
+        const needsSeparateLogisticsEanScan = getQcBarcodeValidationRequirements(
+          selectedBarcodeValidationOption.value,
+          barcodeValidationItemMaster,
+        ).some((requirement) => requirement.inputKey === "inspected_logistics_eans");
+        if (needsSeparateLogisticsEanScan) {
+          payload.inspected_logistics_eans = logisticsEanValues;
+          payload.logistics_ean_scanned = logisticsEanScannedInSession;
+        }
         if (selectedBarcodeValidationOption.value === "inner_master") {
           payload.inner_barcode_scanned = innerBarcodeScannedInSession;
         }
@@ -4004,7 +4134,7 @@ const UpdateQcModal = ({
 	                  <div className="border rounded p-3">
 	                    <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
 	                      <div>
-	                        <div className="small text-secondary text-uppercase">Barcode validation</div>
+                        <div className="small text-secondary text-uppercase">Logistics EAN scan validation</div>
 	                        {barcodeValidated ? (
 	                          <span className="badge bg-success mt-1">Validated. You can proceed.</span>
 	                        ) : (
@@ -4033,7 +4163,10 @@ const UpdateQcModal = ({
                                 : BOX_PACKAGING_MODES.INDIVIDUAL;
                               applyInspectedBoxMode(targetMode);
                               setBarcodeScannerTarget(
-                                getQcBarcodeValidationRequirements(option.value)[0].inputKey,
+                                getQcBarcodeValidationRequirements(
+                                  option.value,
+                                  barcodeValidationItemMaster,
+                                )[0].inputKey,
                               );
                               setBarcodeValidationError("");
                               setBarcodeValidationStatus("");
@@ -4046,13 +4179,27 @@ const UpdateQcModal = ({
 	                      </div>
 	                    </div>
 	                    <div className="row g-2 align-items-end">
-	                      {getQcBarcodeValidationRequirements(barcodeValidationType).map((requirement) => {
+	                      {getQcBarcodeValidationRequirements(
+                          barcodeValidationType,
+                          barcodeValidationItemMaster,
+                        ).map((requirement) => {
 	                        const targetIsInner = requirement.inputKey === "inner_barcode";
-	                        const targetLocked = targetIsInner ? lockInnerBarcodeField : lockBarcodeField;
-	                        const targetValue = targetIsInner ? form.inner_barcode : form.barcode;
+	                        const targetIsLogistics = requirement.inputKey === "inspected_logistics_eans";
+	                        const targetLocked = targetIsInner
+	                          ? lockInnerBarcodeField
+	                          : targetIsLogistics
+	                            ? false
+	                            : lockBarcodeField;
+	                        const targetValue = targetIsInner
+	                          ? form.inner_barcode
+	                          : targetIsLogistics
+	                            ? form.inspected_logistics_eans?.[requirement.logisticsIndex] || ""
+	                            : form.barcode;
 	                        const targetScanned = targetIsInner
 	                          ? innerBarcodeScannedInSession
-	                          : barcodeScannedInSession;
+	                          : targetIsLogistics
+	                            ? logisticsEanScannedInSession[requirement.logisticsIndex] === true
+	                            : barcodeScannedInSession;
 	                        return (
 	                          <div
 	                            key={requirement.key}
@@ -4071,13 +4218,23 @@ const UpdateQcModal = ({
 	                            <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
 	                              <div className="input-group flex-grow-1">
 	                                <input
-	                                  type="number"
+	                                  type={targetIsLogistics ? "text" : "number"}
 	                                  className="form-control"
-	                                  name={requirement.inputKey}
+	                                  name={targetIsLogistics ? undefined : requirement.inputKey}
 	                                  value={targetValue}
-	                                  onChange={handleChange}
-	                                  min="1"
-	                                  step="1"
+	                                  onChange={targetIsLogistics
+	                                    ? (event) => setForm((prev) => ({
+	                                      ...prev,
+	                                      inspected_logistics_eans: prev.inspected_logistics_eans.map(
+	                                        (ean, index) => index === requirement.logisticsIndex
+	                                          ? event.target.value
+	                                          : ean,
+	                                      ),
+	                                    }))
+	                                    : handleChange}
+	                                  inputMode="numeric"
+	                                  min={targetIsLogistics ? undefined : "1"}
+	                                  step={targetIsLogistics ? undefined : "1"}
 	                                  disabled={targetLocked}
 	                                  readOnly={isQcUser}
 	                                  placeholder={`Scan ${requirement.label.toLowerCase()} barcode`}
@@ -4085,10 +4242,18 @@ const UpdateQcModal = ({
 	                                <button
 	                                  type="button"
 	                                  className="btn btn-outline-secondary"
-	                                  onClick={() => toggleBarcodeScanner(requirement.inputKey)}
+	                                  onClick={() => toggleBarcodeScanner(
+	                                    targetIsLogistics
+	                                      ? `logistics:${requirement.logisticsIndex}`
+	                                      : requirement.inputKey,
+	                                  )}
 	                                  disabled={targetLocked}
 	                                >
-	                                  {barcodeScannerOpen && barcodeScannerTarget === requirement.inputKey
+	                                  {barcodeScannerOpen && barcodeScannerTarget === (
+	                                    targetIsLogistics
+	                                      ? `logistics:${requirement.logisticsIndex}`
+	                                      : requirement.inputKey
+	                                  )
 	                                    ? "Stop"
 	                                    : "Scan"}
 	                                </button>
@@ -4097,7 +4262,11 @@ const UpdateQcModal = ({
 	                                <button
 	                                  type="button"
 	                                  className="btn btn-outline-secondary flex-shrink-0"
-	                                  onClick={() => openBarcodeUploadDialog(requirement.inputKey)}
+	                                  onClick={() => openBarcodeUploadDialog(
+	                                    targetIsLogistics
+	                                      ? `logistics:${requirement.logisticsIndex}`
+	                                      : requirement.inputKey,
+	                                  )}
 	                                  disabled={barcodeUploadLoading || saving}
 	                                >
 	                                  {barcodeUploadLoading ? "Uploading..." : "Upload Barcode"}

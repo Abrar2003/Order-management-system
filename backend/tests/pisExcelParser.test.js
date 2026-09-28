@@ -430,6 +430,7 @@ test("middleware replaces PIS data, saves aliases, and remains idempotent", asyn
   assert.equal(item.pis_master_barcode, "8721274914153");
   assert.equal(item.pis_barcode, "8721274914153");
   assert.equal(item.pis_inner_barcode, "8721274914092");
+  assert.equal(item.pis_logistics_ean, "8721274914153");
   assert.equal(item.pis_item_sizes.length, 1);
   assert.equal(item.pis_box_sizes.length, 2);
   assert.equal(item.update_history.length, 1);

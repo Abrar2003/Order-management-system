@@ -177,6 +177,22 @@ test("dual write records a failed modern mirror without failing legacy", async (
   assert.deepEqual(failures[0].payload, { labels: [10] });
 });
 
+test("dual legacy mirror records a failure without changing the completed legacy action", async () => {
+  const { events, failures, service } = createService({ state: { write_mode: "dual" } });
+
+  await service.mirrorLegacyWrite("inspector-1", "replace", {
+    modernWrite: async () => {
+      events.push("modern:write");
+      throw new Error("mirror failed");
+    },
+    payload: { labels: [10] },
+  });
+
+  assert.deepEqual(events, ["modern:write"]);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].operation, "replace");
+});
+
 test("dual write stops when the authoritative legacy write fails", async () => {
   const { events, failures, service } = createService({
     state: { write_mode: "dual" },

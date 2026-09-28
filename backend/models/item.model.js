@@ -21,10 +21,28 @@ const {
   normalizeSingleMasterItemSizeRemarks,
   normalizeSingleMasterBoxSizeRemarks,
 } = require("../helpers/masterSizeRemarks");
+const {
+  isValidEan13,
+  normalizeEan13Input,
+} = require("../helpers/barcodeFormat");
 
 const item_type_enum = ["table", "cabinet", "soft_items", "other"];
 const ITEM_SIZE_ENTRY_LIMIT = 5;
 const BOX_SIZE_ENTRY_LIMIT = 4;
+const logisticsEanField = {
+  type: String,
+  default: "",
+  trim: true,
+  set: normalizeEan13Input,
+  validate: {
+    validator: (value) => !value || isValidEan13(value),
+    message: "Logistics EAN must be a valid 13-digit EAN.",
+  },
+};
+const normalizeLogisticsEans = (values = []) =>
+  (Array.isArray(values) ? values : [values])
+    .map(normalizeEan13Input)
+    .filter(Boolean);
 
 const createSizeEntrySchema = () =>
   new mongoose.Schema(
@@ -534,6 +552,10 @@ const itemSchema = new mongoose.Schema(
     pis_barcode: { type: String, default: "", trim: true },
     pis_master_barcode: { type: String, default: "", trim: true },
     pis_inner_barcode: { type: String, default: "", trim: true },
+    pis_logistics_ean: logisticsEanField,
+    inspected_logistics_ean: logisticsEanField,
+    pis_logistics_eans: { type: [logisticsEanField], default: [] },
+    inspected_logistics_eans: { type: [logisticsEanField], default: [] },
     pis_product_database_synced_at: { type: Date, default: undefined },
     pis_product_database_synced_by: {
       type: productDatabaseActorSchema,
@@ -676,6 +698,27 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
   }
   if (hasSelectedPath("pis_inner_barcode")) {
     this.pis_inner_barcode = String(this.pis_inner_barcode || "").trim();
+  }
+  if (hasSelectedPath("pis_logistics_ean")) {
+    this.pis_logistics_ean = normalizeEan13Input(this.pis_logistics_ean);
+  }
+  if (hasSelectedPath("inspected_logistics_ean")) {
+    this.inspected_logistics_ean = normalizeEan13Input(
+      this.inspected_logistics_ean,
+    );
+  }
+  if (hasSelectedPath("pis_logistics_eans") && this.isModified("pis_logistics_eans")) {
+    this.pis_logistics_eans = normalizeLogisticsEans(this.pis_logistics_eans);
+    this.pis_logistics_ean = this.pis_logistics_eans[0] || "";
+  }
+  if (
+    hasSelectedPath("inspected_logistics_eans") &&
+    this.isModified("inspected_logistics_eans")
+  ) {
+    this.inspected_logistics_eans = normalizeLogisticsEans(
+      this.inspected_logistics_eans,
+    );
+    this.inspected_logistics_ean = this.inspected_logistics_eans[0] || "";
   }
 
   if (hasSelectedPath("master_master_barcode", "master_barcode")) {

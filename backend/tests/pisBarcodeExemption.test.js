@@ -5,12 +5,55 @@ const {
   __test__: { requiresPisBarcodes },
 } = require("../controllers/item.controller");
 const {
-  __test__: { requiresPisBarcodeForQcUpdate },
+  __test__: {
+    getQcBarcodeValidationRequirements,
+    requiresLogisticsEanScanValidation,
+  },
 } = require("../controllers/qc.controller");
 
-test("barcode-exempt PIS updates do not require barcode values", () => {
+test("Logistics EAN scans require both a PIS barcode and uploaded Logistics EAN", () => {
   assert.equal(requiresPisBarcodes({ barcode_exempted: false }), true);
   assert.equal(requiresPisBarcodes({ barcode_exempted: true }), false);
-  assert.equal(requiresPisBarcodeForQcUpdate({ barcode_exempted: false }), true);
-  assert.equal(requiresPisBarcodeForQcUpdate({ barcode_exempted: true }), false);
+  assert.equal(requiresLogisticsEanScanValidation({ pis_barcode: "8721274914153" }), false);
+  assert.equal(requiresLogisticsEanScanValidation({ logistics_ean: { key: "ean.pdf" } }), false);
+  assert.equal(
+    requiresLogisticsEanScanValidation({
+      pis_logistics_ean: "8721274914154",
+      logistics_ean: { key: "ean.pdf" },
+    }),
+    false,
+  );
+  assert.equal(
+    requiresLogisticsEanScanValidation({
+      pis_logistics_ean: "8721274914153",
+      logistics_ean: { key: "ean.pdf" },
+    }),
+    true,
+  );
+  assert.equal(
+    requiresLogisticsEanScanValidation({
+      barcode_exempted: true,
+      pis_logistics_ean: "8721274914153",
+      logistics_ean: { key: "ean.pdf" },
+    }),
+    false,
+  );
+});
+
+test("QC validates PIS barcodes and a distinct Logistics EAN", () => {
+  const item = {
+    pis_master_barcode: "123456",
+    pis_inner_barcode: "654321",
+    pis_logistics_eans: ["8721274914153", "4006381333931"],
+    logistics_ean: { key: "ean.pdf" },
+  };
+
+  assert.deepEqual(
+    getQcBarcodeValidationRequirements("individual", item).map((entry) => entry.scannedField),
+    ["master", "logistics", "logistics"],
+  );
+  assert.deepEqual(
+    getQcBarcodeValidationRequirements("inner_master", item).map((entry) => entry.scannedField),
+    ["master", "inner", "logistics", "logistics"],
+  );
 });

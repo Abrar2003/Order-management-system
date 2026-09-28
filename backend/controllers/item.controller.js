@@ -101,7 +101,11 @@ const {
   buildItemUpdateLogPayload,
 } = require("../helpers/itemUpdateAudit");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
-const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
+const {
+  formatEan13BarcodeDisplay,
+  isValidEan13,
+  normalizeEan13Input,
+} = require("../helpers/barcodeFormat");
 const { isSuperAdminLikeRole, normalizeUserRoleKey } = require("../helpers/userRole");
 const {
   normalizeSingleMasterItemSizeRemarks,
@@ -156,6 +160,11 @@ const parsePositiveInt = (value, fallback) => {
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
 const normalizeTextField = (value) => String(value ?? "").trim();
+const normalizeLogisticsEans = (values) => {
+  if (!Array.isArray(values)) return null;
+  const normalized = values.map(normalizeEan13Input);
+  return normalized.every(isValidEan13) ? normalized : null;
+};
 const requiresPisBarcodes = (item = {}) => item?.barcode_exempted !== true;
 
 const normalizeVendorTextField = (value) => normalizeVendorText(value);
@@ -1638,6 +1647,10 @@ const PRODUCT_DATABASE_ITEM_SELECT = [
   "pis_barcode",
   "pis_master_barcode",
   "pis_inner_barcode",
+  "pis_logistics_ean",
+  "inspected_logistics_ean",
+  "pis_logistics_eans",
+  "inspected_logistics_eans",
   "barcode_exempted",
   "kd",
   "mounting_file_needed",
@@ -1715,6 +1728,10 @@ const ITEM_DETAILS_SELECT = [
   "pis_barcode",
   "pis_master_barcode",
   "pis_inner_barcode",
+  "pis_logistics_ean",
+  "inspected_logistics_ean",
+  "pis_logistics_eans",
+  "inspected_logistics_eans",
   "inspected_item_sizes",
   "inspected_box_sizes",
   "inspected_box_mode",
@@ -2092,12 +2109,11 @@ const buildPisDiffSummary = (item = {}) => {
   );
 
   const pisBarcode = normalizeTextField(
-    item?.pis_master_barcode || item?.pis_barcode,
+    item?.pis_logistics_eans?.[0] || item?.pis_logistics_ean || item?.pis_master_barcode || item?.pis_barcode,
   );
-  const inspectedBarcode =
-    Number(item?.qc?.master_barcode || item?.qc?.barcode || 0) > 0
-      ? String(item?.qc?.master_barcode || item?.qc?.barcode).trim()
-      : "";
+  const inspectedBarcode = normalizeTextField(
+    item?.inspected_logistics_eans?.[0] || item?.inspected_logistics_ean || item?.qc?.master_barcode || item?.qc?.barcode,
+  );
   const barcodeMismatch =
     item?.barcode_exempted === true
       ? false
@@ -2160,6 +2176,10 @@ const PIS_DIFF_ITEM_SELECT = [
   "pis_barcode",
   "pis_master_barcode",
   "pis_inner_barcode",
+  "pis_logistics_ean",
+  "inspected_logistics_ean",
+  "pis_logistics_eans",
+  "inspected_logistics_eans",
   "kd",
   "master_country_of_origin",
   "master_barcode",
@@ -2220,6 +2240,8 @@ const PIS_INSPECTION_MASTER_ITEM_SELECT = [
   "pis_barcode",
   "pis_master_barcode",
   "pis_inner_barcode",
+  "pis_logistics_ean",
+  "pis_logistics_eans",
   "master_barcode",
   "master_master_barcode",
   "master_inner_barcode",
@@ -6376,6 +6398,10 @@ exports.getPisInspectionMasterComparison = async (req, res) => {
           pis_barcode: item?.pis_barcode || "",
           pis_master_barcode: item?.pis_master_barcode || "",
           pis_inner_barcode: item?.pis_inner_barcode || "",
+          pis_logistics_ean: item?.pis_logistics_ean || "",
+          inspected_logistics_ean: item?.inspected_logistics_ean || "",
+          pis_logistics_eans: item?.pis_logistics_eans || [],
+          inspected_logistics_eans: item?.inspected_logistics_eans || [],
           master_barcode: item?.master_barcode || "",
           master_master_barcode: item?.master_master_barcode || "",
           master_inner_barcode: item?.master_inner_barcode || "",
@@ -7454,7 +7480,9 @@ exports.updateItemPis = async (req, res) => {
         (hasOwn(payload, "pis_master_barcode") &&
           !normalizeTextField(payload.pis_master_barcode)) ||
         (hasOwn(payload, "pis_inner_barcode") &&
-          !normalizeTextField(payload.pis_inner_barcode))
+          !normalizeTextField(payload.pis_inner_barcode)) ||
+        (hasOwn(payload, "pis_logistics_ean") &&
+          !normalizeTextField(payload.pis_logistics_ean))
       )
     ) {
       return res.status(400).json({
@@ -7495,6 +7523,32 @@ exports.updateItemPis = async (req, res) => {
       } else {
         setPisPath("pis_inner_barcode", nextInnerBarcode);
       }
+    }
+    if (hasOwn(payload, "pis_logistics_ean")) {
+      const nextLogisticsEan = normalizeEan13Input(payload.pis_logistics_ean);
+      if (!isValidEan13(nextLogisticsEan)) {
+        return res.status(400).json({
+          success: false,
+          message: "PIS Logistics EAN must be a valid 13-digit EAN.",
+        });
+      }
+      setPisPath("pis_logistics_ean", nextLogisticsEan);
+    }
+    if (hasOwn(payload, "pis_logistics_eans")) {
+      const nextLogisticsEans = normalizeLogisticsEans(payload.pis_logistics_eans);
+      const boxCount = Array.isArray(payload.pis_box_sizes)
+        ? payload.pis_box_sizes.length
+        : Array.isArray(item?.pis_box_sizes)
+          ? item.pis_box_sizes.length
+          : 0;
+      if (!nextLogisticsEans || (nextLogisticsEans.length && nextLogisticsEans.length !== boxCount)) {
+        return res.status(400).json({
+          success: false,
+          message: "Provide one valid 13-digit Logistics EAN for each box.",
+        });
+      }
+      setPisPath("pis_logistics_eans", nextLogisticsEans);
+      setPisPath("pis_logistics_ean", nextLogisticsEans[0] || "");
     }
     if (hasOwn(payload, "country_of_origin")) {
       const nextCountryOfOrigin = normalizeTextField(payload.country_of_origin);

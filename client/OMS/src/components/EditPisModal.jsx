@@ -25,12 +25,17 @@ import {
   requiresMasterBarcode,
   resolvePreferredMeasuredSizeCbm,
 } from "../utils/measuredSizeForm";
-import { formatEan13BarcodeDisplay } from "../utils/barcode";
+import { formatEan13BarcodeDisplay, toEan13BarcodeValue } from "../utils/barcode";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isStrictAdminRole, normalizeUserRole } from "../auth/permissions";
 import "../App.css";
 
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
+const ensureLogisticsEans = (values = [], count = 1) =>
+  Array.from(
+    { length: normalizeSizeCount(count, 1, BOX_SIZE_ENTRY_LIMIT) },
+    (_, index) => toText(values[index]),
+  );
 const isPisChecked = (item = {}) => item?.pis_checked_flag === true;
 const formatFallback = (value, fallback = "Not Set") => {
   const text = toText(value);
@@ -299,6 +304,11 @@ const buildInitialForm = (item = {}, options = {}) => {
     (pisBoxEntries.length > 0
       ? normalizeSizeCount(pisBoxEntries.length, 1, BOX_SIZE_ENTRY_LIMIT)
       : 1);
+  const existingLogisticsEans = Array.isArray(item?.pis_logistics_eans) && item.pis_logistics_eans.length
+    ? item.pis_logistics_eans
+    : pisBoxCount === 1
+      ? [item?.pis_logistics_ean]
+      : [];
 
   return {
     country_of_origin: resolvedCountryOfOrigin,
@@ -307,6 +317,7 @@ const buildInitialForm = (item = {}, options = {}) => {
     mounting_file_needed: Boolean(item?.mounting_file_needed),
     master_barcode: resolvedMasterBarcode,
     inner_barcode: resolvedInnerBarcode,
+    pis_logistics_eans: ensureLogisticsEans(existingLogisticsEans, pisBoxCount),
     pis_item_count: String(pisItemCount),
     pis_box_mode: resolvedBoxMode,
     pis_box_count: String(pisBoxCount),
@@ -568,6 +579,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         singleRemark: isBoxEntries ? "box" : "item",
         ...(isBoxEntries ? { limit: BOX_SIZE_ENTRY_LIMIT } : {}),
       }),
+      ...(isBoxEntries
+        ? { pis_logistics_eans: ensureLogisticsEans(prev.pis_logistics_eans, safeCount) }
+        : {}),
     }));
   };
 
@@ -581,6 +595,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       pis_box_count: nextCount,
       inner_barcode:
         requiresInnerBarcode(nextMode) ? prev.inner_barcode : "",
+      pis_logistics_eans: ensureLogisticsEans(prev.pis_logistics_eans, nextCount),
       pis_box_sizes: ensureMeasuredSizeEntryCount(prev.pis_box_sizes, nextCount, {
         mode: nextMode,
         singleRemark: "box",
@@ -677,6 +692,10 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
           );
         next.pis_box_mode = boxMode;
         next.pis_box_count = String(boxCount);
+        next.pis_logistics_eans = ensureLogisticsEans(
+          next.pis_logistics_eans,
+          boxCount,
+        );
         next.pis_box_sizes = ensureMeasuredSizeEntryCount(
           inspectedMeasurementDetails.boxEntries,
           boxCount,
@@ -702,6 +721,10 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   } = {}) => {
     const enteredMasterBarcode = toText(form.master_barcode);
     const enteredInnerBarcode = toText(form.inner_barcode);
+    const logisticsEans = form.pis_logistics_eans.map((value) =>
+      toText(value).replace(/[\s-]+/g, ""),
+    );
+    const hasLogisticsEan = logisticsEans.some(Boolean);
     const masterBarcode = useStoredRequiredBarcodeValues
       ? enteredMasterBarcode || storedMasterBarcode
       : enteredMasterBarcode;
@@ -719,6 +742,15 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       } else {
         setError(missingRequiredFields[0].message);
       }
+      return;
+    }
+    if (
+      hasLogisticsEan &&
+      logisticsEans.some(
+        (value) => value.length !== 13 || toEan13BarcodeValue(value) !== value,
+      )
+    ) {
+      setError("Logistics EAN must be a valid 13-digit EAN.");
       return;
     }
 
@@ -771,6 +803,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       if (requiresPisInnerBarcode) {
         payload.pis_inner_barcode = innerBarcode;
       }
+      if (hasLogisticsEan) {
+        payload.pis_logistics_eans = logisticsEans;
+      }
       if (allowMissingRequiredFields) {
         payload.admin_override_required_fields = true;
       }
@@ -797,6 +832,8 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             pis_master_barcode:
               payload.pis_master_barcode ?? item?.pis_master_barcode,
             pis_inner_barcode: payload.pis_inner_barcode ?? item?.pis_inner_barcode,
+            pis_logistics_eans:
+              payload.pis_logistics_eans ?? item?.pis_logistics_eans,
             pis_box_mode: payload.pis_box_mode,
             pis_item_sizes: payload.pis_item_sizes,
             pis_box_sizes: payload.pis_box_sizes,
@@ -954,7 +991,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             </div>
 
             <div className="row g-2">
-              <div className={requiresPisInnerBarcode ? "col-md-6" : "col-md-12"}>
+              <div className="col-md-6">
                 <label className="form-label">
                   {isPisCartonMode
                     ? "Master Carton Barcode"
@@ -984,6 +1021,29 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                   />
                 </div>
               )}
+              <div className="col-12">
+                <label className="form-label">Logistics EANs (one per box)</label>
+                <div className="row g-2">
+                  {form.pis_logistics_eans.map((value, index) => (
+                    <div className="col-md-6" key={index}>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        className="form-control"
+                        value={value}
+                        onChange={(event) => setForm((prev) => ({
+                          ...prev,
+                          pis_logistics_eans: prev.pis_logistics_eans.map(
+                            (ean, eanIndex) => eanIndex === index ? event.target.value : ean,
+                          ),
+                        }))}
+                        placeholder={`Box ${index + 1} — 13-digit EAN`}
+                        disabled={saving}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
 
             {showInspectedReference && (

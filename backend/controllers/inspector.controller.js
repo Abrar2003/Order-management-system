@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const { getVendorName } = require("../helpers/vendorRef");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const labelStorageService = require("../services/labels/labelStorage.service");
+const liveLabelProjection = require("../services/labels/liveLabelProjection.service");
 const parsePositiveInteger = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
@@ -88,6 +89,25 @@ const appendLabelAllocationHistory = (
     actor: buildLabelHistoryActor(actor),
     recorded_at: new Date(),
     remarks: String(remarks || "").trim(),
+  });
+};
+
+const mirrorLatestLegacyLabelChange = async (inspector, operation) => {
+  const history = Array.isArray(inspector?.label_allocation_history)
+    ? inspector.label_allocation_history.at(-1)
+    : null;
+  if (!history) return;
+
+  await labelStorageService.mirrorLegacyWrite(inspector._id, operation, {
+    payload: {
+      labels: normalizeInspectorLabels(history.labels),
+      previous_labels: normalizeInspectorLabels(history.previous_labels),
+      next_labels: normalizeInspectorLabels(history.next_labels),
+    },
+    modernWrite: () => liveLabelProjection.mirrorInspectorChange({
+      inspectorId: inspector._id,
+      history,
+    }),
   });
 };
 
@@ -646,6 +666,7 @@ exports.allocateLabels = async (req, res) => {
     });
 
     await inspector.save();
+    await mirrorLatestLegacyLabelChange(inspector, "allocate");
     await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     res.json({
@@ -944,6 +965,7 @@ exports.rejectLabels = async (req, res) => {
     });
 
     await inspector.save();
+    await mirrorLatestLegacyLabelChange(inspector, "reject");
     await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     return res.json({
@@ -1040,6 +1062,7 @@ exports.replaceLabels = async (req, res) => {
     });
 
     await inspector.save();
+    await mirrorLatestLegacyLabelChange(inspector, "replace");
     await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     res.json({
@@ -1102,6 +1125,7 @@ exports.removeLabels = async (req, res) => {
     });
 
     await inspector.save();
+    await mirrorLatestLegacyLabelChange(inspector, "remove");
     await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     res.json({

@@ -1,7 +1,8 @@
-  const EAN13_BODY_LENGTH = 12;
+const EAN13_BODY_LENGTH = 12;
 const EAN13_LENGTH = 13;
 
 const normalizeDigits = (value) => String(value ?? "").replace(/\D/g, "");
+const normalizeEan13Input = (value) => String(value ?? "").trim().replace(/[\s-]+/g, "");
 const isDefaultBarcodeValue = (value) => {
   const digits = normalizeDigits(value);
   return digits.length > 0 && /^0+$/.test(digits);
@@ -28,6 +29,11 @@ const toEan13BarcodeValue = (value) => {
   return checkDigit ? `${body}${checkDigit}` : "";
 };
 
+const isValidEan13 = (value) => {
+  const normalized = normalizeEan13Input(value);
+  return /^\d{13}$/.test(normalized) && toEan13BarcodeValue(normalized) === normalized;
+};
+
 const formatEan13BarcodeDisplay = (value, fallback = "Not Set") => {
   const rawText = String(value ?? "").trim();
   if (!rawText || isDefaultBarcodeValue(rawText)) return fallback;
@@ -37,5 +43,7 @@ const formatEan13BarcodeDisplay = (value, fallback = "Not Set") => {
 
 module.exports = {
   formatEan13BarcodeDisplay,
+  isValidEan13,
+  normalizeEan13Input,
   toEan13BarcodeValue,
 };

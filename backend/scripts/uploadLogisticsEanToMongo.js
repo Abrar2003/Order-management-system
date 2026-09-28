@@ -20,6 +20,8 @@ const mime = (file) =>
     ".jpeg": "image/jpeg",
     ".png": "image/png",
   })[path.extname(file).toLowerCase()] || "";
+const notUploadedMessage = (file, reason) =>
+  `  ${path.basename(file)} — ${reason}`;
 
 function options(args) {
   const value = (name) => {
@@ -74,11 +76,13 @@ async function main() {
     invalid: 0,
     failed: 0,
   };
+  const notUploaded = [];
   for (const file of list) {
     const code = codeFrom(file);
     if (!code) {
       total.invalid++;
       console.warn(`[missing-code] ${file}`);
+      notUploaded.push(notUploadedMessage(file, "item code is missing from filename"));
       continue;
     }
     const item = await Item.findOne({
@@ -87,6 +91,7 @@ async function main() {
     if (!item) {
       total.missing++;
       console.warn(`[missing-item] ${code}`);
+      notUploaded.push(notUploadedMessage(file, `item ${code} was not found`));
       continue;
     }
     total.matched++;
@@ -117,13 +122,22 @@ async function main() {
       if (uploaded?.key) await deleteObject(uploaded.key).catch(() => {});
       total.failed++;
       console.error(`[failed] ${code}: ${error.message}`);
+      notUploaded.push(notUploadedMessage(file, `item ${code}: ${error.message}`));
     }
   }
   console.log(`Upload summary for ${opt.folder}:`, total);
+  if (notUploaded.length) {
+    console.warn("Not uploaded:");
+    notUploaded.forEach((entry) => console.warn(entry));
+  }
   await mongoose.disconnect();
   if (total.failed) process.exitCode = 1;
 }
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+module.exports.__test__ = { codeFrom, notUploadedMessage };
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

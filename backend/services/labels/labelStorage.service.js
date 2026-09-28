@@ -148,6 +148,28 @@ class LabelStorageService {
     }
     return legacyResult;
   }
+
+  async mirrorLegacyWrite(
+    inspectorId,
+    operation,
+    { modernWrite, payload = {} } = {},
+  ) {
+    const state = await this.getState(inspectorId);
+    if (state.write_mode !== 'dual') return;
+
+    try {
+      await modernWrite();
+    } catch (error) {
+      this.logger.error('Modern label mirror write failed', {
+        inspector: String(inspectorId),
+        operation,
+        requested_write_mode: state.write_mode,
+        actual_source: 'legacy',
+        error: error?.message || String(error),
+      });
+      await this.recordSyncFailure(inspectorId, operation, payload, error);
+    }
+  }
 }
 
 module.exports = new LabelStorageService();
