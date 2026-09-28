@@ -1375,6 +1375,9 @@ const UpdateQcModal = ({
       qc_rejected: "",
       rejection_remark: "",
       ...restoredForm,
+      inspected_logistics_eans: Array.isArray(restoredForm.inspected_logistics_eans)
+        ? restoredForm.inspected_logistics_eans
+        : getPisLogisticsEans(barcodeValidationItemMaster).map(() => ""),
       kd: Boolean(restoredForm.kd ?? form.kd),
       mounting_file_needed: Boolean(
         restoredForm.mounting_file_needed ?? form.mounting_file_needed,
