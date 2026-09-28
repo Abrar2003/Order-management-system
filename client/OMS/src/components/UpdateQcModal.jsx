@@ -134,8 +134,10 @@ const getPisMasterBarcode = (item = {}) =>
     item?.pis_master_barcode || item?.pis_barcode || getPisLogisticsEan(item),
   );
 
+const requiresPisBarcodeValidation = (item = {}) => item?.barcode_exempted !== true;
+
 const requiresLogisticsEanScanValidation = (item = {}) =>
-  item?.barcode_exempted !== true &&
+  requiresPisBarcodeValidation(item) &&
   Boolean(getPisLogisticsEan(item)) &&
   Boolean(String(
     item?.logistics_ean?.key ||
@@ -227,14 +229,16 @@ const getQcBarcodeValidationRequirements = (type = "", item = {}) => {
         inputKey: "barcode",
       },
     ];
-  for (const [logisticsIndex] of getPisLogisticsEans(item).entries()) {
-    requirements.push({
-      key: `logistics-${logisticsIndex}`,
-      label: `Logistics EAN ${logisticsIndex + 1}`,
-      pisKey: "pis_logistics_ean",
-      inputKey: "inspected_logistics_eans",
-      logisticsIndex,
-    });
+  if (requiresLogisticsEanScanValidation(item)) {
+    for (const [logisticsIndex] of getPisLogisticsEans(item).entries()) {
+      requirements.push({
+        key: `logistics-${logisticsIndex}`,
+        label: `Logistics EAN ${logisticsIndex + 1}`,
+        pisKey: "pis_logistics_ean",
+        inputKey: "inspected_logistics_eans",
+        logisticsIndex,
+      });
+    }
   }
   return requirements;
 };
@@ -1185,7 +1189,7 @@ const UpdateQcModal = ({
   const barcodeValidationItemMaster = qc?.item_master || {};
   const requiresBarcodeValidation =
     isQcUser &&
-    requiresLogisticsEanScanValidation(barcodeValidationItemMaster) &&
+    requiresPisBarcodeValidation(barcodeValidationItemMaster) &&
     !(isInspectionRecordUpdate && isCurrentUserLabelExempt);
   const qcBarcodeValidationLocked =
     requiresBarcodeValidation && !barcodeValidated;
@@ -2723,7 +2727,7 @@ const UpdateQcModal = ({
           allowFallback: true,
         })
         : qc?.item_master || {};
-    const submitBarcodeValidationExempted = !requiresLogisticsEanScanValidation(
+    const submitBarcodeValidationExempted = !requiresPisBarcodeValidation(
       barcodeValidationItemMaster,
     );
     const existingInspectedBoxMode = detectBoxPackagingMode(
@@ -4134,7 +4138,7 @@ const UpdateQcModal = ({
 	                  <div className="border rounded p-3">
 	                    <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
 	                      <div>
-                        <div className="small text-secondary text-uppercase">Logistics EAN scan validation</div>
+                        <div className="small text-secondary text-uppercase">Barcode scan validation</div>
 	                        {barcodeValidated ? (
 	                          <span className="badge bg-success mt-1">Validated. You can proceed.</span>
 	                        ) : (

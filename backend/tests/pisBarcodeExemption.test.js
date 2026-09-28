@@ -7,13 +7,16 @@ const {
 const {
   __test__: {
     getQcBarcodeValidationRequirements,
+    requiresPisBarcodeValidation,
     requiresLogisticsEanScanValidation,
   },
 } = require("../controllers/qc.controller");
 
-test("Logistics EAN scans require both a PIS barcode and uploaded Logistics EAN", () => {
+test("QC barcode validation is required without a Logistics EAN", () => {
   assert.equal(requiresPisBarcodes({ barcode_exempted: false }), true);
   assert.equal(requiresPisBarcodes({ barcode_exempted: true }), false);
+  assert.equal(requiresPisBarcodeValidation({}), true);
+  assert.equal(requiresPisBarcodeValidation({ barcode_exempted: true }), false);
   assert.equal(requiresLogisticsEanScanValidation({ pis_barcode: "8721274914153" }), false);
   assert.equal(requiresLogisticsEanScanValidation({ logistics_ean: { key: "ean.pdf" } }), false);
   assert.equal(
@@ -55,5 +58,13 @@ test("QC validates PIS barcodes and a distinct Logistics EAN", () => {
   assert.deepEqual(
     getQcBarcodeValidationRequirements("inner_master", item).map((entry) => entry.scannedField),
     ["master", "inner", "logistics", "logistics"],
+  );
+});
+
+test("QC only adds a Logistics EAN scan when its file is uploaded", () => {
+  assert.deepEqual(
+    getQcBarcodeValidationRequirements("individual", { pis_master_barcode: "123456" })
+      .map((entry) => entry.scannedField),
+    ["master"],
   );
 });

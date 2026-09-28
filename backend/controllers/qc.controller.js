@@ -268,8 +268,9 @@ const getPisMasterBarcode = (item = {}) =>
   normalizeText(
     item?.pis_master_barcode || item?.pis_barcode || getPisLogisticsEan(item),
   );
+const requiresPisBarcodeValidation = (item = {}) => item?.barcode_exempted !== true;
 const requiresLogisticsEanScanValidation = (item = {}) =>
-  item?.barcode_exempted !== true &&
+  requiresPisBarcodeValidation(item) &&
   Boolean(getPisLogisticsEan(item)) &&
   hasStoredLogisticsEan(item?.logistics_ean);
 const QC_BARCODE_VALIDATION_TYPES = Object.freeze({
@@ -304,13 +305,15 @@ const getQcBarcodeValidationRequirements = (type, item = {}) => {
   if (!config) return [];
 
   const requirements = [...config.requirements];
-  for (const [logisticsIndex, logisticsEan] of getPisLogisticsEans(item).entries()) {
-    requirements.push({
-      label: `Logistics EAN ${logisticsIndex + 1}`,
-      pisKey: "pis_logistics_ean",
-      scannedField: "logistics",
-      logisticsIndex,
-    });
+  if (requiresLogisticsEanScanValidation(item)) {
+    for (const [logisticsIndex] of getPisLogisticsEans(item).entries()) {
+      requirements.push({
+        label: `Logistics EAN ${logisticsIndex + 1}`,
+        pisKey: "pis_logistics_ean",
+        scannedField: "logistics",
+        logisticsIndex,
+      });
+    }
   }
   return requirements;
 };
@@ -3874,6 +3877,7 @@ exports.__test__ = {
   syncQcRequestHistoryStatuses,
   syncRequestHistoryInspectorsFromInspections,
   getQcBarcodeValidationRequirements,
+  requiresPisBarcodeValidation,
   requiresLogisticsEanScanValidation,
   recalculateInspectorUsedLabels,
 };
@@ -6555,7 +6559,7 @@ const updateQC = async (req, res) => {
               itemDocForBarcodeRequirement?.pis_box_sizes,
           );
     const pisMasterBarcode = getPisMasterBarcode(itemDocForBarcodeRequirement);
-    const requiresPisBarcode = requiresLogisticsEanScanValidation(
+    const requiresPisBarcode = requiresPisBarcodeValidation(
       itemDocForBarcodeRequirement,
     );
     if (
