@@ -84,6 +84,7 @@ const {
   buildStoredQcImageEntry,
   prepareSingleQcImageUpload,
   uploadPreparedQcImage,
+  cleanupUploadedQcImageObject,
   cleanupLocalQcImageFiles,
   processQcImageBatch,
 } = require("../services/qcImageUpload.service");
@@ -2190,6 +2191,54 @@ const findPreviousPoImageHistoryForItem = async ({
     inspectionRecords,
     referenceTime,
   });
+};
+
+const findItemRemindersForQc = async ({ qcDoc = {}, user = null } = {}) => {
+  const itemCode = normalizeText(
+    qcDoc?.item?.item_code || qcDoc?.order?.item?.item_code || "",
+  );
+  if (!itemCode) return [];
+
+  const reminderQcs = await QC.find({
+    "item.item_code": {
+      $regex: `^${escapeRegex(itemCode)}$`,
+      $options: "i",
+    },
+    "reminders.0": { $exists: true },
+  })
+    .select("_id order order_meta reminders")
+    .populate({
+      path: "order",
+      match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, user),
+      select: "_id",
+    })
+    .lean();
+
+  const reminders = (Array.isArray(reminderQcs) ? reminderQcs : [])
+    .filter((record) => record?.order)
+    .flatMap((record) =>
+      (Array.isArray(record?.reminders) ? record.reminders : []).map((reminder) => ({
+        ...reminder,
+        qc_id: String(record?._id || ""),
+        order_id: normalizeText(record?.order_meta?.order_id),
+      })),
+    )
+    .sort(
+      (left, right) =>
+        toSortableTimestamp(right?.createdAt) - toSortableTimestamp(left?.createdAt),
+    );
+
+  return Promise.all(
+    reminders.map(async (reminder) => ({
+      ...reminder,
+      image: reminder?.image
+        ? {
+            ...reminder.image,
+            ...(await buildSignedQcImage(reminder.image)),
+          }
+        : null,
+    })),
+  );
 };
 
 const getRequestBaseUrl = (req = {}) => {
@@ -11930,6 +11979,136 @@ exports.getDailyReport = async (req, res) => {
   }
 };
 
+exports.addQcReminders = async (req, res) => {
+  const files = flattenUploadedFiles(req.files);
+  const localCleanupPaths = files.map((file) => file?.path);
+  const uploadedObjectKeys = [];
+
+  try {
+    const qcId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(qcId)) {
+      return res.status(400).json({ message: "Invalid QC id" });
+    }
+
+    let rawReminders;
+    try {
+      rawReminders = JSON.parse(String(req.body?.reminders || "[]"));
+    } catch (_error) {
+      return res.status(400).json({ message: "Reminders must be valid data" });
+    }
+    if (!Array.isArray(rawReminders) || rawReminders.length === 0) {
+      return res.status(400).json({ message: "Add at least one reminder" });
+    }
+
+    const usedImageIndexes = new Set();
+    const reminders = rawReminders.map((entry, index) => {
+      const comment = normalizeText(entry?.comment || "");
+      if (!comment) {
+        throw new Error(`Reminder ${index + 1} needs a comment`);
+      }
+      if (comment.length > 2000) {
+        throw new Error(`Reminder ${index + 1} comment cannot exceed 2000 characters`);
+      }
+
+      const rawImageIndex = entry?.image_index;
+      if (rawImageIndex === undefined || rawImageIndex === null || rawImageIndex === "") {
+        return { comment, imageIndex: null };
+      }
+
+      const imageIndex = Number(rawImageIndex);
+      if (
+        !Number.isInteger(imageIndex) ||
+        imageIndex < 0 ||
+        imageIndex >= files.length ||
+        usedImageIndexes.has(imageIndex)
+      ) {
+        throw new Error(`Reminder ${index + 1} has an invalid image`);
+      }
+      usedImageIndexes.add(imageIndex);
+      return { comment, imageIndex };
+    });
+    if (usedImageIndexes.size !== files.length) {
+      return res.status(400).json({ message: "Each reminder image must be assigned once" });
+    }
+
+    const qc = await QC.findById(qcId)
+      .populate("inspector")
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "_id",
+      });
+    if (!qc || !qc.order) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    if (normalizeUserRoleKey(req.user?.role) === "qc") {
+      const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+      const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
+      if (!currentUserId || currentUserId !== alignedInspectorId) {
+        return res.status(403).json({ message: "QC can only add reminders to aligned records" });
+      }
+    }
+
+    const uploadedBy = buildAuditActor(req.user);
+    const createdAt = new Date();
+    const remindersToSave = reminders.map((reminder) => ({
+      _id: new mongoose.Types.ObjectId(),
+      comment: reminder.comment,
+      image: null,
+      created_by: uploadedBy,
+      createdAt,
+    }));
+
+    for (let index = 0; index < reminders.length; index += 1) {
+      const imageIndex = reminders[index].imageIndex;
+      if (imageIndex === null) continue;
+
+      const preparedUpload = await prepareSingleQcImageUpload({
+        file: files[imageIndex],
+        fallbackOriginalName: `reminder-${index + 1}.jpg`,
+      });
+      localCleanupPaths.push(...(preparedUpload?.cleanupPaths || []));
+      const uploadResult = await uploadPreparedQcImage({
+        preparedUpload,
+        folder: "qc-reminders",
+        qcId: String(qc._id),
+        inspectionId: String(remindersToSave[index]._id),
+        targetField: "reminder_image",
+      });
+      if (uploadResult?.key && !uploadResult?.reusedExistingObject) {
+        uploadedObjectKeys.push(uploadResult.key);
+      }
+      remindersToSave[index].image = buildStoredQcImageEntry({
+        uploadResult,
+        hash: preparedUpload.hash,
+        uploadedAt: createdAt,
+        uploadedBy,
+        thumbnail: { status: "pending" },
+      });
+    }
+
+    qc.reminders.push(...remindersToSave);
+    qc.updated_by = uploadedBy;
+    await qc.save();
+    uploadedObjectKeys.length = 0;
+
+    return res.status(201).json({
+      message: `${remindersToSave.length} reminder${remindersToSave.length === 1 ? "" : "s"} saved successfully`,
+      data: remindersToSave,
+    });
+  } catch (error) {
+    await Promise.allSettled(
+      uploadedObjectKeys.map((key) => cleanupUploadedQcImageObject(key)),
+    );
+    return res.status(400).json({
+      message: error.message || "Failed to save reminders",
+    });
+  } finally {
+    await cleanupLocalQcImageFiles(localCleanupPaths);
+  }
+};
+
 exports.uploadQcImages = async (req, res) => {
   const requestStartedAt = Date.now();
   try {
@@ -12958,6 +13137,10 @@ exports.getQCById = async (req, res) => {
         qcDoc: qcData,
         user: req.user,
       });
+    const itemReminders = await findItemRemindersForQc({
+      qcDoc: qcData,
+      user: req.user,
+    });
     const previousInspectedPoImages = await Promise.all(
       previousImageHistory.map(async (historyEntry) => {
         const record = historyEntry.qc_record;
@@ -13052,6 +13235,7 @@ exports.getQCById = async (req, res) => {
         hardware_inspection: hardwareInspectionImagesWithSignedUrls,
         previous_inspected_po_images: previousInspectedPoImages,
         goods_not_ready_images: goodsNotReadyImagesWithSignedUrls,
+        item_reminders: itemReminders,
         rejected_image: latestInspectionRejectedImage
           ? latestInspectionRejectedImage
           : rejectedImageWithSignedUrl

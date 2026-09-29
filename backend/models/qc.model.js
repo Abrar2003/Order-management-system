@@ -451,6 +451,17 @@ const qcSchema = new mongoose.Schema(
     remarks: {
       type: String,
     },
+    reminders: {
+      type: [
+        {
+          comment: { type: String, required: true, trim: true, maxlength: 2000 },
+          image: { type: mongoose.Schema.Types.Mixed, default: null },
+          created_by: { type: AuditActorSchema, default: () => ({}) },
+          createdAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

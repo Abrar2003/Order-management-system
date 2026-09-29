@@ -555,6 +555,7 @@ const QcDetails = () => {
   const [claimWarningSeconds, setClaimWarningSeconds] = useState(
     CLAIM_WARNING_DELAY_SECONDS,
   );
+  const [reminderPopupOpen, setReminderPopupOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [relatedFileType, setRelatedFileType] = useState(() => {
     const initialRole = String(getUserFromToken()?.role || "").trim().toLowerCase();
@@ -673,6 +674,7 @@ const QcDetails = () => {
   const firstInspectionAlertedRequestRef = useRef("");
   const relatedFileUploadInFlightRef = useRef(false);
   const relatedFileUploadBatchKeyRef = useRef("");
+  const reminderPopupShownForQcRef = useRef("");
   const qcImageGalleryBodyRef = useRef(null);
   const qcImageGalleryThumbNodesRef = useRef(new Map());
   const [visibleGalleryThumbKeys, setVisibleGalleryThumbKeys] = useState(() => new Set());
@@ -717,6 +719,10 @@ const QcDetails = () => {
   const latestRequestEntry = useMemo(
     () => resolveLatestRequestEntry(qc?.request_history),
     [qc],
+  );
+  const itemReminders = useMemo(
+    () => (Array.isArray(qc?.item_reminders) ? qc.item_reminders : []),
+    [qc?.item_reminders],
   );
   const qcUserRequestAvailability = useMemo(
     () => getQcUserUpdateRequestAvailability(qc, { currentUserId }),
@@ -1142,6 +1148,40 @@ const QcDetails = () => {
     globalThis.sessionStorage?.setItem(acknowledgementKey, "true");
     setClaimWarningOpen(false);
   }, [claimPercentage, claimWarningSeconds, qc?._id]);
+
+  useEffect(() => {
+    const qcId = String(qc?._id || "").trim();
+    const isAlignedQcUser =
+      isQcUser && Boolean(currentUserId) && alignedInspectorId === currentUserId;
+    const claimAcknowledgementKey =
+      `qc-claim-warning:${qcId}:${formatClaimPercentage(claimPercentage)}`;
+    const claimNeedsAcknowledgement =
+      claimPercentage > CLAIM_WARNING_THRESHOLD &&
+      globalThis.sessionStorage?.getItem(claimAcknowledgementKey) !== "true";
+
+    if (!qcId || !isAlignedQcUser || itemReminders.length === 0) {
+      setReminderPopupOpen(false);
+      return;
+    }
+    if (
+      claimWarningOpen ||
+      claimNeedsAcknowledgement ||
+      reminderPopupShownForQcRef.current === qcId
+    ) {
+      return;
+    }
+
+    reminderPopupShownForQcRef.current = qcId;
+    setReminderPopupOpen(true);
+  }, [
+    alignedInspectorId,
+    claimPercentage,
+    claimWarningOpen,
+    currentUserId,
+    isQcUser,
+    itemReminders.length,
+    qc?._id,
+  ]);
 
   const finishRows = useMemo(() => {
     const finishEntries = Array.isArray(qc?.item_master?.finish)
@@ -4292,6 +4332,70 @@ const QcDetails = () => {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {reminderPopupOpen && (
+        <div
+          className="om-notification-popup-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="item-reminders-title"
+        >
+          <div className="om-notification-popup qc-claim-warning-modal">
+            <div className="om-notification-popup-header">
+              <div>
+                <h5 id="item-reminders-title" className="mb-1">Item Reminders</h5>
+                <div className="text-secondary small">
+                  Notes from previous QC updates for this item.
+                </div>
+              </div>
+            </div>
+            <div className="om-notification-popup-body overflow-auto" style={{ maxHeight: "60vh" }}>
+              <div className="d-grid gap-3">
+                {itemReminders.map((reminder, index) => {
+                  const imageUrl = String(
+                    reminder?.image?.preview?.url ||
+                    reminder?.image?.url ||
+                    reminder?.image?.storage?.source_url ||
+                    "",
+                  ).trim();
+                  const source = [
+                    reminder?.order_id ? `PO ${reminder.order_id}` : "",
+                    reminder?.created_by?.name || "",
+                    reminder?.createdAt ? formatDateDDMMYYYY(reminder.createdAt) : "",
+                  ].filter(Boolean).join(" | ");
+
+                  return (
+                    <div key={reminder?._id || `${reminder?.qc_id || "reminder"}-${index}`} className="border rounded p-2">
+                      <div className="fw-semibold">Reminder {index + 1}</div>
+                      <div className="mt-1">{reminder?.comment}</div>
+                      {imageUrl && (
+                        <a href={imageUrl} target="_blank" rel="noreferrer" className="d-inline-block mt-2">
+                          <img
+                            src={imageUrl}
+                            alt={`Reminder ${index + 1} attachment`}
+                            className="img-thumbnail"
+                            style={{ maxHeight: "180px", maxWidth: "100%" }}
+                          />
+                        </a>
+                      )}
+                      {source && <div className="small text-secondary mt-2">{source}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="om-notification-popup-footer">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setReminderPopupOpen(false)}
+              >
+                Acknowledge
+              </button>
+            </div>
           </div>
         </div>
       )}

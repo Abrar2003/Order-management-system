@@ -75,6 +75,8 @@ const NON_NEGATIVE_FIELDS = new Set([
   "inspected_item_bottom_H",
 ]);
 
+const REMINDER_IMAGE_ACCEPT = ".jpg,.jpeg,.png,.webp,.heic,.heif";
+
 const MIN_REJECTION_IMAGE_COUNT = 2;
 const MAX_REJECTION_IMAGE_COUNT = 10;
 
@@ -1035,6 +1037,10 @@ const UpdateQcModal = ({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [rejectionImages, setRejectionImages] = useState([]);
+  const [reminderDrafts, setReminderDrafts] = useState([]);
+  const [savingReminders, setSavingReminders] = useState(false);
+  const [reminderError, setReminderError] = useState("");
+  const [reminderStatus, setReminderStatus] = useState("");
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
   const [barcodeScannerTarget, setBarcodeScannerTarget] = useState("barcode");
@@ -1060,6 +1066,7 @@ const UpdateQcModal = ({
   const barcodeFocusPointRef = useRef(null);
   const barcodeFocusResetTimerRef = useRef(null);
   const skipNextBarcodeValidationResetRef = useRef(false);
+  const reminderDraftIdRef = useRef(0);
 
   const getBarcodeVideoTrack = () =>
     barcodeStreamRef.current?.getVideoTracks?.()[0] || null;
@@ -3652,6 +3659,79 @@ const UpdateQcModal = ({
     }
   };
 
+  const addReminderDraft = () => {
+    reminderDraftIdRef.current += 1;
+    setReminderDrafts((current) => [
+      ...current,
+      { id: `reminder-${reminderDraftIdRef.current}`, comment: "", image: null },
+    ]);
+    setReminderError("");
+    setReminderStatus("");
+  };
+
+  const updateReminderDraft = (id, changes) => {
+    setReminderDrafts((current) =>
+      current.map((reminder) =>
+        reminder.id === id ? { ...reminder, ...changes } : reminder,
+      ),
+    );
+    setReminderError("");
+    setReminderStatus("");
+  };
+
+  const removeReminderDraft = (id) => {
+    setReminderDrafts((current) => current.filter((reminder) => reminder.id !== id));
+    setReminderError("");
+    setReminderStatus("");
+  };
+
+  const saveReminders = async () => {
+    if (!qc?._id) return;
+    if (reminderDrafts.length === 0) {
+      setReminderError("Add a reminder before saving.");
+      return;
+    }
+
+    const hasBlankComment = reminderDrafts.some(
+      (reminder) => !String(reminder.comment || "").trim(),
+    );
+    if (hasBlankComment) {
+      setReminderError("Each reminder needs a comment.");
+      return;
+    }
+
+    const formData = new FormData();
+    let imageIndex = 0;
+    const reminders = reminderDrafts.map((reminder) => {
+      const image = reminder.image || null;
+      const payload = {
+        comment: String(reminder.comment || "").trim(),
+      };
+      if (image) {
+        payload.image_index = imageIndex;
+        imageIndex += 1;
+        formData.append("images", image);
+      }
+      return payload;
+    });
+    formData.append("reminders", JSON.stringify(reminders));
+
+    try {
+      setSavingReminders(true);
+      setReminderError("");
+      setReminderStatus("");
+      const response = await api.post(`/qc/${qc._id}/reminders`, formData);
+      setReminderDrafts([]);
+      setReminderStatus(response?.data?.message || "Reminders saved successfully.");
+    } catch (saveError) {
+      setReminderError(
+        saveError?.response?.data?.message || "Failed to save reminders.",
+      );
+    } finally {
+      setSavingReminders(false);
+    }
+  };
+
   if (!qc) return null;
   const requestedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
   const requestedInspectorName = String(
@@ -4907,6 +4987,98 @@ const UpdateQcModal = ({
 	                  disabled={saving || qcBarcodeValidationLocked}
 	                />
               </div>
+
+              {!isInspectionRecordUpdate && (
+                <div className="col-12">
+                  <div className="border rounded p-3 d-grid gap-3">
+                    <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                      <div>
+                        <h6 className="mb-1">Reminders</h6>
+                        <div className="small text-secondary">
+                          Saved reminders appear whenever a QC user opens an aligned request for this item.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-outline-primary btn-sm"
+                        onClick={addReminderDraft}
+                        disabled={saving || savingReminders}
+                      >
+                        Add Reminder
+                      </button>
+                    </div>
+
+                    {reminderDrafts.map((reminder, index) => (
+                      <div key={reminder.id} className="border rounded p-2 row g-2 align-items-end">
+                        <div className="col-md-7">
+                          <label className="form-label small mb-1" htmlFor={`${reminder.id}-comment`}>
+                            Reminder {index + 1}
+                          </label>
+                          <textarea
+                            id={`${reminder.id}-comment`}
+                            className="form-control"
+                            value={reminder.comment}
+                            onChange={(event) =>
+                              updateReminderDraft(reminder.id, { comment: event.target.value })
+                            }
+                            rows="2"
+                            maxLength="2000"
+                            disabled={saving || savingReminders}
+                          />
+                        </div>
+                        <div className="col-md-4">
+                          <label className="form-label small mb-1" htmlFor={`${reminder.id}-image`}>
+                            Image (optional)
+                          </label>
+                          <input
+                            id={`${reminder.id}-image`}
+                            className="form-control"
+                            type="file"
+                            accept={REMINDER_IMAGE_ACCEPT}
+                            onChange={(event) =>
+                              updateReminderDraft(reminder.id, {
+                                image: event.target.files?.[0] || null,
+                              })
+                            }
+                            disabled={saving || savingReminders}
+                          />
+                          {reminder.image?.name && (
+                            <div className="small text-secondary mt-1 text-truncate">
+                              {reminder.image.name}
+                            </div>
+                          )}
+                        </div>
+                        <div className="col-md-1 d-grid">
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger btn-sm"
+                            onClick={() => removeReminderDraft(reminder.id)}
+                            disabled={saving || savingReminders}
+                            aria-label={`Remove reminder ${index + 1}`}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+
+                    {reminderDrafts.length > 0 && (
+                      <div className="d-flex flex-wrap align-items-center gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={saveReminders}
+                          disabled={saving || savingReminders}
+                        >
+                          {savingReminders ? "Saving Reminders..." : "Save Reminders"}
+                        </button>
+                        {reminderError && <span className="text-danger small">{reminderError}</span>}
+                        {reminderStatus && <span className="text-success small">{reminderStatus}</span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {error && <div className="alert alert-danger mb-0">{error}</div>}
@@ -4916,8 +5088,13 @@ const UpdateQcModal = ({
             <button
               type="button"
               className="btn btn-outline-danger"
-              onClick={() => clearDraft()}
-              disabled={saving}
+              onClick={() => {
+                clearDraft();
+                setReminderDrafts([]);
+                setReminderError("");
+                setReminderStatus("");
+              }}
+              disabled={saving || savingReminders}
             >
               Discard Draft
             </button>
@@ -4925,7 +5102,7 @@ const UpdateQcModal = ({
               type="button"
               className="btn btn-outline-secondary"
               onClick={onClose}
-              disabled={saving}
+              disabled={saving || savingReminders}
             >
               Cancel
             </button>
@@ -4933,7 +5110,7 @@ const UpdateQcModal = ({
               type="button"
               className="btn btn-primary"
               onClick={handleSubmit}
-	              disabled={saving || isQcUpdateBlockedByMissingRequest || qcBarcodeValidationLocked}
+	              disabled={saving || savingReminders || isQcUpdateBlockedByMissingRequest || qcBarcodeValidationLocked}
             >
               {saving ? "Updating..." : "Update"}
             </button>

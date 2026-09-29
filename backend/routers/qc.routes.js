@@ -98,6 +98,15 @@ router.patch(
   qcController.updateQC
 );
 
+router.post(
+  "/:id/reminders",
+  auth,
+  requirePermission("qc", "edit"),
+  qcImageAnyUpload,
+  invalidateQcOnSuccess,
+  qcController.addQcReminders,
+);
+
 router.patch(
   "/:id/checked",
   auth,
