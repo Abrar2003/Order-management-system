@@ -8,6 +8,7 @@ require("dotenv").config({ path: path.resolve(__dirname, "../.env.production") }
 
 const args = process.argv.slice(2);
 const shouldApply = args.includes("--apply");
+const shouldReplace = args.includes("--replace");
 
 const fileArgIndex = args.indexOf("--file");
 
@@ -208,7 +209,7 @@ async function main() {
 
   const updatableRows = matchedRows.filter(
     (row) =>
-      !hasExistingPisBarcode(existingItemByCode.get(row.code)) &&
+      (shouldReplace || !hasExistingPisBarcode(existingItemByCode.get(row.code))) &&
       (row.exempted || row.barcode || row.masterBarcode || row.innerBarcode),
   );
 
@@ -222,6 +223,7 @@ async function main() {
     skippedExistingPisBarcodeItems: skippedExistingPisRows.length,
     updatableItems: updatableRows.length,
     unmatchedItems: unmatchedRows.length,
+    replaceExistingPisBarcodes: shouldReplace,
     mode: shouldApply ? "APPLY" : "DRY_RUN",
   });
 
@@ -268,7 +270,7 @@ async function main() {
 
       return {
         updateOne: {
-          filter: buildMissingPisBarcodeFilter(row.code),
+          filter: shouldReplace ? { code: row.code } : buildMissingPisBarcodeFilter(row.code),
           update: {
             $set: updateData,
           },
@@ -321,7 +323,7 @@ async function main() {
 
     return {
       updateOne: {
-        filter: buildMissingPisBarcodeFilter(row.code),
+        filter: shouldReplace ? { code: row.code } : buildMissingPisBarcodeFilter(row.code),
         update: {
           $set: updateData,
         },

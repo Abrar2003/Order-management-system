@@ -684,7 +684,7 @@ const Containers = () => {
         {selectedContainer && (
           <>
             <div
-              className="modal fade show d-block"
+              className="modal d-block om-modal-backdrop"
               tabIndex="-1"
               role="dialog"
               aria-modal="true"
@@ -823,7 +823,6 @@ const Containers = () => {
                 </form>
               </div>
             </div>
-            <div className="modal-backdrop fade show" />
           </>
         )}
       </div>
