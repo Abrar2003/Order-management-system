@@ -127,6 +127,7 @@ const Claims = () => {
   const [draftVendorFilter, setDraftVendorFilter] = useState(DEFAULT_FILTER);
   const [showRaiseClaim, setShowRaiseClaim] = useState(false);
   const [showCreateTenure, setShowCreateTenure] = useState(false);
+  const [showTenureDropdown, setShowTenureDropdown] = useState(false);
   const [deletingTenure, setDeletingTenure] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -258,7 +259,7 @@ const Claims = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2 mb-3"><div className="col-md-10"><label className="form-label">Brand tenures</label><div className="border rounded p-2 d-flex flex-wrap gap-3">{tenures.map((tenure) => <label className="form-check mb-0" key={tenure.id}><input className="form-check-input" type="checkbox" checked={selectedTenureIds.includes(String(tenure.id))} onChange={() => toggleTenure(String(tenure.id))} /><span className="form-check-label">{tenure.brand} · {formatDateDDMMYYYY(tenure.from_date)} - {formatDateDDMMYYYY(tenure.to_date)}</span></label>)}</div></div>{canRaiseClaim && <div className="col-md-2 d-flex align-items-end"><button type="button" className="btn btn-outline-danger w-100" disabled={!selectedTenure || deletingTenure} onClick={handleDeleteTenure}>{deletingTenure ? "Deleting..." : "Delete tenure"}</button></div>}</div>
+            <div className="row g-2 mb-3"><div className="col-md-10"><label className="form-label">Brand tenures</label><div className="dropdown"><button type="button" className="btn btn-outline-secondary dropdown-toggle w-100 text-start" aria-expanded={showTenureDropdown} onClick={() => setShowTenureDropdown((show) => !show)}>{selectedTenureIds.length ? `${selectedTenureIds.length} tenure${selectedTenureIds.length === 1 ? "" : "s"} selected` : "Select tenures"}</button>{showTenureDropdown && <div className="dropdown-menu show w-100 p-2" style={{ maxHeight: "16rem", overflowY: "auto" }}>{tenures.map((tenure) => <label className="form-check mb-2" key={tenure.id}><input className="form-check-input" type="checkbox" checked={selectedTenureIds.includes(String(tenure.id))} onChange={() => toggleTenure(String(tenure.id))} /><span className="form-check-label">{tenure.brand} · {formatDateDDMMYYYY(tenure.from_date)} - {formatDateDDMMYYYY(tenure.to_date)}</span></label>)}</div>}</div></div>{canRaiseClaim && <div className="col-md-2 d-flex align-items-end"><button type="button" className="btn btn-outline-danger w-100" disabled={!selectedTenure || deletingTenure} onClick={handleDeleteTenure}>{deletingTenure ? "Deleting..." : "Delete tenure"}</button></div>}</div>
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
                 <label className="form-label">Search (Code / Name / Description)</label>
