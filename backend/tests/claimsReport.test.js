@@ -2,10 +2,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  __test__: { buildClaimComparisonRows, buildClaimsExportRows, isCurrentClaimSystemItem, buildClaimsReportRow, matchesInspectedItemsReportFilters },
+  __test__: { buildClaimComparisonRows, buildClaimsExportRows, getClaimsTenureIds, isCurrentClaimSystemItem, buildClaimsReportRow, matchesInspectedItemsReportFilters },
 } = require("../controllers/reports.controller");
 
 test("Claims report includes tenure-based claims and calculates their totals", () => {
+  assert.deepEqual(getClaimsTenureIds({ tenure_ids: "tenure-1,tenure-2,tenure-1" }), ["tenure-1", "tenure-2"]);
   assert.equal(isCurrentClaimSystemItem({ claim_percentage: 20 }), false);
   assert.equal(isCurrentClaimSystemItem({ claim_tenures: [] }), false);
   assert.equal(isCurrentClaimSystemItem({ claim_tenures: [{}] }), false);

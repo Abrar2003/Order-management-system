@@ -116,7 +116,7 @@ const Claims = () => {
   const [filters, setFilters] = useState({ brands: [], vendors: [] });
   const [tenures, setTenures] = useState([]);
   const [tenureBrands, setTenureBrands] = useState([]);
-  const [selectedTenureId, setSelectedTenureId] = useState("");
+  const [selectedTenureIds, setSelectedTenureIds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -141,7 +141,7 @@ const Claims = () => {
   }, []);
 
   const loadClaims = useCallback(async () => {
-    if (!selectedTenureId) {
+    if (selectedTenureIds.length === 0) {
       setRows([]);
       setFilters({ brands: [], vendors: [] });
       setLoading(false);
@@ -151,7 +151,7 @@ const Claims = () => {
       setLoading(true);
       setError("");
       const response = await api.get("/reports/claims", {
-        params: { tenure_id: selectedTenureId, search: searchInput, brand: brandFilter, vendor: vendorFilter },
+        params: { tenure_ids: selectedTenureIds.join(","), search: searchInput, brand: brandFilter, vendor: vendorFilter },
       });
       setRows(Array.isArray(response?.data?.rows) ? response.data.rows : []);
       setFilters(response?.data?.filters || { brands: [], vendors: [] });
@@ -161,7 +161,7 @@ const Claims = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, searchInput, selectedTenureId, vendorFilter]);
+  }, [brandFilter, searchInput, selectedTenureIds, vendorFilter]);
 
   useEffect(() => {
     loadTenures();
@@ -171,7 +171,12 @@ const Claims = () => {
     loadClaims();
   }, [loadClaims]);
 
-  const selectedTenure = tenures.find((tenure) => String(tenure.id) === selectedTenureId);
+  const selectedTenure = selectedTenureIds.length === 1
+    ? tenures.find((tenure) => String(tenure.id) === selectedTenureIds[0])
+    : null;
+  const toggleTenure = (tenureId) => setSelectedTenureIds((ids) => (
+    ids.includes(tenureId) ? ids.filter((id) => id !== tenureId) : [...ids, tenureId]
+  ));
 
   const handleApplyFilters = (event) => {
     event.preventDefault();
@@ -195,7 +200,7 @@ const Claims = () => {
       setDeletingTenure(true);
       setError("");
       await api.delete(`/reports/claims/tenures/${selectedTenure.id}`);
-      setSelectedTenureId("");
+      setSelectedTenureIds([]);
       await loadTenures();
     } catch (deleteError) {
       setError(deleteError?.response?.data?.message || "Failed to delete tenure.");
@@ -210,7 +215,7 @@ const Claims = () => {
       setError("");
       const response = await api.get("/reports/claims/export", {
         responseType: "blob",
-        params: { search: searchInput, brand: brandFilter, vendor: vendorFilter },
+        params: { tenure_ids: selectedTenureIds.join(","), search: searchInput, brand: brandFilter, vendor: vendorFilter },
       });
       const url = window.URL.createObjectURL(new Blob([response.data], {
         type: response?.headers?.["content-type"] || "application/vnd.ms-excel",
@@ -236,11 +241,11 @@ const Claims = () => {
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
           <div>
             <h2 className="h4 mb-1">Claims</h2>
-            <p className="text-secondary mb-0">Select a brand tenure to see every item, including items with a 0% claim.</p>
+            <p className="text-secondary mb-0">Select one or more brand tenures to see every item, including items with a 0% claim.</p>
           </div>
           <div className="d-flex gap-2">
-            <button type="button" className="btn btn-outline-primary btn-sm" onClick={handleExportXls} disabled={loading || exporting}>
-              {exporting ? "Exporting..." : "Export all XLS"}
+            <button type="button" className="btn btn-outline-primary btn-sm" onClick={handleExportXls} disabled={selectedTenureIds.length === 0 || loading || exporting}>
+              {exporting ? "Exporting..." : "Export XLS"}
             </button>
             <button type="button" className="btn btn-outline-primary btn-sm" onClick={loadClaims}>
               Refresh
@@ -253,7 +258,7 @@ const Claims = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2 mb-3"><div className="col-md-6"><label className="form-label">Brand tenure</label><select className="form-select" value={selectedTenureId} onChange={(event) => setSelectedTenureId(event.target.value)}><option value="">Select tenure</option>{tenures.map((tenure) => <option key={tenure.id} value={tenure.id}>{tenure.brand} · {formatDateDDMMYYYY(tenure.from_date)} - {formatDateDDMMYYYY(tenure.to_date)}</option>)}</select></div>{canRaiseClaim && <div className="col-md-2 d-flex align-items-end"><button type="button" className="btn btn-outline-danger w-100" disabled={!selectedTenure || deletingTenure} onClick={handleDeleteTenure}>{deletingTenure ? "Deleting..." : "Delete tenure"}</button></div>}</div>
+            <div className="row g-2 mb-3"><div className="col-md-10"><label className="form-label">Brand tenures</label><div className="border rounded p-2 d-flex flex-wrap gap-3">{tenures.map((tenure) => <label className="form-check mb-0" key={tenure.id}><input className="form-check-input" type="checkbox" checked={selectedTenureIds.includes(String(tenure.id))} onChange={() => toggleTenure(String(tenure.id))} /><span className="form-check-label">{tenure.brand} · {formatDateDDMMYYYY(tenure.from_date)} - {formatDateDDMMYYYY(tenure.to_date)}</span></label>)}</div></div>{canRaiseClaim && <div className="col-md-2 d-flex align-items-end"><button type="button" className="btn btn-outline-danger w-100" disabled={!selectedTenure || deletingTenure} onClick={handleDeleteTenure}>{deletingTenure ? "Deleting..." : "Delete tenure"}</button></div>}</div>
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
                 <label className="form-label">Search (Code / Name / Description)</label>
@@ -308,14 +313,14 @@ const Claims = () => {
                 {loading ? (
                   <tr><td colSpan="8" className="text-center py-4">Loading claims...</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan="8" className="text-center py-4 text-secondary">{selectedTenureId ? "No items match these filters." : "Select a tenure to view its items."}</td></tr>
+                  <tr><td colSpan="8" className="text-center py-4 text-secondary">{selectedTenureIds.length ? "No items match these filters." : "Select one or more tenures to view their items."}</td></tr>
                 ) : rows.map((row) => (
                   <tr key={row.id}>
                     <td className="fw-semibold">{row.code || "-"}</td>
                     <td>{row.description || row.name || "-"}</td>
                     <td>{row.brand || "-"}</td>
                     <td>{(row.vendors || []).join(", ") || "-"}</td>
-                    <td>{selectedTenure ? `${formatDateDDMMYYYY(selectedTenure.from_date)} - ${formatDateDDMMYYYY(selectedTenure.to_date)}` : "-"}</td>
+                    <td>{row.tenure ? `${formatDateDDMMYYYY(row.tenure.from_date)} - ${formatDateDDMMYYYY(row.tenure.to_date)}` : "-"}</td>
                     <td>{row.delivered_quantity}</td>
                     <td>{row.rejected_quantity}</td>
                     <td><span className="badge text-bg-warning">{formatPercentage(row.claim_percentage)}</span></td>
@@ -335,7 +340,7 @@ const Claims = () => {
           }}
         />
       )}
-      {showCreateTenure && <CreateTenureModal brands={tenureBrands} onClose={() => setShowCreateTenure(false)} onSaved={(tenure) => { setShowCreateTenure(false); setSelectedTenureId(String(tenure?.id || "")); loadTenures(); }} />}
+      {showCreateTenure && <CreateTenureModal brands={tenureBrands} onClose={() => setShowCreateTenure(false)} onSaved={(tenure) => { setShowCreateTenure(false); setSelectedTenureIds([String(tenure?.id || "")]); loadTenures(); }} />}
     </>
   );
 };

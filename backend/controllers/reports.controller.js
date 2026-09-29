@@ -2363,22 +2363,33 @@ exports.replaceItemClaimTenures = async (req, res) => {
   }
 };
 
+const getClaimsTenureIds = (query = {}) => [...new Set(
+  [query.tenure_ids, query.tenureIds, query.tenure_id, query.tenureId]
+    .flatMap((value) => (Array.isArray(value) ? value : String(value || "").split(",")))
+    .map((value) => String(value).trim())
+    .filter(Boolean),
+)];
+
 const getClaimsReportDataset = async ({ query, user }) => {
-  const tenureId = String(query.tenure_id || query.tenureId || "").trim();
-  if (!mongoose.Types.ObjectId.isValid(tenureId)) {
-    const error = new Error("Select a valid tenure.");
+  const tenureIds = getClaimsTenureIds(query);
+  if (tenureIds.length === 0 || tenureIds.some((id) => !mongoose.Types.ObjectId.isValid(id))) {
+    const error = new Error("Select at least one valid tenure.");
     error.statusCode = 400;
     throw error;
   }
-  const tenure = await Tenure.findOne(applyTenureAccessMatch({ _id: tenureId }, user)).lean();
-  if (!tenure) {
-    const error = new Error("Tenure not found.");
+  const tenures = await Tenure.find(applyTenureAccessMatch({ _id: { $in: tenureIds } }, user)).lean();
+  if (tenures.length !== tenureIds.length) {
+    const error = new Error("One or more tenures were not found.");
     error.statusCode = 404;
     throw error;
   }
 
   const items = await Item.find(applyDataAccessMatch(
-    buildItemBrandMatch(tenure.brand),
+    { $or: tenures.flatMap((tenure) => [
+      { brand: tenure.brand },
+      { brand_name: tenure.brand },
+      { brands: tenure.brand },
+    ]) },
     user,
     { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
   ))
@@ -2386,8 +2397,16 @@ const getClaimsReportDataset = async ({ query, user }) => {
     .sort({ updatedAt: -1, code: 1 })
     .lean();
 
-  const tenureById = buildTenureMap([tenure]);
-  const allRows = items.map((item) => buildClaimsReportRow(item, tenureById, tenureId));
+  const tenureById = buildTenureMap(tenures);
+  const allRows = tenures.flatMap((tenure) => items
+    .filter((item) => [item?.brand, item?.brand_name, ...(Array.isArray(item?.brands) ? item.brands : [])]
+      .some((brand) => normalizeText(brand).toLocaleLowerCase() === normalizeText(tenure.brand).toLocaleLowerCase()))
+    .map((item) => ({
+      ...buildClaimsReportRow(item, tenureById, tenure._id),
+      id: `${item._id}-${tenure._id}`,
+      brand: normalizeText(tenure.brand) || getItemBrand(item),
+      tenure: serializeTenure(tenure),
+    })));
   const rows = allRows.filter((row) => matchesInspectedItemsReportFilters(row, {
     search: query.search,
     brand: query.brand,
@@ -2395,7 +2414,8 @@ const getClaimsReportDataset = async ({ query, user }) => {
   }));
 
   return {
-    tenure: serializeTenure(tenure),
+    tenures: tenures.map(serializeTenure),
+    tenure: tenures.length === 1 ? serializeTenure(tenures[0]) : undefined,
     rows,
     filters: {
       brands: normalizeDistinctTextValues(
@@ -2429,39 +2449,6 @@ const buildClaimsExportRows = (rows) => rows.map((row) => ({
   "Claim %": row.claim_percentage || 0,
 }));
 
-const getClaimsExportDataset = async ({ query, user }) => {
-  const tenures = await getAccessibleTenures(user);
-  const tenureById = buildTenureMap(tenures);
-  const tenureIds = [...tenureById.keys()];
-  if (tenureIds.length === 0) return [];
-
-  const items = await Item.find(applyDataAccessMatch(
-    { "claim_tenures.tenure_id": { $in: tenureIds } },
-    user,
-    { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
-  )).select(CLAIMS_REPORT_SELECT).sort({ code: 1 }).lean();
-
-  return items.flatMap((item) => {
-    const row = buildClaimsReportRow(item, tenureById);
-    return row.tenures.flatMap((claim) => {
-      const tenure = tenureById.get(claim.tenure_id);
-      if (!tenure) return [];
-      const delivered_quantity = claim.delivered_quantity;
-      const rejected_quantity = claim.rejected_quantity;
-      return [{
-        ...row,
-        brand: normalizeText(tenure.brand) || row.brand,
-        tenure: serializeTenure(tenure),
-        delivered_quantity,
-        rejected_quantity,
-        claim_percentage: delivered_quantity > 0
-          ? Number(((rejected_quantity / delivered_quantity) * 100).toFixed(2))
-          : 0,
-      }];
-    });
-  }).filter((row) => matchesInspectedItemsReportFilters(row, query));
-};
-
 exports.getClaimsReport = async (req, res) => {
   try {
     const dataset = await getClaimsReportDataset({ query: req.query, user: req.user });
@@ -2477,8 +2464,8 @@ exports.getClaimsReport = async (req, res) => {
 
 exports.exportClaimsReport = async (req, res) => {
   try {
-    const rows = await getClaimsExportDataset({ query: req.query, user: req.user });
-    const worksheet = XLSX.utils.json_to_sheet(buildClaimsExportRows(rows));
+    const dataset = await getClaimsReportDataset({ query: req.query, user: req.user });
+    const worksheet = XLSX.utils.json_to_sheet(buildClaimsExportRows(dataset.rows));
     worksheet["!cols"] = [14, 34, 18, 28, 24, 12, 12, 12].map((wch) => ({ wch }));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Claims");
@@ -3683,6 +3670,7 @@ exports.getMonthlyShipmentsDrilldown = async (req, res) => {
 exports.__test__ = {
   buildClaimComparisonRows,
   buildClaimsExportRows,
+  getClaimsTenureIds,
   isCurrentClaimSystemItem,
   buildClaimsReportRow,
   buildInspectedItemsReportRow,
