@@ -253,6 +253,10 @@ const getLogisticsScanIndex = (target = "") => {
   const match = /^logistics:(\d+)$/.exec(target);
   return match ? Number(match[1]) : -1;
 };
+const setLogisticsEanValue = (values = [], index, value) =>
+  Array.from({ length: Math.max(values.length, index + 1) }, (_, currentIndex) =>
+    currentIndex === index ? value : values[currentIndex] || "",
+  );
 
 const getBoxModeForQcBarcodeValidationType = (type = "") =>
   getQcBarcodeValidationOption(type).value === "inner_master"
@@ -1813,8 +1817,10 @@ const UpdateQcModal = ({
       setForm((prev) => logisticsIndex >= 0
         ? {
           ...prev,
-          inspected_logistics_eans: prev.inspected_logistics_eans.map(
-            (ean, index) => index === logisticsIndex ? parsedNumericBarcode : ean,
+          inspected_logistics_eans: setLogisticsEanValue(
+            prev.inspected_logistics_eans,
+            logisticsIndex,
+            parsedNumericBarcode,
           ),
         }
         : { ...prev, [barcodeScannerTarget]: parsedNumericBarcode });
@@ -2252,8 +2258,10 @@ const UpdateQcModal = ({
       setForm((prev) => logisticsIndex >= 0
         ? {
           ...prev,
-          inspected_logistics_eans: prev.inspected_logistics_eans.map(
-            (ean, index) => index === logisticsIndex ? scannedBarcode : ean,
+          inspected_logistics_eans: setLogisticsEanValue(
+            prev.inspected_logistics_eans,
+            logisticsIndex,
+            scannedBarcode,
           ),
         }
         : { ...prev, [uploadTarget]: scannedBarcode });
@@ -4231,12 +4239,12 @@ const UpdateQcModal = ({
 	                                  value={targetValue}
 	                                  onChange={targetIsLogistics
 	                                    ? (event) => setForm((prev) => ({
-	                                      ...prev,
-	                                      inspected_logistics_eans: prev.inspected_logistics_eans.map(
-	                                        (ean, index) => index === requirement.logisticsIndex
-	                                          ? event.target.value
-	                                          : ean,
-	                                      ),
+                                      ...prev,
+                                      inspected_logistics_eans: setLogisticsEanValue(
+                                        prev.inspected_logistics_eans,
+                                        requirement.logisticsIndex,
+                                        event.target.value,
+                                      ),
 	                                    }))
 	                                    : handleChange}
 	                                  inputMode="numeric"
