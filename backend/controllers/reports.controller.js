@@ -2418,16 +2418,49 @@ const getClaimsReportDataset = async ({ query, user }) => {
   };
 };
 
-const buildClaimsExportRows = (rows, tenure) => rows.map((row) => ({
+const buildClaimsExportRows = (rows) => rows.map((row) => ({
   "Item Code": row.code || "N/A",
   Description: row.description || row.name || "N/A",
   Brand: row.brand || "N/A",
   Vendors: (row.vendors || []).join(", ") || "N/A",
-  Tenure: `${toISODateString(tenure?.from_date)} - ${toISODateString(tenure?.to_date)}`,
+  Tenure: `${toISODateString(row?.tenure?.from_date)} - ${toISODateString(row?.tenure?.to_date)}`,
   Delivered: row.delivered_quantity || 0,
   Rejected: row.rejected_quantity || 0,
   "Claim %": row.claim_percentage || 0,
 }));
+
+const getClaimsExportDataset = async ({ query, user }) => {
+  const tenures = await getAccessibleTenures(user);
+  const tenureById = buildTenureMap(tenures);
+  const tenureIds = [...tenureById.keys()];
+  if (tenureIds.length === 0) return [];
+
+  const items = await Item.find(applyDataAccessMatch(
+    { "claim_tenures.tenure_id": { $in: tenureIds } },
+    user,
+    { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
+  )).select(CLAIMS_REPORT_SELECT).sort({ code: 1 }).lean();
+
+  return items.flatMap((item) => {
+    const row = buildClaimsReportRow(item, tenureById);
+    return row.tenures.flatMap((claim) => {
+      const tenure = tenureById.get(claim.tenure_id);
+      if (!tenure) return [];
+      const delivered_quantity = claim.delivered_quantity;
+      const rejected_quantity = claim.rejected_quantity;
+      return [{
+        ...row,
+        brand: normalizeText(tenure.brand) || row.brand,
+        tenure: serializeTenure(tenure),
+        delivered_quantity,
+        rejected_quantity,
+        claim_percentage: delivered_quantity > 0
+          ? Number(((rejected_quantity / delivered_quantity) * 100).toFixed(2))
+          : 0,
+      }];
+    });
+  }).filter((row) => matchesInspectedItemsReportFilters(row, query));
+};
 
 exports.getClaimsReport = async (req, res) => {
   try {
@@ -2444,8 +2477,8 @@ exports.getClaimsReport = async (req, res) => {
 
 exports.exportClaimsReport = async (req, res) => {
   try {
-    const dataset = await getClaimsReportDataset({ query: req.query, user: req.user });
-    const worksheet = XLSX.utils.json_to_sheet(buildClaimsExportRows(dataset.rows, dataset.tenure));
+    const rows = await getClaimsExportDataset({ query: req.query, user: req.user });
+    const worksheet = XLSX.utils.json_to_sheet(buildClaimsExportRows(rows));
     worksheet["!cols"] = [14, 34, 18, 28, 24, 12, 12, 12].map((wch) => ({ wch }));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Claims");

@@ -35,7 +35,7 @@ test("Claims report includes tenure-based claims and calculates their totals", (
   assert.equal(zeroClaimRow.rejected_quantity, 0);
   assert.equal(zeroClaimRow.claim_percentage, 0);
 
-  assert.deepEqual(buildClaimsExportRows([row], { from_date: "2026-01-01", to_date: "2026-01-31" })[0], {
+  assert.deepEqual(buildClaimsExportRows([{ ...row, tenure: { from_date: "2026-01-01", to_date: "2026-01-31" } }])[0], {
     "Item Code": "ITEM-1",
     Description: "N/A",
     Brand: "N/A",
@@ -45,6 +45,14 @@ test("Claims report includes tenure-based claims and calculates their totals", (
     Rejected: 15,
     "Claim %": 10,
   });
+
+  assert.deepEqual(buildClaimsExportRows([
+    { ...row, brand: "Brand A", tenure: { from_date: "2026-01-01", to_date: "2026-01-31" }, delivered_quantity: 100, rejected_quantity: 5, claim_percentage: 5 },
+    { ...row, brand: "Brand B", tenure: { from_date: "2026-02-01", to_date: "2026-02-28" }, delivered_quantity: 50, rejected_quantity: 10, claim_percentage: 20 },
+  ]).map(({ Brand, Tenure, Delivered }) => ({ Brand, Tenure, Delivered })), [
+    { Brand: "Brand A", Tenure: "2026-01-01 - 2026-01-31", Delivered: 100 },
+    { Brand: "Brand B", Tenure: "2026-02-01 - 2026-02-28", Delivered: 50 },
+  ]);
 });
 
 test("claim comparison classifies missing, new, and retained claim items", () => {

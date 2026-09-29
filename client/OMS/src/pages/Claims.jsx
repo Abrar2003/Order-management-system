@@ -210,7 +210,7 @@ const Claims = () => {
       setError("");
       const response = await api.get("/reports/claims/export", {
         responseType: "blob",
-        params: { tenure_id: selectedTenureId, search: searchInput, brand: brandFilter, vendor: vendorFilter },
+        params: { search: searchInput, brand: brandFilter, vendor: vendorFilter },
       });
       const url = window.URL.createObjectURL(new Blob([response.data], {
         type: response?.headers?.["content-type"] || "application/vnd.ms-excel",
@@ -239,8 +239,8 @@ const Claims = () => {
             <p className="text-secondary mb-0">Select a brand tenure to see every item, including items with a 0% claim.</p>
           </div>
           <div className="d-flex gap-2">
-            <button type="button" className="btn btn-outline-primary btn-sm" onClick={handleExportXls} disabled={!selectedTenureId || loading || exporting}>
-              {exporting ? "Exporting..." : "Export XLS"}
+            <button type="button" className="btn btn-outline-primary btn-sm" onClick={handleExportXls} disabled={loading || exporting}>
+              {exporting ? "Exporting..." : "Export all XLS"}
             </button>
             <button type="button" className="btn btn-outline-primary btn-sm" onClick={loadClaims}>
               Refresh
