@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  __test__: { buildClaimComparisonRows, isCurrentClaimSystemItem, buildClaimsReportRow, matchesInspectedItemsReportFilters },
+  __test__: { buildClaimComparisonRows, buildClaimsExportRows, isCurrentClaimSystemItem, buildClaimsReportRow, matchesInspectedItemsReportFilters },
 } = require("../controllers/reports.controller");
 
 test("Claims report includes tenure-based claims and calculates their totals", () => {
@@ -34,6 +34,17 @@ test("Claims report includes tenure-based claims and calculates their totals", (
   assert.equal(zeroClaimRow.delivered_quantity, 0);
   assert.equal(zeroClaimRow.rejected_quantity, 0);
   assert.equal(zeroClaimRow.claim_percentage, 0);
+
+  assert.deepEqual(buildClaimsExportRows([row], { from_date: "2026-01-01", to_date: "2026-01-31" })[0], {
+    "Item Code": "ITEM-1",
+    Description: "N/A",
+    Brand: "N/A",
+    Vendors: "Vendor A",
+    Tenure: "2026-01-01 - 2026-01-31",
+    Delivered: 150,
+    Rejected: 15,
+    "Claim %": 10,
+  });
 });
 
 test("claim comparison classifies missing, new, and retained claim items", () => {

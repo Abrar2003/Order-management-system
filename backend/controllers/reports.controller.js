@@ -2363,60 +2363,102 @@ exports.replaceItemClaimTenures = async (req, res) => {
   }
 };
 
+const getClaimsReportDataset = async ({ query, user }) => {
+  const tenureId = String(query.tenure_id || query.tenureId || "").trim();
+  if (!mongoose.Types.ObjectId.isValid(tenureId)) {
+    const error = new Error("Select a valid tenure.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const tenure = await Tenure.findOne(applyTenureAccessMatch({ _id: tenureId }, user)).lean();
+  if (!tenure) {
+    const error = new Error("Tenure not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const items = await Item.find(applyDataAccessMatch(
+    buildItemBrandMatch(tenure.brand),
+    user,
+    { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
+  ))
+    .select(CLAIMS_REPORT_SELECT)
+    .sort({ updatedAt: -1, code: 1 })
+    .lean();
+
+  const tenureById = buildTenureMap([tenure]);
+  const allRows = items.map((item) => buildClaimsReportRow(item, tenureById, tenureId));
+  const rows = allRows.filter((row) => matchesInspectedItemsReportFilters(row, {
+    search: query.search,
+    brand: query.brand,
+    vendor: query.vendor,
+  }));
+
+  return {
+    tenure: serializeTenure(tenure),
+    rows,
+    filters: {
+      brands: normalizeDistinctTextValues(
+        allRows
+          .filter((row) => matchesInspectedItemsReportFilters(row, {
+            search: query.search,
+            vendor: query.vendor,
+          }))
+          .flatMap((row) => [row.brand, ...(row.brands || [])]),
+      ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+      vendors: normalizeDistinctTextValues(
+        allRows
+          .filter((row) => matchesInspectedItemsReportFilters(row, {
+            search: query.search,
+            brand: query.brand,
+          }))
+          .flatMap((row) => row.vendors || []),
+      ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+    },
+  };
+};
+
+const buildClaimsExportRows = (rows, tenure) => rows.map((row) => ({
+  "Item Code": row.code || "N/A",
+  Description: row.description || row.name || "N/A",
+  Brand: row.brand || "N/A",
+  Vendors: (row.vendors || []).join(", ") || "N/A",
+  Tenure: `${toISODateString(tenure?.from_date)} - ${toISODateString(tenure?.to_date)}`,
+  Delivered: row.delivered_quantity || 0,
+  Rejected: row.rejected_quantity || 0,
+  "Claim %": row.claim_percentage || 0,
+}));
+
 exports.getClaimsReport = async (req, res) => {
   try {
-    const tenureId = String(req.query.tenure_id || req.query.tenureId || "").trim();
-    if (!mongoose.Types.ObjectId.isValid(tenureId)) {
-      return res.status(400).json({ success: false, message: "Select a valid tenure." });
-    }
-    const tenure = await Tenure.findOne(applyTenureAccessMatch({ _id: tenureId }, req.user)).lean();
-    if (!tenure) return res.status(404).json({ success: false, message: "Tenure not found." });
-
-    const items = await Item.find(applyDataAccessMatch(
-      buildItemBrandMatch(tenure.brand),
-      req.user,
-      { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
-    ))
-      .select(CLAIMS_REPORT_SELECT)
-      .sort({ updatedAt: -1, code: 1 })
-      .lean();
-
-    const tenureById = buildTenureMap([tenure]);
-    const allRows = items.map((item) => buildClaimsReportRow(item, tenureById, tenureId));
-    const rows = allRows.filter((row) => matchesInspectedItemsReportFilters(row, {
-      search: req.query.search,
-      brand: req.query.brand,
-      vendor: req.query.vendor,
-    }));
-
-    return res.status(200).json({
-      success: true,
-      tenure: serializeTenure(tenure),
-      rows,
-      filters: {
-        brands: normalizeDistinctTextValues(
-          allRows
-            .filter((row) => matchesInspectedItemsReportFilters(row, {
-              search: req.query.search,
-              vendor: req.query.vendor,
-            }))
-            .flatMap((row) => [row.brand, ...(row.brands || [])]),
-        ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
-        vendors: normalizeDistinctTextValues(
-          allRows
-            .filter((row) => matchesInspectedItemsReportFilters(row, {
-              search: req.query.search,
-              brand: req.query.brand,
-            }))
-            .flatMap((row) => row.vendors || []),
-        ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
-      },
-    });
+    const dataset = await getClaimsReportDataset({ query: req.query, user: req.user });
+    return res.status(200).json({ success: true, ...dataset });
   } catch (error) {
     console.error("Get Claims Report Error:", error);
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       success: false,
       message: error?.message || "Failed to fetch claims.",
+    });
+  }
+};
+
+exports.exportClaimsReport = async (req, res) => {
+  try {
+    const dataset = await getClaimsReportDataset({ query: req.query, user: req.user });
+    const worksheet = XLSX.utils.json_to_sheet(buildClaimsExportRows(dataset.rows, dataset.tenure));
+    worksheet["!cols"] = [14, 34, 18, 28, 24, 12, 12, 12].map((wch) => ({ wch }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Claims");
+    const fileName = `claims-report-${new Date().toISOString().slice(0, 10)}.xls`;
+
+    res.setHeader("Content-Type", "application/vnd.ms-excel");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(XLSX.write(workbook, { type: "buffer", bookType: "xls" }));
+  } catch (error) {
+    console.error("Export Claims Report Error:", error);
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      message: error?.message || "Failed to export claims report.",
     });
   }
 };
@@ -3607,6 +3649,7 @@ exports.getMonthlyShipmentsDrilldown = async (req, res) => {
 
 exports.__test__ = {
   buildClaimComparisonRows,
+  buildClaimsExportRows,
   isCurrentClaimSystemItem,
   buildClaimsReportRow,
   buildInspectedItemsReportRow,

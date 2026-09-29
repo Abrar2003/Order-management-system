@@ -180,6 +180,16 @@ router.get(
 );
 
 router.get(
+  "/claims/export",
+  auth,
+  requirePermission("reports", "view"),
+  securityLog("export_excel", "claims_report", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
+  reportsController.exportClaimsReport,
+);
+
+router.get(
   "/claims",
   auth,
   requirePermission("reports", "view"),

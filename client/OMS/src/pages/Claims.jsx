@@ -128,6 +128,7 @@ const Claims = () => {
   const [showRaiseClaim, setShowRaiseClaim] = useState(false);
   const [showCreateTenure, setShowCreateTenure] = useState(false);
   const [deletingTenure, setDeletingTenure] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const loadTenures = useCallback(async () => {
     try {
@@ -203,6 +204,31 @@ const Claims = () => {
     }
   };
 
+  const handleExportXls = async () => {
+    try {
+      setExporting(true);
+      setError("");
+      const response = await api.get("/reports/claims/export", {
+        responseType: "blob",
+        params: { tenure_id: selectedTenureId, search: searchInput, brand: brandFilter, vendor: vendorFilter },
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data], {
+        type: response?.headers?.["content-type"] || "application/vnd.ms-excel",
+      }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `claims-report-${new Date().toISOString().slice(0, 10)}.xls`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (exportError) {
+      setError("Failed to export claims report as XLS.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <>
       <Navbar />
@@ -213,6 +239,9 @@ const Claims = () => {
             <p className="text-secondary mb-0">Select a brand tenure to see every item, including items with a 0% claim.</p>
           </div>
           <div className="d-flex gap-2">
+            <button type="button" className="btn btn-outline-primary btn-sm" onClick={handleExportXls} disabled={!selectedTenureId || loading || exporting}>
+              {exporting ? "Exporting..." : "Export XLS"}
+            </button>
             <button type="button" className="btn btn-outline-primary btn-sm" onClick={loadClaims}>
               Refresh
             </button>
