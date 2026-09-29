@@ -9,6 +9,12 @@ require("dotenv").config({ path: path.resolve(__dirname, "../.env.production") }
 const args = process.argv.slice(2);
 const shouldApply = args.includes("--apply");
 const shouldReplace = args.includes("--replace");
+const mongoArgIndex = args.indexOf("--mongo");
+const mongoTarget = mongoArgIndex >= 0 ? args[mongoArgIndex + 1] : "main";
+
+if (!["main", "script"].includes(mongoTarget)) {
+  throw new Error("--mongo must be main or script");
+}
 
 const fileArgIndex = args.indexOf("--file");
 
@@ -156,10 +162,11 @@ function readBarcodeRows(xlsxPath) {
 }
 
 async function main() {
-  const mongoUri = String(process.env.MONGO_URI || "").trim();
+  const mongoEnvName = mongoTarget === "script" ? "MONGO_URI_SCRIPT" : "MONGO_URI";
+  const mongoUri = String(process.env[mongoEnvName] || "").trim();
 
   if (!mongoUri) {
-    throw new Error("MONGO_URI is missing in env");
+    throw new Error(`${mongoEnvName} is missing in env`);
   }
 
   const rows = readBarcodeRows(filePath);
@@ -224,6 +231,7 @@ async function main() {
     updatableItems: updatableRows.length,
     unmatchedItems: unmatchedRows.length,
     replaceExistingPisBarcodes: shouldReplace,
+    database: mongoTarget,
     mode: shouldApply ? "APPLY" : "DRY_RUN",
   });
 

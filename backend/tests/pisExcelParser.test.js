@@ -467,6 +467,34 @@ test("middleware uses a lone PIS barcode for both master aliases", async () => {
   assert.equal(item.pis_barcode, "8721274911619");
 });
 
+test("middleware does not save a Logistics EAN for one box size", async () => {
+  const item = createFakeItem();
+  const parsed = {
+    articleNumber: item.code,
+    sheetName: "PIS",
+    masterBarcode: "8721274914153",
+    pcsBarcode: "",
+    itemSizes: [],
+    boxSizes: [{}],
+    boxMode: BOX_PACKAGING_MODES.INDIVIDUAL,
+  };
+  const middleware = createParseAndSyncPisUpload({
+    ItemModel: { findOne: async () => item },
+    parseUpload: async () => parsed,
+  });
+  const request = {
+    file: { originalname: "pis.xlsx", buffer: Buffer.from("test") },
+    params: { itemId: String(item._id) },
+    user: {},
+  };
+
+  await middleware(request, createResponse(), () => {});
+
+  assert.equal(item.pis_master_barcode, "8721274914153");
+  assert.equal(item.pis_logistics_ean, undefined);
+  assert.equal(request.pisImportResult.parsed.logistics_ean, "");
+});
+
 test("route item/article mismatch returns 409 without saving", async () => {
   const item = createFakeItem({ code: "DIFFERENT" });
   const middleware = createParseAndSyncPisUpload({

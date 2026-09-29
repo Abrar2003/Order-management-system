@@ -138,6 +138,7 @@ const requiresPisBarcodeValidation = (item = {}) => item?.barcode_exempted !== t
 
 const requiresLogisticsEanScanValidation = (item = {}) =>
   requiresPisBarcodeValidation(item) &&
+  Array.isArray(item?.pis_box_sizes) && item.pis_box_sizes.length >= 2 &&
   Boolean(getPisLogisticsEan(item)) &&
   Boolean(String(
     item?.logistics_ean?.key ||

@@ -271,6 +271,7 @@ const getPisMasterBarcode = (item = {}) =>
 const requiresPisBarcodeValidation = (item = {}) => item?.barcode_exempted !== true;
 const requiresLogisticsEanScanValidation = (item = {}) =>
   requiresPisBarcodeValidation(item) &&
+  Array.isArray(item?.pis_box_sizes) && item.pis_box_sizes.length >= 2 &&
   Boolean(getPisLogisticsEan(item)) &&
   hasStoredLogisticsEan(item?.logistics_ean);
 const QC_BARCODE_VALIDATION_TYPES = Object.freeze({

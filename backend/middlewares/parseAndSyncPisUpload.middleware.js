@@ -42,7 +42,7 @@ const buildImportResult = (parsed, updatedFields) => ({
   updated_fields: updatedFields,
   parsed: {
     master_barcode: parsed.masterBarcode,
-    logistics_ean: parsed.masterBarcode,
+    logistics_ean: parsed.boxSizes.length >= 2 ? parsed.masterBarcode : "",
     pcs_barcode: parsed.pcsBarcode,
     item_sizes_count: parsed.itemSizes.length,
     box_sizes_count: parsed.boxSizes.length,
@@ -100,14 +100,15 @@ const createParseAndSyncPisUpload = ({
     const updatedFields = [];
 
     const masterBarcode = parsed.masterBarcode || parsed.pcsBarcode;
-    if (parsed.masterBarcode && !isValidEan13(parsed.masterBarcode)) {
+    const requiresLogisticsEan = parsed.boxSizes.length >= 2;
+    if (requiresLogisticsEan && parsed.masterBarcode && !isValidEan13(parsed.masterBarcode)) {
       throw new PisImportError(422, "PIS Logistics EAN must be a valid 13-digit EAN");
     }
     if (masterBarcode) {
       setWhenChanged(item, "pis_master_barcode", masterBarcode, updatedFields);
       setWhenChanged(item, "pis_barcode", masterBarcode, updatedFields);
     }
-    if (parsed.masterBarcode) {
+    if (requiresLogisticsEan && parsed.masterBarcode) {
       setWhenChanged(item, "pis_logistics_ean", parsed.masterBarcode, updatedFields);
     }
     if (parsed.pcsBarcode) {

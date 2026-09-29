@@ -472,6 +472,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const isPisCartonMode =
     detectBoxPackagingMode(form.pis_box_mode, form.pis_box_sizes) ===
     BOX_PACKAGING_MODES.CARTON;
+  const requiresLogisticsEan = Number(form.pis_box_count) >= 2;
   const storedMasterBarcode = toText(
     isPisDiffUpdate
       ? item?.master_master_barcode || item?.master_barcode || item?.pis_master_barcode || item?.pis_barcode
@@ -721,7 +722,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   } = {}) => {
     const enteredMasterBarcode = toText(form.master_barcode);
     const enteredInnerBarcode = toText(form.inner_barcode);
-    const logisticsEans = form.pis_logistics_eans.map((value) =>
+    const logisticsEans = (requiresLogisticsEan ? form.pis_logistics_eans : []).map((value) =>
       toText(value).replace(/[\s-]+/g, ""),
     );
     const hasLogisticsEan = logisticsEans.some(Boolean);
@@ -1021,29 +1022,31 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                   />
                 </div>
               )}
-              <div className="col-12">
-                <label className="form-label">Logistics EANs (one per box)</label>
-                <div className="row g-2">
-                  {form.pis_logistics_eans.map((value, index) => (
-                    <div className="col-md-6" key={index}>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        className="form-control"
-                        value={value}
-                        onChange={(event) => setForm((prev) => ({
-                          ...prev,
-                          pis_logistics_eans: prev.pis_logistics_eans.map(
-                            (ean, eanIndex) => eanIndex === index ? event.target.value : ean,
-                          ),
-                        }))}
-                        placeholder={`Box ${index + 1} — 13-digit EAN`}
-                        disabled={saving}
-                      />
-                    </div>
-                  ))}
+              {requiresLogisticsEan && (
+                <div className="col-12">
+                  <label className="form-label">Logistics EANs (one per box)</label>
+                  <div className="row g-2">
+                    {form.pis_logistics_eans.map((value, index) => (
+                      <div className="col-md-6" key={index}>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          className="form-control"
+                          value={value}
+                          onChange={(event) => setForm((prev) => ({
+                            ...prev,
+                            pis_logistics_eans: prev.pis_logistics_eans.map(
+                              (ean, eanIndex) => eanIndex === index ? event.target.value : ean,
+                            ),
+                          }))}
+                          placeholder={`Box ${index + 1} — 13-digit EAN`}
+                          disabled={saving}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {showInspectedReference && (
