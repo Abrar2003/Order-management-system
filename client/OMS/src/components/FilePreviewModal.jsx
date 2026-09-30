@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getFilePreviewSource } from "../constants/itemFiles";
 
 const FilePreviewModal = ({
@@ -10,6 +10,11 @@ const FilePreviewModal = ({
   onClose,
 }) => {
   const modalRef = useRef(null);
+  const [zoom, setZoom] = useState(1);
+
+  useEffect(() => {
+    setZoom(1);
+  }, [url]);
 
   useEffect(() => {
     const previousFocus = document.activeElement;
@@ -98,12 +103,15 @@ const FilePreviewModal = ({
                 File URL is not available.
               </div>
             ) : resolvedPreviewMode === "image" ? (
-              <div className="d-flex justify-content-center align-items-center bg-light" style={{ minHeight: "80vh" }}>
+              <div
+                className={`file-preview-image-stage d-flex justify-content-center align-items-center bg-light${zoom > 1 ? " is-zoomed" : ""}`}
+                style={{ height: "80vh", maxHeight: "80vh" }}
+              >
                 <img
                   src={resolvedUrl}
                   alt={resolvedName || resolvedTitle}
-                  className="img-fluid"
-                  style={{ maxHeight: "80vh", objectFit: "contain" }}
+                  className="file-preview-image"
+                  style={{ zoom, maxHeight: "80vh", objectFit: "contain" }}
                 />
               </div>
             ) : previewSource ? (
@@ -125,6 +133,13 @@ const FilePreviewModal = ({
           </div>
 
           <div className="modal-footer">
+            {resolvedPreviewMode === "image" && (
+              <div className="btn-group me-auto" aria-label="Image zoom controls">
+                <button type="button" className="btn btn-outline-secondary" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(1, value - 0.25))} disabled={zoom === 1}>−</button>
+                <button type="button" className="btn btn-outline-secondary" aria-label="Reset zoom" onClick={() => setZoom(1)} disabled={zoom === 1}>{zoom * 100}%</button>
+                <button type="button" className="btn btn-outline-secondary" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(3, value + 0.25))} disabled={zoom === 3}>+</button>
+              </div>
+            )}
             {resolvedPreviewMode === "office" && (
               <div className="me-auto small text-muted">
                 PowerPoint previews use an embedded Office viewer.

@@ -1479,6 +1479,33 @@ export const ProductDatabaseModal = ({
     loadTemplateOptions();
   }, [loadTemplateOptions]);
 
+  useEffect(() => {
+    const currentKey = normalizeTemplateKey(form.productTypeKey);
+    const currentVersion = Number(form.productTypeVersion || 0);
+    if (!currentKey || !currentVersion) return;
+
+    const newerActiveTemplate = templateOptions.reduce(
+      (newest, templateOption) =>
+        templateOption?.status === "active" &&
+        normalizeTemplateKey(templateOption?.key) === currentKey &&
+        Number(templateOption?.version || 0) > currentVersion &&
+        Number(templateOption?.version || 0) > Number(newest?.version || 0)
+          ? templateOption
+          : newest,
+      null,
+    );
+    if (!newerActiveTemplate) return;
+
+    setForm((previous) => ({
+      ...previous,
+      productTypeVersion: Number(newerActiveTemplate.version),
+    }));
+    setSelectedTemplate(null);
+    setTemplateError("");
+    setProductTypeForm(createProductTypeFormState({ item: {}, template: null }));
+    setProductTypeErrors(cloneProductTypeValidation());
+  }, [form.productTypeKey, form.productTypeVersion, templateOptions]);
+
   const loadSelectedTemplate = useCallback(
     async (templateKey, templateVersion = 0) => {
       const normalizedTemplateKey = normalizeTemplateKey(templateKey);

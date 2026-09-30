@@ -190,14 +190,11 @@ const extractProductSpecFieldValue = (entry = {}) => {
 
 const findFieldValueEntry = (fields = [], field = {}) => {
   const safeFields = Array.isArray(fields) ? fields : [];
-  return (
-    safeFields.find((entry) => {
-      if (entry?.field_id && field?._id) {
-        return String(entry.field_id) === String(field._id);
-      }
-      return normalizeTemplateKey(entry?.key) === normalizeTemplateKey(field?.key);
-    }) || null
-  );
+  return safeFields.find(
+    (entry) => entry?.field_id && field?._id && String(entry.field_id) === String(field._id),
+  ) || safeFields.find(
+    (entry) => normalizeTemplateKey(entry?.key) === normalizeTemplateKey(field?.key),
+  ) || null;
 };
 
 const findSizeEntryByRemark = (entries = [], remark = "") => {

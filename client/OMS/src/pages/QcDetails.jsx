@@ -584,6 +584,8 @@ const QcDetails = () => {
   const [inspectionRecordToUpdate, setInspectionRecordToUpdate] = useState(null);
   const [showQcImageGallery, setShowQcImageGallery] = useState(false);
   const [showQcImageCarousel, setShowQcImageCarousel] = useState(false);
+  const [qcImageCarouselZoom, setQcImageCarouselZoom] = useState(1);
+  const [qcImageCarouselBaseSize, setQcImageCarouselBaseSize] = useState(null);
   const [showOnlyCommentedQcImages, setShowOnlyCommentedQcImages] = useState(false);
   const [showQcImageUploadQueue, setShowQcImageUploadQueue] = useState(false);
   const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
@@ -2403,6 +2405,8 @@ const QcDetails = () => {
       Math.max(Number(index) || 0, 0),
       qcImages.length - 1,
     );
+    setQcImageCarouselZoom(1);
+    setQcImageCarouselBaseSize(null);
     setActiveQcImageIndex(nextIndex);
     setShowQcImageCarousel(true);
   }, [qcImages.length]);
@@ -2410,6 +2414,8 @@ const QcDetails = () => {
   const handleMoveQcImageCarousel = useCallback((direction) => {
     if (visibleQcImages.length === 0) return;
 
+    setQcImageCarouselZoom(1);
+    setQcImageCarouselBaseSize(null);
     setActiveQcImageIndex((currentIndex) => {
       const currentVisibleIndex = visibleQcImages.findIndex(
         (entry) => entry.index === currentIndex,
@@ -4288,12 +4294,23 @@ const QcDetails = () => {
                   >
                     {"<"}
                   </button>
-                  <div className="qc-image-carousel-stage">
+                  <div className={`qc-image-carousel-stage${qcImageCarouselZoom > 1 ? " is-zoomed" : ""}`}>
                     {getQcImagePreviewUrl(activeQcImage) ? (
                       <img
+                        key={`${activeQcImageIndex}-${getQcImagePreviewUrl(activeQcImage)}`}
                         src={getQcImagePreviewUrl(activeQcImage)}
                         alt={activeQcImage?.originalName || "QC image"}
                         className="qc-image-carousel-image"
+                        style={qcImageCarouselZoom > 1 && qcImageCarouselBaseSize ? {
+                          width: `${qcImageCarouselBaseSize.width * qcImageCarouselZoom}px`,
+                          height: `${qcImageCarouselBaseSize.height * qcImageCarouselZoom}px`,
+                          maxWidth: "none",
+                          maxHeight: "none",
+                        } : undefined}
+                        onLoad={(event) => {
+                          const { width, height } = event.currentTarget.getBoundingClientRect();
+                          setQcImageCarouselBaseSize({ width, height });
+                        }}
                         loading="eager"
                         decoding="async"
                         fetchPriority="high"
@@ -4328,6 +4345,11 @@ const QcDetails = () => {
                         {String(activeQcImage.comment || "").trim()}
                       </div>
                     )}
+                    <div className="qc-image-carousel-zoom-controls btn-group mt-2" aria-label="Image zoom controls">
+                      <button type="button" className="btn btn-outline-secondary btn-sm" aria-label="Zoom out" onClick={() => setQcImageCarouselZoom((value) => Math.max(1, value - 0.25))} disabled={qcImageCarouselZoom === 1}>−</button>
+                      <button type="button" className="btn btn-outline-secondary btn-sm" aria-label="Reset zoom" onClick={() => setQcImageCarouselZoom(1)} disabled={qcImageCarouselZoom === 1}>{qcImageCarouselZoom * 100}%</button>
+                      <button type="button" className="btn btn-outline-secondary btn-sm" aria-label="Zoom in" onClick={() => setQcImageCarouselZoom((value) => Math.min(3, value + 0.25))} disabled={qcImageCarouselZoom === 3}>+</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4372,7 +4394,10 @@ const QcDetails = () => {
                       <div className="fw-semibold">Reminder {index + 1}</div>
                       <div className="mt-1">{reminder?.comment}</div>
                       {imageUrl && (
-                        <a href={imageUrl} target="_blank" rel="noreferrer" className="d-inline-block mt-2">
+                        <a href={imageUrl} target="_blank" rel="noreferrer" className="d-inline-block mt-2" onClick={(event) => {
+                          event.preventDefault();
+                          setPreviewFile({ title: `Reminder ${index + 1} attachment`, url: imageUrl, previewMode: "image" });
+                        }}>
                           <img
                             src={imageUrl}
                             alt={`Reminder ${index + 1} attachment`}

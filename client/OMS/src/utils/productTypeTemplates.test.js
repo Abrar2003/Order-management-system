@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildProductTypePayload,
+  createProductTypeFormState,
   isTemplateFieldVisible,
   sortTemplateFormFields,
   validateProductTypeFormState,
@@ -145,4 +146,31 @@ test("form fields place booleans last without disturbing the other field order",
     ]).map((field) => field.key),
     ["first", "second", "enabled", "visible"],
   );
+});
+
+test("a newer template keeps matching v1 values and fills its defaults", () => {
+  const form = createProductTypeFormState({
+    item: {
+      product_type: { key: "table", version: 1 },
+      product_specs: {
+        fields: [
+          { field_id: "v1-material", key: "material", value_type: "string", value_text: "Oak" },
+          { key: "legacy_only", value_type: "string", value_text: "Old value" },
+        ],
+      },
+    },
+    template: {
+      key: "table",
+      version: 2,
+      groups: [{
+        key: "details",
+        fields: [
+          { _id: "v2-material", key: "material", input_type: "text", value_type: "string" },
+          { key: "new_finish", input_type: "text", value_type: "string", default_value: "Natural" },
+        ],
+      }],
+    },
+  });
+
+  assert.deepEqual(form.fieldValues, { material: "Oak", new_finish: "Natural" });
 });
