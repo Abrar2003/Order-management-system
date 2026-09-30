@@ -180,22 +180,99 @@ const hasMeaningfulStoredSpecField = (entry = {}) => {
 };
 
 const getProductDatabaseMaterialOptions = (items = []) => {
-  const options = new Map();
+  const options = {
+    wood: new Map(),
+    stone: new Map(),
+    metal: new Map(),
+    color: new Map(),
+  };
 
   (Array.isArray(items) ? items : []).forEach((item) => {
     const fields = Array.isArray(item?.product_specs?.fields)
       ? item.product_specs.fields
       : [];
     fields.forEach((field) => {
-      if (!normalizeTemplateKey(field?.key).includes("material")) return;
+      const fieldKey = normalizeTemplateKey(field?.key);
       const value = normalizeText(field?.value_text);
       if (!value) return;
+      const bucket = fieldKey.endsWith("_wood_type")
+        ? "wood"
+        : fieldKey.endsWith("_stone_type")
+        ? "stone"
+        : fieldKey.endsWith("_metal_type")
+        ? "metal"
+        : fieldKey.endsWith("_color_name")
+        ? "color"
+        : "";
+      if (!bucket) return;
       const key = value.toLowerCase();
-      if (!options.has(key)) options.set(key, value);
+      if (!options[bucket].has(key)) options[bucket].set(key, value);
     });
   });
 
-  return [...options.values()].sort((left, right) => left.localeCompare(right));
+  return Object.fromEntries(
+    Object.entries(options).map(([key, values]) => [
+      key,
+      [...values.values()].sort((left, right) => left.localeCompare(right)),
+    ]),
+  );
+};
+
+const getStoredProductSpecText = (field = {}) =>
+  normalizeText(field?.value_text || field?.raw_value);
+
+const assertComponentMaterialFields = (productSpecs = {}) => {
+  const fields = Array.isArray(productSpecs?.fields) ? productSpecs.fields : [];
+  const byKey = new Map(fields.map((field) => [normalizeTemplateKey(field?.key), field]));
+  const materialTypes = new Set(["wood", "stone", "metal"]);
+  const coatingTypes = new Set(["powder coating", "plating", "other"]);
+  const isEnabled = (component) => {
+    const enabledField = byKey.get(`${component}_material_enabled`);
+    return !enabledField || enabledField.value_boolean === true;
+  };
+
+  fields.forEach((field) => {
+    const key = normalizeTemplateKey(field?.key);
+    if (!key.endsWith("_has_color") || field?.value_boolean !== true) return;
+    const component = key.slice(0, -"_has_color".length);
+    if (!isEnabled(component)) return;
+    const componentLabel = normalizeText(component.replace(/_/g, " ")) || "component";
+    if (!getStoredProductSpecText(byKey.get(`${component}_color_name`))) {
+      throw new ProductDatabaseError(`Color Name is required for ${componentLabel}`);
+    }
+  });
+
+  fields.forEach((field) => {
+    const key = normalizeTemplateKey(field?.key);
+    if (!key.endsWith("_material_type")) return;
+
+    const materialType = normalizeKey(getStoredProductSpecText(field));
+    if (!materialType) return;
+    if (!materialTypes.has(materialType)) {
+      throw new ProductDatabaseError(`${field?.label || "Material Type"} is invalid`);
+    }
+
+    const component = key.slice(0, -"_material_type".length);
+    if (!isEnabled(component)) return;
+    const componentLabel = normalizeText(component.replace(/_/g, " ")) || "component";
+    const typeField = byKey.get(`${component}_${materialType}_type`);
+    if (!getStoredProductSpecText(typeField)) {
+      throw new ProductDatabaseError(`Type of ${materialType} is required for ${componentLabel}`);
+    }
+
+    if (materialType !== "metal") return;
+    const coatingField = byKey.get(`${component}_coating_type`);
+    const coatingType = normalizeKey(getStoredProductSpecText(coatingField));
+    if (!coatingTypes.has(coatingType)) {
+      throw new ProductDatabaseError(`Type of Coating is required for ${componentLabel}`);
+    }
+    if (
+      coatingType === "other" &&
+      !getStoredProductSpecText(byKey.get(`${component}_coating_other`))
+    ) {
+      throw new ProductDatabaseError(`Specify Other Coating is required for ${componentLabel}`);
+    }
+  });
 };
 
 const hasMeaningfulStoredSizeEntry = (entry = {}, { isBoxSize = false } = {}) => {
@@ -1180,6 +1257,7 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
   assertProductDatabaseBarcodes(nextState, item, {
     allowMissingRequiredFields: adminOverrideRequiredFields,
   });
+  assertComponentMaterialFields(nextState.product_specs);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (!input.hasInput) {
@@ -1225,6 +1303,7 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
     item,
   );
   assertProductDatabaseBarcodes(nextState, item);
+  assertComponentMaterialFields(nextState.product_specs);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (changedFields.length > 0) {
@@ -1290,6 +1369,7 @@ const applyProductDatabaseApprove = ({ item, payload = {}, user = {} } = {}) => 
     item,
   );
   assertProductDatabaseBarcodes(nextState, item);
+  assertComponentMaterialFields(nextState.product_specs);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (previousStatus !== PD_STATUSES.CHECKED || changedFields.length > 0) {
@@ -1415,6 +1495,7 @@ module.exports = {
   buildProductDatabaseCompletionSummary,
   buildProductDatabaseCompletionRangeSummary,
   getProductDatabaseMaterialOptions,
+  assertComponentMaterialFields,
   getProductDatabaseCompletionRange,
   productDatabaseCompletionMatchesRange,
   applyProductDatabaseSave,

@@ -65,9 +65,13 @@ export const sortTemplateGroups = (groups = []) =>
 
 export const sortTemplateFormFields = (fields = []) =>
   [...fields].sort(
-    (left, right) =>
-      Number(normalizeTemplateKey(left?.input_type) === "boolean") -
-      Number(normalizeTemplateKey(right?.input_type) === "boolean"),
+    (left, right) => {
+      const priority = (field) =>
+        normalizeTemplateKey(field?.key).endsWith("_material_enabled")
+          ? -1
+          : Number(normalizeTemplateKey(field?.input_type) === "boolean");
+      return priority(left) - priority(right);
+    },
   );
 
 export const flattenTemplateFields = (template = {}) =>
@@ -197,6 +201,121 @@ const findFieldValueEntry = (fields = [], field = {}) => {
   ) || null;
 };
 
+const hasStoredComponentMaterialValue = (fields = [], component = "") =>
+  (Array.isArray(fields) ? fields : []).some((entry) => {
+    const key = normalizeTemplateKey(entry?.key);
+    if (!key.startsWith(`${component}_`) || key === `${component}_material_enabled`) {
+      return false;
+    }
+    const valueType = normalizeTemplateKey(
+      entry?.value_type || getDefaultValueTypeForInputType(entry?.input_type),
+    );
+    const value = extractProductSpecFieldValue(entry);
+    return valueType === "boolean" ? value === true : !isBlankValue(value) && value !== "N/A";
+  });
+
+const LEGACY_COMPONENT_MATERIAL_FIELDS = Object.freeze({
+  table: {
+    top: ["material_top"],
+    top_backing: ["backing_material"],
+    legs: ["material_leg"],
+    frame: ["material_frame"],
+  },
+  cabinet: {
+    top: ["material_top"],
+    legs: ["material_leg"],
+    body: ["material_cabinet", "material_body"],
+    back: ["material_back"],
+    doors: ["material_door", "material_doors"],
+    drawers: ["material_drawer", "material_drawers"],
+    frame: ["material_frame"],
+    base: ["material_base"],
+    shelves: ["material_shelf", "material_shelves"],
+  },
+});
+
+const LEGACY_COMPONENT_COLOR_FIELDS = Object.freeze({
+  table: { top: ["top_color"], legs: ["legs_color", "leg_color"], frame: ["frame_color"] },
+  cabinet: {
+    top: ["top_color", "color_top"],
+    legs: ["legs_color", "leg_color"],
+    body: ["color_cabinet", "cabinet_color"],
+    frame: ["frame_color"],
+  },
+});
+
+const getStoredProductSpecText = (entry = {}) =>
+  normalizeText(entry?.value_text || entry?.raw_value);
+
+const getFirstStoredProductSpecText = (fieldsByKey = new Map(), keys = []) => {
+  for (const key of keys) {
+    const value = getStoredProductSpecText(fieldsByKey.get(normalizeTemplateKey(key)));
+    if (value && value !== "N/A") return value;
+  }
+  return "";
+};
+
+export const getLegacyComponentMaterialMigration = ({ item = {}, template = null } = {}) => {
+  const templateKey = normalizeTemplateKey(template?.key);
+  const templateVersion = Number(template?.version || 0);
+  const sourceType = item?.product_type || {};
+  if (
+    templateVersion < 3 ||
+    templateKey !== normalizeTemplateKey(sourceType?.key) ||
+    Number(sourceType?.version || 0) >= 3 ||
+    !LEGACY_COMPONENT_MATERIAL_FIELDS[templateKey]
+  ) {
+    return { components: {}, colors: {}, legacyReview: [] };
+  }
+
+  const fieldsByKey = new Map(
+    (Array.isArray(item?.product_specs?.fields) ? item.product_specs.fields : []).map(
+      (entry) => [normalizeTemplateKey(entry?.key), entry],
+    ),
+  );
+  const components = Object.fromEntries(
+    Object.entries(LEGACY_COMPONENT_MATERIAL_FIELDS[templateKey]).flatMap(([component, keys]) => {
+      const value = getFirstStoredProductSpecText(fieldsByKey, keys);
+      return value ? [[component, value]] : [];
+    }),
+  );
+  const colors = Object.fromEntries(
+    Object.entries(LEGACY_COMPONENT_COLOR_FIELDS[templateKey] || {}).flatMap(([component, keys]) => {
+      const value = getFirstStoredProductSpecText(fieldsByKey, keys);
+      return value ? [[component, value]] : [];
+    }),
+  );
+  const legacyReview = ["material_1", "material_2"].flatMap((key) => {
+    const value = getFirstStoredProductSpecText(fieldsByKey, [key]);
+    return value ? [{ key, label: key.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()), value }] : [];
+  });
+
+  return { components, colors, legacyReview };
+};
+
+export const applyLegacyComponentMaterialMigration = (formState = {}, migration = {}) => ({
+  ...formState,
+  fieldValues: {
+    ...(formState?.fieldValues || {}),
+    ...Object.fromEntries(
+      [...Object.keys(migration?.components || {}), ...Object.keys(migration?.colors || {})]
+        .map((component) => [`${component}_material_enabled`, true]),
+    ),
+    ...Object.fromEntries(
+      Object.entries(migration?.colors || {}).flatMap(([component, color]) => [
+        [`${component}_has_color`, true],
+        [`${component}_color_name`, color],
+      ]),
+    ),
+  },
+});
+
+export const getUnresolvedLegacyComponentMaterials = (migration = {}, fieldValues = {}) =>
+  Object.entries(migration?.components || {}).filter(([component]) =>
+    fieldValues?.[`${component}_material_enabled`] === true &&
+    isBlankValue(fieldValues?.[`${component}_material_type`]),
+  );
+
 const findSizeEntryByRemark = (entries = [], remark = "") => {
   const normalizedRemark = normalizeTemplateKey(remark);
   return (
@@ -275,6 +394,11 @@ export const createProductTypeFormState = ({ item = {}, template = null } = {}) 
     }
 
     const existingValueEntry = findFieldValueEntry(specs?.fields, field);
+    if (fieldKey.endsWith("_material_enabled") && !existingValueEntry) {
+      const component = fieldKey.slice(0, -"_material_enabled".length);
+      fieldValues[fieldKey] = hasStoredComponentMaterialValue(specs?.fields, component);
+      return;
+    }
     if (
       existingValueEntry &&
       extractProductSpecFieldValue(existingValueEntry) !== "N/A"
@@ -392,6 +516,7 @@ export const validateProductTypeFormState = ({
   template = null,
   selectedProductTypeKey = "",
   formState = {},
+  includeSizeFields = true,
 } = {}) => {
   const errors = {
     product_type: "",
@@ -410,8 +535,9 @@ export const validateProductTypeFormState = ({
 
   flattenTemplateFields(template).forEach((field) => {
     const fieldKey = normalizeTemplateKey(field?.key);
-    if (!isTemplateFieldVisible(field, formState?.fieldValues)) return;
     const inputType = normalizeTemplateKey(field?.input_type);
+    if (!includeSizeFields && ["item_size", "box_size"].includes(inputType)) return;
+    if (!isTemplateFieldVisible(field, formState?.fieldValues)) return;
     const valueType = normalizeTemplateKey(
       field?.value_type || getDefaultValueTypeForInputType(inputType),
     );
@@ -555,6 +681,31 @@ export const validateProductTypeFormState = ({
     valid,
     errors,
   };
+};
+
+export const getProductTypeValidationErrorMessages = ({ template = null, errors = {} } = {}) => {
+  const fieldsByKey = new Map(
+    flattenTemplateFields(template).map((field) => [
+      normalizeTemplateKey(field?.key),
+      field,
+    ]),
+  );
+  const describe = (key, message) => {
+    const field = fieldsByKey.get(normalizeTemplateKey(key));
+    const group = normalizeText(field?.group_label || field?.label || key);
+    const text = normalizeText(message);
+    return group && text ? `${group}: ${text}` : text;
+  };
+  const fieldMessages = Object.entries(errors?.fields || {}).map(([key, message]) =>
+    describe(key, message),
+  );
+  const sizeMessages = [errors?.item_sizes, errors?.box_sizes].flatMap((sections) =>
+    Object.entries(sections || {}).flatMap(([key, values]) =>
+      Object.values(values || {}).map((message) => describe(key, message)),
+    ),
+  );
+
+  return [...fieldMessages, ...sizeMessages].filter(Boolean);
 };
 
 const buildFieldValuePayload = (field = {}, value) => {

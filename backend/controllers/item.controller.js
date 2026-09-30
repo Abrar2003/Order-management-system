@@ -3328,7 +3328,16 @@ exports.getProductDatabaseItems = async (req, res) => {
       Item.distinct("brand", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
       Item.distinct("vendors", applyItemDataAccess(buildItemMatch({ search, brand }), req.user)),
       Item.find(
-        applyItemDataAccess({ "product_specs.fields.key": /material/i }, req.user),
+        applyItemDataAccess(
+          {
+            $or: [
+              { "product_specs.fields.key": /material/i },
+              { "product_specs.fields.key": /_(wood|stone|metal)_type$/i },
+              { "product_specs.fields.key": /_color_name$/i },
+            ],
+          },
+          req.user,
+        ),
       ).select("product_specs.fields").lean(),
     ]);
 
@@ -3688,6 +3697,121 @@ const buildItemDatabaseRow = ({
   },
 });
 
+const formatProductSpecValueForExport = (field = {}) => {
+  switch (normalizeTemplateKey(field?.value_type)) {
+    case "number":
+      return field?.value_number ?? "";
+    case "boolean":
+      return field?.value_boolean === null || field?.value_boolean === undefined
+        ? ""
+        : field.value_boolean ? "Yes" : "No";
+    case "date":
+      return toDisplayDateString(field?.value_date);
+    case "array":
+      return Array.isArray(field?.value_array) ? field.value_array.join(", ") : "";
+    case "object":
+      return field?.raw_value ? JSON.stringify(field.raw_value) : field?.value_text || "";
+    default:
+      return field?.value_text || "";
+  }
+};
+
+const formatProductDatabaseSizesForExport = (entries = []) =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      const dimensions = [entry?.L, entry?.B, entry?.H]
+        .map((value) => Number(value || 0))
+        .join(" x ");
+      return [
+        entry?.remark || entry?.type || entry?.box_type || "",
+        dimensions,
+        entry?.net_weight ? `Net ${entry.net_weight}` : "",
+        entry?.gross_weight ? `Gross ${entry.gross_weight}` : "",
+        entry?.item_count_in_inner ? `Items/Inner ${entry.item_count_in_inner}` : "",
+        entry?.box_count_in_master ? `Inner/Master ${entry.box_count_in_master}` : "",
+      ].filter(Boolean).join(" | ");
+    })
+    .join("; ");
+
+const buildItemDatabaseExport = (rows = []) => {
+  const columns = [
+    { key: "item_code", group: "Item Details", header: "Item Code" },
+    { key: "description", group: "Item Details", header: "Description" },
+    { key: "brand", group: "Item Details", header: "Brand" },
+    { key: "vendor", group: "Item Details", header: "Vendor" },
+    { key: "current_running_pos", group: "Activity", header: "Current Running POs" },
+    { key: "current_running_po_ids", group: "Activity", header: "Running PO IDs" },
+    { key: "last_inspected_date", group: "Activity", header: "Last Inspected Date" },
+    { key: "product_database_status", group: "Product Database", header: "PD Status" },
+    { key: "pd_completion", group: "Product Database", header: "PD Details Filled" },
+    { key: "pd_completion_count", group: "Product Database", header: "PD Details Count" },
+    { key: "country_of_origin", group: "Product Database", header: "Country of Origin" },
+    { key: "pd_master_barcode", group: "Product Database", header: "Master Barcode" },
+    { key: "pd_inner_barcode", group: "Product Database", header: "Inner Barcode" },
+    { key: "kd", group: "Product Database", header: "K/D" },
+    { key: "mounting_file_needed", group: "Product Database", header: "Mounting File Needed" },
+    { key: "product_type", group: "Product Database", header: "Product Type" },
+    { key: "pd_item_sizes", group: "Product Database Measurements", header: "Item Sizes" },
+    { key: "pd_box_mode", group: "Product Database Measurements", header: "Box Mode" },
+    { key: "pd_box_sizes", group: "Product Database Measurements", header: "Box Sizes" },
+  ];
+  const dynamicColumns = new Map();
+  const exportRows = (Array.isArray(rows) ? rows : []).map((row) => {
+    const productDatabase = row?.product_database || {};
+    const values = {
+      item_code: String(row?.item_code || "").trim(),
+      description: String(row?.description || "").trim(),
+      brand: String(row?.brand || "").trim() || (Array.isArray(row?.brands) ? row.brands.join(", ") : ""),
+      vendor: normalizeVendorTextField(row?.vendor) || normalizeVendorDisplayList(row?.vendors).join(", "),
+      current_running_pos: Number(row?.current_running_pos || 0),
+      current_running_po_ids: Array.isArray(row?.current_running_po_ids) ? row.current_running_po_ids.join(", ") : "",
+      last_inspected_date: toDisplayDateString(row?.last_inspected_date),
+      product_database_status: String(row?.product_database_status || NOT_SET_STATUS).trim().replace(/_/g, " "),
+      pd_completion: row?.pd_completion?.total ? `${row.pd_completion.percentage}%` : "",
+      pd_completion_count: row?.pd_completion?.total ? `${row.pd_completion.filled}/${row.pd_completion.total}` : "",
+      country_of_origin: productDatabase?.country_of_origin || "",
+      pd_master_barcode: productDatabase?.pd_master_barcode || productDatabase?.pd_barcode || "",
+      pd_inner_barcode: productDatabase?.pd_inner_barcode || "",
+      kd: productDatabase?.kd === true ? "Yes" : "No",
+      mounting_file_needed: productDatabase?.mounting_file_needed === true ? "Yes" : "No",
+      product_type: productDatabase?.product_type_label || productDatabase?.product_type?.label || productDatabase?.product_type?.key || "",
+      pd_item_sizes: formatProductDatabaseSizesForExport(productDatabase?.pd_item_sizes),
+      pd_box_mode: productDatabase?.pd_box_mode || "",
+      pd_box_sizes: formatProductDatabaseSizesForExport(productDatabase?.pd_box_sizes),
+    };
+
+    (Array.isArray(productDatabase?.product_specs?.fields) ? productDatabase.product_specs.fields : [])
+      .forEach((field) => {
+        const fieldKey = normalizeTemplateKey(field?.key);
+        if (!fieldKey) return;
+        const group = String(field?.group_label || "Product Specifications").trim() || "Product Specifications";
+        const key = `spec:${normalizeTemplateKey(field?.group_key || group)}:${fieldKey}`;
+        if (!dynamicColumns.has(key)) {
+          dynamicColumns.set(key, {
+            key,
+            group,
+            header: String(field?.label || fieldKey).trim(),
+          });
+        }
+        values[key] = formatProductSpecValueForExport(field);
+      });
+
+    return values;
+  });
+
+  return {
+    columns: [
+      ...columns,
+      ...[...dynamicColumns.values()].sort(
+        (left, right) => left.group.localeCompare(right.group) || left.header.localeCompare(right.header),
+      ),
+    ],
+    exportRows,
+  };
+};
+
+exports.__test__.buildItemDatabaseExport = buildItemDatabaseExport;
+
 const getItemDatabaseDataset = async ({
   search,
   brand,
@@ -3871,53 +3995,29 @@ exports.exportItemDatabaseItems = async (req, res) => {
       runningPo: req.query.running_po,
       user: req.user,
     });
-    const columns = [
-      { key: "item_code", header: "Item Code" },
-      { key: "description", header: "Description" },
-      { key: "brand", header: "Brand" },
-      { key: "vendor", header: "Vendor" },
-      { key: "current_running_pos", header: "Current Running POs" },
-      { key: "current_running_po_ids", header: "Running PO IDs" },
-      { key: "last_inspected_date", header: "Last Inspected Date" },
-      { key: "product_database_status", header: "PD Status" },
-      { key: "pd_completion", header: "PD Details Filled" },
-      { key: "pd_completion_count", header: "PD Details Count" },
-    ];
-    const exportRows = dataset.rows.map((row) => ({
-      item_code: String(row?.item_code || "").trim(),
-      description: String(row?.description || "").trim(),
-      brand:
-        String(row?.brand || "").trim() ||
-        (Array.isArray(row?.brands) ? row.brands.join(", ") : ""),
-      vendor:
-        normalizeVendorTextField(row?.vendor) ||
-        normalizeVendorDisplayList(row?.vendors).join(", "),
-      current_running_pos: Number(row?.current_running_pos || 0),
-      current_running_po_ids: Array.isArray(row?.current_running_po_ids)
-        ? row.current_running_po_ids.join(", ")
-        : "",
-      last_inspected_date: toDisplayDateString(row?.last_inspected_date),
-      product_database_status:
-        String(row?.product_database_status || NOT_SET_STATUS)
-          .trim()
-          .replace(/_/g, " "),
-      pd_completion: row?.pd_completion?.total
-        ? `${row.pd_completion.percentage}%`
-        : "",
-      pd_completion_count: row?.pd_completion?.total
-        ? `${row.pd_completion.filled}/${row.pd_completion.total}`
-        : "",
-    }));
+    const { columns, exportRows } = buildItemDatabaseExport(dataset.rows);
     const headerRow = columns.map((column) => column.header);
     const dataRows = exportRows.map((row) =>
       columns.map((column) => row[column.key] ?? ""),
     );
-    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    const groupRow = columns.map((column, index) =>
+      index > 0 && columns[index - 1].group === column.group ? "" : column.group,
+    );
+    const worksheet = XLSX.utils.aoa_to_sheet([groupRow, headerRow, ...dataRows]);
+    const merges = [];
+    let groupStart = 0;
+    columns.forEach((column, index) => {
+      if (index + 1 < columns.length && columns[index + 1].group === column.group) return;
+      if (index > groupStart) merges.push({ s: { r: 0, c: groupStart }, e: { r: 0, c: index } });
+      groupStart = index + 1;
+    });
+    worksheet["!merges"] = merges;
     worksheet["!cols"] = columns.map((column, columnIndex) => ({
       wch: Math.min(
         50,
         Math.max(
           12,
+          column.group.length + 2,
           column.header.length + 2,
           ...dataRows.map((row) => String(row[columnIndex] ?? "").length + 2),
         ),

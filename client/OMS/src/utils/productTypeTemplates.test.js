@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildProductTypePayload,
+  applyLegacyComponentMaterialMigration,
   createProductTypeFormState,
+  getLegacyComponentMaterialMigration,
+  getProductTypeValidationErrorMessages,
+  getUnresolvedLegacyComponentMaterials,
   isTemplateFieldVisible,
   sortTemplateFormFields,
   validateProductTypeFormState,
@@ -140,11 +144,12 @@ test("form fields place booleans last without disturbing the other field order",
   assert.deepEqual(
     sortTemplateFormFields([
       { key: "first", input_type: "text" },
+      { key: "top_material_enabled", input_type: "boolean" },
       { key: "enabled", input_type: "boolean" },
       { key: "second", input_type: "select" },
       { key: "visible", input_type: "boolean" },
     ]).map((field) => field.key),
-    ["first", "second", "enabled", "visible"],
+    ["top_material_enabled", "first", "second", "enabled", "visible"],
   );
 });
 
@@ -173,4 +178,143 @@ test("a newer template keeps matching v1 values and fills its defaults", () => {
   });
 
   assert.deepEqual(form.fieldValues, { material: "Oak", new_finish: "Natural" });
+});
+
+test("existing component material turns on a newly added material switch", () => {
+  const form = createProductTypeFormState({
+    item: {
+      product_specs: { fields: [
+        { key: "top_material_type", input_type: "select", value_type: "string", value_text: "Wood" },
+        { key: "top_wood_type", input_type: "text", value_type: "string", value_text: "Oak" },
+      ] },
+    },
+    template: {
+      groups: [{ key: "top", fields: [
+        { key: "top_material_enabled", input_type: "boolean", value_type: "boolean", default_value: false },
+        { key: "top_material_type", input_type: "select", value_type: "string" },
+      ] }],
+    },
+  });
+
+  assert.equal(form.fieldValues.top_material_enabled, true);
+});
+
+test("validation messages name the component containing each missing field", () => {
+  assert.deepEqual(
+    getProductTypeValidationErrorMessages({
+      template: {
+        groups: [{
+          key: "top",
+          label: "Top",
+          fields: [{ key: "top_wood_type", label: "Type of Wood", input_type: "text" }],
+        }],
+      },
+      errors: {
+        fields: { top_wood_type: "Type of Wood is required" },
+        item_sizes: {},
+        box_sizes: {},
+      },
+    }),
+    ["Top: Type of Wood is required"],
+  );
+});
+
+test("Product Database validation skips template size fields it does not render", () => {
+  const templateWithRequiredBox = {
+    key: "table",
+    groups: [{
+      key: "sizes",
+      label: "Sizes",
+      fields: [{ key: "packing_box_1", label: "Packing Box 1", input_type: "box_size", required: true }],
+    }],
+  };
+
+  assert.equal(
+    validateProductTypeFormState({
+      template: templateWithRequiredBox,
+      selectedProductTypeKey: "table",
+      formState: { boxSizeValues: {} },
+      includeSizeFields: false,
+    }).valid,
+    true,
+  );
+});
+
+test("v1 and v2 materials migrate for review without writing a type until chosen", () => {
+  const item = {
+    product_type: { key: "table", version: 2 },
+    product_specs: {
+      fields: [
+        { key: "material_top", value_type: "string", value_text: "Oak" },
+        { key: "backing_material", value_type: "string", value_text: "Plywood" },
+        { key: "material_leg", value_type: "string", value_text: "Steel" },
+        { key: "top_color", value_type: "string", value_text: "Walnut" },
+        { key: "wood_pattern", value_type: "string", value_text: "Chevron" },
+        { key: "leg_shape", value_type: "string", value_text: "Tapered" },
+        { key: "number_of_legs", value_type: "number", value_number: 4 },
+        { key: "material_1", value_type: "string", value_text: "Legacy one" },
+      ],
+    },
+  };
+  const migration = getLegacyComponentMaterialMigration({
+    item,
+    template: { key: "table", version: 3 },
+  });
+  const form = applyLegacyComponentMaterialMigration(
+    createProductTypeFormState({
+      item,
+      template: {
+        key: "table",
+        version: 3,
+        groups: [{ key: "top", fields: [
+          { key: "wood_pattern", input_type: "text", value_type: "string" },
+          { key: "leg_shape", input_type: "text", value_type: "string" },
+          { key: "number_of_legs", input_type: "number", value_type: "number" },
+        ] }],
+      },
+    }),
+    migration,
+  );
+
+  assert.deepEqual(migration.components, { top: "Oak", top_backing: "Plywood", legs: "Steel" });
+  assert.deepEqual(migration.legacyReview, [{ key: "material_1", label: "Material 1", value: "Legacy one" }]);
+  assert.equal(form.fieldValues.top_material_type, undefined);
+  assert.equal(form.fieldValues.top_material_enabled, true);
+  assert.equal(form.fieldValues.top_backing_material_enabled, true);
+  assert.equal(form.fieldValues.top_has_color, true);
+  assert.equal(form.fieldValues.top_color_name, "Walnut");
+  assert.deepEqual(
+    [form.fieldValues.wood_pattern, form.fieldValues.leg_shape, form.fieldValues.number_of_legs],
+    ["Chevron", "Tapered", 4],
+  );
+  assert.deepEqual(getUnresolvedLegacyComponentMaterials(migration, form.fieldValues), [
+    ["top", "Oak"],
+    ["top_backing", "Plywood"],
+    ["legs", "Steel"],
+  ]);
+  assert.deepEqual(
+    getUnresolvedLegacyComponentMaterials(migration, {
+      ...form.fieldValues,
+      top_material_enabled: false,
+    }),
+    [["top_backing", "Plywood"], ["legs", "Steel"]],
+  );
+
+  assert.deepEqual(
+    getLegacyComponentMaterialMigration({
+      item: {
+        product_type: { key: "cabinet", version: 1 },
+        product_specs: { fields: [
+          { key: "material_cabinet", value_text: "MDF" },
+          { key: "color_cabinet", value_text: "White" },
+        ] },
+      },
+      template: { key: "cabinet", version: 3 },
+    }),
+    {
+      components: { body: "MDF" },
+      colors: { body: "White" },
+      legacyReview: [],
+    },
+  );
 });

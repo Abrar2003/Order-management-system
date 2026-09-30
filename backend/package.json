@@ -15,6 +15,7 @@
     "update:product-type-common-fields": "node scripts/addCommonProductTypeTemplateFields.js",
     "seed:cabinet-sub-product-type": "node scripts/addCabinetSubProductTypeTemplate.js",
     "seed:table-sub-product-type": "node scripts/addTableSubProductTypeTemplate.js",
+    "seed:component-material-v3": "node scripts/createComponentMaterialV3Templates.js",
     "wasabi:cors": "node scripts/setWasabiCors.js",
     "export:pis:pdf": "node scripts/exportPisPdfExample.js",
     "sync:pis": "node scripts/syncPisWorkbooks.js",

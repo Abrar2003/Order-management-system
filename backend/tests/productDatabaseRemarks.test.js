@@ -6,6 +6,7 @@ const {
   buildProductDatabaseCompletionRangeSummary,
   buildProductDatabaseCompletionSummary,
   buildProductDatabaseRow,
+  assertComponentMaterialFields,
   getProductDatabaseMaterialOptions,
   getProductDatabaseCompletionRange,
   normalizeProductDatabaseInput,
@@ -380,15 +381,15 @@ test("Product Database completion counts unset booleans as false", () => {
   );
 });
 
-test("Product Database material options reuse saved material values", () => {
+test("Product Database keeps material suggestions in their own buckets", () => {
   assert.deepEqual(
     getProductDatabaseMaterialOptions([
       {
         product_specs: {
           fields: [
-            { key: "material_top", value_text: "Oak" },
-            { key: "material_leg", value_text: "Steel" },
-            { key: "top_color", value_text: "Walnut" },
+            { key: "top_wood_type", value_text: "Oak" },
+            { key: "legs_metal_type", value_text: "Steel" },
+            { key: "top_color_name", value_text: "Walnut" },
           ],
         },
       },
@@ -398,7 +399,98 @@ test("Product Database material options reuse saved material values", () => {
         },
       },
     ]),
-    ["Oak", "Steel"],
+    {
+      wood: ["Oak"],
+      stone: [],
+      metal: ["Steel"],
+      color: ["Walnut"],
+    },
+  );
+});
+
+test("Product Database rejects incomplete component material dependencies", () => {
+  const fields = (entries) => ({ fields: entries.map(([key, value_text, value_boolean]) => ({
+    key,
+    value_text,
+    value_boolean,
+  })) });
+
+  assert.throws(
+    () => assertComponentMaterialFields(fields([["top_material_type", "Wood"]])),
+    /Type of wood is required/,
+  );
+  assert.throws(
+    () => assertComponentMaterialFields(fields([
+      ["top_material_type", "Metal"],
+      ["top_metal_type", "Steel"],
+    ])),
+    /Type of Coating is required/,
+  );
+  assert.throws(
+    () => assertComponentMaterialFields(fields([
+      ["top_material_type", "Metal"],
+      ["top_metal_type", "Steel"],
+      ["top_coating_type", "Other"],
+    ])),
+    /Specify Other Coating is required/,
+  );
+  assert.throws(
+    () => assertComponentMaterialFields(fields([
+      ["top_has_color", "", true],
+    ])),
+    /Color Name is required/,
+  );
+  assert.doesNotThrow(() => assertComponentMaterialFields(fields([
+    ["top_material_type", "Metal"],
+    ["top_metal_type", "Steel"],
+    ["top_coating_type", "Powder Coating"],
+    ["top_has_color", "", false],
+  ])));
+  assert.doesNotThrow(() => assertComponentMaterialFields(fields([
+    ["top_material_enabled", "", false],
+    ["top_material_type", "Wood"],
+  ])));
+});
+
+test("Product Database save, check, and approve all enforce component material rules", () => {
+  const invalidSpecs = {
+    fields: [{
+      key: "top_material_type",
+      input_type: "select",
+      value_type: "string",
+      value_text: "Wood",
+    }],
+  };
+  const item = (pd_checked) => ({
+    barcode_exempted: true,
+    pd_checked,
+    pd_box_mode: "individual",
+    pd_history: [],
+    pd_created_by: { user: "creator" },
+    product_specs: invalidSpecs,
+  });
+
+  assert.throws(
+    () => applyProductDatabaseSave({
+      item: item(""),
+      payload: { product_specs: invalidSpecs },
+      user: { id: "manager", role: "manager" },
+    }),
+    /Type of wood is required/,
+  );
+  assert.throws(
+    () => applyProductDatabaseCheck({
+      item: item("created"),
+      user: { id: "checker", role: "manager" },
+    }),
+    /Type of wood is required/,
+  );
+  assert.throws(
+    () => applyProductDatabaseApprove({
+      item: item("checked"),
+      user: { id: "approver", role: "super admin" },
+    }),
+    /Type of wood is required/,
   );
 });
 

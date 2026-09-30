@@ -42,8 +42,13 @@ import {
 import {
   buildProductTypePayload,
   createProductTypeFormState,
+  applyLegacyComponentMaterialMigration,
+  getLegacyComponentMaterialMigration,
+  getProductTypeValidationErrorMessages,
+  getUnresolvedLegacyComponentMaterials,
   hasProductTypeFormValues,
   normalizeTemplateKey,
+  validateProductTypeFormState,
 } from "../utils/productTypeTemplates";
 import "../App.css";
 
@@ -1332,7 +1337,7 @@ const parseTemplateOptionValue = (value = "") => {
 export const ProductDatabaseModal = ({
   item,
   draft = null,
-  materialOptions = [],
+  materialOptions = {},
   onClose,
   onSaved,
   onSaveDraft,
@@ -1540,6 +1545,13 @@ export const ProductDatabaseModal = ({
     () => mergeProductDatabaseTableV1Fields(selectedTemplate),
     [selectedTemplate],
   );
+  const legacyComponentMigration = useMemo(
+    () => getLegacyComponentMaterialMigration({
+      item: draftItem,
+      template: selectedProductTypeTemplate,
+    }),
+    [draftItem, selectedProductTypeTemplate],
+  );
 
   useEffect(() => {
     const selectedKey = normalizeTemplateKey(form.productTypeKey);
@@ -1568,12 +1580,12 @@ export const ProductDatabaseModal = ({
     }
 
     setProductTypeForm(
-      getProductTypeFormState({
+      applyLegacyComponentMaterialMigration(getProductTypeFormState({
         draft,
         form,
         item: draftItem,
         template: selectedProductTypeTemplate,
-      }),
+      }), legacyComponentMigration),
     );
     setProductTypeErrors(cloneProductTypeValidation());
   }, [
@@ -1581,6 +1593,7 @@ export const ProductDatabaseModal = ({
     draftItem,
     form.productTypeKey,
     form.productTypeVersion,
+    legacyComponentMigration,
     selectedProductTypeTemplate,
   ]);
 
@@ -1788,13 +1801,23 @@ export const ProductDatabaseModal = ({
   const handleProductTypeFieldChange = (fieldKey, value) => {
     clearDraftMessage();
     setProductTypeErrors(cloneProductTypeValidation());
-    setProductTypeForm((prev) => ({
-      ...prev,
-      fieldValues: {
-        ...prev.fieldValues,
-        [fieldKey]: value,
-      },
-    }));
+    setProductTypeForm((prev) => {
+      const nextFieldValues = { ...prev.fieldValues, [fieldKey]: value };
+      const component = fieldKey.endsWith("_material_type")
+        ? fieldKey.slice(0, -"_material_type".length)
+        : "";
+      const materialType = normalizeTemplateKey(value);
+      const previousMaterial = legacyComponentMigration.components?.[component];
+      const typeFieldKey = `${component}_${materialType}_type`;
+      if (
+        previousMaterial &&
+        ["wood", "stone", "metal"].includes(materialType) &&
+        !normalizeTextValue(nextFieldValues[typeFieldKey])
+      ) {
+        nextFieldValues[typeFieldKey] = previousMaterial;
+      }
+      return { ...prev, fieldValues: nextFieldValues };
+    });
   };
 
   const handleItemSizeChange = (fieldKey, fieldName, value) => {
@@ -2012,6 +2035,35 @@ export const ProductDatabaseModal = ({
 
       if (normalizeTemplateKey(form.productTypeKey) && !templateReady) {
         setError("Please wait for the selected product type template to finish loading.");
+        return;
+      }
+      const productTypeValidation = validateProductTypeFormState({
+        template: selectedProductTypeTemplate,
+        selectedProductTypeKey: form.productTypeKey,
+        formState: productTypeForm,
+        includeSizeFields: false,
+      });
+      setProductTypeErrors(productTypeValidation.errors);
+      if (!productTypeValidation.valid) {
+        const validationMessages = getProductTypeValidationErrorMessages({
+          template: selectedProductTypeTemplate,
+          errors: productTypeValidation.errors,
+        });
+        setError(
+          validationMessages.length > 0
+            ? `Complete the required product type fields before saving: ${validationMessages.join("; ")}`
+            : "Complete the required product type fields before saving.",
+        );
+        return;
+      }
+      const unresolvedMaterials = getUnresolvedLegacyComponentMaterials(
+        legacyComponentMigration,
+        productTypeForm.fieldValues,
+      );
+      if (unresolvedMaterials.length > 0) {
+        setError(
+          `Select a material type for the previous ${unresolvedMaterials[0][0].replace(/_/g, " ")} material.`,
+        );
         return;
       }
       const primaryBarcode = useStoredRequiredBarcodeValues
@@ -2394,6 +2446,14 @@ export const ProductDatabaseModal = ({
 
             {selectedProductTypeTemplate && (
               <section className="mb-4">
+                {legacyComponentMigration.legacyReview.length > 0 && (
+                  <div className="alert alert-warning mb-3">
+                    <div className="fw-semibold">Legacy material review</div>
+                    {legacyComponentMigration.legacyReview.map((entry) => (
+                      <div key={entry.key}>{entry.label}: {entry.value}</div>
+                    ))}
+                  </div>
+                )}
                 <ProductTypeDynamicForm
                   template={selectedProductTypeTemplate}
                   fieldValues={productTypeForm.fieldValues}
@@ -2403,6 +2463,7 @@ export const ProductDatabaseModal = ({
                   disabled={!canEdit}
                   hideSizeFields
                   materialOptions={materialOptions}
+                  previousMaterials={legacyComponentMigration.components}
                   onFieldChange={handleProductTypeFieldChange}
                   onItemSizeChange={handleItemSizeChange}
                   onBoxSizeChange={handleBoxSizeChange}
@@ -2585,7 +2646,7 @@ const ProductDatabase = () => {
   const [success, setSuccess] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
   const [productDatabaseDrafts, setProductDatabaseDrafts] = useState({});
-  const [materialOptions, setMaterialOptions] = useState([]);
+  const [materialOptions, setMaterialOptions] = useState({});
   const [syncedQuery, setSyncedQuery] = useState(null);
 
   const fetchRows = useCallback(async () => {
@@ -2611,9 +2672,9 @@ const ProductDatabase = () => {
       setSummary(data?.summary || {});
       setFilters(data?.filters || {});
       setMaterialOptions(
-        Array.isArray(data?.filters?.material_options)
+        data?.filters?.material_options && typeof data.filters.material_options === "object"
           ? data.filters.material_options
-          : [],
+          : {},
       );
       setPagination(data?.pagination || {});
     } catch (err) {

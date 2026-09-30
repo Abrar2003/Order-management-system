@@ -195,15 +195,20 @@ const DynamicField = ({
   value,
   error = "",
   disabled = false,
-  materialOptions = [],
+  materialOptions = {},
   onChange,
 }) => {
   const fieldKey = normalizeTemplateKey(field?.key);
   const inputType = normalizeTemplateKey(field?.input_type);
   const options = Array.isArray(field?.options) ? field.options : [];
-  const isMaterialField = fieldKey.includes("material");
-  const materialDatalistId = `product-type-material-${fieldKey}`;
-  const hasMaterialOptions = isMaterialField && materialOptions.length > 0;
+  const suggestionScope = normalizeTemplateKey(field?.validation?.suggestion_scope);
+  const suggestionOptions = Array.isArray(materialOptions)
+    ? materialOptions
+    : Array.isArray(materialOptions?.[suggestionScope])
+    ? materialOptions[suggestionScope]
+    : [];
+  const materialDatalistId = `product-type-suggestions-${fieldKey}`;
+  const hasMaterialOptions = suggestionOptions.length > 0;
 
   if (inputType === "textarea") {
     return (
@@ -430,7 +435,7 @@ const DynamicField = ({
       />
       {hasMaterialOptions && (
         <datalist id={materialDatalistId}>
-          {materialOptions.map((option) => (
+          {suggestionOptions.map((option) => (
             <option key={option} value={option} />
           ))}
         </datalist>
@@ -450,7 +455,8 @@ const ProductTypeDynamicForm = ({
   errors = {},
   disabled = false,
   hideSizeFields = false,
-  materialOptions = [],
+  materialOptions = {},
+  previousMaterials = {},
   onFieldChange,
   onItemSizeChange,
   onBoxSizeChange,
@@ -482,13 +488,14 @@ const ProductTypeDynamicForm = ({
     return formGroups
       .filter((group, index) => {
         if (index < 2) return true;
+        if (normalizeText(previousMaterials?.[normalizeTemplateKey(group?.key)])) return true;
         return (
           normalizedTemplateKey === TABLE_TEMPLATE_KEY &&
           normalizeTemplateKey(group?.key) === TABLE_DETAILS_GROUP_KEY
         );
       })
       .map((group) => normalizeTemplateKey(group?.key));
-  }, [formGroups, template?.key]);
+  }, [formGroups, previousMaterials, template?.key]);
   const [openGroups, setOpenGroups] = useState([]);
 
   useEffect(() => {
@@ -504,6 +511,7 @@ const ProductTypeDynamicForm = ({
       {visibleGroups.map((group) => {
         const groupKey = normalizeTemplateKey(group?.key);
         const isOpen = openGroups.includes(groupKey);
+        const previousMaterial = normalizeText(previousMaterials?.[groupKey]);
         const groupFields = sortTemplateFormFields(
           flattenTemplateFields({ groups: [group] }).filter((field) => {
             if (!isTemplateFieldVisible(field, fieldValues)) return false;
@@ -537,6 +545,11 @@ const ProductTypeDynamicForm = ({
 
             {isOpen && (
               <div className="card-body">
+                {previousMaterial && (
+                  <div className="alert alert-info py-2 small">
+                    Previous material: {previousMaterial}. Select its material type to prefill the new type field.
+                  </div>
+                )}
                 <div className="row g-3">
                   {groupFields.map((field) => {
                     const fieldKey = normalizeTemplateKey(field?.key);
