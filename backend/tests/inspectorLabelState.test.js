@@ -28,6 +28,7 @@ test("label cache recalculation retries an inspector version conflict", async ()
   const originalFindOne = Inspector.findOne;
   const originalFind = Inspection.find;
   let saves = 0;
+  let inspectionFilter;
 
   Inspector.findOne = () => ({
     save: async () => {
@@ -39,15 +40,23 @@ test("label cache recalculation retries an inspector version conflict", async ()
       }
     },
   });
-  Inspection.find = () => ({
+  Inspection.find = (filter) => {
+    inspectionFilter = filter;
+    return {
     select() { return this; },
     populate() { return this; },
     lean: async () => [],
-  });
+    };
+  };
 
   try {
     await recalculateInspectorUsedLabels(["507f1f77bcf86cd799439011"]);
     assert.equal(saves, 2);
+    assert.deepEqual(inspectionFilter, {
+      inspector: "507f1f77bcf86cd799439011",
+      status: { $ne: "transfered" },
+      "labels_added.0": { $exists: true },
+    });
   } finally {
     Inspector.findOne = originalFindOne;
     Inspection.find = originalFind;

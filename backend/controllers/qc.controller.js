@@ -1348,6 +1348,7 @@ const recalculateInspectorUsedLabels = async (inspectorIds = []) => {
       const labelUsageRecords = await Inspection.find({
         inspector: inspectorUserId,
         status: { $ne: INSPECTION_RECORD_STATUS.TRANSFERRED },
+        "labels_added.0": { $exists: true },
       })
         .select("qc request_history_id inspection_date labels_added createdAt updatedAt")
         .populate("qc", "order_meta item request_date last_inspected_date")
@@ -7570,7 +7571,7 @@ const updateQC = async (req, res) => {
       if (inspectionRecord) {
         await recalculateInspectorUsedLabels([inspectionInspectorId]);
         try {
-          const itemInspectionSyncResult = await syncItemInspectedDataFromInspection({
+          await syncItemInspectedDataFromInspection({
             qcDoc: qc,
             inspectionRecord,
             itemDoc: itemDocForInspectedSizeUpdate,
@@ -7578,9 +7579,6 @@ const updateQC = async (req, res) => {
             route: "PATCH /qc/update-qc/:id",
             source: "qc_update_modal",
           });
-          if (itemInspectionSyncResult?.updated && itemInspectionSyncResult?.item_doc) {
-            await syncTotalPoCbmForItem(itemInspectionSyncResult.item_doc.toObject());
-          }
         } catch (itemInspectionSyncError) {
           console.error("Item inspected data sync after QC update failed:", {
             qcId: qc?._id,
@@ -7607,10 +7605,6 @@ const updateQC = async (req, res) => {
       const itemDoc = itemDocForInspectedSizeUpdate;
       const itemDocSnapshot = itemDoc?.toObject ? itemDoc.toObject() : {};
       let hasItemDocChanges = false;
-      const hasPoCbmRelevantItemChanges = Boolean(
-        parsedInspectedBoxSizeEntries.hasInput ||
-          hasInspectedBoxModeUpdate,
-      );
       const setSizeEntriesPath = (
         path,
         parsedEntries,
@@ -7831,20 +7825,10 @@ const updateQC = async (req, res) => {
           },
         });
         await itemDoc.save();
-        if (hasPoCbmRelevantItemChanges) {
-          try {
-            await syncTotalPoCbmForItem(itemDoc.toObject());
-          } catch (syncError) {
-            console.error("QC inspected box PO CBM sync failed:", {
-              itemId: itemDoc?._id,
-              code: itemDoc?.code,
-              error: syncError?.message || String(syncError),
-            });
-          }
-        }
       }
     }
 
+    // ponytail: the current order is recalculated below; backfill historical PO-CBM cache outside this transaction if needed.
     qc.updated_by = buildAuditActor(req.user);
     await qc.save();
 
