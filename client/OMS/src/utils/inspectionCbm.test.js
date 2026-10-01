@@ -12,6 +12,16 @@ test("uses inspection dimensions when its CBM snapshot is empty", () => {
   );
 });
 
+test("uses inspection dimensions when a saved CBM snapshot is stale", () => {
+  assert.equal(
+    resolveInspectionRecordCbm({
+      cbm: { total: "0.25" },
+      inspected_box_sizes: [{ L: 186, B: 24.5, H: 91 }],
+    }),
+    0.41,
+  );
+});
+
 test("keeps the saved inspection CBM before later item changes", () => {
   assert.equal(
     resolveInspectionRecordCbm(

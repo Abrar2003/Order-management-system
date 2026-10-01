@@ -10,11 +10,14 @@ const {
 } = require("../services/cacheInvalidation.service");
 const {
   securityLog,
+  qcUpdateLog,
 } = require("../middlewares/securityActivityLogger");
 const controller = require("../controllers/qcImageDirectUpload.controller");
 
 const router = express.Router();
 const invalidateQcOnSuccess = invalidateCacheOnSuccess(invalidateQcCaches);
+
+router.use(qcUpdateLog);
 
 router.post(
   "/upload-session",

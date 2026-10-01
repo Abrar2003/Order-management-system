@@ -25,12 +25,12 @@ export const resolveInspectionRecordCbm = (record = {}, qc = {}) => {
   const itemMaster = qc?.item_master || {};
 
   return resolvePreferredCbm(
-    record?.cbm?.total,
     calculateMeasurementCbm(record, {
       boxSizes: "inspected_box_sizes",
       boxMode: "inspected_box_mode",
       itemSizes: "inspected_item_sizes",
     }),
+    record?.cbm?.total,
     calculateMeasurementCbm(itemMaster, {
       boxSizes: "inspected_box_sizes",
       boxMode: "inspected_box_mode",

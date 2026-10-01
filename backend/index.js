@@ -185,6 +185,11 @@ app.use((error, req, res, next) => {
 });
 
 app.use((error, req, res, _next) => {
+  res.locals.requestError = {
+    name: error?.name || "Error",
+    message: error?.message || String(error),
+    code: error?.code || "",
+  };
   console.error("Unhandled request error:", {
     method: req.method,
     path: req.originalUrl,

@@ -125,6 +125,13 @@ const runTransactionalController = async ({
         error: error?.message || String(error),
       });
 
+      res.locals = res.locals || {};
+      res.locals.requestError = {
+        name: error?.name || "Error",
+        message: error?.message || String(error),
+        code: error?.code || "",
+      };
+
       return res.status(500).json({
         message: "The QC update could not be completed. No changes were saved.",
       });

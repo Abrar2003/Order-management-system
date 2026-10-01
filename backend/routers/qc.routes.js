@@ -20,10 +20,14 @@ const {
 } = require("../services/cacheInvalidation.service");
 const {
   securityLog,
+  qcUpdateLog,
 } = require("../middlewares/securityActivityLogger");
 const qcController = require("../controllers/qc.controller");
 const { renderHtmlPdf } = require("../controllers/pdf.controller");
 const invalidateQcOnSuccess = invalidateCacheOnSuccess(invalidateQcCaches);
+
+// Applies before auth so rejected QC changes are logged too.
+router.use(qcUpdateLog);
 
 router.post(
   "/pdf/render",

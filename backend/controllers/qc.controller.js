@@ -2356,6 +2356,24 @@ const buildItemInspectedBoxCbmSnapshot = (itemDoc = null) =>
     ),
   });
 
+const buildInspectionCbmSnapshot = ({
+  inspectionSizeSnapshot = {},
+  fallbackCbm = {},
+} = {}) => {
+  const boxSnapshot = buildCbmSnapshotFromBoxSizeSource({
+    sizes: inspectionSizeSnapshot?.inspected_box_sizes,
+    mode: inspectionSizeSnapshot?.inspected_box_mode,
+  });
+  if (getNormalizedCbmTotalNumber(boxSnapshot) > 0) return boxSnapshot;
+
+  const itemCbm = calculateSizeEntriesCbmTotal(
+    inspectionSizeSnapshot?.inspected_item_sizes,
+  );
+  return itemCbm > 0
+    ? buildSingleBoxCbmSnapshot(itemCbm)
+    : buildNormalizedCbmSnapshot(fallbackCbm);
+};
+
 const resolveItemInspectedCbmPerUnit = (itemDoc = null) => {
   return getNormalizedCbmTotalNumber(buildItemInspectedBoxCbmSnapshot(itemDoc));
 };
@@ -3265,6 +3283,10 @@ const upsertInspectionRecordForRequest = async ({
     currentSource: currentSizeSource,
     updatePayload: sizeSnapshotPayload,
   });
+  const inspectionCbmSnapshot = buildInspectionCbmSnapshot({
+    inspectionSizeSnapshot,
+    fallbackCbm: qcCbmSnapshot,
+  });
   const inspectionKd = hasOwn(sizeSnapshotPayload, "kd")
     ? Boolean(sizeSnapshotPayload.kd)
     : Boolean(
@@ -3297,7 +3319,7 @@ const upsertInspectionRecordForRequest = async ({
       vendor_requested: requestedQty,
       vendor_offered: toNonNegativeNumber(addProvision, 0),
       pending_after: pendingAfter,
-      cbm: qcCbmSnapshot,
+      cbm: inspectionCbmSnapshot,
       ...inspectionBarcodeSnapshot,
       inspected_item_sizes: inspectionSizeSnapshot.inspected_item_sizes,
       inspected_box_sizes: inspectionSizeSnapshot.inspected_box_sizes,
@@ -3366,7 +3388,7 @@ const upsertInspectionRecordForRequest = async ({
   inspectionRecord.kd = inspectionKd;
 
   if (replaceCbmSnapshot) {
-    inspectionRecord.cbm = qcCbmSnapshot;
+    inspectionRecord.cbm = inspectionCbmSnapshot;
   }
 
   if (replaceCurrentRecord) {
@@ -3930,6 +3952,7 @@ exports.__test__ = {
   requiresPisBarcodeValidation,
   requiresLogisticsEanScanValidation,
   recalculateInspectorUsedLabels,
+  buildInspectionCbmSnapshot,
 };
 
 const isIsoDateWithinInclusiveRange = (

@@ -18,6 +18,7 @@ import { toEan13BarcodeValue } from "../utils/barcode";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { getDerivedOrderStatus } from "../utils/orderStatus";
 import { formatPositiveCbm } from "../utils/cbm";
+import { resolveInspectionRecordCbm } from "../utils/inspectionCbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import {
   getNextClientSortState,
@@ -1284,7 +1285,7 @@ const InspectionReport = () => {
         : formatStructuredWeightValue();
     const calculatedInspectedCbmRaw =
       hasLatestInspectionRecord
-        ? inspectedSource?.cbm?.total
+        ? resolveInspectionRecordCbm(inspectedSource, qc)
         : itemMaster?.cbm?.calculated_inspected_total ??
           itemMaster?.cbm?.calculated_total ??
           itemMaster?.cbm?.qc_total ??
@@ -1324,7 +1325,9 @@ const InspectionReport = () => {
     const showCbmTop = pisCbmTop !== "Not Set" || checkedCbmTop !== "Not Set";
     const showCbmBottom = pisCbmBottom !== "Not Set" || checkedCbmBottom !== "Not Set";
     const inspectedTotalCbm = formatPositiveCbm(
-      hasLatestInspectionRecord ? inspectedSource?.cbm?.total : itemMaster?.cbm?.inspected_total,
+      hasLatestInspectionRecord
+        ? resolveInspectionRecordCbm(inspectedSource, qc)
+        : itemMaster?.cbm?.inspected_total,
       "Not Set",
     );
     const baseTotalCbm = formatPositiveCbm(itemMaster?.cbm?.total, "Not Set");
