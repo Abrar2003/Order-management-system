@@ -10,6 +10,7 @@ const {
   __test__: {
     applyInspectionQuantityTransfer,
     calculateQcAggregateMetrics,
+    recalculateQcAggregateQuantities,
     getInspectionQuantityError,
     getRejectionEvidenceError,
   },
@@ -108,6 +109,47 @@ test("QC aggregate sums stored rejected values and ignores transferred records",
   );
 
   assert.equal(result.totalRejected, 2);
+});
+
+test("QC aggregate keeps AQL checked quantity separate from effective passed quantity", () => {
+  const qc = {
+    request_type: "AQL",
+    request_history: [
+      { _id: "request-1", quantity_requested: 50 },
+      { _id: "request-2", quantity_requested: 100 },
+    ],
+    quantities: {
+      client_demand: 250,
+      vendor_provision: 70,
+      qc_checked: 150,
+      qc_passed: 150,
+      pending: 100,
+      qc_rejected: 0,
+    },
+  };
+  const inspections = [
+    {
+      request_history_id: "request-1",
+      status: "Inspection Done",
+      vendor_offered: 50,
+      checked: 10,
+      passed: 10,
+    },
+    {
+      request_history_id: "request-2",
+      status: "Inspection Done",
+      vendor_offered: 20,
+      checked: 20,
+      passed: 20,
+    },
+  ];
+
+  recalculateQcAggregateQuantities(qc, inspections);
+
+  assert.equal(qc.quantities.vendor_provision, 70);
+  assert.equal(qc.quantities.qc_checked, 30);
+  assert.equal(qc.quantities.qc_passed, 150);
+  assert.equal(qc.quantities.pending, 100);
 });
 
 test("partial inspection transfers retain the source inspection balance", () => {

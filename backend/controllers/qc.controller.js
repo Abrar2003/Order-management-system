@@ -3937,6 +3937,7 @@ exports.__test__ = {
   buildInspectorUsedLabelState,
   buildApprovedGoodsQuantityByInspectionId,
   calculateQcAggregateMetrics,
+  recalculateQcAggregateQuantities,
   getFirstInspectionAssignmentError,
   getRejectionEvidenceError,
   getInspectionQuantityError,
@@ -5363,6 +5364,10 @@ exports.alignQC = async (req, res) => {
       );
       const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(orderRecord);
 
+      // QC totals are derived from inspection rows. Refresh legacy/stale totals
+      // before applying alignment validation.
+      recalculateQcAggregateQuantities(existingQC, beforeQcInspectionRecords);
+
       if (clientDemand < existingQC.quantities.qc_passed) {
         return res.status(400).json({
           message: "client demand cannot be less than already passed quantity",
@@ -5381,16 +5386,6 @@ exports.alignQC = async (req, res) => {
       if (quantityRequested > existingPendingQuantity) {
         return res.status(400).json({
           message: "quantity requested cannot be greater than pending quantity",
-        });
-      }
-
-      if (
-        hasVendorProvisionInput &&
-        vendorProvision < existingQC.quantities.qc_passed
-      ) {
-        return res.status(400).json({
-          message:
-            "vendor provision cannot be less than already passed quantity",
         });
       }
 

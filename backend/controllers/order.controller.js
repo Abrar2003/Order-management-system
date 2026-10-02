@@ -2363,16 +2363,12 @@ const applyNewOrderRows = async ({
           previousQc.quantities = previousQc.quantities || {};
 
           const nextPassed = clampToDemand(previousQc.quantities.qc_passed);
-          const nextChecked = Math.max(
-            nextPassed,
-            clampToDemand(previousQc.quantities.qc_checked),
-          );
+          const nextChecked = clampToDemand(previousQc.quantities.qc_checked);
           const nextRequested = clampToDemand(
             previousQc.quantities.quantity_requested,
           );
-          const nextProvision = Math.max(
-            nextPassed,
-            toNonNegativeQuantity(previousQc.quantities.vendor_provision),
+          const nextProvision = toNonNegativeQuantity(
+            previousQc.quantities.vendor_provision,
           );
           const nextRejected = Math.min(
             toNonNegativeQuantity(previousQc.quantities.qc_rejected),
@@ -11295,7 +11291,7 @@ exports.editOrder = async (req, res) => {
 
         const nextPassed = clampToDemand(qcRecord.quantities.qc_passed);
         const nextCheckedRaw = clampToDemand(qcRecord.quantities.qc_checked);
-        const nextChecked = Math.max(nextPassed, nextCheckedRaw);
+        const nextChecked = nextCheckedRaw;
         const nextRequested = clampToDemand(
           qcRecord.quantities.quantity_requested,
         );
