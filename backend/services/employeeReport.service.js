@@ -55,8 +55,11 @@ const isFileApprovalPending = (item = {}, fileType = "") => {
 };
 
 const hasPrimaryShippingMark = (item = {}) =>
-  (Array.isArray(item?.shipping_marks?.files) ? item.shipping_marks.files : [])
-    .some((file) => hasStoredFile(file));
+  [
+    ...(Array.isArray(item?.shipping_marks?.files) ? item.shipping_marks.files : []),
+    item?.shipping_marks?.shipping_marks_1,
+    item?.shipping_marks?.shipping_marks_2,
+  ].some((file) => hasStoredFile(file));
 
 const isProductDatabaseNotCreated = (item = {}) => {
   const status = text(item?.pd_checked).toLowerCase();
@@ -102,18 +105,21 @@ const countItemTasks = (items = []) => Object.fromEntries(
 const getTaskMetrics = async () => {
   const [items, activeOrderIds] = await Promise.all([
     Item.find({})
-      .select("country_of_origin kd mounting_file_needed cad_file assembly_file mounting_file packeging_ppt shipping_marks pd_checked file_approvals")
+      .select("code country_of_origin kd mounting_file_needed cad_file assembly_file mounting_file packeging_ppt shipping_marks pd_checked file_approvals")
       .lean(),
     Order.distinct("_id", ACTIVE_ORDER_MATCH),
   ]);
   const metrics = countItemTaskMetrics(items);
   if (activeOrderIds.length === 0) return metrics;
 
-  const activeQcIds = await QC.find({ order: { $in: activeOrderIds } }).distinct("_id");
-  metrics.shipping_marks_updated.total = activeQcIds.length;
-  metrics.shipping_marks_updated.pending = activeQcIds.length
-    ? await QC.countDocuments({ _id: { $in: activeQcIds }, shipping_mark_updated: { $ne: true } })
-    : 0;
+  const activeQcs = await QC.find({ order: { $in: activeOrderIds } })
+    .select("item.item_code shipping_mark_updated")
+    .lean();
+  const activeQcIds = activeQcs.map((qc) => qc._id);
+  const shippingMarkItemCodes = new Set(items.filter(hasPrimaryShippingMark).map((item) => item.code));
+  const shippingMarkQcs = activeQcs.filter((qc) => shippingMarkItemCodes.has(qc.item?.item_code));
+  metrics.shipping_marks_updated.total = shippingMarkQcs.length;
+  metrics.shipping_marks_updated.pending = shippingMarkQcs.filter((qc) => qc.shipping_mark_updated !== true).length;
   if (activeQcIds.length) {
     const inspectionMatch = { qc: { $in: activeQcIds }, status: "Inspection Done" };
     const [total, pending] = await Promise.all([

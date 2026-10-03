@@ -211,9 +211,6 @@ const Navbar = () => {
     if (isQcOnlyRole) {
       return [
         routeMenuItem("qc", "QC", "/qc"),
-        ...(hasPermission("reports", "view")
-          ? [routeMenuItem("employee-report", "Employee Report", "/employee-report")]
-          : []),
         ...(canAccessOmsAssistant
           ? [routeMenuItem("oms-assistant", "OMS Assistant", "/oms-assistant")]
           : []),
@@ -355,13 +352,15 @@ const Navbar = () => {
       routeMenuItem("daily-summary", "Daily Summary", "/summary/daily"),
     ];
 
-    if (isQcOnlyRole) {
-      return [];
-    }
-
     if (!hasPermission("reports", "view")) return [];
 
+    const employeeReport = routeMenuItem("employee-report", "Employee Report", "/employee-report");
+    if (isQcOnlyRole) {
+      return [groupMenuItem("performance-reports", "Performance Reports", [employeeReport])];
+    }
+
     const performanceReports = [
+      employeeReport,
       routeMenuItem("inspector-reports", "Inspector Performance Report", "/reports/inspectors"),
       routeMenuItem("vendor-performance-report", "Detailed Vendor Performance Report", "/reports/vendor-performance"),
       routeMenuItem("vendor-reports", "Vendor Performance Report", "/reports/vendors"),
@@ -391,7 +390,6 @@ const Navbar = () => {
     ];
 
     const otherReports = [
-      routeMenuItem("employee-report", "Employee Report", "/employee-report"),
       ...(canAccessAnalytics
         ? [routeMenuItem("product-analytics", "Product Analytics", "/reports/product-analytics")]
         : []),
