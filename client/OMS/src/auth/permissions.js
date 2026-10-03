@@ -83,6 +83,8 @@ export const hasShipmentEditRole = (role) =>
 export const isQcAllowedPagePath = (path = "") => {
   const pathname = String(path || "").trim().split(/[?#]/)[0] || "/";
   if (pathname === "/qc") return true;
+  if (pathname === "/employee-report") return true;
+  if (pathname === "/item-files") return true;
   if (pathname === "/reports/inspectors") return true;
   if (/^\/qc\/[^/]+$/.test(pathname)) return true;
   if (/^\/qc\/[^/]+\/inspection-report$/.test(pathname)) return true;

@@ -211,6 +211,9 @@ const Navbar = () => {
     if (isQcOnlyRole) {
       return [
         routeMenuItem("qc", "QC", "/qc"),
+        ...(hasPermission("reports", "view")
+          ? [routeMenuItem("employee-report", "Employee Report", "/employee-report")]
+          : []),
         ...(canAccessOmsAssistant
           ? [routeMenuItem("oms-assistant", "OMS Assistant", "/oms-assistant")]
           : []),
@@ -260,7 +263,16 @@ const Navbar = () => {
   );
 
   const itemMenuItems = useMemo(() => {
-    if (!hasPermission("items", "view") || isQcOnlyRole) return [];
+    if (!hasPermission("items", "view")) return [];
+    if (isQcOnlyRole) {
+      return [
+        groupMenuItem("qc-file-approvals", "File Approvals", [
+          routeMenuItem("qc-cad-approval", "AutoCAD Approval", "/item-files?file_type=cad_file&country=India"),
+          routeMenuItem("qc-assembly-approval", "Assembly Approval", "/item-files?file_type=assembly_file&country=India"),
+          routeMenuItem("qc-mounting-approval", "Mounting Approval", "/item-files?file_type=mounting_file&country=India"),
+        ]),
+      ];
+    }
     if (isViewer) {
       return [
         routeMenuItem("items-all", "View Items", "/items"),
@@ -379,6 +391,7 @@ const Navbar = () => {
     ];
 
     const otherReports = [
+      routeMenuItem("employee-report", "Employee Report", "/employee-report"),
       ...(canAccessAnalytics
         ? [routeMenuItem("product-analytics", "Product Analytics", "/reports/product-analytics")]
         : []),
@@ -570,6 +583,7 @@ const Navbar = () => {
       if (isAdmin) {
         items.push(
           routeMenuItem("permission-management", "Rights Management", "/settings/permissions"),
+          routeMenuItem("employee-management", "Employee Management", "/settings/employee-management"),
         );
       }
 

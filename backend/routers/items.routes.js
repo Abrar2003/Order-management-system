@@ -58,6 +58,8 @@ const {
   syncAllProductDatabaseToPis,
   syncProductDatabaseToPis,
   getItemFileUrl,
+  getPendingFileApprovals,
+  approveItemFile,
   getItemPisFileUrl,
   uploadItemFile,
   uploadItemPisFile,
@@ -132,6 +134,21 @@ router.get(
   requirePermission("items", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getItems,
+);
+
+router.get(
+  "/file-approvals/pending",
+  auth,
+  authorize("QC"),
+  getPendingFileApprovals,
+);
+
+router.post(
+  "/:id/file-approvals/:fileType/approve",
+  auth,
+  authorize("QC"),
+  invalidateItemsOnSuccess,
+  approveItemFile,
 );
 
 router.get(

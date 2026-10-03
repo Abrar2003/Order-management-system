@@ -1142,6 +1142,307 @@ small,
   margin-bottom: 0;
 }
 
+.employee-assignment-select {
+  position: relative;
+}
+
+.employee-assignment-select > summary {
+  cursor: pointer;
+  list-style: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employee-assignment-select > summary::-webkit-details-marker {
+  display: none;
+}
+
+.employee-assignment-options {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  width: max-content;
+  min-width: 100%;
+  max-width: 360px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--om-color-border);
+  border-radius: var(--om-radius-md);
+  background: var(--om-color-surface);
+}
+
+.employee-assignment-options .form-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.employee-assignment-options .form-check:last-child {
+  margin-bottom: 0;
+}
+
+.employee-report-page {
+  min-width: 0;
+}
+
+.employee-report-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.employee-report-header h1 {
+  margin: 0 0 0.3rem;
+  color: var(--om-color-text);
+  font-size: clamp(1.5rem, 2vw, 1.75rem);
+  font-weight: 650;
+}
+
+.employee-report-page .employee-report-refresh,
+.employee-report-toolbar .form-control,
+.employee-report-toolbar .form-select {
+  border-radius: 8px;
+}
+
+.employee-report-summary-grid,
+.employee-report-task-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.employee-report-summary-grid {
+  margin-bottom: 1.5rem;
+}
+
+.employee-report-summary-card,
+.employee-report-task-card,
+.employee-report-empty-state {
+  border: 1px solid var(--om-color-border);
+  border-radius: 12px;
+  background: var(--om-color-surface);
+  box-shadow: var(--om-shadow-sm);
+}
+
+.employee-report-summary-card {
+  display: grid;
+  gap: 0.35rem;
+  min-height: 124px;
+  padding: 1.1rem 1.2rem;
+}
+
+.employee-report-summary-card span,
+.employee-report-metrics span,
+.employee-report-card-type,
+.employee-report-card-assignee > span,
+.employee-report-completion {
+  color: var(--om-color-text-soft);
+  font-size: 0.78rem;
+}
+
+.employee-report-summary-card strong {
+  align-self: end;
+  color: var(--om-color-text);
+  font-size: clamp(1.65rem, 2.6vw, 2rem);
+  line-height: 1;
+}
+
+.employee-report-summary-card.is-emphasized {
+  border-color: color-mix(in srgb, var(--om-color-accent-strong) 35%, var(--om-color-border));
+}
+
+.employee-report-summary-card.is-emphasized strong,
+.employee-report-metrics .is-pending strong {
+  color: var(--om-color-accent-strong);
+}
+
+.employee-report-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.employee-report-toolbar .form-control,
+.employee-report-toolbar .form-select {
+  min-width: 0;
+}
+
+.employee-report-task-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 276px;
+  padding: 1.15rem;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.employee-report-task-card:hover {
+  border-color: var(--om-color-accent-strong);
+  box-shadow: 0 5px 14px rgba(74, 61, 45, 0.1);
+}
+
+.employee-report-task-card h2 {
+  margin: 0.3rem 0 1.35rem;
+  color: var(--om-color-text);
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.employee-report-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.employee-report-metrics > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.employee-report-metrics strong {
+  color: var(--om-color-text);
+  font-size: 1.55rem;
+  line-height: 1.1;
+}
+
+.employee-report-count-link {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dashed currentColor;
+  border-radius: 0;
+  background: transparent;
+  color: var(--om-color-text);
+  font: inherit;
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: left;
+  cursor: pointer;
+}
+
+.employee-report-metrics .is-pending .employee-report-count-link {
+  color: var(--om-color-accent-strong);
+}
+
+.employee-report-count-link:hover,
+.employee-report-count-link:focus-visible {
+  border-bottom-style: solid;
+}
+
+.employee-report-completion {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1.15rem;
+}
+
+.employee-report-progress {
+  height: 7px;
+  margin-top: 0.45rem;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--om-color-border) 70%, transparent);
+}
+
+.employee-report-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--om-color-accent-strong);
+}
+
+.employee-report-card-assignee {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: auto;
+  padding-top: 1.25rem;
+  overflow: hidden;
+}
+
+.employee-report-card-assignee strong {
+  overflow: hidden;
+  color: var(--om-color-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employee-report-empty-state {
+  padding: 1.25rem;
+}
+
+.employee-report-empty-state h2 {
+  margin: 0;
+  color: var(--om-color-text);
+  font-size: 1rem;
+}
+
+.employee-report-empty-state p {
+  margin: 0.4rem 0 0;
+  color: var(--om-color-text-soft);
+}
+
+.employee-report-empty-state.compact {
+  margin-top: 0;
+}
+
+@media (max-width: 1199.98px) {
+  .employee-report-summary-grid,
+  .employee-report-task-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .employee-report-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767.98px) {
+  .employee-report-page {
+    padding-top: 1rem !important;
+    padding-bottom: 1.5rem !important;
+  }
+
+  .employee-report-header {
+    flex-direction: column;
+    margin-bottom: 1rem;
+  }
+
+  .employee-report-refresh {
+    width: 100%;
+  }
+
+  .employee-report-summary-grid,
+  .employee-report-task-grid,
+  .employee-report-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  .employee-report-summary-grid,
+  .employee-report-toolbar {
+    margin-bottom: 1rem;
+  }
+
+  .employee-report-summary-card {
+    min-height: 100px;
+  }
+
+  .employee-report-task-card {
+    min-height: 250px;
+  }
+}
+
 .card,
 .om-card {
   border: 1px solid var(--om-color-border);

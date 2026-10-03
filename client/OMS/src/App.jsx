@@ -38,6 +38,8 @@ const ShippedSamples = lazy(() => import("./pages/ShippedSamples"));
 const Items = lazy(() => import("./pages/Items"));
 const ItemMasters = lazy(() => import("./pages/ItemMasters"));
 const ItemFilesPage = lazy(() => import("./pages/ItemFilesPage"));
+const EmployeeReport = lazy(() => import("./pages/EmployeeReport"));
+const EmployeeManagement = lazy(() => import("./pages/EmployeeManagement"));
 const ItemDetails = lazy(() => import("./pages/ItemDetails"));
 const ItemOrdersHistory = lazy(() => import("./pages/ItemOrdersHistory"));
 const UploadLogs = lazy(() => import("./pages/UploadLogs"));
@@ -327,6 +329,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <InspectorReports />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/employee-report"
+            element={
+              <ProtectedRoute permissionModule="reports">
+                <EmployeeReport />
               </ProtectedRoute>
             }
           />
@@ -768,6 +779,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <PermissionManagement />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/settings/employee-management"
+            element={
+              <ProtectedRoute>
+                <EmployeeManagement />
               </ProtectedRoute>
             }
           />

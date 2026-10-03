@@ -330,6 +330,27 @@ const fileSubSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const fileApprovalSchema = new mongoose.Schema(
+  {
+    file_key: { type: String, default: "", trim: true },
+    approved_by: {
+      user: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
+      name: { type: String, default: "", trim: true },
+    },
+    approved_at: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
+const fileApprovalsSchema = new mongoose.Schema(
+  {
+    cad_file: { type: fileApprovalSchema, default: () => ({}) },
+    assembly_file: { type: fileApprovalSchema, default: () => ({}) },
+    mounting_file: { type: fileApprovalSchema, default: () => ({}) },
+  },
+  { _id: false },
+);
+
 const shippingMarksSchema = new mongoose.Schema(
   {
     files: { type: [fileSubSchema], default: [] },
@@ -350,6 +371,7 @@ const itemSchema = new mongoose.Schema(
       type: shippingMarksSchema,
       default: () => ({}),
     },
+    file_approvals: { type: fileApprovalsSchema, default: () => ({}) },
     code: {
       type: String,
       required: true,

@@ -7,6 +7,8 @@ import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { usePermissions } from "../auth/PermissionContext";
+import { getUserFromToken } from "../auth/auth.service";
+import { isQcOnlyUserRole } from "../auth/permissions";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import {
   buildItemFileUploadRequest,
@@ -31,6 +33,7 @@ import "../App.css";
 const DEFAULT_LIMIT = 20;
 const DEFAULT_COUNTRY_FILTER = "India";
 const LIMIT_OPTIONS = [10, 20, 50, 100];
+const QC_APPROVAL_FILE_TYPES = new Set(["cad_file", "assembly_file", "mounting_file"]);
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(value, 10);
@@ -302,9 +305,11 @@ const ItemFilesPage = () => {
   const activeFileOption =
     getItemFileOption(requestedFileType) || getItemFileOption(DEFAULT_ITEM_FILE_TYPE);
   const activeFileType = activeFileOption?.value || DEFAULT_ITEM_FILE_TYPE;
+  const isQcApprovalMode =
+    isQcOnlyUserRole(getUserFromToken()?.role) && QC_APPROVAL_FILE_TYPES.has(activeFileType);
   const preferPisMeasurements = isPisSpreadsheetUploadType(activeFileType);
   const canUploadActiveFile =
-    canUploadItemFiles &&
+    !isQcApprovalMode && canUploadItemFiles &&
     (!isPisSpreadsheetUploadType(activeFileType) || canEditPis);
 
   const [rows, setRows] = useState([]);
@@ -329,6 +334,12 @@ const ItemFilesPage = () => {
   const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
+  const [fileStatus, setFileStatus] = useState(() =>
+    normalizeFilterParam(searchParams.get("file_status"), "all"),
+  );
+  const [draftFileStatus, setDraftFileStatus] = useState(() =>
+    normalizeFilterParam(searchParams.get("file_status"), "all"),
+  );
   const [countryFilter, setCountryFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("country"), DEFAULT_COUNTRY_FILTER),
   );
@@ -351,6 +362,7 @@ const ItemFilesPage = () => {
   const [draggingItemId, setDraggingItemId] = useState("");
   const [itemFilePickerItemId, setItemFilePickerItemId] = useState("");
   const [openingFileItemId, setOpeningFileItemId] = useState("");
+  const [approvingItemId, setApprovingItemId] = useState("");
   const [previewFile, setPreviewFile] = useState(null);
   const itemFileInputRef = useRef(null);
   const [sortBy, setSortBy] = useState("code");
@@ -361,15 +373,20 @@ const ItemFilesPage = () => {
       setLoading(true);
       setError("");
 
-      const res = await api.get("/items", {
+      const res = await api.get(isQcApprovalMode ? "/items/file-approvals/pending" : "/items", {
         params: {
           search: searchInput,
-          brand: brandFilter,
-          vendor: vendorFilter,
-          country: countryFilter,
           file_type: activeFileType,
           page,
           limit,
+          ...(isQcApprovalMode
+            ? {}
+            : {
+                brand: brandFilter,
+                vendor: vendorFilter,
+                country: countryFilter,
+                file_status: fileStatus,
+              }),
         },
       });
 
@@ -400,7 +417,7 @@ const ItemFilesPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeFileType, brandFilter, countryFilter, limit, page, searchInput, vendorFilter]);
+  }, [activeFileType, brandFilter, countryFilter, fileStatus, isQcApprovalMode, limit, page, searchInput, vendorFilter]);
 
   useEffect(() => {
     fetchItems();
@@ -413,6 +430,7 @@ const ItemFilesPage = () => {
     const nextSearchInput = normalizeSearchParam(searchParams.get("search"));
     const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
+    const nextFileStatus = normalizeFilterParam(searchParams.get("file_status"), "all");
     const nextCountryFilter = normalizeFilterParam(
       searchParams.get("country"),
       DEFAULT_COUNTRY_FILTER,
@@ -426,6 +444,8 @@ const ItemFilesPage = () => {
     setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setFileStatus((prev) => (prev === nextFileStatus ? prev : nextFileStatus));
+    setDraftFileStatus((prev) => (prev === nextFileStatus ? prev : nextFileStatus));
     setCountryFilter((prev) => (prev === nextCountryFilter ? prev : nextCountryFilter));
     setDraftCountryFilter((prev) => (prev === nextCountryFilter ? prev : nextCountryFilter));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
@@ -439,12 +459,13 @@ const ItemFilesPage = () => {
 
     const next = new URLSearchParams();
     next.set("file_type", activeFileType);
-    next.set("country", countryFilter);
+    next.set("country", isQcApprovalMode ? "India" : countryFilter);
 
     const searchValue = normalizeSearchParam(searchInput);
     if (searchValue) next.set("search", searchValue);
-    if (brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
-    if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
+    if (!isQcApprovalMode && brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
+    if (!isQcApprovalMode && vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
+    if (!isQcApprovalMode && fileStatus === "missing") next.set("file_status", fileStatus);
     if (page > 1) next.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
 
@@ -455,6 +476,8 @@ const ItemFilesPage = () => {
     activeFileType,
     brandFilter,
     countryFilter,
+    fileStatus,
+    isQcApprovalMode,
     limit,
     page,
     searchInput,
@@ -470,19 +493,22 @@ const ItemFilesPage = () => {
     setSearchInput(normalizeSearchParam(draftSearchInput));
     setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
     setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
+    setFileStatus(normalizeFilterParam(draftFileStatus, "all"));
     setCountryFilter(normalizeFilterParam(draftCountryFilter, DEFAULT_COUNTRY_FILTER));
     setSuccess("");
-  }, [draftBrandFilter, draftCountryFilter, draftSearchInput, draftVendorFilter]);
+  }, [draftBrandFilter, draftCountryFilter, draftFileStatus, draftSearchInput, draftVendorFilter]);
 
   const handleClearFilters = useCallback(() => {
     setPage(1);
     setDraftSearchInput("");
     setDraftBrandFilter("all");
     setDraftVendorFilter("all");
+    setDraftFileStatus("all");
     setDraftCountryFilter(DEFAULT_COUNTRY_FILTER);
     setSearchInput("");
     setBrandFilter("all");
     setVendorFilter("all");
+    setFileStatus("all");
     setCountryFilter(DEFAULT_COUNTRY_FILTER);
     setSuccess("");
   }, []);
@@ -743,6 +769,30 @@ const ItemFilesPage = () => {
     }
   }, [activeFileOption, activeFileType]);
 
+  const handleApproveFile = useCallback(async (item) => {
+    const itemId = String(item?._id || "").trim();
+    if (!itemId) return;
+
+    try {
+      setApprovingItemId(itemId);
+      setError("");
+      setSuccess("");
+      const response = await api.post(
+        `/items/${encodeURIComponent(itemId)}/file-approvals/${encodeURIComponent(activeFileType)}/approve`,
+      );
+      setSuccess(response?.data?.message || `${activeFileOption.label} approved.`);
+      await fetchItems();
+    } catch (approveError) {
+      setError(
+        approveError?.response?.data?.message
+          || approveError?.message
+          || `Failed to approve ${activeFileOption.label}.`,
+      );
+    } finally {
+      setApprovingItemId("");
+    }
+  }, [activeFileOption.label, activeFileType, fetchItems]);
+
   return (
     <>
       <Navbar />
@@ -769,7 +819,11 @@ const ItemFilesPage = () => {
           <div className="text-center flex-grow-1">
             <h2 className="h4 mb-1">{activeFileOption.label}</h2>
             <div className="text-secondary small">
-              Item file upload view for {activeFileOption.label.toLowerCase()}.
+              {isQcApprovalMode
+                ? `Indian ${activeFileOption.label.toLowerCase()} files awaiting QC approval.`
+                : fileStatus === "missing"
+                  ? `Items missing ${activeFileOption.label.toLowerCase()}.`
+                  : `Item file upload view for ${activeFileOption.label.toLowerCase()}.`}
             </div>
           </div>
           <span className="d-none d-md-inline" />
@@ -794,50 +848,57 @@ const ItemFilesPage = () => {
                   ))}
                 </datalist>
               </div>
-              <div className="col-md-2">
-                <label className="form-label">Brand</label>
-                <select
-                  className="form-select"
-                  value={draftBrandFilter}
-                  onChange={(event) => setDraftBrandFilter(event.target.value)}
-                >
-                  <option value="all">All Brands</option>
-                  {filters.brands.map((brand) => (
-                    <option key={brand} value={brand}>
-                      {brand}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-md-2">
-                <label className="form-label">Vendor</label>
-                <select
-                  className="form-select"
-                  value={draftVendorFilter}
-                  onChange={(event) => setDraftVendorFilter(event.target.value)}
-                >
-                  <option value="all">All Vendors</option>
-                  {filters.vendors.map((vendor) => (
-                    <option key={vendor} value={vendor}>
-                      {vendor}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!isQcApprovalMode && <>
+                <div className="col-md-2">
+                  <label className="form-label">Brand</label>
+                  <select
+                    className="form-select"
+                    value={draftBrandFilter}
+                    onChange={(event) => setDraftBrandFilter(event.target.value)}
+                  >
+                    <option value="all">All Brands</option>
+                    {filters.brands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
+                  </select>
+                </div>
+                <div className="col-md-2">
+                  <label className="form-label">Vendor</label>
+                  <select
+                    className="form-select"
+                    value={draftVendorFilter}
+                    onChange={(event) => setDraftVendorFilter(event.target.value)}
+                  >
+                    <option value="all">All Vendors</option>
+                    {filters.vendors.map((vendor) => <option key={vendor} value={vendor}>{vendor}</option>)}
+                  </select>
+                </div>
+                <div className="col-md-2">
+                  <label className="form-label">File status</label>
+                  <select
+                    className="form-select"
+                    value={draftFileStatus}
+                    onChange={(event) => setDraftFileStatus(event.target.value)}
+                  >
+                    <option value="all">All files</option>
+                    <option value="missing">Missing only</option>
+                  </select>
+                </div>
+              </>}
               <div className="col-md-2">
                 <label className="form-label">Country of Origin</label>
-                <select
-                  className="form-select"
-                  value={draftCountryFilter}
-                  onChange={(event) => setDraftCountryFilter(event.target.value)}
-                >
-                  <option value="all">All Countries</option>
-                  {countryOptions.map((country) => (
-                    <option key={country.value} value={country.value}>
-                      {country.label}
-                    </option>
-                  ))}
-                </select>
+                {isQcApprovalMode ? (
+                  <input className="form-control" value="India" readOnly />
+                ) : (
+                  <select
+                    className="form-select"
+                    value={draftCountryFilter}
+                    onChange={(event) => setDraftCountryFilter(event.target.value)}
+                  >
+                    <option value="all">All Countries</option>
+                    {countryOptions.map((country) => (
+                      <option key={country.value} value={country.value}>{country.label}</option>
+                    ))}
+                  </select>
+                )}
               </div>
               <div className="col-md-3 d-grid gap-2">
                 <button type="submit" className="btn btn-primary" disabled={loading}>
@@ -859,8 +920,13 @@ const ItemFilesPage = () => {
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
             <span className="om-summary-chip">File: {activeFileOption.label}</span>
+            {!isQcApprovalMode && fileStatus === "missing" && (
+              <span className="om-summary-chip">Status: Missing only</span>
+            )}
             <span className="om-summary-chip">Records: {totalRecords}</span>
-            <span className="om-summary-chip">Visible Uploaded: {uploadedVisibleCount}</span>
+            <span className="om-summary-chip">
+              {isQcApprovalMode ? "Pending approval" : "Visible Uploaded"}: {uploadedVisibleCount}
+            </span>
             <span className="om-summary-chip">Page: {page}</span>
             <span className="om-summary-chip">Limit: {limit}</span>
           </div>
@@ -950,6 +1016,7 @@ const ItemFilesPage = () => {
                       const itemId = String(item?._id || "").trim();
                       const isUploadingThisItem = uploadingItemId === itemId;
                       const isOpeningThisItem = openingFileItemId === itemId;
+                      const isApprovingThisItem = approvingItemId === itemId;
                       const storedFiles = getItemFileValues(item, activeFileOption);
                       const storedFile = storedFiles[0] || null;
                       const hasFile = storedFiles.length > 0;
@@ -999,10 +1066,12 @@ const ItemFilesPage = () => {
                                     />
                                   )}
                                   {!isProductImageFileType(activeFileType) && (
-                                    <span className="badge text-bg-success align-self-start">
-                                      {storedFiles.length > 1
-                                        ? `${storedFiles.length} Uploaded`
-                                        : "Uploaded"}
+                                    <span className={`badge align-self-start ${isQcApprovalMode ? "text-bg-warning" : "text-bg-success"}`}>
+                                      {isQcApprovalMode
+                                        ? "Pending QC approval"
+                                        : storedFiles.length > 1
+                                          ? `${storedFiles.length} Uploaded`
+                                          : "Uploaded"}
                                     </span>
                                   )}
                                 </div>
@@ -1041,32 +1110,34 @@ const ItemFilesPage = () => {
                                 Actions
                               </button>
                               <ul className="dropdown-menu dropdown-menu-end shadow">
-                                <li>
-                                  <button
-                                    className="dropdown-item"
-                                    type="button"
-                                    onClick={() => navigateToItemDetails(item)}
-                                    disabled={!item?.code}
-                                    title="Open item details"
-                                  >
-                                    View Item
-                                  </button>
-                                </li>
-                                <li>
-                                  <button
-                                    className="dropdown-item"
-                                    type="button"
-                                    onClick={() => navigateToLatestInspectionReport(item)}
-                                    disabled={!item?.latest_inspection_report_qc_id}
-                                    title={
-                                      item?.latest_inspection_report_qc_id
-                                        ? "Open latest inspection report"
-                                        : "No inspection report available yet"
-                                    }
-                                  >
-                                    Inspection Report
-                                  </button>
-                                </li>
+                                {!isQcApprovalMode && <>
+                                  <li>
+                                    <button
+                                      className="dropdown-item"
+                                      type="button"
+                                      onClick={() => navigateToItemDetails(item)}
+                                      disabled={!item?.code}
+                                      title="Open item details"
+                                    >
+                                      View Item
+                                    </button>
+                                  </li>
+                                  <li>
+                                    <button
+                                      className="dropdown-item"
+                                      type="button"
+                                      onClick={() => navigateToLatestInspectionReport(item)}
+                                      disabled={!item?.latest_inspection_report_qc_id}
+                                      title={
+                                        item?.latest_inspection_report_qc_id
+                                          ? "Open latest inspection report"
+                                          : "No inspection report available yet"
+                                      }
+                                    >
+                                      Inspection Report
+                                    </button>
+                                  </li>
+                                </>}
                                 <li>
                                   <button
                                     className="dropdown-item"
@@ -1077,6 +1148,18 @@ const ItemFilesPage = () => {
                                     {isOpeningThisItem ? "Loading..." : "Preview"}
                                   </button>
                                 </li>
+                                {isQcApprovalMode && (
+                                  <li>
+                                    <button
+                                      className="dropdown-item text-success fw-semibold"
+                                      type="button"
+                                      onClick={() => handleApproveFile(item)}
+                                      disabled={!hasFile || isApprovingThisItem}
+                                    >
+                                      {isApprovingThisItem ? "Approving..." : "Approve"}
+                                    </button>
+                                  </li>
+                                )}
                                 {canUploadActiveFile && (
                                   <>
                                     <li>

@@ -13,6 +13,34 @@ test("missing item country leaves the item query unfiltered", () => {
   assert.deepEqual(buildItemMatch(), {});
 });
 
+test("item search matches every current barcode variant", () => {
+  const match = buildItemMatch({ search: "871234" });
+  const barcodeFields = [
+    "pis_barcode",
+    "pis_master_barcode",
+    "pis_inner_barcode",
+    "pis_logistics_ean",
+    "pis_logistics_eans",
+    "inspected_logistics_ean",
+    "inspected_logistics_eans",
+    "master_barcode",
+    "master_master_barcode",
+    "master_inner_barcode",
+    "pd_barcode",
+    "pd_master_barcode",
+    "pd_inner_barcode",
+    "qc.barcode",
+    "qc.master_barcode",
+    "qc.inner_barcode",
+  ];
+
+  barcodeFields.forEach((field) => {
+    assert.deepEqual(match.$or.find((condition) => field in condition), {
+      [field]: { $regex: "871234", $options: "i" },
+    });
+  });
+});
+
 test("item country filter matches country of origin case-insensitively", () => {
   assert.deepEqual(buildItemMatch({ country: " India " }), {
     country_of_origin: {

@@ -1061,7 +1061,7 @@ const Items = () => {
           <div className="card-body">
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-3">
-                <label className="form-label">Search (Code / Name / Description)</label>
+                <label className="form-label">Search (Code / Name / Description / Barcode)</label>
                 <input
                   type="text"
                   className="form-control"

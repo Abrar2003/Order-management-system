@@ -102,6 +102,13 @@ const {
 } = require("../helpers/itemUpdateAudit");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const {
+  APPROVAL_FILE_TYPES,
+  getPendingFileApprovalItems,
+  getStoredFileKey,
+  isFileApprovalEligible,
+  isFileApprovalPending,
+} = require("../services/employeeReport.service");
+const {
   formatEan13BarcodeDisplay,
   isValidEan13,
   normalizeEan13Input,
@@ -1583,6 +1590,30 @@ const resolveInspectorName = (inspectorValue) => {
   ).trim();
 };
 
+const BARCODE_SEARCH_FIELDS = [
+  "pis_barcode",
+  "pis_master_barcode",
+  "pis_inner_barcode",
+  "pis_logistics_ean",
+  "pis_logistics_eans",
+  "inspected_logistics_ean",
+  "inspected_logistics_eans",
+  "master_barcode",
+  "master_master_barcode",
+  "master_inner_barcode",
+  "pd_barcode",
+  "pd_master_barcode",
+  "pd_inner_barcode",
+  "qc.barcode",
+  "qc.master_barcode",
+  "qc.inner_barcode",
+];
+
+const buildBarcodeSearchConditions = (escapedSearch) =>
+  BARCODE_SEARCH_FIELDS.map((field) => ({
+    [field]: { $regex: escapedSearch, $options: "i" },
+  }));
+
 const buildItemMatch = ({ search, brand, vendor, country } = {}) => {
   const conditions = [];
   const normalizedSearch = normalizeFilterValue(search);
@@ -1599,6 +1630,7 @@ const buildItemMatch = ({ search, brand, vendor, country } = {}) => {
         { description: { $regex: escaped, $options: "i" } },
         { brand: { $regex: escaped, $options: "i" } },
         { brand_name: { $regex: escaped, $options: "i" } },
+        ...buildBarcodeSearchConditions(escaped),
       ],
     });
   }
@@ -1914,18 +1946,38 @@ const ITEM_DATA_ACCESS_FIELDS = {
 const applyItemDataAccess = (match = {}, user = {}) =>
   applyDataAccessMatch(match, user, ITEM_DATA_ACCESS_FIELDS);
 
-const buildItemFileViewMatch = (fileType = "") => {
+const buildItemFilePresenceMatch = (fileConfig = {}) => {
+  const storedFileFields = ["key", "public_id", "link", "url"];
+  if (fileConfig.multiple) {
+    return {
+      $or: storedFileFields.map((field) => ({
+        [fileConfig.field]: {
+          $elemMatch: { [field]: { $exists: true, $nin: ["", null] } },
+        },
+      })),
+    };
+  }
+  return {
+    $or: storedFileFields.map((field) => ({
+      [`${fileConfig.field}.${field}`]: { $exists: true, $nin: ["", null] },
+    })),
+  };
+};
+
+const buildItemFileViewMatch = (fileType = "", fileStatus = "") => {
   const normalizedFileType = normalizeTextField(fileType).toLowerCase();
-  if (normalizedFileType === "mounting_file") {
-    return { mounting_file_needed: true };
-  }
-  if (normalizedFileType === "satin_label") {
-    return { satin_label_required: true };
-  }
-  if (["assembly_file", "logistics_ean"].includes(normalizedFileType)) {
-    return { kd: true };
-  }
-  return {};
+  const requirements = normalizedFileType === "mounting_file"
+    ? { mounting_file_needed: true }
+    : normalizedFileType === "satin_label"
+      ? { satin_label_required: true }
+      : ["assembly_file", "logistics_ean"].includes(normalizedFileType)
+        ? { kd: true }
+        : {};
+  if (normalizeTextField(fileStatus).toLowerCase() !== "missing") return requirements;
+  const fileConfig = getItemFileConfig(normalizedFileType);
+  return fileConfig
+    ? combineMongoMatches(requirements, { $nor: [buildItemFilePresenceMatch(fileConfig)] })
+    : requirements;
 };
 
 const handleProductDatabaseError = (res, error, fallbackMessage) => {
@@ -2843,6 +2895,7 @@ const buildFinalPisCheckMatch = ({ search, brand, vendor, country } = {}) => {
         { code: { $regex: escaped, $options: "i" } },
         { name: { $regex: escaped, $options: "i" } },
         { description: { $regex: escaped, $options: "i" } },
+        ...buildBarcodeSearchConditions(escaped),
       ],
     });
   }
@@ -4429,11 +4482,12 @@ exports.getItems = async (req, res) => {
     const vendor = req.query.vendor;
     const country = req.query.country;
     const fileType = req.query.file_type ?? req.query.fileType;
+    const fileStatus = req.query.file_status ?? req.query.fileStatus;
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
 
-    const fileViewMatch = buildItemFileViewMatch(fileType);
+    const fileViewMatch = buildItemFileViewMatch(fileType, fileStatus);
     const match = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ search, brand, vendor, country }), req.user),
       fileViewMatch,
@@ -8194,13 +8248,20 @@ exports.getItemFileUrl = async (req, res) => {
 
     const fileSelectFields = [
       "code",
+      "country_of_origin",
       "kd",
       "mounting_file_needed",
       "satin_label_required",
+      "file_approvals",
       fileConfig.field,
       ...(Array.isArray(fileConfig.legacyFields) ? fileConfig.legacyFields : []),
     ].join(" ");
-    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user))
+    const isQcApprovalPreview =
+      normalizeUserRoleKey(req.user?.role) === "qc" &&
+      APPROVAL_FILE_TYPES.includes(fileType);
+    const item = await Item.findOne(
+      isQcApprovalPreview ? { _id: itemId } : applyItemDataAccess({ _id: itemId }, req.user),
+    )
       .select(fileSelectFields);
     if (!item) {
       return res.status(404).json({
@@ -8217,6 +8278,12 @@ exports.getItemFileUrl = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: `${fileConfig.label} can only be used when ${requirement}`,
+      });
+    }
+    if (isQcApprovalPreview && !isFileApprovalPending(item, fileType)) {
+      return res.status(404).json({
+        success: false,
+        message: "This file is not awaiting QC approval",
       });
     }
 
@@ -8279,6 +8346,72 @@ exports.getItemFileUrl = async (req, res) => {
       success: false,
       message: error.message || "Failed to generate item file URL",
     });
+  }
+};
+
+exports.getPendingFileApprovals = async (req, res) => {
+  try {
+    const payload = await getPendingFileApprovalItems({
+      fileType: normalizeTextField(req.query?.file_type || req.query?.fileType).toLowerCase(),
+      search: req.query?.search,
+      page: parsePositiveInt(req.query?.page, 1),
+      limit: Math.min(100, parsePositiveInt(req.query?.limit, 20)),
+    });
+    return res.json({
+      ...payload,
+      filters: { brands: [], vendors: [], item_codes: [] },
+    });
+  } catch (error) {
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      message: error?.message || "Failed to load pending file approvals",
+    });
+  }
+};
+
+exports.approveItemFile = async (req, res) => {
+  try {
+    const itemId = getRequestedItemId(req);
+    const fileType = normalizeTextField(req.params?.fileType).toLowerCase();
+    if (!mongoose.Types.ObjectId.isValid(itemId) || !APPROVAL_FILE_TYPES.includes(fileType)) {
+      return res.status(400).json({ message: "Invalid item or approval file type" });
+    }
+    const item = await Item.findById(itemId);
+    if (!item) return res.status(404).json({ message: "Item not found" });
+    if (!isFileApprovalEligible(item, fileType)) {
+      return res.status(400).json({
+        message: "Only uploaded, applicable Indian files can be approved",
+      });
+    }
+    if (!isFileApprovalPending(item, fileType)) {
+      return res.status(409).json({ message: "This file is already approved" });
+    }
+    const beforeItemSnapshot = item.toObject();
+    item.set(`file_approvals.${fileType}`, {
+      file_key: getStoredFileKey(item?.[fileType]),
+      approved_by: {
+        user: req.user?._id || req.user?.id || null,
+        name: normalizeTextField(req.user?.name || req.user?.email || req.user?.username),
+      },
+      approved_at: new Date(),
+    });
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "file_approval",
+      source: "qc_file_approval",
+      route: "POST /items/:id/file-approvals/:fileType/approve",
+      metadata: { file_type: fileType, file_key: getStoredFileKey(item?.[fileType]) },
+    });
+    await item.save();
+    return res.json({
+      message: "File approved",
+      data: { item_id: String(item._id), file_type: fileType, approved: true },
+    });
+  } catch (error) {
+    console.error("Approve item file error:", error);
+    return res.status(500).json({ message: error?.message || "Failed to approve file" });
   }
 };
 
@@ -8396,6 +8529,9 @@ exports.uploadItemFile = async (req, res) => {
         ? uploadResults.map((uploadResult) => buildStoredWasabiItemFile(uploadResult))
         : buildStoredWasabiItemFile(uploadResults[0]);
       item.set(fileConfig.field, nextValue);
+      if (APPROVAL_FILE_TYPES.includes(fileType)) {
+        item.set(`file_approvals.${fileType}`, {});
+      }
       appendItemUpdateHistory(item, {
         before: beforeItemSnapshot,
         after: item.toObject(),
@@ -8781,6 +8917,9 @@ exports.deleteItemFile = async (req, res) => {
       if (fileConfig.multiple && Array.isArray(fileConfig.legacyFields)) {
         fileConfig.legacyFields.forEach((field) => item.set(field, {}));
       }
+    }
+    if (APPROVAL_FILE_TYPES.includes(fileType)) {
+      item.set(`file_approvals.${fileType}`, {});
     }
     appendItemUpdateHistory(item, {
       before: beforeItemSnapshot,
