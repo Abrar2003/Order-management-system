@@ -146,6 +146,13 @@ router.get(
   getPendingFileApprovals,
 );
 
+router.get(
+  "/file-approvals",
+  auth,
+  requirePermission("items", "view"),
+  getPendingFileApprovals,
+);
+
 router.post(
   "/:id/file-approvals/:fileType/approve",
   auth,

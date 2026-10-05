@@ -4192,6 +4192,87 @@ const buildQcListMatch = ({
   return match;
 };
 
+const buildQcReportFilterStages = ({ country = "", workloadTask = "", workloadStatus = "all" } = {}) => {
+  const normalizedCountry = normalizeText(country);
+  const normalizedTask = normalizeText(workloadTask).toLowerCase();
+  const normalizedStatus = normalizeText(workloadStatus).toLowerCase() || "all";
+  if (!["", "inspection_approval"].includes(normalizedTask)
+    || !["all", "pending", "completed"].includes(normalizedStatus)) {
+    return null;
+  }
+
+  const stages = [
+    {
+      $lookup: {
+        from: Item.collection.name,
+        localField: "item.item_code",
+        foreignField: "code",
+        as: "qc_item_master",
+      },
+    },
+    {
+      $addFields: {
+        shipping_mark_updated: {
+          $eq: [{ $arrayElemAt: ["$qc_item_master.shipping_mark_updated", 0] }, true],
+        },
+      },
+    },
+  ];
+
+  if (normalizedCountry && normalizedCountry.toLowerCase() !== "all") {
+    stages.push({
+      $match: normalizedCountry.toLowerCase() === "unspecified"
+        ? {
+            $or: [
+              { "qc_item_master.country_of_origin": { $in: [null, ""] } },
+              { "qc_item_master.country_of_origin": { $regex: "^\\s*$" } },
+            ],
+          }
+        : {
+            "qc_item_master.country_of_origin": {
+              $regex: `^${escapeRegex(normalizedCountry)}$`,
+              $options: "i",
+            },
+          },
+    });
+  }
+
+  if (normalizedTask === "inspection_approval") {
+    stages.push({
+      $lookup: {
+        from: Inspection.collection.name,
+        let: { qcId: "$_id" },
+        pipeline: [{
+          $match: {
+            $expr: {
+              $and: [
+                { $eq: ["$qc", "$$qcId"] },
+                { $eq: ["$status", "Inspection Done"] },
+              ],
+            },
+          },
+        }],
+        as: "inspection_approval_rows",
+      },
+    });
+    if (normalizedStatus === "all") {
+      stages.push({ $match: { "inspection_approval_rows.0": { $exists: true } } });
+    } else {
+      stages.push({
+        $match: {
+          inspection_approval_rows: {
+            $elemMatch: normalizedStatus === "pending"
+              ? { is_approved: { $ne: true } }
+              : { is_approved: true },
+          },
+        },
+      });
+    }
+  }
+
+  return stages;
+};
+
 const resolveQcListSortConfig = ({
   sortToken = "",
   sortByInput = "",
@@ -4538,6 +4619,9 @@ exports.getQCList = async (req, res) => {
       checked_status = "",
       sort = "-request_date",
     } = req.query;
+    const country = req.query.country ?? "";
+    const workloadTask = req.query.workload_task ?? req.query.workloadTask ?? "";
+    const workloadStatus = req.query.workload_status ?? req.query.workloadStatus ?? "all";
     const selectedInspectionStatus = normalizeQcInspectionStatusFilter(
       req.query.inspection_status ?? req.query.inspectionStatus,
     );
@@ -4585,6 +4669,14 @@ exports.getQCList = async (req, res) => {
     );
     const inspectionStatusStages =
       buildQcInspectionStatusStages(selectedInspectionStatus);
+    const workloadFilterStages = buildQcReportFilterStages({
+      country,
+      workloadTask,
+      workloadStatus,
+    });
+    if (workloadFilterStages === null) {
+      return res.status(400).json({ message: "Invalid workload task or status" });
+    }
     const optionInspectionStatusStages = selectedInspectionStatus
       ? buildQcInspectionStatusStages(selectedInspectionStatus)
       : [];
@@ -4593,6 +4685,7 @@ exports.getQCList = async (req, res) => {
       { $match: match },
       buildActiveOrderLookupStage("order", req.user),
       { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
+      ...workloadFilterStages,
       {
         $addFields: {
           request_date_sort_key: {
@@ -4619,7 +4712,7 @@ exports.getQCList = async (req, res) => {
             {
               $unwind: { path: "$inspector", preserveNullAndEmptyArrays: true },
             },
-            { $project: { request_date_sort_key: 0 } },
+            { $project: { request_date_sort_key: 0, qc_item_master: 0, inspection_approval_rows: 0 } },
           ],
           totalCount: [{ $count: "count" }],
         },
@@ -4632,6 +4725,7 @@ exports.getQCList = async (req, res) => {
         { $match: applyDataAccessMatch(buildQcListMatch({ ...filterInput, includeVendor: false }), req.user, { brandFields: ["order_meta.brand"], vendorFields: ["order_meta.vendor"] }) },
         buildActiveOrderLookupStage("order", req.user),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
+        ...workloadFilterStages,
         ...optionInspectionStatusStages,
         { $group: { _id: "$order_meta.vendor" } },
         { $project: { _id: 0, value: "$_id" } },
@@ -4640,6 +4734,7 @@ exports.getQCList = async (req, res) => {
         { $match: applyDataAccessMatch(buildQcListMatch({ ...filterInput, includeOrder: false }), req.user, { brandFields: ["order_meta.brand"], vendorFields: ["order_meta.vendor"] }) },
         buildActiveOrderLookupStage("order", req.user),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
+        ...workloadFilterStages,
         ...optionInspectionStatusStages,
         { $group: { _id: "$order_meta.order_id" } },
         { $project: { _id: 0, value: "$_id" } },
@@ -4648,6 +4743,7 @@ exports.getQCList = async (req, res) => {
         { $match: applyDataAccessMatch(buildQcListMatch({ ...filterInput, includeSearch: false }), req.user, { brandFields: ["order_meta.brand"], vendorFields: ["order_meta.vendor"] }) },
         buildActiveOrderLookupStage("order", req.user),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
+        ...workloadFilterStages,
         ...optionInspectionStatusStages,
         { $group: { _id: "$item.item_code" } },
         { $project: { _id: 0, value: "$_id" } },
@@ -5836,19 +5932,21 @@ exports.updateShippingMarkUpdated = async (req, res) => {
     }
 
     const shippingMarkUpdated = rawValue === true || normalizedValue === "true" || normalizedValue === "1";
-    const qc = await QC.findOneAndUpdate(
+    const qc = await QC.findOne(
       applyDataAccessMatch({ _id: req.params.id }, req.user),
-      {
-        $set: {
-          shipping_mark_updated: shippingMarkUpdated,
-          updated_by: buildAuditActor(req.user),
-        },
-      },
-      { new: true, runValidators: true },
-    ).lean();
-
+    ).select("item.item_code").lean();
     if (!qc) return res.status(404).json({ message: "QC record not found" });
-    return res.json({ shipping_mark_updated: qc.shipping_mark_updated });
+
+    const itemCode = normalizeText(qc?.item?.item_code);
+    const item = itemCode
+      ? await Item.findOneAndUpdate(
+        { code: { $regex: `^${escapeRegex(itemCode)}$`, $options: "i" } },
+        { $set: { shipping_mark_updated: shippingMarkUpdated } },
+        { new: true, runValidators: true },
+      ).lean()
+      : null;
+    if (!item) return res.status(404).json({ message: "Item not found for this QC record" });
+    return res.json({ shipping_mark_updated: item.shipping_mark_updated });
   } catch (err) {
     return res.status(400).json({
       message: err.message || "Failed to update shipping mark status",
@@ -12929,7 +13027,7 @@ exports.getQCById = async (req, res) => {
         ),
       )
           .select(
-            "code name description brand_name brands vendors finish claim_tenures claim_percentage barcode_exempted inspected_weight pis_weight weight cbm kd mounting_file_needed pis_barcode pis_master_barcode pis_inner_barcode pis_logistics_ean inspected_logistics_ean pis_logistics_eans inspected_logistics_eans qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_mode inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_mode pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file logistics_ean mounting_file packeging_ppt shipping_marks",
+            "code name description brand_name brands vendors finish claim_tenures claim_percentage barcode_exempted inspected_weight pis_weight weight cbm kd mounting_file_needed pis_barcode pis_master_barcode pis_inner_barcode pis_logistics_ean inspected_logistics_ean pis_logistics_eans inspected_logistics_eans qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_mode inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_mode pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file logistics_ean mounting_file packeging_ppt shipping_marks shipping_mark_updated",
           )
           .lean()
       : null;
@@ -13232,6 +13330,7 @@ exports.getQCById = async (req, res) => {
     res.json({
       data: {
         ...qcData,
+        shipping_mark_updated: Boolean(itemMaster?.shipping_mark_updated),
         item_master: itemMasterWithSignedUrls,
         qc_images: qcImagesWithSignedUrls,
         hardware_inspection: hardwareInspectionImagesWithSignedUrls,

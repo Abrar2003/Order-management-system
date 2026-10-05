@@ -305,8 +305,12 @@ const ItemFilesPage = () => {
   const activeFileOption =
     getItemFileOption(requestedFileType) || getItemFileOption(DEFAULT_ITEM_FILE_TYPE);
   const activeFileType = activeFileOption?.value || DEFAULT_ITEM_FILE_TYPE;
+  const isQcUser = isQcOnlyUserRole(getUserFromToken()?.role);
+  const requestedApprovalStatus = normalizeFilterParam(searchParams.get("approval_status"), "");
   const isQcApprovalMode =
-    isQcOnlyUserRole(getUserFromToken()?.role) && QC_APPROVAL_FILE_TYPES.has(activeFileType);
+    QC_APPROVAL_FILE_TYPES.has(activeFileType) && (isQcUser || Boolean(requestedApprovalStatus));
+  const approvalStatus = isQcApprovalMode ? (requestedApprovalStatus || "pending") : "all";
+  const canApproveActiveFile = isQcUser && approvalStatus === "pending";
   const preferPisMeasurements = isPisSpreadsheetUploadType(activeFileType);
   const canUploadActiveFile =
     !isQcApprovalMode && canUploadItemFiles &&
@@ -373,14 +377,18 @@ const ItemFilesPage = () => {
       setLoading(true);
       setError("");
 
-      const res = await api.get(isQcApprovalMode ? "/items/file-approvals/pending" : "/items", {
+      const res = await api.get(
+        isQcApprovalMode
+          ? (isQcUser ? "/items/file-approvals/pending" : "/items/file-approvals")
+          : "/items",
+        {
         params: {
           search: searchInput,
           file_type: activeFileType,
           page,
           limit,
           ...(isQcApprovalMode
-            ? {}
+            ? { approval_status: approvalStatus }
             : {
                 brand: brandFilter,
                 vendor: vendorFilter,
@@ -417,7 +425,7 @@ const ItemFilesPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeFileType, brandFilter, countryFilter, fileStatus, isQcApprovalMode, limit, page, searchInput, vendorFilter]);
+  }, [activeFileType, approvalStatus, brandFilter, countryFilter, fileStatus, isQcApprovalMode, isQcUser, limit, page, searchInput, vendorFilter]);
 
   useEffect(() => {
     fetchItems();
@@ -465,7 +473,8 @@ const ItemFilesPage = () => {
     if (searchValue) next.set("search", searchValue);
     if (!isQcApprovalMode && brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
     if (!isQcApprovalMode && vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
-    if (!isQcApprovalMode && fileStatus === "missing") next.set("file_status", fileStatus);
+    if (isQcApprovalMode) next.set("approval_status", approvalStatus);
+    else if (["missing", "uploaded"].includes(fileStatus)) next.set("file_status", fileStatus);
     if (page > 1) next.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
 
@@ -474,6 +483,7 @@ const ItemFilesPage = () => {
     }
   }, [
     activeFileType,
+    approvalStatus,
     brandFilter,
     countryFilter,
     fileStatus,
@@ -511,7 +521,13 @@ const ItemFilesPage = () => {
     setFileStatus("all");
     setCountryFilter(DEFAULT_COUNTRY_FILTER);
     setSuccess("");
-  }, []);
+    if (isQcApprovalMode) {
+      const next = new URLSearchParams(searchParams);
+      next.set("approval_status", "all");
+      next.delete("page");
+      setSearchParams(next);
+    }
+  }, [isQcApprovalMode, searchParams, setSearchParams]);
 
   const itemCodeOptions = useMemo(
     () => (Array.isArray(filters.item_codes) ? filters.item_codes : []),
@@ -820,9 +836,11 @@ const ItemFilesPage = () => {
             <h2 className="h4 mb-1">{activeFileOption.label}</h2>
             <div className="text-secondary small">
               {isQcApprovalMode
-                ? `Indian ${activeFileOption.label.toLowerCase()} files awaiting QC approval.`
+                ? `Indian ${activeFileOption.label.toLowerCase()} files with ${approvalStatus === "pending" ? "pending" : approvalStatus === "completed" ? "completed" : "all"} QC approvals.`
                 : fileStatus === "missing"
                   ? `Items missing ${activeFileOption.label.toLowerCase()}.`
+                  : fileStatus === "uploaded"
+                    ? `Items with ${activeFileOption.label.toLowerCase()} uploaded.`
                   : `Item file upload view for ${activeFileOption.label.toLowerCase()}.`}
             </div>
           </div>
@@ -880,9 +898,29 @@ const ItemFilesPage = () => {
                   >
                     <option value="all">All files</option>
                     <option value="missing">Missing only</option>
+                    <option value="uploaded">Uploaded only</option>
                   </select>
                 </div>
               </>}
+              {isQcApprovalMode && (
+                <div className="col-md-2">
+                  <label className="form-label">Approval status</label>
+                  <select
+                    className="form-select"
+                    value={approvalStatus}
+                    onChange={(event) => {
+                      const next = new URLSearchParams(searchParams);
+                      next.set("approval_status", event.target.value);
+                      next.delete("page");
+                      setSearchParams(next);
+                    }}
+                  >
+                    <option value="all">All</option>
+                    <option value="pending">Pending</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </div>
+              )}
               <div className="col-md-2">
                 <label className="form-label">Country of Origin</label>
                 {isQcApprovalMode ? (
@@ -920,12 +958,12 @@ const ItemFilesPage = () => {
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
             <span className="om-summary-chip">File: {activeFileOption.label}</span>
-            {!isQcApprovalMode && fileStatus === "missing" && (
-              <span className="om-summary-chip">Status: Missing only</span>
+            {!isQcApprovalMode && ["missing", "uploaded"].includes(fileStatus) && (
+              <span className="om-summary-chip">Status: {fileStatus === "missing" ? "Missing only" : "Uploaded only"}</span>
             )}
             <span className="om-summary-chip">Records: {totalRecords}</span>
             <span className="om-summary-chip">
-              {isQcApprovalMode ? "Pending approval" : "Visible Uploaded"}: {uploadedVisibleCount}
+              {isQcApprovalMode ? `${approvalStatus === "completed" ? "Approved" : approvalStatus === "pending" ? "Pending approval" : "QC approval"}` : "Visible Uploaded"}: {uploadedVisibleCount}
             </span>
             <span className="om-summary-chip">Page: {page}</span>
             <span className="om-summary-chip">Limit: {limit}</span>
@@ -1068,7 +1106,7 @@ const ItemFilesPage = () => {
                                   {!isProductImageFileType(activeFileType) && (
                                     <span className={`badge align-self-start ${isQcApprovalMode ? "text-bg-warning" : "text-bg-success"}`}>
                                       {isQcApprovalMode
-                                        ? "Pending QC approval"
+                                        ? approvalStatus === "completed" ? "QC approved" : approvalStatus === "pending" ? "Pending QC approval" : "QC approval"
                                         : storedFiles.length > 1
                                           ? `${storedFiles.length} Uploaded`
                                           : "Uploaded"}
@@ -1148,7 +1186,7 @@ const ItemFilesPage = () => {
                                     {isOpeningThisItem ? "Loading..." : "Preview"}
                                   </button>
                                 </li>
-                                {isQcApprovalMode && (
+                                {canApproveActiveFile && (
                                   <li>
                                     <button
                                       className="dropdown-item text-success fw-semibold"

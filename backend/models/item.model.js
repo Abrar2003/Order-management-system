@@ -372,6 +372,8 @@ const itemSchema = new mongoose.Schema(
       type: shippingMarksSchema,
       default: () => ({}),
     },
+    // Item-owned so every QC request for this item reads the same approval state.
+    shipping_mark_updated: { type: Boolean, default: false },
     file_approvals: { type: fileApprovalsSchema, default: () => ({}) },
     code: {
       type: String,

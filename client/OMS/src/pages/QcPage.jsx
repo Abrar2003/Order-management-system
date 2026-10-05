@@ -22,6 +22,7 @@ import {
 import { formatPositiveCbm } from "../utils/cbm";
 import { canTransferLatestRequestToday } from "../utils/qcRequests";
 import { getOptionText, normalizeTextOptions } from "../utils/optionText";
+import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import "../App.css";
 
 const toSafeNumber = (value) => {
@@ -229,6 +230,9 @@ const buildQcFilterStateFromSearchParams = (
     order: normalizeQueryText(searchParams.get("order")),
     inspectionStatus: normalizeQueryText(searchParams.get("inspection_status")),
     checkedStatus: normalizeQueryText(searchParams.get("checked_status")),
+    country: normalizeQueryText(searchParams.get("country")) || "all",
+    workloadTask: normalizeQueryText(searchParams.get("workload_task")),
+    workloadStatus: normalizeQueryText(searchParams.get("workload_status")) || "all",
   };
 };
 
@@ -240,7 +244,10 @@ const areQcFilterStatesEqual = (left = {}, right = {}) =>
   && normalizeQueryText(left.to) === normalizeQueryText(right.to)
   && normalizeQueryText(left.order) === normalizeQueryText(right.order)
   && normalizeQueryText(left.inspectionStatus) === normalizeQueryText(right.inspectionStatus)
-  && normalizeQueryText(left.checkedStatus) === normalizeQueryText(right.checkedStatus);
+  && normalizeQueryText(left.checkedStatus) === normalizeQueryText(right.checkedStatus)
+  && normalizeQueryText(left.country) === normalizeQueryText(right.country)
+  && normalizeQueryText(left.workloadTask) === normalizeQueryText(right.workloadTask)
+  && normalizeQueryText(left.workloadStatus) === normalizeQueryText(right.workloadStatus);
 
 const QCPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -294,6 +301,7 @@ const QCPage = () => {
   const [checkedStatus, setCheckedStatus] = useState(
     initialFilters.checkedStatus,
   );
+  const [country, setCountry] = useState(initialFilters.country);
 
   // applied filters used for API + URL sync
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
@@ -327,6 +335,9 @@ const QCPage = () => {
           inspector: canUseInspectorFilter ? appliedFilters.inspector : "",
           vendor: appliedFilters.vendor,
           inspection_status: appliedFilters.inspectionStatus,
+          country: appliedFilters.country,
+          workload_task: appliedFilters.workloadTask,
+          workload_status: appliedFilters.workloadStatus,
           checked_status: canManageCheckedStatus ? appliedFilters.checkedStatus : "",
           from: fromIso || "",
           to: toIso || "",
@@ -412,6 +423,7 @@ const QCPage = () => {
     setCheckedStatus((prev) => (
       prev === nextFilters.checkedStatus ? prev : nextFilters.checkedStatus
     ));
+    setCountry((prev) => (prev === nextFilters.country ? prev : nextFilters.country));
     setAppliedFilters((prev) => (
       areQcFilterStatesEqual(prev, nextFilters) ? prev : nextFilters
     ));
@@ -437,6 +449,13 @@ const QCPage = () => {
     }
     if (normalizeQueryText(appliedFilters.vendor)) {
       next.set("vendor", normalizeQueryText(appliedFilters.vendor));
+    }
+    if (normalizeQueryText(appliedFilters.country) && normalizeQueryText(appliedFilters.country).toLowerCase() !== "all") {
+      next.set("country", normalizeQueryText(appliedFilters.country));
+    }
+    if (normalizeQueryText(appliedFilters.workloadTask)) {
+      next.set("workload_task", normalizeQueryText(appliedFilters.workloadTask));
+      next.set("workload_status", normalizeQueryText(appliedFilters.workloadStatus) || "all");
     }
     if (normalizeQueryText(appliedFilters.inspectionStatus)) {
       next.set(
@@ -523,6 +542,9 @@ const QCPage = () => {
     order: normalizeQueryText(order),
     inspectionStatus: normalizeQueryText(inspectionStatus),
     checkedStatus: normalizeQueryText(checkedStatus),
+    country: normalizeQueryText(country) || "all",
+    workloadTask: normalizeQueryText(appliedFilters.workloadTask),
+    workloadStatus: normalizeQueryText(appliedFilters.workloadStatus) || "all",
   };
   const hasPendingFilterChanges = !areQcFilterStatesEqual(
     appliedFilters,
@@ -546,6 +568,9 @@ const QCPage = () => {
       order: "",
       inspectionStatus: "",
       checkedStatus: "",
+      country: "all",
+      workloadTask: "",
+      workloadStatus: "all",
     };
 
     setSearch("");
@@ -556,6 +581,7 @@ const QCPage = () => {
     setOrder("");
     setInspectionStatus("");
     setCheckedStatus("");
+    setCountry("all");
     setAppliedFilters(emptyFilters);
     setPage(1);
   }, []);
@@ -799,6 +825,19 @@ const QCPage = () => {
                   ))}
                 </datalist>
               </div>
+              <div className="qc-list-filter-field">
+                <label>Country</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                >
+                  <option value="all">All</option>
+                  {getCountryOfOriginOptions("").map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
               <div className="qc-list-filter-field qc-list-filter-date-field">
                 <label>Request Date</label>
                 <div className="qc-list-desktop-date-range">
@@ -917,6 +956,19 @@ const QCPage = () => {
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
+                </div>
+                <div>
+                  <label className="form-label small text-secondary">Country</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                  >
+                    <option value="all">All</option>
+                    {getCountryOfOriginOptions("").map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="form-label small text-secondary">Status</label>

@@ -427,6 +427,13 @@ const Items = () => {
   const canUpdateShippingMark = isManagerLikeRole(role);
   const canCreateComplaints =
     hasPermission("complaints", "create") && isManagerLikeRole(role);
+  const workloadTask = normalizeFilterParam(searchParams.get("workload_task"), "");
+  const workloadStatus = normalizeFilterParam(searchParams.get("workload_status"), "all");
+  const workloadLabel = workloadTask === "shipping_marks_approval"
+    ? "Shipping Marks Approval"
+    : workloadTask === "product_database_creation"
+      ? "Product Database Creation"
+      : "";
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -498,6 +505,8 @@ const Items = () => {
           brand: brandFilter,
           vendor: vendorFilter,
           country: countryFilter,
+          workload_task: workloadTask,
+          workload_status: workloadStatus,
           include_product_image_thumbnail: true,
           page,
           limit,
@@ -529,7 +538,7 @@ const Items = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, countryFilter, limit, page, searchInput, vendorFilter]);
+  }, [brandFilter, countryFilter, limit, page, searchInput, vendorFilter, workloadStatus, workloadTask]);
 
   useEffect(() => {
     fetchItems();
@@ -600,6 +609,10 @@ const Items = () => {
     if (searchValue) next.set("search", searchValue);
     if (brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
     if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
+    if (workloadTask) {
+      next.set("workload_task", workloadTask);
+      next.set("workload_status", workloadStatus);
+    }
     if (page > 1) next.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
 
@@ -616,6 +629,8 @@ const Items = () => {
     setSearchParams,
     syncedQuery,
     vendorFilter,
+    workloadStatus,
+    workloadTask,
   ]);
 
   const handleSync = async () => {
@@ -1056,6 +1071,12 @@ const Items = () => {
             <span className="d-none d-md-inline" />
           )}
         </div>
+
+        {workloadLabel && (
+          <div className="alert alert-light border mb-3 py-2">
+            Showing <strong>{workloadLabel}</strong> items: <strong>{workloadStatus}</strong>.
+          </div>
+        )}
 
         <div className="card om-card mb-3">
           <div className="card-body">

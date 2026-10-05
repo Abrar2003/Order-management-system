@@ -80,7 +80,7 @@ const {
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const {
   APPROVAL_FILE_TYPES,
-  getPendingFileApprovalItems,
+  getFileApprovalItems,
   getStoredFileKey,
   isFileApprovalEligible,
   isFileApprovalPending,
@@ -1677,19 +1677,17 @@ const combineMongoMatches = (...matches) => {
 
 const buildItemFilePresenceMatch = (fileConfig = {}) => {
   const storedFileFields = ["key", "public_id", "link", "url"];
-  if (fileConfig.multiple) {
-    return {
-      $or: storedFileFields.map((field) => ({
-        [fileConfig.field]: {
-          $elemMatch: { [field]: { $exists: true, $nin: ["", null] } },
-        },
-      })),
-    };
-  }
+  const fields = [fileConfig.field, ...(fileConfig.legacyFields || [])].filter(Boolean);
   return {
-    $or: storedFileFields.map((field) => ({
-      [`${fileConfig.field}.${field}`]: { $exists: true, $nin: ["", null] },
-    })),
+    $or: fields.flatMap((fileField, index) => (
+      fileConfig.multiple && index === 0
+        ? storedFileFields.map((field) => ({
+            [fileField]: { $elemMatch: { [field]: { $exists: true, $nin: ["", null] } } },
+          }))
+        : storedFileFields.map((field) => ({
+            [`${fileField}.${field}`]: { $exists: true, $nin: ["", null] },
+          }))
+    )),
   };
 };
 
@@ -1702,11 +1700,47 @@ const buildItemFileViewMatch = (fileType = "", fileStatus = "") => {
       : ["assembly_file", "logistics_ean"].includes(normalizedFileType)
         ? { kd: true }
         : {};
-  if (normalizeTextField(fileStatus).toLowerCase() !== "missing") return requirements;
+  const normalizedStatus = normalizeTextField(fileStatus).toLowerCase();
+  if (!["missing", "uploaded"].includes(normalizedStatus)) return requirements;
   const fileConfig = getItemFileConfig(normalizedFileType);
-  return fileConfig
-    ? combineMongoMatches(requirements, { $nor: [buildItemFilePresenceMatch(fileConfig)] })
-    : requirements;
+  if (!fileConfig) return requirements;
+  const presenceMatch = buildItemFilePresenceMatch(fileConfig);
+  return normalizedStatus === "uploaded"
+    ? combineMongoMatches(requirements, presenceMatch)
+    : combineMongoMatches(requirements, { $nor: [presenceMatch] });
+};
+
+const buildWorkloadTaskMatch = (task = "", status = "all") => {
+  const normalizedTask = normalizeTextField(task).toLowerCase();
+  const normalizedStatus = normalizeTextField(status).toLowerCase() || "all";
+  if (!normalizedTask) return {};
+  if (!["all", "pending", "completed"].includes(normalizedStatus)) return null;
+
+  if (["shipping_marks_approval", "shipping_marks_updated"].includes(normalizedTask)) {
+    const shippingMarks = buildItemFilePresenceMatch(getItemFileConfig("shipping_marks"));
+    if (normalizedStatus === "all") return shippingMarks;
+    return combineMongoMatches(
+      shippingMarks,
+      normalizedStatus === "completed"
+        ? { shipping_mark_updated: true }
+        : { shipping_mark_updated: { $ne: true } },
+    );
+  }
+
+  if (normalizedTask === "product_database_creation") {
+    const pending = {
+      $or: [
+        { pd_checked: { $exists: false } },
+        { pd_checked: { $in: [null, "", "not set", "not_set", "not created", "not_created"] } },
+      ],
+    };
+    if (normalizedStatus === "all") return {};
+    return normalizedStatus === "pending"
+      ? pending
+      : { $and: [{ pd_checked: { $exists: true } }, { $nor: [pending] }] };
+  }
+
+  return null;
 };
 
 const handleProductDatabaseError = (res, error, fallbackMessage) => {
@@ -1979,7 +2013,7 @@ const buildLatestInspectionReportLookup = async (itemCodes = []) => {
       "item.item_code": new RegExp(`^\\s*${escapeRegex(code)}\\s*$`, "i"),
     })),
   })
-    .select("_id item.item_code last_inspected_date inspection_record shipping_mark_updated updatedAt createdAt")
+    .select("_id item.item_code last_inspected_date inspection_record updatedAt createdAt")
     .lean();
 
   const latestByItemCode = new Map();
@@ -2006,7 +2040,6 @@ const buildLatestInspectionReportLookup = async (itemCodes = []) => {
     latestByItemCode.set(itemCodeKey, {
       qc_id: String(qcDoc?._id || "").trim(),
       last_inspected_date: normalizeTextField(qcDoc?.last_inspected_date),
-      shipping_mark_updated: Boolean(qcDoc?.shipping_mark_updated),
       sortTimestamp,
     });
   });
@@ -3155,26 +3188,36 @@ exports.getItems = async (req, res) => {
     const country = req.query.country;
     const fileType = req.query.file_type ?? req.query.fileType;
     const fileStatus = req.query.file_status ?? req.query.fileStatus;
+    const workloadTask = req.query.workload_task ?? req.query.workloadTask;
+    const workloadStatus = req.query.workload_status ?? req.query.workloadStatus ?? "all";
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
 
     const fileViewMatch = buildItemFileViewMatch(fileType, fileStatus);
+    const workloadTaskMatch = buildWorkloadTaskMatch(workloadTask, workloadStatus);
+    if (workloadTaskMatch === null) {
+      return res.status(400).json({ message: "Invalid workload task or status" });
+    }
     const match = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ search, brand, vendor, country }), req.user),
       fileViewMatch,
+      workloadTaskMatch,
     );
     const brandOptionsMatch = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ search, vendor, country }), req.user),
       fileViewMatch,
+      workloadTaskMatch,
     );
     const vendorOptionsMatch = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ search, brand, country }), req.user),
       fileViewMatch,
+      workloadTaskMatch,
     );
     const codeOptionsMatch = combineMongoMatches(
       applyItemDataAccess(buildItemMatch({ brand, vendor, country }), req.user),
       fileViewMatch,
+      workloadTaskMatch,
     );
 
     const [items, totalRecords, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw, codesRaw] =
@@ -3205,7 +3248,7 @@ exports.getItems = async (req, res) => {
         latest_inspection_report_qc_id: latestInspectionReport?.qc_id || "",
         latest_inspection_report_date:
           latestInspectionReport?.last_inspected_date || "",
-        shipping_mark_updated: Boolean(latestInspectionReport?.shipping_mark_updated),
+        shipping_mark_updated: Boolean(item?.shipping_mark_updated),
       };
     });
     const shouldAttachThumbnails =
@@ -6043,8 +6086,9 @@ exports.getItemFileUrl = async (req, res) => {
 
 exports.getPendingFileApprovals = async (req, res) => {
   try {
-    const payload = await getPendingFileApprovalItems({
+    const payload = await getFileApprovalItems({
       fileType: normalizeTextField(req.query?.file_type || req.query?.fileType).toLowerCase(),
+      approvalStatus: req.query?.approval_status ?? req.query?.approvalStatus ?? "pending",
       search: req.query?.search,
       page: parsePositiveInt(req.query?.page, 1),
       limit: Math.min(100, parsePositiveInt(req.query?.limit, 20)),

@@ -26,7 +26,7 @@ const TASK_CATALOG = Object.freeze([
   { key: "assembly_upload", label: "Assembly Upload", configurable: true },
   { key: "mounting_upload", label: "Mounting Upload", configurable: true },
   { key: "shipping_marks_upload", label: "Shipping Marks Upload", configurable: true },
-  { key: "shipping_marks_updated", label: "Shipping Marks Updated", configurable: true },
+  { key: "shipping_marks_updated", label: "Shipping Marks Approval", configurable: true },
   { key: "inspection_approval", label: "Inspection Approval", configurable: true },
   { key: "product_database_creation", label: "Product Database Creation", configurable: true },
   { key: "packaging_ppt_upload", label: "Packaging PPT Upload", configurable: true },
@@ -82,6 +82,10 @@ const countItemTaskMetrics = (items = []) => {
   for (const item of items) {
     metrics.cad_upload.total += 1;
     metrics.shipping_marks_upload.total += 1;
+    if (hasPrimaryShippingMark(item)) {
+      metrics.shipping_marks_updated.total += 1;
+      if (item?.shipping_mark_updated !== true) metrics.shipping_marks_updated.pending += 1;
+    }
     metrics.packaging_ppt_upload.total += 1;
     metrics.product_database_creation.total += 1;
     if (!hasStoredFile(item?.cad_file)) metrics.cad_upload.pending += 1;
@@ -112,7 +116,7 @@ const countItemTasks = (items = []) => Object.fromEntries(
 const getTaskMetrics = async () => {
   const [items, activeOrderIds] = await Promise.all([
     Item.find({})
-      .select("code country_of_origin kd mounting_file_needed cad_file assembly_file mounting_file packeging_ppt shipping_marks pd_checked file_approvals")
+      .select("code country_of_origin kd mounting_file_needed cad_file assembly_file mounting_file packeging_ppt shipping_marks shipping_mark_updated pd_checked file_approvals")
       .lean(),
     Order.distinct("_id", ACTIVE_ORDER_MATCH),
   ]);
@@ -120,13 +124,9 @@ const getTaskMetrics = async () => {
   if (activeOrderIds.length === 0) return metrics;
 
   const activeQcs = await QC.find({ order: { $in: activeOrderIds } })
-    .select("item.item_code shipping_mark_updated")
+    .select("item.item_code")
     .lean();
   const activeQcIds = activeQcs.map((qc) => qc._id);
-  const shippingMarkItemCodes = new Set(items.filter(hasPrimaryShippingMark).map((item) => item.code));
-  const shippingMarkQcs = activeQcs.filter((qc) => shippingMarkItemCodes.has(qc.item?.item_code));
-  metrics.shipping_marks_updated.total = shippingMarkQcs.length;
-  metrics.shipping_marks_updated.pending = shippingMarkQcs.filter((qc) => qc.shipping_mark_updated !== true).length;
   if (activeQcIds.length) {
     const inspectionMatch = { qc: { $in: activeQcIds }, status: "Inspection Done" };
     const [total, pending] = await Promise.all([
@@ -146,7 +146,7 @@ const getTaskMetrics = async () => {
 const getTaskMetricsByCountry = async () => {
   const [items, activeOrderIds] = await Promise.all([
     Item.find({})
-      .select("code country_of_origin kd mounting_file_needed cad_file assembly_file mounting_file packeging_ppt shipping_marks pd_checked file_approvals")
+      .select("code country_of_origin kd mounting_file_needed cad_file assembly_file mounting_file packeging_ppt shipping_marks shipping_mark_updated pd_checked file_approvals")
       .lean(),
     Order.distinct("_id", ACTIVE_ORDER_MATCH),
   ]);
@@ -164,18 +164,15 @@ const getTaskMetricsByCountry = async () => {
   if (!activeOrderIds.length) return Object.fromEntries(metricsByCountry);
 
   const activeQcs = await QC.find({ order: { $in: activeOrderIds } })
-    .select("_id item.item_code shipping_mark_updated")
+    .select("_id item.item_code")
     .lean();
-  const itemCountryByCode = new Map(items.map((item) => [item.code, getCountryLabel(item)]));
-  const shippingMarkItemCodes = new Set(items.filter(hasPrimaryShippingMark).map((item) => item.code));
+  const itemCountryByCode = new Map(
+    items.map((item) => [text(item.code).toLowerCase(), getCountryLabel(item)]),
+  );
   const qcCountryById = new Map();
   for (const qc of activeQcs) {
-    const country = itemCountryByCode.get(qc.item?.item_code) || "Unspecified";
+    const country = itemCountryByCode.get(text(qc.item?.item_code).toLowerCase()) || "Unspecified";
     qcCountryById.set(String(qc._id), country);
-    if (!shippingMarkItemCodes.has(qc.item?.item_code)) continue;
-    const metric = getMetrics(country).shipping_marks_updated;
-    metric.total += 1;
-    if (qc.shipping_mark_updated !== true) metric.pending += 1;
   }
   if (!activeQcs.length) return Object.fromEntries(metricsByCountry);
 
@@ -195,7 +192,13 @@ const getTaskCounts = async () => Object.fromEntries(
   Object.entries(await getTaskMetrics()).map(([key, metric]) => [key, metric.pending]),
 );
 
-const getPendingFileApprovalItems = async ({ fileType, search = "", page = 1, limit = 20 } = {}) => {
+const getFileApprovalItems = async ({
+  fileType,
+  approvalStatus = "pending",
+  search = "",
+  page = 1,
+  limit = 20,
+} = {}) => {
   if (!APPROVAL_FILE_TYPES.includes(fileType)) {
     const error = new Error("Invalid approval file type");
     error.statusCode = 400;
@@ -214,20 +217,37 @@ const getPendingFileApprovalItems = async ({ fileType, search = "", page = 1, li
     .select(`code name description brand brand_name country_of_origin cbm kd mounting_file_needed ${fileType} file_approvals`)
     .sort({ code: 1 })
     .lean();
-  const pending = items.filter((item) => isFileApprovalPending(item, fileType));
+  const normalizedStatus = text(approvalStatus).toLowerCase();
+  if (!["all", "pending", "completed"].includes(normalizedStatus)) {
+    const error = new Error("Invalid approval status");
+    error.statusCode = 400;
+    throw error;
+  }
+  const filtered = items.filter((item) => (
+    normalizedStatus === "all"
+      ? isFileApprovalEligible(item, fileType)
+      : normalizedStatus === "pending"
+        ? isFileApprovalPending(item, fileType)
+        : isFileApprovalEligible(item, fileType) && !isFileApprovalPending(item, fileType)
+  ));
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
   const safePage = Math.max(1, Number(page) || 1);
   const start = (safePage - 1) * safeLimit;
   return {
-    data: pending.slice(start, start + safeLimit),
+    data: filtered.slice(start, start + safeLimit),
     pagination: {
       page: safePage,
       limit: safeLimit,
-      totalRecords: pending.length,
-      totalPages: Math.max(1, Math.ceil(pending.length / safeLimit)),
+      totalRecords: filtered.length,
+      totalPages: Math.max(1, Math.ceil(filtered.length / safeLimit)),
     },
   };
 };
+
+const getPendingFileApprovalItems = (options = {}) => getFileApprovalItems({
+  ...options,
+  approvalStatus: "pending",
+});
 
 const ensureObjectIdList = (values = []) => {
   const ids = Array.isArray(values) ? values : [];
@@ -249,6 +269,7 @@ module.exports = {
   countItemTaskMetrics,
   countItemTasks,
   ensureObjectIdList,
+  getFileApprovalItems,
   getPendingFileApprovalItems,
   getStoredFileKey,
   getTaskCounts,

@@ -54,6 +54,16 @@ test("all item countries leaves the item query unfiltered", () => {
   assert.deepEqual(buildItemMatch({ country: "all" }), {});
 });
 
+test("unspecified country keeps report drill-downs on items without a country", () => {
+  assert.deepEqual(buildItemMatch({ country: "Unspecified" }), {
+    $or: [
+      { country_of_origin: { $exists: false } },
+      { country_of_origin: null },
+      { country_of_origin: { $regex: "^\\s*$" } },
+    ],
+  });
+});
+
 test("item country filter combines with existing filters", () => {
   const match = buildItemMatch({
     brand: "Brand A",

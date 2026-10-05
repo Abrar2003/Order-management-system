@@ -1529,6 +1529,22 @@ small,
   white-space: nowrap;
 }
 
+.employee-country-count-link {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dashed currentColor;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.employee-country-count-link:hover,
+.employee-country-count-link:focus-visible {
+  border-bottom-style: solid;
+}
+
 .employee-country-row b {
   color: var(--om-color-border-strong);
 }

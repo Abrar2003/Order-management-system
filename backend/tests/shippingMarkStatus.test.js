@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const QC = require("../models/qc.model");
+const Item = require("../models/item.model");
 const { updateShippingMarkUpdated } = require("../controllers/qc.controller");
 
 const createResponse = () => ({
@@ -17,9 +18,13 @@ const createResponse = () => ({
   },
 });
 
-test("manager can mark a QC shipping mark as updated", async (t) => {
+test("manager can mark an item shipping mark as updated through a QC record", async (t) => {
   let update = null;
-  t.mock.method(QC, "findOneAndUpdate", (_filter, nextUpdate) => {
+  t.mock.method(QC, "findOne", () => ({
+    select() { return this; },
+    lean: async () => ({ item: { item_code: "ITEM-1" } }),
+  }));
+  t.mock.method(Item, "findOneAndUpdate", (_filter, nextUpdate) => {
     update = nextUpdate;
     return { lean: async () => ({ shipping_mark_updated: true }) };
   });

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { usePermissions } from "../auth/PermissionContext";
+import { getEmployeeTaskDrilldownPath } from "../utils/employeeTaskDrilldown";
 import "../App.css";
 
 const formatCount = new Intl.NumberFormat("en-IN");
@@ -23,6 +25,7 @@ const isQcEmployee = (employee = {}) => String(employee.role || "").trim().toLow
 const QC_TEAM = Object.freeze({ _id: "qc-team", name: "QC Team", department: "QC", role: "QC" });
 
 const EmployeeReport = () => {
+  const navigate = useNavigate();
   const { isAdmin } = usePermissions();
   const [report, setReport] = useState({ tasks: [], employee: null });
   const [management, setManagement] = useState({ tasks: [], employees: [] });
@@ -221,21 +224,55 @@ const EmployeeReport = () => {
                                   .filter(([, metric]) => metric.total > 0 || metric.pending > 0)
                                   .sort(([left], [right]) => left.localeCompare(right))
                                 : [[countryFilter, current]];
+                              const countLink = (value, status, country, label) => {
+                                const destination = getEmployeeTaskDrilldownPath({
+                                  taskKey: workload.task.key,
+                                  status,
+                                  country,
+                                });
+                                return destination ? (
+                                  <button
+                                    type="button"
+                                    className="employee-report-count-link"
+                                    onClick={() => navigate(destination)}
+                                    aria-label={`View ${label} for ${workload.task.label}`}
+                                  >
+                                    {formatCount.format(value)}
+                                  </button>
+                                ) : <strong>{formatCount.format(value)}</strong>;
+                              };
+                              const countryCountLink = (value, status, country, label) => {
+                                const destination = getEmployeeTaskDrilldownPath({
+                                  taskKey: workload.task.key,
+                                  status,
+                                  country,
+                                });
+                                return destination ? (
+                                  <button
+                                    type="button"
+                                    className="employee-country-count-link"
+                                    onClick={() => navigate(destination)}
+                                    aria-label={`View ${label} for ${country}`}
+                                  >
+                                    {label} {formatCount.format(value)}
+                                  </button>
+                                ) : <span>{label} {formatCount.format(value)}</span>;
+                              };
                               return (
                                 <article className="employee-workload-card" key={workload.key}>
                                   <header><div><p>{departmentName(workload.employee)} · {workload.employee.name || workload.employee.email || "Unnamed user"}</p><h3>{workload.task.label}</h3></div></header>
                                   <div className="employee-report-metrics">
-                                    <div><span>Total assigned</span><strong>{formatCount.format(current.total)}</strong></div>
-                                    <div className="is-pending"><span>Pending</span><strong>{formatCount.format(current.pending)}</strong></div>
-                                    <div><span>Completed</span><strong>{formatCount.format(completedTasks)}</strong></div>
+                                    <div><span>Total assigned</span>{countLink(current.total, "all", countryFilter, "all assigned items")}</div>
+                                    <div className="is-pending"><span>Pending</span>{countLink(current.pending, "pending", countryFilter, "pending items")}</div>
+                                    <div><span>Completed</span>{countLink(completedTasks, "completed", countryFilter, "completed items")}</div>
                                   </div>
                                   <div className="employee-report-completion"><span>Completion</span><span>{progress}%</span></div>
                                   <div className="employee-report-progress" aria-label={`${progress}% completed`}><span style={{ width: `${progress}%` }} /></div>
                                   <div className="employee-country-workload">
                                     <h4>Country workload</h4>
-                                    {countryFilter === "all" && <div className="employee-country-row is-all"><strong>All Countries</strong><span>Total {formatCount.format(workload.all.total)} <b>·</b> Pending {formatCount.format(workload.all.pending)}</span></div>}
+                                    {countryFilter === "all" && <div className="employee-country-row is-all"><strong>All Countries</strong><span>{countryCountLink(workload.all.total, "all", "all", "Total")} <b>·</b> {countryCountLink(workload.all.pending, "pending", "all", "Pending")}</span></div>}
                                     {countryRows.length ? countryRows.map(([country, metric]) => (
-                                      <div className="employee-country-row" key={country}><strong>{country}</strong><span>Total {formatCount.format(metric.total)} <b>·</b> Pending {formatCount.format(metric.pending)}</span></div>
+                                      <div className="employee-country-row" key={country}><strong>{country}</strong><span>{countryCountLink(metric.total, "all", country, "Total")} <b>·</b> {countryCountLink(metric.pending, "pending", country, "Pending")}</span></div>
                                     )) : <p className="employee-country-empty">No country workload assigned.</p>}
                                   </div>
                                 </article>

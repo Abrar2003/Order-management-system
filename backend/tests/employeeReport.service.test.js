@@ -9,6 +9,7 @@ const {
   countItemTaskMetrics,
   countItemTasks,
   ensureObjectIdList,
+  getFileApprovalItems,
   getTaskMetricsByCountry,
   getTaskMetrics,
   isFileApprovalEligible,
@@ -51,8 +52,8 @@ test("employee task metrics keep item workloads grouped by their stored country"
   t.mock.method(Item, "find", () => ({
     select() { return this; },
     lean: async () => [
-      { code: "NL-1", country_of_origin: "Netherlands" },
-      { code: "DE-1", country_of_origin: "Germany", cad_file: stored("cad") },
+      { code: "NL-1", country_of_origin: "Netherlands", shipping_marks: { files: [stored("nl")] } },
+      { code: "DE-1", country_of_origin: "Germany", cad_file: stored("cad"), shipping_mark_updated: true, shipping_marks: { files: [stored("de")] } },
       { code: "UNKNOWN" },
     ],
   }));
@@ -62,6 +63,8 @@ test("employee task metrics keep item workloads grouped by their stored country"
   assert.deepEqual(metrics.Netherlands.cad_upload, { total: 1, pending: 1 });
   assert.deepEqual(metrics.Germany.cad_upload, { total: 1, pending: 0 });
   assert.deepEqual(metrics.Unspecified.shipping_marks_upload, { total: 1, pending: 1 });
+  assert.deepEqual(metrics.Netherlands.shipping_marks_updated, { total: 1, pending: 1 });
+  assert.deepEqual(metrics.Germany.shipping_marks_updated, { total: 1, pending: 0 });
 });
 
 test("QC approvals require an applicable Indian file and follow the stored file key", () => {
@@ -87,11 +90,11 @@ test("QC approvals require an applicable Indian file and follow the stored file 
   assert.equal(isFileApprovalEligible({ ...item, mounting_file_needed: false }, "mounting_file"), false);
 });
 
-test("shipping mark updates count only active QC records with uploaded item shipping marks", async (t) => {
+test("shipping mark approvals count unique uploaded items, not QC requests", async (t) => {
   let items = [
-    { code: "UPLOADED", shipping_marks: { files: [stored("front"), stored("side")] } },
-    { code: "LEGACY-1", shipping_marks: { shipping_marks_1: { public_id: "legacy-1" } } },
-    { code: "LEGACY-2", shipping_marks: { shipping_marks_2: { link: "legacy-2.pdf" } } },
+    { code: "UPLOADED", shipping_mark_updated: false, shipping_marks: { files: [stored("front"), stored("side")] } },
+    { code: "LEGACY-1", shipping_mark_updated: false, shipping_marks: { shipping_marks_1: { public_id: "legacy-1" } } },
+    { code: "LEGACY-2", shipping_mark_updated: true, shipping_marks: { shipping_marks_2: { link: "legacy-2.pdf" } } },
     { code: "MISSING" },
     { code: "EMPTY", shipping_marks: { files: [{}, { key: "  " }] } },
     { code: "EAN-ONLY", shipping_marks: { ean: stored("ean") } },
@@ -134,7 +137,7 @@ test("shipping mark updates count only active QC records with uploaded item ship
   });
 
   const metrics = await getTaskMetrics();
-  assert.deepEqual(metrics.shipping_marks_updated, { total: 4, pending: 2 });
+  assert.deepEqual(metrics.shipping_marks_updated, { total: 3, pending: 2 });
   assert.deepEqual(metrics.shipping_marks_upload, { total: 6, pending: 3 });
   assert.deepEqual(metrics.inspection_approval, { total: 5, pending: 3 });
 
@@ -147,6 +150,27 @@ test("shipping mark updates count only active QC records with uploaded item ship
   const noOrders = await getTaskMetrics();
   assert.deepEqual(noOrders.shipping_marks_updated, { total: 0, pending: 0 });
   assert.deepEqual(noOrders.inspection_approval, { total: 0, pending: 0 });
+});
+
+test("QC file approval lists support all, pending, and completed states", async (t) => {
+  const items = [
+    { code: "PENDING", country_of_origin: "India", cad_file: stored("cad-a") },
+    { code: "COMPLETE", country_of_origin: "India", cad_file: stored("cad-b"), file_approvals: { cad_file: { file_key: "cad-b" } } },
+    { code: "OUTSIDE", country_of_origin: "Germany", cad_file: stored("cad-c") },
+  ];
+  t.mock.method(Item, "find", () => ({
+    select() { return this; },
+    sort() { return this; },
+    lean: async () => items,
+  }));
+
+  const all = await getFileApprovalItems({ fileType: "cad_file", approvalStatus: "all", limit: 20 });
+  const pending = await getFileApprovalItems({ fileType: "cad_file", approvalStatus: "pending", limit: 20 });
+  const completed = await getFileApprovalItems({ fileType: "cad_file", approvalStatus: "completed", limit: 20 });
+
+  assert.deepEqual(all.data.map((item) => item.code), ["PENDING", "COMPLETE"]);
+  assert.deepEqual(pending.data.map((item) => item.code), ["PENDING"]);
+  assert.deepEqual(completed.data.map((item) => item.code), ["COMPLETE"]);
 });
 
 test("task catalog helpers normalize assignments and exclude inactive orders", () => {

@@ -75,12 +75,20 @@ const buildItemMatch = ({ search, brand, vendor, country } = {}) => {
   }
 
   if (normalizedCountry) {
-    conditions.push({
-      country_of_origin: {
-        $regex: `^${escapeRegex(normalizedCountry)}$`,
-        $options: "i",
-      },
-    });
+    conditions.push(normalizedCountry.toLowerCase() === "unspecified"
+      ? {
+          $or: [
+            { country_of_origin: { $exists: false } },
+            { country_of_origin: null },
+            { country_of_origin: { $regex: "^\\s*$" } },
+          ],
+        }
+      : {
+          country_of_origin: {
+            $regex: `^${escapeRegex(normalizedCountry)}$`,
+            $options: "i",
+          },
+        });
   }
 
   if (conditions.length === 0) return {};

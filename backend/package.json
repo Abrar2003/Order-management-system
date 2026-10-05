@@ -23,6 +23,7 @@
     "backfill:po-cbm": "node scripts/backfillTotalPoCbm.js",
     "backfill:item-kd": "node scripts/backfillItemKdFromLegacyFields.js",
     "backfill:claim-tenures": "node scripts/backfillClaimTenures.js",
+    "backfill:shipping-mark-status": "node scripts/backfillShippingMarkItemStatus.js",
     "validate:qc-heic": "node scripts/validateQcHeicSharp.js",
     "sync:items-inspected-from-latest-inspections": "node scripts/syncItemsInspectedDataFromLatestInspections.js",
     "compare:by-boo-collection": "node scripts/createByBooDbComparisonSheet.js",
