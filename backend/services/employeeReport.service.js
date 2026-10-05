@@ -70,6 +70,13 @@ const createTaskMetrics = () => Object.fromEntries(
   TASK_CATALOG.map((task) => [task.key, { total: 0, pending: 0 }]),
 );
 
+const addTaskMetric = (target, key, metric = {}) => {
+  target[key].total += Number(metric.total || 0);
+  target[key].pending += Number(metric.pending || 0);
+};
+
+const getCountryLabel = (item = {}) => text(item.country_of_origin) || "Unspecified";
+
 const countItemTaskMetrics = (items = []) => {
   const metrics = createTaskMetrics();
   for (const item of items) {
@@ -136,6 +143,54 @@ const getTaskMetrics = async () => {
   return metrics;
 };
 
+const getTaskMetricsByCountry = async () => {
+  const [items, activeOrderIds] = await Promise.all([
+    Item.find({})
+      .select("code country_of_origin kd mounting_file_needed cad_file assembly_file mounting_file packeging_ppt shipping_marks pd_checked file_approvals")
+      .lean(),
+    Order.distinct("_id", ACTIVE_ORDER_MATCH),
+  ]);
+  const metricsByCountry = new Map();
+  const getMetrics = (country) => {
+    if (!metricsByCountry.has(country)) metricsByCountry.set(country, createTaskMetrics());
+    return metricsByCountry.get(country);
+  };
+
+  for (const item of items) {
+    const countryMetrics = getMetrics(getCountryLabel(item));
+    const itemMetrics = countItemTaskMetrics([item]);
+    for (const [key, metric] of Object.entries(itemMetrics)) addTaskMetric(countryMetrics, key, metric);
+  }
+  if (!activeOrderIds.length) return Object.fromEntries(metricsByCountry);
+
+  const activeQcs = await QC.find({ order: { $in: activeOrderIds } })
+    .select("_id item.item_code shipping_mark_updated")
+    .lean();
+  const itemCountryByCode = new Map(items.map((item) => [item.code, getCountryLabel(item)]));
+  const shippingMarkItemCodes = new Set(items.filter(hasPrimaryShippingMark).map((item) => item.code));
+  const qcCountryById = new Map();
+  for (const qc of activeQcs) {
+    const country = itemCountryByCode.get(qc.item?.item_code) || "Unspecified";
+    qcCountryById.set(String(qc._id), country);
+    if (!shippingMarkItemCodes.has(qc.item?.item_code)) continue;
+    const metric = getMetrics(country).shipping_marks_updated;
+    metric.total += 1;
+    if (qc.shipping_mark_updated !== true) metric.pending += 1;
+  }
+  if (!activeQcs.length) return Object.fromEntries(metricsByCountry);
+
+  const inspections = await Inspection.find({
+    qc: { $in: activeQcs.map((qc) => qc._id) },
+    status: "Inspection Done",
+  }).select("qc is_approved").lean();
+  for (const inspection of inspections) {
+    const metric = getMetrics(qcCountryById.get(String(inspection.qc)) || "Unspecified").inspection_approval;
+    metric.total += 1;
+    if (inspection.is_approved !== true) metric.pending += 1;
+  }
+  return Object.fromEntries(metricsByCountry);
+};
+
 const getTaskCounts = async () => Object.fromEntries(
   Object.entries(await getTaskMetrics()).map(([key, metric]) => [key, metric.pending]),
 );
@@ -197,6 +252,7 @@ module.exports = {
   getPendingFileApprovalItems,
   getStoredFileKey,
   getTaskCounts,
+  getTaskMetricsByCountry,
   getTaskMetrics,
   hasPrimaryShippingMark,
   hasStoredFile,

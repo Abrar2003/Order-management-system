@@ -1,102 +1,76 @@
-# PIS, Product Database, and Master Item Data Flow
+# PIS data sanity workflow
 
-This document maps the current OMS item data surfaces after the PIS update log work.
+Effective cycle: **3 October 2026, Asia/Kolkata** (2026-10-02T18:30:00Z). One cycle per Item record. This is an additive rollout: do not reset master data, check flags, or historical logs, and do not reconstruct stages from old logs.
 
-## Shared Data Model
+## Review sequence
 
-Main item data lives in `backend/models/item.model.js`.
-
-Important field groups:
-
-| Data group | Item fields |
-| --- | --- |
-| PIS | `country_of_origin`, `pis_barcode`, `pis_master_barcode`, `pis_inner_barcode`, `pis_item_sizes`, `pis_box_sizes`, `pis_box_mode`, `pis_weight`, `cbm.calculated_pis_total`, `cbm.calculated_master_total`, `pis_checked_flag` |
-| Product Database | `pd_barcode`, `pd_master_barcode`, `pd_inner_barcode`, `pd_item_sizes`, `pd_box_sizes`, `pd_box_mode`, `pd_checked`, `pd_created_by`, `pd_checked_by`, `pd_approved_by`, `pd_last_changed_by`, `pd_history`, `product_type`, `product_specs` |
-| Master | `master_item_sizes`, `master_box_sizes`, `master_box_mode`, `pis_checked_flag` |
-
-Size arrays are capped at 4 entries by the item schema. Inner + master carton mode stores 2 box entries: `inner` and `master`.
-
-## Backend Routes
-
-| Data | Operation | Route | Controller | Business behavior |
-| --- | --- | --- | --- | --- |
-| PIS list | Read | `GET /items` | `backend/controllers/item.controller.js#getItems` | Used by the PIS and Items pages to read item rows, PIS measurements, barcodes, files, QC flags, and metadata. |
-| PIS update | Update | `PATCH /items/:id/pis` | `backend/controllers/item.controller.js#updateItemPis` | Updates PIS country, barcodes, `pis_item_sizes`, `pis_box_sizes`, box mode, derived weights, and calculated CBM. Legacy PIS LBH fields are read-only. In PIS Diff mode it writes master sizes, master box mode, `cbm.calculated_master_total`, and `pis_checked_flag`; PIS fields are left unchanged. |
-| PIS diffs | Read | `GET /items/pis-diffs` | `backend/controllers/item.controller.js#getPisDiffItems` | Reads unchecked rows where inspected data exists and differs from PIS data. Checked rows are excluded by `pis_checked_flag: { $ne: true }`, and rows with no inspected data are excluded because there is nothing to compare. |
-| Product Database | Read | `GET /items/product-database` | `backend/controllers/item.controller.js#getProductDatabaseItems` | Reads Product Database rows, status counts, filters, and row-level permissions. |
-| Product Database | Update | `PATCH /items/:id/product-database` | `backend/controllers/item.controller.js#updateProductDatabaseItem` | Saves PD fields through `backend/helpers/productDatabase.js#applyProductDatabaseSave`, moves the record to Created, and appends `pd_history`. |
-| Product Database | Check | `POST /items/:id/product-database/check` | `backend/controllers/item.controller.js#checkProductDatabaseItem` | Manager check flow. If submitted data changed, it remains Created; otherwise it moves Created to Checked. |
-| Product Database | Approve | `POST /items/:id/product-database/approve` | `backend/controllers/item.controller.js#approveProductDatabaseItem` | Admin approval flow. Can also save changed submitted data while approving. |
-| Master item data | Read | `GET /items/masters` | `backend/controllers/item.controller.js#getItemMasters` | Reads master sizes first, then falls back to PIS sizes when master sizes are empty. |
-| PIS update logs | Read | `GET /items/pis-update-logs` | `backend/controllers/item.controller.js#getPisUpdateLogs` | Reads append-only logs for PIS, PD, and Master updates, including changed fields and missing fields after save. |
-
-There is no hard-delete route for PIS, PD, or Master item data. Clearing values is done by updating those fields to empty values. File deletion is separate: `DELETE /items/:id/files/:fileType`.
-
-## Frontend Pages And Modals
-
-| Page or modal | File path | Reads from | Updates through | Business flow |
-| --- | --- | --- | --- | --- |
-| PIS page | `client/OMS/src/pages/PIS.jsx` | `GET /items` | Opens `EditPisModal` | Shows PIS data and lets users with PIS edit permission open the PIS update modal. |
-| PIS update modal | `client/OMS/src/components/EditPisModal.jsx` | Receives selected item from PIS, PIS Diffs, or Final PIS Check page | `PATCH /items/:id/pis` | Builds PIS payload with country, barcodes, item sizes, box sizes, and box mode. Missing size fields are now allowed and logged instead of blocking the save. |
-| PIS Diffs page | `client/OMS/src/pages/PISDiffs.jsx` | `GET /items/pis-diffs` | Opens `EditPisModal` with `updateSource="pis_diffs"` | Shows unchecked diffs. When Update Master is saved, backend requires Admin/Super Admin, saves the submitted size values to master fields only, sets `pis_checked_flag`, removes the row from the visible list, and logs Master changes. |
-| Final PIS Check page | `client/OMS/src/pages/FinalPISCheck.jsx` | `GET /items/final-pis-check` and related report routes | Opens `EditPisModal` | Report/checking surface that can still update PIS through the same modal and backend route. |
-| Product Database page | `client/OMS/src/pages/ProductDatabase.jsx` | `GET /items/product-database` and product type template APIs | Product Database patch/check/approve routes | Shows status-based PD workflow. The modal saves barcodes, origin, product type specs, PD sizes, and status actions. Empty/missing values are allowed on save/check/approve and are logged. |
-| Item Masters page | `client/OMS/src/pages/ItemMasters.jsx` | `GET /items/masters` | No direct update modal | Read-only master view. It displays `master_item_sizes` and `master_box_sizes`; if those are empty it falls back to PIS sizes. |
-| PIS Update Logs page | `client/OMS/src/pages/PisUpdateLogs.jsx` | `GET /items/pis-update-logs` | Read-only | Shows who updated data, source page, operation type, whether PIS/PD/Master was touched, changed fields, and missing fields after the update. |
-
-## Update Logging Flow
-
-Append-only log rows are stored in `backend/models/pisUpdateLog.model.js` as `pis_update_logs`.
-
-Log creation is centralized through `backend/helpers/itemUpdateAudit.js` and is called by:
-
-| Update source | Logged operation | Logged data scope |
+| Current state | Page | Evidence and Super Admin action |
 | --- | --- | --- |
-| PIS update modal | `pis_update` | `PIS` |
-| PIS Diff modal | `pis_diff_update` | `Master` |
-| Product Database Save | `product_database_update` | `PD` |
-| Product Database Check | `product_database_check` | `PD` |
-| Product Database Approve | `product_database_approve` | `PD` |
+| Awaiting Master 1 | PIS Diffs | Latest approved inspection from one PO; review/save or Confirm unchanged |
+| Master 1 | Final PIS Check | First three additional qualifying distinct POs; review/save Master 2 |
+| Master 2 | Final Master | First three more qualifying distinct POs; review/save Final Master |
+| Final Master | Master vs PD | Correct Final Master, open the normal PD editor, or accept each unresolved issue with a reason; sign off |
+| Current comparison signed off | Master vs PD | Finalize PIS permanently locks Final Master |
 
-Each log keeps:
+Every approved item awaiting Master 1 appears even if it has legacy masters, an old checked flag, imported data, matching measurements, or missing measurements. Existing master values remain in use until the first review; that review also preserves a legacy snapshot. Later pages show waiting progress as well as ready items. Final Master also shows created and finalized items. Only Super Admin can write master data or approve stages/sign-offs/finalization; inspection approval permissions are unchanged.
 
-- User id and display name.
-- Item id, item code, item name, description, brand, and vendors.
-- Page name and source key.
-- Operation type and data scope.
-- Changed field count and before/after values.
-- Missing field count and missing field labels after the update.
-- Extra metadata such as PD status or PIS diff sync flags.
+**Workflow actions write only master data and workflow history. Vendor PIS values and the PIS page are unchanged. Finalize PIS locks only Final Master.** Normal PIS edits, PD approval/editing and inspections remain available after finalization. There is no unlock action.
 
-Log save failures are caught and printed to the backend console so the user update itself is not rolled back by a secondary logging failure.
+## Evidence rules
 
-## Empty And Missing Field Rule
+Evidence comes from actual approved Inspection records joined through QC to the item and PO, within existing brand/vendor access. Cached latest item inspection values are never evidence. PO identifiers are trimmed and case-normalized; repeated visits count once, and a PO consumed by an earlier stage cannot count again.
 
-The PIS update modal, PIS Diff modal, and Product Database modal now allow saves with missing fields.
+For Master 2 and Final Master, a visit must have been recorded strictly after the previous stage review and its inspection date must be on or after that review's India calendar date. Fresh same-day visits are valid; older recorded visits, backdating, future dates, and unapproved records are excluded. Eligible POs are ordered by their first qualifying visit; the first three are selected, using the latest approved qualifying visit for each. Latest visits are ordered by inspection date, recording timestamp and ID. No automatic averaging is performed.
 
-What is allowed:
+The reviewer sees all selected visits before submission. Each stage stores the exact evidence, measurements, normalized consumed POs, reviewer, timestamp, and saved master snapshot. Later source inspection changes do not rewrite completed stage evidence. Matching measurements still require an explicit review.
 
-- Empty country/barcode fields.
-- Empty or partial PIS item and box size rows.
-- Empty or partial PD item and box size rows.
-- Empty remarks for multi-entry rows.
-- Empty carton count fields.
+## Data and concurrency
 
-What is still rejected:
+Item.master_workflow stores cycle_version, started_at, stage, revision, consumed_pos, legacy_master, reviews, events, pd_review and finalization details. No workflow field means awaiting Master 1 for this cycle. Current master_* fields remain the values consumed elsewhere; cbm.calculated_master_total belongs to Master.
 
-- Negative numbers.
-- Non-numeric values in numeric fields.
-- More than the schema limit of size rows.
-- Unauthorized PIS Diff check/master sync attempts.
+Every action requires the exact current workflow revision. Stage reviews also require the evidence token returned by the list API. PD review/finalization require the current comparison token. The service rechecks evidence and authorization and uses an atomic item update matching revision, stage, master values and PD measurements. A stale or simultaneous second submission returns 409 without advancing. Snapshots and workflow audit events are part of the same atomic write. Existing Item update history and PIS update logs remain available.
 
-Missing fields are not hidden. They are stored in `pis_update_logs.missing_fields` and are visible on the PIS Update Logs page.
+PD measurement writes increment pd_measurement_revision, including changes that are later reverted. Comparison tokens include that revision and both measurement snapshots. Changing either side before finalization requires another sign-off. An unlocked Final Master correction invalidates its sign-off and adds a correction event without changing the original stage evidence.
 
-## Delete Flow
+## Master vs PD
 
-There is no dedicated delete flow for PIS, PD, or Master values.
+Comparison aligns parts/remarks and packaging using existing dimension orientation rules. Every row remains visible, including missing values and unmatched parts.
 
-Current delete-like behavior:
+| Field | Accepted boundary |
+| --- | --- |
+| Item L/B/H | Absolute difference at most 0.5 cm |
+| Box L/B/H | Absolute difference at most 1 cm |
+| Net/gross weight | Difference at most 10% of the Final Master value |
+| Packaging modes and carton counts | Exact match |
+| Missing/zero measurements | Visible issue requiring an explicit acceptance reason |
 
-- To remove PIS or PD field values, save the modal with blank values.
-- To remove master size values, save the PIS Diffs modal with blank size values.
-- To delete item files, use the existing item file delete route: `DELETE /items/:id/files/:fileType`.
+Every unresolved discrepancy needs its own nonblank reason (maximum 2,000 characters). Sign-off records both compared snapshots, reasons and actor. PD changes after finalization may change the live comparison display but cannot reopen or alter Final Master or its final snapshot. Existing PD approval rules continue independently.
+
+## APIs and pages
+
+Shared implementation: backend/helpers/masterWorkflow.js, backend/services/masterWorkflow.service.js, backend/controllers/masterWorkflow.controller.js and client/OMS/src/components/MasterWorkflowPage.jsx.
+
+| Method / route | Purpose |
+| --- | --- |
+| GET /items/pis-diffs | Awaiting Master 1 with approved records |
+| GET /items/final-pis-check | Master 1 items and progress toward Master 2 |
+| GET /items/final-masters | Master 2 waiting/ready, Final Master created, finalized |
+| GET /items/master-vs-pd | Final Master and current PD comparison |
+| POST /items/:id/master-workflow/review | Advance one stage with revision, evidence_token and values containing only master fields |
+| PATCH /items/:id/master-workflow/final-master | Correct unlocked Final Master with revision and master values |
+| POST /items/:id/master-workflow/pd-review | Sign off with revision, comparison_token and reasons keyed by comparison row |
+| POST /items/:id/master-workflow/finalize | Permanently lock with revision and comparison_token |
+
+Lists support search, brand, vendor, country, status, page and limit. Responses expose current stage, revision, evidence/progress and permitted actions. Each list has /export-preview and /export; PDFs use the central /items/pdf/render service. Existing comments and Item Masters stage labels are retained. All writes invalidate related item/QC/report caches.
+
+Legacy direct modal master updates via PATCH /items/:id/pis and the inline /final-pis-check/:code/master-values route return 409 directing callers to the workflow. Ordinary PIS updates continue using PATCH /items/:id/pis.
+
+## Permanent lock and rollout checks
+
+Finalization records final_snapshot, finalized_at and finalized_by. Model middleware guards document saves, query updates, replacements and bulk writes, including parent CBM replacements and stale documents. Normalization hooks skip frozen master values, and the master remark maintenance script excludes finalized records. Application scripts must use the guarded Item model; direct database writes are outside application protections and must never be used to modify finalized masters.
+
+No migration or destructive reset is required. Deploy backend and client together. Existing masters remain available, while all approved legacy items reappear for Master 1. Item rows allow up to five item-size rows and four box-size rows; Inner + Master mode uses two rows and Individual + Master uses one master carton row. Existing nonnegative numeric and remark validation remains in place.
+
+Validation: backend/tests/masterWorkflow.test.js covers the full 1 + 3 + 3 sequence, legacy and unchanged reviews, duplicate/reused POs, approval/date rules, concurrent/stale submissions, PD invalidation, tolerances/missing data, permissions, PIS preservation and locked model writes. Frontend utility tests cover master-only payloads and packaging transitions. Run backend npm test, frontend npm test and npm run build, then exercise the four pages with representative items before production rollout.
+
+After building the frontend, run `node tests/masterWorkflow.browser.js` from backend for the browser check. It serves the built client locally and intercepts all API requests using synthetic data: no database or production API is contacted. It exercises all four pages, unchanged stage reviews, waiting progress, PO reuse exclusion, discrepancy reasons, invalidated sign-off and finalization, then writes a screenshot under .tmp.

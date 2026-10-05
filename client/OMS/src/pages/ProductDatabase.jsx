@@ -12,10 +12,7 @@ import Navbar from "../components/Navbar";
 import AdminRequiredFieldsWarning from "../components/AdminRequiredFieldsWarning";
 import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import ProductTypeDynamicForm from "../components/ProductTypeDynamicForm";
-import {
-  getProductTypeTemplateByKey,
-  getProductTypeTemplates,
-} from "../services/productTypeTemplates.service";
+import { getProductTypeTemplates } from "../services/productTypeTemplates.service";
 import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -44,6 +41,7 @@ import {
   createProductTypeFormState,
   applyLegacyComponentMaterialMigration,
   getLegacyComponentMaterialMigration,
+  getProductTypeTemplateForEdit,
   getProductTypeValidationErrorMessages,
   getUnresolvedLegacyComponentMaterials,
   hasProductTypeFormValues,
@@ -1412,11 +1410,8 @@ export const ProductDatabaseModal = ({
   );
   const [form, setForm] = useState(initialForm);
   const [templateOptions, setTemplateOptions] = useState([]);
-  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesLoading, setTemplatesLoading] = useState(canViewProductTypeTemplates);
   const [templatesError, setTemplatesError] = useState("");
-  const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [templateLoading, setTemplateLoading] = useState(false);
-  const [templateError, setTemplateError] = useState("");
   const [productTypeForm, setProductTypeForm] = useState(() =>
     getProductTypeFormState({ draft, form: initialForm, item: draftItem, template: null }),
   );
@@ -1443,7 +1438,7 @@ export const ProductDatabaseModal = ({
     setMeasuredSizeForm(getProductDatabaseMeasuredSizeFormState({ draft, item: draftItem }));
   }, [draft, draftItem]);
 
-  const loadTemplateOptions = useCallback(async () => {
+  useEffect(() => {
     if (!canViewProductTypeTemplates) {
       setTemplateOptions([]);
       setTemplatesError("");
@@ -1451,100 +1446,74 @@ export const ProductDatabaseModal = ({
       return;
     }
 
-    try {
-      setTemplatesLoading(true);
-      setTemplatesError("");
-      const response = await getProductTypeTemplates();
-      const currentSelectionRef = buildTemplateOptionValue(
-        draftItem?.product_type?.key,
-        draftItem?.product_type?.version,
-      );
-      const options = (Array.isArray(response?.data) ? response.data : []).filter(
-        (templateOption) =>
-          templateOption?.status === "active" ||
-          buildTemplateOptionValue(
-            templateOption?.key,
-            templateOption?.version,
-          ) === currentSelectionRef,
-      );
-      setTemplateOptions(options);
-    } catch (loadError) {
-      setTemplateOptions([]);
-      setTemplatesError(
-        loadError?.response?.data?.message ||
-          loadError?.message ||
-          "Failed to load product type templates.",
-      );
-    } finally {
-      setTemplatesLoading(false);
-    }
+    let cancelled = false;
+    const loadTemplateOptions = async () => {
+      try {
+        setTemplatesLoading(true);
+        setTemplatesError("");
+        const response = await getProductTypeTemplates();
+        if (cancelled) return;
+        const currentSelectionRef = buildTemplateOptionValue(
+          draftItem?.product_type?.key,
+          draftItem?.product_type?.version,
+        );
+        const options = (Array.isArray(response?.data) ? response.data : []).filter(
+          (templateOption) =>
+            templateOption?.status === "active" ||
+            buildTemplateOptionValue(
+              templateOption?.key,
+              templateOption?.version,
+            ) === currentSelectionRef,
+        );
+        setTemplateOptions(options);
+      } catch (loadError) {
+        if (cancelled) return;
+        setTemplateOptions([]);
+        setTemplatesError(
+          loadError?.response?.data?.message ||
+            loadError?.message ||
+            "Failed to load product type templates.",
+        );
+      } finally {
+        if (!cancelled) setTemplatesLoading(false);
+      }
+    };
+
+    loadTemplateOptions();
+    return () => {
+      cancelled = true;
+    };
   }, [canViewProductTypeTemplates, draftItem]);
 
-  useEffect(() => {
-    loadTemplateOptions();
-  }, [loadTemplateOptions]);
+  // The list already contains the full definitions; a second version request can
+  // arrive late and replace the active template with the record's old version.
+  const selectedProductTypeTemplate = useMemo(
+    () => mergeProductDatabaseTableV1Fields(getProductTypeTemplateForEdit(
+      templateOptions,
+      form.productTypeKey,
+      form.productTypeVersion,
+    )),
+    [templateOptions, form.productTypeKey, form.productTypeVersion],
+  );
+  const templateError =
+    canViewProductTypeTemplates && !templatesLoading && !templatesError &&
+    normalizeTemplateKey(form.productTypeKey) && !selectedProductTypeTemplate
+      ? "The selected product type template is not available."
+      : "";
 
   useEffect(() => {
-    const currentKey = normalizeTemplateKey(form.productTypeKey);
-    const currentVersion = Number(form.productTypeVersion || 0);
-    if (!currentKey || !currentVersion) return;
-
-    const newerActiveTemplate = templateOptions.reduce(
-      (newest, templateOption) =>
-        templateOption?.status === "active" &&
-        normalizeTemplateKey(templateOption?.key) === currentKey &&
-        Number(templateOption?.version || 0) > currentVersion &&
-        Number(templateOption?.version || 0) > Number(newest?.version || 0)
-          ? templateOption
-          : newest,
-      null,
-    );
-    if (!newerActiveTemplate) return;
+    if (
+      !selectedProductTypeTemplate ||
+      Number(selectedProductTypeTemplate.version) === Number(form.productTypeVersion || 0)
+    ) {
+      return;
+    }
 
     setForm((previous) => ({
       ...previous,
-      productTypeVersion: Number(newerActiveTemplate.version),
+      productTypeVersion: Number(selectedProductTypeTemplate.version),
     }));
-    setSelectedTemplate(null);
-    setTemplateError("");
-    setProductTypeForm(createProductTypeFormState({ item: {}, template: null }));
-    setProductTypeErrors(cloneProductTypeValidation());
-  }, [form.productTypeKey, form.productTypeVersion, templateOptions]);
-
-  const loadSelectedTemplate = useCallback(
-    async (templateKey, templateVersion = 0) => {
-      const normalizedTemplateKey = normalizeTemplateKey(templateKey);
-      if (!canViewProductTypeTemplates || !normalizedTemplateKey) {
-        setSelectedTemplate(null);
-        setTemplateError("");
-        setTemplateLoading(false);
-        return;
-      }
-
-      try {
-        setTemplateLoading(true);
-        setTemplateError("");
-        const response = await getProductTypeTemplateByKey(normalizedTemplateKey, {
-          ...(templateVersion > 0 ? { version: templateVersion } : {}),
-        });
-        setSelectedTemplate(response?.data || null);
-      } catch (loadError) {
-        setSelectedTemplate(null);
-        setTemplateError(
-          loadError?.response?.data?.message ||
-            loadError?.message ||
-            "Failed to load the selected product type template.",
-        );
-      } finally {
-        setTemplateLoading(false);
-      }
-    },
-    [canViewProductTypeTemplates],
-  );
-  const selectedProductTypeTemplate = useMemo(
-    () => mergeProductDatabaseTableV1Fields(selectedTemplate),
-    [selectedTemplate],
-  );
+  }, [form.productTypeVersion, selectedProductTypeTemplate]);
   const legacyComponentMigration = useMemo(
     () => getLegacyComponentMaterialMigration({
       item: draftItem,
@@ -1554,28 +1523,7 @@ export const ProductDatabaseModal = ({
   );
 
   useEffect(() => {
-    const selectedKey = normalizeTemplateKey(form.productTypeKey);
-    if (!selectedKey) {
-      setSelectedTemplate(null);
-      setTemplateError("");
-      setProductTypeForm(
-        getProductTypeFormState({ draft, form, item: draftItem, template: null }),
-      );
-      setProductTypeErrors(cloneProductTypeValidation());
-      return;
-    }
-
-    loadSelectedTemplate(selectedKey, Number(form.productTypeVersion || 0));
-  }, [
-    draft,
-    draftItem,
-    form.productTypeKey,
-    form.productTypeVersion,
-    loadSelectedTemplate,
-  ]);
-
-  useEffect(() => {
-    if (!selectedProductTypeTemplate) {
+    if (normalizeTemplateKey(form.productTypeKey) && !selectedProductTypeTemplate) {
       return;
     }
 
@@ -1599,7 +1547,8 @@ export const ProductDatabaseModal = ({
 
   const templateReady =
     !normalizeTemplateKey(form.productTypeKey) ||
-    (!templateLoading && Boolean(selectedProductTypeTemplate));
+    (!templatesLoading && Boolean(selectedProductTypeTemplate) &&
+      Number(selectedProductTypeTemplate.version) === Number(form.productTypeVersion));
 
   const currentProductTypePayload = useMemo(() => {
     if (!normalizeTemplateKey(form.productTypeKey)) {
@@ -1792,8 +1741,6 @@ export const ProductDatabaseModal = ({
       productTypeKey: nextKey,
       productTypeVersion: nextVersion,
     }));
-    setSelectedTemplate(null);
-    setTemplateError("");
     setProductTypeForm(createProductTypeFormState({ item: {}, template: null }));
     setProductTypeErrors(cloneProductTypeValidation());
   };
@@ -2395,9 +2342,6 @@ export const ProductDatabaseModal = ({
                       <div className="d-flex flex-wrap gap-2 justify-content-lg-end">
                         {templatesLoading && (
                           <span className="om-summary-chip">Loading product types...</span>
-                        )}
-                        {templateLoading && normalizeTemplateKey(form.productTypeKey) && (
-                          <span className="om-summary-chip">Loading selected template...</span>
                         )}
                         {selectedProductTypeTemplate && (
                           <>

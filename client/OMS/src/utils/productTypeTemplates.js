@@ -41,6 +41,24 @@ export const normalizeTemplateKey = (value) =>
     .replace(/_+/g, "_")
     .replace(/^_+|_+$/g, "");
 
+export const getProductTypeTemplateForEdit = (templates = [], key = "", version = 0) => {
+  const currentKey = normalizeTemplateKey(key);
+  const currentVersion = Number(version || 0);
+  if (!currentKey) return null;
+
+  return templates.reduce((selected, template) => {
+    const templateVersion = Number(template?.version || 0);
+    if (
+      normalizeTemplateKey(template?.key) !== currentKey ||
+      templateVersion <= 0 ||
+      (templateVersion !== currentVersion &&
+        !(template?.status === "active" && templateVersion > currentVersion))
+    ) return selected;
+
+    return templateVersion > Number(selected?.version || 0) ? template : selected;
+  }, null);
+};
+
 export const isBlankValue = (value) => {
   if (value === undefined || value === null) return true;
   if (typeof value === "string") {

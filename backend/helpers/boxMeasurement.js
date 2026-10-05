@@ -476,6 +476,7 @@ const calculateEffectiveBoxEntriesCbmTotal = (
   );
 
 module.exports = {
+  normalizeBoxEntryMetadata,
   BOX_PACKAGING_MODES,
   BOX_ENTRY_TYPES,
   BOX_INDIVIDUAL_REMARK_OPTIONS,

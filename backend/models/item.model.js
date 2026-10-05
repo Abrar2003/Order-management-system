@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { masterWorkflowGuard } = require("../helpers/masterWorkflowGuard");
 const {
   coerceVendorArrayForSchema,
   coerceVendorValueForSchema,
@@ -669,6 +670,25 @@ const itemSchema = new mongoose.Schema(
       public_id: { type: String, default: "", trim: true },
     },
     pis_checked_flag: { type: Boolean, default: false },
+    pd_measurement_revision: { type: Number, default: 0, min: 0 },
+    // Absent on legacy items until their first review; existing master values stay intact.
+    master_workflow: {
+      type: new mongoose.Schema({
+        cycle_version: { type: String, required: true },
+        started_at: { type: Date, required: true },
+        stage: { type: String, enum: ["awaiting_master_1", "master_1", "master_2", "final_master", "finalized"], required: true },
+        revision: { type: Number, min: 0, required: true },
+        consumed_pos: { type: [String], default: [] },
+        legacy_master: mongoose.Schema.Types.Mixed,
+        reviews: { type: [mongoose.Schema.Types.Mixed], default: [] },
+        events: { type: [mongoose.Schema.Types.Mixed], default: [] },
+        pd_review: { type: mongoose.Schema.Types.Mixed, default: null },
+        finalized_at: Date,
+        finalized_by: mongoose.Schema.Types.Mixed,
+        final_snapshot: mongoose.Schema.Types.Mixed,
+      }, { _id: false }),
+      default: undefined,
+    },
     is_rectify_imported: { type: Boolean, default: false },
     barcode_exempted: { type: Boolean, default: false },
     finish: {
@@ -691,6 +711,7 @@ itemSchema.index({ brand: 1 });
 itemSchema.index({ brand_name: 1 });
 itemSchema.index({ brands: 1 });
 itemSchema.index({ pis_checked_flag: 1 });
+itemSchema.index({ "master_workflow.stage": 1, code: 1 });
 itemSchema.index({ pd_checked: 1 });
 itemSchema.index({ "product_type.key": 1 });
 itemSchema.index({ "product_type.template": 1 });
@@ -743,17 +764,17 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
     this.inspected_logistics_ean = this.inspected_logistics_eans[0] || "";
   }
 
-  if (hasSelectedPath("master_master_barcode", "master_barcode")) {
+  if (this.master_workflow?.stage !== "finalized" && hasSelectedPath("master_master_barcode", "master_barcode")) {
     const normalizedMasterBarcode = String(
       this.master_master_barcode || this.master_barcode || "",
     ).trim();
     this.master_master_barcode = normalizedMasterBarcode;
     this.master_barcode = normalizedMasterBarcode;
   }
-  if (hasSelectedPath("master_inner_barcode")) {
+  if (this.master_workflow?.stage !== "finalized" && hasSelectedPath("master_inner_barcode")) {
     this.master_inner_barcode = String(this.master_inner_barcode || "").trim();
   }
-  if (hasSelectedPath("master_country_of_origin")) {
+  if (this.master_workflow?.stage !== "finalized" && hasSelectedPath("master_country_of_origin")) {
     this.master_country_of_origin = String(
       this.master_country_of_origin || "",
     ).trim();
@@ -832,6 +853,7 @@ itemSchema.pre("validate", async function resolveVendorReferences() {
 });
 
 itemSchema.pre("validate", function normalizeSingleMasterSizeRemarksForSave() {
+  if (this.master_workflow?.stage === "finalized") return;
   if (Array.isArray(this.master_item_sizes)) {
     this.master_item_sizes = normalizeSingleMasterItemSizeRemarks(
       this.master_item_sizes,
@@ -866,6 +888,7 @@ itemSchema.pre("validate", function formatInspectedSizesToReference() {
   }
 });
 
+itemSchema.plugin(masterWorkflowGuard);
 const Item = mongoose.model("items", itemSchema);
 
 Item.createSizeEntrySchema = createSizeEntrySchema;

@@ -1396,6 +1396,155 @@ small,
   margin-top: 0;
 }
 
+.employee-report-employee-toolbar {
+  grid-template-columns: minmax(210px, 1.5fr) repeat(4, minmax(140px, 1fr));
+}
+
+.employee-department-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 264px), 1fr));
+  align-items: start;
+  gap: 1rem;
+}
+
+.employee-department-section {
+  min-width: 0;
+  border: 1px solid var(--om-color-border);
+  border-top: 3px solid var(--om-color-accent-strong);
+  background: var(--om-color-surface-muted);
+}
+
+.employee-department-header {
+  padding: 1rem 1rem 0.9rem;
+  border-bottom: 1px solid var(--om-color-border);
+}
+
+.employee-department-header > p,
+.employee-workload-card header p {
+  margin: 0 0 0.2rem;
+  color: var(--om-color-text-soft);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.employee-department-header h2,
+.employee-workload-card h3 {
+  margin: 0;
+  color: var(--om-color-text);
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.employee-department-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem 0.9rem;
+  margin: 1rem 0 0;
+}
+
+.employee-department-summary div {
+  min-width: 0;
+}
+
+.employee-department-summary dt {
+  color: var(--om-color-text-soft);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.employee-department-summary dd {
+  margin: 0.08rem 0 0;
+  color: var(--om-color-text);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.employee-card-stack {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+.employee-workload-card {
+  min-width: 0;
+  border: 1px solid var(--om-color-border);
+  border-radius: 8px;
+  background: var(--om-color-surface);
+  box-shadow: var(--om-shadow-sm);
+  padding: 1rem;
+}
+
+.employee-workload-card .employee-report-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.employee-workload-card .employee-report-metrics strong {
+  font-size: 1.2rem;
+}
+
+.employee-workload-card .employee-report-completion {
+  margin-top: 1rem;
+}
+
+.employee-country-workload {
+  margin-top: 1rem;
+  border-top: 1px solid var(--om-color-border);
+  padding-top: 0.85rem;
+}
+
+.employee-country-workload h4 {
+  margin: 0 0 0.55rem;
+  color: var(--om-color-text-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.employee-country-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  padding: 0.45rem 0;
+  border-top: 1px solid color-mix(in srgb, var(--om-color-border) 70%, transparent);
+  color: var(--om-color-text);
+  font-size: 0.78rem;
+}
+
+.employee-country-row:first-of-type {
+  border-top: 0;
+}
+
+.employee-country-row strong {
+  overflow-wrap: anywhere;
+}
+
+.employee-country-row span {
+  color: var(--om-color-text-soft);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.employee-country-row b {
+  color: var(--om-color-border-strong);
+}
+
+.employee-country-row.is-all {
+  margin-bottom: 0.2rem;
+  border-bottom: 1px solid var(--om-color-border);
+  color: var(--om-color-accent-strong);
+}
+
+.employee-country-empty {
+  margin: 0;
+  color: var(--om-color-text-soft);
+  font-size: 0.8rem;
+}
+
 @media (max-width: 1199.98px) {
   .employee-report-summary-grid,
   .employee-report-task-grid {
@@ -1440,6 +1589,20 @@ small,
 
   .employee-report-task-card {
     min-height: 250px;
+  }
+
+  .employee-workload-card .employee-report-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .employee-country-row {
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+  }
+
+  .employee-country-row span {
+    text-align: left;
+    white-space: normal;
   }
 }
 

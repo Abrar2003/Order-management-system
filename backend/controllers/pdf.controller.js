@@ -7,6 +7,8 @@ const PDF_REPORT_KEYS = new Set([
   "common-errors-report",
   "delayed-po-report",
   "final-pis-check",
+  "final-masters",
+  "master-vs-pd",
   "inspection-report",
   "packed-goods",
   "shipping-pending",

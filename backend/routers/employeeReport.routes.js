@@ -8,6 +8,7 @@ const router = express.Router();
 
 router.get("/me", auth, requirePermission("reports", "view"), controller.getMyEmployeeReport);
 router.get("/management", auth, authorize("admin"), controller.getEmployeeManagement);
+router.patch("/employees/:employeeId/department", auth, authorize("admin"), controller.updateEmployeeDepartment);
 router.put("/assignments/:taskKey", auth, authorize("admin"), controller.updateTaskAssignment);
 
 module.exports = router;

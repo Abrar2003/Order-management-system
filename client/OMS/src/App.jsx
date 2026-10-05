@@ -70,6 +70,8 @@ const ProductTypeTemplates = lazy(() => import("./pages/ProductTypeTemplates"));
 const PermissionManagement = lazy(() => import("./pages/PermissionManagement"));
 const PIS = lazy(() => import("./pages/PIS"));
 const Finishes = lazy(() => import("./pages/Finishes"));
+const FinalMaster = lazy(() => import("./pages/FinalMaster"));
+const MasterVsPD = lazy(() => import("./pages/MasterVsPD"));
 const PISDiffs = lazy(() => import("./pages/PISDiffs"));
 const FinalPISCheck = lazy(() => import("./pages/FinalPISCheck"));
 const PisUpdateLogs = lazy(() => import("./pages/PisUpdateLogs"));
@@ -657,6 +659,8 @@ const App = () => {
             }
           />
 
+          <Route path="/final-masters" element={<ProtectedRoute allowViewer={false} permissionModule="pis"><FinalMaster /></ProtectedRoute>} />
+          <Route path="/master-vs-pd" element={<ProtectedRoute allowViewer={false} permissionModule="pis"><MasterVsPD /></ProtectedRoute>} />
           <Route
             path="/final-pis-check"
             element={

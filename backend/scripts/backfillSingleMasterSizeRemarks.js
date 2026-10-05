@@ -133,7 +133,7 @@ const buildBulkOps = (docs = []) =>
 
       return {
         updateOne: {
-          filter: { _id: doc._id },
+          filter: { _id: doc._id, "master_workflow.stage": { $ne: "finalized" } },
           update: { $set },
         },
       };
@@ -181,7 +181,7 @@ const main = async () => {
 
   const [totalItems, docs] = await Promise.all([
     Item.countDocuments({}),
-    Item.find(getCandidateQuery())
+    Item.find({ $and: [getCandidateQuery(), { "master_workflow.stage": { $ne: "finalized" } }] })
       .select("code master_item_sizes master_box_sizes")
       .lean(),
   ]);

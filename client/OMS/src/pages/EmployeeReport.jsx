@@ -1,35 +1,36 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
-import { getUserFromToken } from "../auth/auth.service";
-import { isQcOnlyUserRole } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import "../App.css";
 
 const formatCount = new Intl.NumberFormat("en-IN");
 const asCount = (value) => Math.max(0, Number(value) || 0);
-const FILE_TASK_OPTIONS = Object.freeze({
-  cad_upload: { fileType: "cad_file" },
-  assembly_upload: { fileType: "assembly_file" },
-  mounting_upload: { fileType: "mounting_file" },
-  shipping_marks_upload: { fileType: "shipping_marks" },
-  packaging_ppt_upload: { fileType: "packeging_ppt" },
-  cad_approval: { fileType: "cad_file", qcApproval: true },
-  assembly_approval: { fileType: "assembly_file", qcApproval: true },
-  mounting_approval: { fileType: "mounting_file", qcApproval: true },
+const EMPTY_METRIC = Object.freeze({ total: 0, pending: 0 });
+
+const addMetric = (target, metric = EMPTY_METRIC) => ({
+  total: target.total + asCount(metric.total),
+  pending: target.pending + asCount(metric.pending),
 });
+
+const completionPercent = ({ total, pending }) => (
+  total ? Math.round((Math.max(0, total - Math.min(total, pending)) / total) * 100) : 0
+);
+
+const departmentName = (employee = {}) => String(employee.department || "").trim() || "Unassigned";
+const hasDepartment = (employee = {}) => Boolean(String(employee.department || "").trim());
+const isQcEmployee = (employee = {}) => String(employee.role || "").trim().toLowerCase() === "qc";
+const QC_TEAM = Object.freeze({ _id: "qc-team", name: "QC Team", department: "QC", role: "QC" });
 
 const EmployeeReport = () => {
   const { isAdmin } = usePermissions();
-  const navigate = useNavigate();
-  const isQcOnly = isQcOnlyUserRole(getUserFromToken()?.role);
-  const [report, setReport] = useState({ tasks: [] });
+  const [report, setReport] = useState({ tasks: [], employee: null });
   const [management, setManagement] = useState({ tasks: [], employees: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [employeeFilter, setEmployeeFilter] = useState("all");
+  const [departmentFilter, setDepartmentFilter] = useState("all");
+  const [countryFilter, setCountryFilter] = useState("all");
   const [workloadFilter, setWorkloadFilter] = useState("all");
   const [sort, setSort] = useState("pending_desc");
 
@@ -41,7 +42,7 @@ const EmployeeReport = () => {
         api.get("/employee-report/me"),
         isAdmin ? api.get("/employee-report/management") : Promise.resolve(null),
       ]);
-      setReport(personalResponse?.data || { tasks: [] });
+      setReport(personalResponse?.data || { tasks: [], employee: null });
       if (managementResponse) setManagement(managementResponse?.data || { tasks: [], employees: [] });
     } catch (loadError) {
       setError(
@@ -57,71 +58,83 @@ const EmployeeReport = () => {
   }, [loadReport]);
 
   const dashboardTasks = isAdmin ? management.tasks : report.tasks;
-  const employeeNames = useCallback((assigneeIds = []) => {
-    const names = assigneeIds
-      .map((id) => management.employees.find((employee) => String(employee._id) === String(id)))
-      .map((employee) => employee?.name || employee?.email)
-      .filter(Boolean);
-    return names.length ? names.join(", ") : "Not assigned";
-  }, [management.employees]);
+  const sourceEmployees = useMemo(
+    () => (isAdmin ? management.employees : (report.employee ? [report.employee] : [])),
+    [isAdmin, management.employees, report.employee],
+  );
+  const qcUsers = useMemo(() => sourceEmployees.filter(isQcEmployee), [sourceEmployees]);
+  const qcUserIds = useMemo(() => new Set(qcUsers.map((employee) => String(employee._id))), [qcUsers]);
+  const employees = useMemo(() => [
+    ...sourceEmployees.filter((employee) => !isQcEmployee(employee) && hasDepartment(employee)),
+    ...(qcUsers.length ? [QC_TEAM] : []),
+  ], [qcUsers.length, sourceEmployees]);
+  const countries = useMemo(() => Array.from(new Set(
+    dashboardTasks.flatMap((task) => Object.keys(task.country_metrics || {})),
+  )).sort((left, right) => left.localeCompare(right)), [dashboardTasks]);
 
-  const assignedLabel = useCallback((task) => {
-    if (task.qc_shared || !task.configurable) return "All QC users";
-    return isAdmin ? employeeNames(task.assignee_ids) : "Assigned to you";
-  }, [employeeNames, isAdmin]);
-
-  const summary = useMemo(() => {
-    const totalTasks = dashboardTasks.reduce((sum, task) => sum + asCount(task.total_count), 0);
-    const totalPending = dashboardTasks.reduce((sum, task) => sum + asCount(task.pending_count), 0);
-    const assignedTaskTypes = dashboardTasks.filter((task) =>
-      task.qc_shared || (task.assignee_ids || []).length > 0,
-    ).length;
-    const assignedEmployeeIds = new Set(
-      dashboardTasks.flatMap((task) => (task.configurable ? task.assignee_ids || [] : [])),
-    );
-    if (isAdmin && dashboardTasks.some((task) => task.qc_shared)) {
-      management.employees
-        .filter((employee) => String(employee.role || "").trim().toLowerCase() === "qc")
-        .forEach((employee) => assignedEmployeeIds.add(employee._id));
+  const taskWorkloads = useMemo(() => {
+    const employeesById = new Map(employees.map((employee) => [String(employee._id), employee]));
+    const workloads = [];
+    for (const task of dashboardTasks) {
+      const assigneeIds = task.qc_shared
+        ? (qcUsers.length ? [QC_TEAM._id] : [])
+        : Array.from(new Set((task.assignee_ids || []).map((id) => (
+          qcUserIds.has(String(id)) ? QC_TEAM._id : String(id)
+        ))));
+      for (const employeeId of assigneeIds) {
+        const employee = employeesById.get(employeeId);
+        if (!employee) continue;
+        const countriesForTask = task.country_metrics || {};
+        workloads.push({
+          key: `${employeeId}-${task.key}`,
+          employee,
+          task,
+          countries: countriesForTask,
+          all: Object.values(countriesForTask).reduce(addMetric, { total: 0, pending: 0 }),
+        });
+      }
     }
-    return {
-      totalTasks,
-      totalPending,
-      assignedTaskTypes,
-      assignedEmployees: isAdmin ? assignedEmployeeIds.size : (dashboardTasks.length ? 1 : 0),
-    };
-  }, [dashboardTasks, isAdmin, management.employees]);
+    return workloads;
+  }, [dashboardTasks, employees, qcUserIds, qcUsers.length]);
 
-  const visibleTasks = useMemo(() => {
+  const visibleWorkloads = useMemo(() => {
     const searchTerm = search.trim().toLowerCase();
-    const nextTasks = dashboardTasks.filter((task) => {
-      const total = asCount(task.total_count);
-      const pending = Math.min(total, asCount(task.pending_count));
-      const matchesSearch = !searchTerm || task.label.toLowerCase().includes(searchTerm);
-      const matchesEmployee = employeeFilter === "all"
-        || (employeeFilter === "all_qc" ? task.qc_shared : (task.assignee_ids || []).includes(employeeFilter));
-      const matchesWorkload = workloadFilter === "all"
-        || (workloadFilter === "pending" ? pending > 0 : total > 0 && pending === 0);
-      return matchesSearch && matchesEmployee && matchesWorkload;
-    });
+    const metric = (workload) => countryFilter === "all"
+      ? workload.all : workload.countries[countryFilter] || EMPTY_METRIC;
+    return taskWorkloads
+      .filter((workload) => {
+        const employee = workload.employee;
+        const current = metric(workload);
+        const name = `${employee.name || ""} ${employee.email || ""}`.toLowerCase();
+        const matchesSearch = !searchTerm || name.includes(searchTerm);
+        const matchesDepartment = departmentFilter === "all" || departmentName(employee) === departmentFilter;
+        const matchesWorkload = workloadFilter === "all"
+          || (workloadFilter === "pending" ? current.pending > 0 : current.total > 0 && current.pending === 0);
+        return matchesSearch && matchesDepartment && matchesWorkload;
+      })
+      .sort((left, right) => {
+        const leftMetric = metric(left);
+        const rightMetric = metric(right);
+        if (sort === "total_desc") return rightMetric.total - leftMetric.total;
+        if (sort === "completion_desc") return completionPercent(rightMetric) - completionPercent(leftMetric);
+        return rightMetric.pending - leftMetric.pending;
+      });
+  }, [countryFilter, departmentFilter, search, sort, taskWorkloads, workloadFilter]);
 
-    return nextTasks.sort((left, right) => {
-      if (sort === "pending_asc") return asCount(left.pending_count) - asCount(right.pending_count);
-      if (sort === "name") return left.label.localeCompare(right.label);
-      return asCount(right.pending_count) - asCount(left.pending_count);
-    });
-  }, [dashboardTasks, employeeFilter, search, sort, workloadFilter]);
-
-  const openTaskFiles = useCallback((task, pendingOnly) => {
-    const option = FILE_TASK_OPTIONS[task.key];
-    if (!option || (option.qcApproval && !isQcOnly)) return;
-    const params = new URLSearchParams({
-      file_type: option.fileType,
-      country: option.qcApproval ? "India" : "all",
-    });
-    if (pendingOnly && !option.qcApproval) params.set("file_status", "missing");
-    navigate(`/item-files?${params.toString()}`);
-  }, [isQcOnly, navigate]);
+  const departments = useMemo(() => Array.from(new Set(employees.map(departmentName)))
+    .sort((left, right) => left.localeCompare(right)), [employees]);
+  const departmentWorkloads = useMemo(() => {
+    const metric = (workload) => countryFilter === "all"
+      ? workload.all : workload.countries[countryFilter] || EMPTY_METRIC;
+    return visibleWorkloads.reduce((groups, workload) => {
+      const department = departmentName(workload.employee);
+      if (!groups[department]) groups[department] = { name: department, employeeIds: new Set(), workloads: [], summary: { total: 0, pending: 0 } };
+      groups[department].employeeIds.add(workload.employee._id);
+      groups[department].workloads.push(workload);
+      groups[department].summary = addMetric(groups[department].summary, metric(workload));
+      return groups;
+    }, {});
+  }, [countryFilter, visibleWorkloads]);
 
   return (
     <>
@@ -130,9 +143,9 @@ const EmployeeReport = () => {
         <div className="employee-report-header">
           <div>
             <p className="text-uppercase text-secondary fw-semibold small mb-1">Live workload</p>
-            <h1>Task Assignment Overview</h1>
+            <h1>Employee Report</h1>
             <p className="text-secondary mb-0">
-              Monitor total workload, pending items, and employee responsibilities.
+              See employee workload by department, then by country.
             </p>
           </div>
           <button type="button" className="btn btn-outline-secondary employee-report-refresh" onClick={loadReport} disabled={loading}>
@@ -145,47 +158,29 @@ const EmployeeReport = () => {
           <div className="text-center text-secondary py-5">Loading report...</div>
         ) : (
           <>
-            <section className="employee-report-summary-grid" aria-label="Workload summary">
-              <article className="employee-report-summary-card is-emphasized">
-                <span>Total Tasks</span><strong>{formatCount.format(summary.totalTasks)}</strong>
-              </article>
-              <article className="employee-report-summary-card is-emphasized">
-                <span>Total Pending</span><strong>{formatCount.format(summary.totalPending)}</strong>
-              </article>
-              <article className="employee-report-summary-card">
-                <span>Assigned Task Types</span><strong>{formatCount.format(summary.assignedTaskTypes)}</strong>
-              </article>
-              <article className="employee-report-summary-card">
-                <span>Employees Assigned</span><strong>{formatCount.format(summary.assignedEmployees)}</strong>
-              </article>
-            </section>
-
-            {dashboardTasks.length === 0 ? (
+            {employees.length === 0 ? (
               <section className="employee-report-empty-state">
-                <h2>No tasks are assigned to you.</h2>
-                <p>Tasks assigned to you will appear here with their current workload.</p>
+                <h2>No employees with departments are available.</h2>
+                <p>Assign an employee to a department in Employee Management to include them here.</p>
               </section>
             ) : (
               <>
-                <div className="employee-report-toolbar" aria-label="Task filters">
+                <div className="employee-report-toolbar employee-report-employee-toolbar" aria-label="Employee filters">
                   <input
                     type="search"
                     className="form-control"
                     value={search}
-                    placeholder="Search task"
+                    placeholder="Search employee"
                     onChange={(event) => setSearch(event.target.value)}
                   />
-                  {isAdmin && (
-                    <select className="form-select" value={employeeFilter} onChange={(event) => setEmployeeFilter(event.target.value)}>
-                      <option value="all">All employees</option>
-                      <option value="all_qc">All QC users</option>
-                      {management.employees.map((employee) => (
-                        <option key={employee._id} value={employee._id}>
-                          {employee.name || employee.email || "Unnamed user"}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  <select className="form-select" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)}>
+                    <option value="all">All departments</option>
+                    {departments.map((department) => <option key={department} value={department}>{department}</option>)}
+                  </select>
+                  <select className="form-select" value={countryFilter} onChange={(event) => setCountryFilter(event.target.value)}>
+                    <option value="all">All countries</option>
+                    {countries.map((country) => <option key={country} value={country}>{country}</option>)}
+                  </select>
                   <select className="form-select" value={workloadFilter} onChange={(event) => setWorkloadFilter(event.target.value)}>
                     <option value="all">All workload</option>
                     <option value="pending">Has pending work</option>
@@ -193,59 +188,61 @@ const EmployeeReport = () => {
                   </select>
                   <select className="form-select" value={sort} onChange={(event) => setSort(event.target.value)}>
                     <option value="pending_desc">Pending: High to low</option>
-                    <option value="pending_asc">Pending: Low to high</option>
-                    <option value="name">Task name</option>
+                    <option value="total_desc">Total: High to low</option>
+                    <option value="completion_desc">Completion: High to low</option>
                   </select>
                 </div>
 
-                {visibleTasks.length === 0 ? (
+                {visibleWorkloads.length === 0 ? (
                   <div className="employee-report-empty-state compact"><h2>No tasks match these filters.</h2></div>
                 ) : (
-                  <section className="employee-report-task-grid" aria-label="Task workload cards">
-                    {visibleTasks.map((task) => {
-                      const total = asCount(task.total_count);
-                      const pending = Math.min(total, asCount(task.pending_count));
+                  <section className="employee-department-grid" aria-label="Department employee workloads">
+                    {Object.values(departmentWorkloads).map((department) => {
+                      const { total, pending } = department.summary;
                       const completed = Math.max(0, total - pending);
-                      const completedPercent = total ? Math.round((completed / total) * 100) : 0;
-                      const canOpenFiles = Boolean(FILE_TASK_OPTIONS[task.key])
-                        && (!FILE_TASK_OPTIONS[task.key].qcApproval || isQcOnly);
-                      const canOpenTotalFiles = canOpenFiles && !FILE_TASK_OPTIONS[task.key].qcApproval;
                       return (
-                        <article key={task.key} className="employee-report-task-card" title={`View ${task.label} workload`}>
-                          <div>
-                            <span className="employee-report-card-type">
-                              {task.qc_shared ? "Shared QC queue" : "Assigned task"}
-                            </span>
-                            <h2>{task.label}</h2>
+                        <section className="employee-department-section" key={department.name}>
+                          <header className="employee-department-header">
+                            <p>Department</p><h2>{department.name}</h2>
+                            <dl className="employee-department-summary">
+                              <div><dt>Employees</dt><dd>{formatCount.format(department.employeeIds.size)}</dd></div>
+                              <div><dt>Total</dt><dd>{formatCount.format(total)}</dd></div>
+                              <div><dt>Pending</dt><dd>{formatCount.format(pending)}</dd></div>
+                              <div><dt>Completed</dt><dd>{formatCount.format(completed)}</dd></div>
+                            </dl>
+                          </header>
+                          <div className="employee-card-stack">
+                            {department.workloads.map((workload) => {
+                              const current = countryFilter === "all" ? workload.all : workload.countries[countryFilter] || EMPTY_METRIC;
+                              const completedTasks = Math.max(0, current.total - current.pending);
+                              const progress = completionPercent(current);
+                              const countryRows = countryFilter === "all"
+                                ? Object.entries(workload.countries)
+                                  .filter(([, metric]) => metric.total > 0 || metric.pending > 0)
+                                  .sort(([left], [right]) => left.localeCompare(right))
+                                : [[countryFilter, current]];
+                              return (
+                                <article className="employee-workload-card" key={workload.key}>
+                                  <header><div><p>{departmentName(workload.employee)} · {workload.employee.name || workload.employee.email || "Unnamed user"}</p><h3>{workload.task.label}</h3></div></header>
+                                  <div className="employee-report-metrics">
+                                    <div><span>Total assigned</span><strong>{formatCount.format(current.total)}</strong></div>
+                                    <div className="is-pending"><span>Pending</span><strong>{formatCount.format(current.pending)}</strong></div>
+                                    <div><span>Completed</span><strong>{formatCount.format(completedTasks)}</strong></div>
+                                  </div>
+                                  <div className="employee-report-completion"><span>Completion</span><span>{progress}%</span></div>
+                                  <div className="employee-report-progress" aria-label={`${progress}% completed`}><span style={{ width: `${progress}%` }} /></div>
+                                  <div className="employee-country-workload">
+                                    <h4>Country workload</h4>
+                                    {countryFilter === "all" && <div className="employee-country-row is-all"><strong>All Countries</strong><span>Total {formatCount.format(workload.all.total)} <b>·</b> Pending {formatCount.format(workload.all.pending)}</span></div>}
+                                    {countryRows.length ? countryRows.map(([country, metric]) => (
+                                      <div className="employee-country-row" key={country}><strong>{country}</strong><span>Total {formatCount.format(metric.total)} <b>·</b> Pending {formatCount.format(metric.pending)}</span></div>
+                                    )) : <p className="employee-country-empty">No country workload assigned.</p>}
+                                  </div>
+                                </article>
+                              );
+                            })}
                           </div>
-                          <div className="employee-report-metrics">
-                            <div>
-                              <span>Total</span>
-                              {canOpenTotalFiles ? (
-                                <button type="button" className="employee-report-count-link" onClick={() => openTaskFiles(task, false)}>
-                                  {formatCount.format(total)}
-                                </button>
-                              ) : <strong>{formatCount.format(total)}</strong>}
-                            </div>
-                            <div className="is-pending">
-                              <span>Pending</span>
-                              {canOpenFiles ? (
-                                <button type="button" className="employee-report-count-link" onClick={() => openTaskFiles(task, true)}>
-                                  {formatCount.format(pending)}
-                                </button>
-                              ) : <strong>{formatCount.format(pending)}</strong>}
-                            </div>
-                          </div>
-                          <div className="employee-report-completion">
-                            <span>Completed {formatCount.format(completed)}</span><span>{completedPercent}%</span>
-                          </div>
-                          <div className="employee-report-progress" aria-label={`${completedPercent}% completed`}>
-                            <span style={{ width: `${completedPercent}%` }} />
-                          </div>
-                          <div className="employee-report-card-assignee">
-                            <span>Assigned to</span><strong>{assignedLabel(task)}</strong>
-                          </div>
-                        </article>
+                        </section>
                       );
                     })}
                   </section>

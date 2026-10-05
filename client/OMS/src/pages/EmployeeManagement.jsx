@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { usePermissions } from "../auth/PermissionContext";
@@ -9,6 +9,7 @@ const EmployeeManagement = () => {
   const [data, setData] = useState({ tasks: [], employees: [] });
   const [loading, setLoading] = useState(true);
   const [savingTask, setSavingTask] = useState("");
+  const [savingDepartment, setSavingDepartment] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -72,6 +73,37 @@ const EmployeeManagement = () => {
     }
   };
 
+  const departments = useMemo(() => Array.from(new Set([
+    "IT", "QC", "Production", "Design", "Operations", "Management",
+    ...data.employees.map((employee) => employee.department).filter(Boolean),
+  ])).sort((left, right) => left.localeCompare(right)), [data.employees]);
+
+  const setDepartment = (employeeId, department) => {
+    setData((current) => ({
+      ...current,
+      employees: current.employees.map((employee) => (
+        employee._id === employeeId ? { ...employee, department } : employee
+      )),
+    }));
+  };
+
+  const saveDepartment = async (employee) => {
+    setSavingDepartment(employee._id);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.patch(`/employee-report/employees/${employee._id}/department`, {
+        department: employee.department || "",
+      });
+      setDepartment(employee._id, response?.data?.employee?.department || "");
+      setSuccess(`${employee.name || employee.email || "Employee"} department saved.`);
+    } catch (saveError) {
+      setError(saveError?.response?.data?.message || saveError?.message || "Failed to save department.");
+    } finally {
+      setSavingDepartment("");
+    }
+  };
+
   if (!isAdmin) {
     return <><Navbar /><main className="page-shell py-4"><div className="alert alert-danger">Employee management is admin-only.</div></main></>;
   }
@@ -84,14 +116,55 @@ const EmployeeManagement = () => {
           <div>
             <p className="text-uppercase text-secondary fw-semibold small mb-1">Settings</p>
             <h1 className="h3 mb-1">Employee Management</h1>
-            <p className="text-secondary mb-0">Assign each live task to one or more employees.</p>
+            <p className="text-secondary mb-0">Organize employees by department, then assign each live task.</p>
           </div>
-          <button type="button" className="btn btn-outline-secondary" onClick={loadManagement} disabled={loading || Boolean(savingTask)}>Refresh</button>
+          <button type="button" className="btn btn-outline-secondary" onClick={loadManagement} disabled={loading || Boolean(savingTask) || Boolean(savingDepartment)}>Refresh</button>
         </div>
 
         {error && <div className="alert alert-danger">{error}</div>}
         {success && <div className="alert alert-success">{success}</div>}
-        <div className="card om-card shadow-sm">
+        <section className="card om-card shadow-sm mb-4">
+          <div className="card-header bg-transparent py-3">
+            <h2 className="h6 mb-1">Employee departments</h2>
+            <p className="text-secondary small mb-0">Select an existing department or type a new one to create it.</p>
+          </div>
+          <div className="card-body p-0">
+            {loading ? (
+              <div className="text-center text-secondary py-4">Loading employees...</div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table align-middle mb-0">
+                  <thead><tr><th>Employee</th><th>Role</th><th>Department</th><th /></tr></thead>
+                  <tbody>
+                    {data.employees.map((employee) => (
+                      <tr key={employee._id}>
+                        <td><strong>{employee.name || employee.email || "Unnamed user"}</strong><div className="small text-secondary">{employee.email}</div></td>
+                        <td>{employee.role || "user"}</td>
+                        <td style={{ minWidth: 220 }}>
+                          <input
+                            className="form-control"
+                            list="employee-departments"
+                            value={employee.department || ""}
+                            placeholder="Select or create department"
+                            disabled={Boolean(savingDepartment)}
+                            onChange={(event) => setDepartment(employee._id, event.target.value)}
+                          />
+                        </td>
+                        <td className="text-end"><button type="button" className="btn btn-primary btn-sm" disabled={Boolean(savingDepartment)} onClick={() => saveDepartment(employee)}>{savingDepartment === employee._id ? "Saving..." : "Save"}</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <datalist id="employee-departments">
+                  {departments.map((department) => <option key={department} value={department} />)}
+                </datalist>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="card om-card shadow-sm">
+          <div className="card-header bg-transparent py-3"><h2 className="h6 mb-0">Task assignments</h2></div>
           <div className="card-body p-0">
             {loading ? (
               <div className="text-center text-secondary py-5">Loading employees...</div>
@@ -149,7 +222,7 @@ const EmployeeManagement = () => {
               </div>
             )}
           </div>
-        </div>
+        </section>
       </main>
     </>
   );

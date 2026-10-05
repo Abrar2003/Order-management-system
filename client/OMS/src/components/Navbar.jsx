@@ -316,6 +316,8 @@ const Navbar = () => {
         routeMenuItem("pis", "PIS", "/pis"),
         routeMenuItem("pis-diffs", "PIS Diffs", "/pis-diffs"),
         routeMenuItem("final-pis-check", "Final PIS Check", "/final-pis-check"),
+        routeMenuItem("final-masters", "Final Master", "/final-masters"),
+        routeMenuItem("master-vs-pd", "Master vs PD", "/master-vs-pd"),
         routeMenuItem("qc-report-mismatch", "QC Report Mismatch", "/reports/qc-report-mismatch"),
       );
     }

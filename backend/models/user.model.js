@@ -14,6 +14,7 @@ const user_Schema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     phone: { type: String },
     name: { type: String, required: true },
+    department: { type: String, default: "", trim: true, maxlength: 80 },
     isQC: { type: Boolean, default: false },
     inspector_id: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
     allowed_brands: [{ type: mongoose.Schema.Types.ObjectId, ref: "brands" }],

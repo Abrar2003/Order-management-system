@@ -7,8 +7,9 @@ const CACHE_PREFIXES = Object.freeze({
   analytics: "analytics:*",
   qc: "qc:*",
   items: "items:*",
-  pisDiffs: "pis-diffs-v2:*",
-  pisDiffReports: "pis-diff-reports-v2:*",
+  masterWorkflow: "master-workflow-v1:*",
+  pisDiffs: "pis-diffs-v3:*",
+  pisDiffReports: "pis-diff-reports-v3:*",
   options: "options:*",
 });
 
@@ -41,6 +42,9 @@ const invalidateOrderCaches = () =>
     CACHE_PREFIXES.analytics,
     CACHE_PREFIXES.qc,
     CACHE_PREFIXES.items,
+    CACHE_PREFIXES.masterWorkflow,
+    CACHE_PREFIXES.pisDiffs,
+    CACHE_PREFIXES.pisDiffReports,
     CACHE_PREFIXES.options,
   ]);
 
@@ -52,12 +56,14 @@ const invalidateQcCaches = () =>
     CACHE_PREFIXES.reports,
     CACHE_PREFIXES.analytics,
     CACHE_PREFIXES.items,
+    CACHE_PREFIXES.masterWorkflow,
     CACHE_PREFIXES.pisDiffs,
     CACHE_PREFIXES.pisDiffReports,
   ]);
 
 const ITEM_CACHE_PATTERNS = Object.freeze([
   CACHE_PREFIXES.items,
+  CACHE_PREFIXES.masterWorkflow,
   CACHE_PREFIXES.pisDiffs,
   CACHE_PREFIXES.pisDiffReports,
   CACHE_PREFIXES.options,

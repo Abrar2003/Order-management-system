@@ -1,3 +1,4 @@
+const masterWorkflow = require("../controllers/masterWorkflow.controller");
 const express = require("express");
 const upload = require("../config/multer.config");
 const auth = require("../middlewares/auth.middleware");
@@ -26,17 +27,9 @@ const {
   getItems,
   exportItems,
   getItemMasters,
-  getPisDiffItems,
-  getPisDiffCheckedReportPreview,
-  exportPisDiffCheckedReport,
-  getFinalPisCheckItems,
-  getFinalPisCheckOptions,
-  getFinalPisCheckReportPreview,
-  exportFinalPisCheckReport,
   createFinalPisCheckComment,
   updateFinalPisCheckComment,
   deleteFinalPisCheckComment,
-  updateFinalPisCheckMasterValues,
   getPisUpdateLogs,
   getProductDatabaseItems,
   exportProductDatabaseItems,
@@ -128,6 +121,16 @@ const requiresPisAdminForPayload = (req, res, next) => {
   return next();
 };
 
+
+for (const view of ["final-masters", "master-vs-pd"]) {
+  router.get('/' + view, auth, requirePermission("pis", "view"), masterWorkflow.list(view));
+  router.get('/' + view + '/export-preview', auth, requirePermission("pis", "export"), masterWorkflow.report(view));
+  router.get('/' + view + '/export', auth, requirePermission("pis", "export"), securityLog("export_excel", "master_workflow"), masterWorkflow.report(view, true));
+}
+for (const [method, suffix, action] of [["post", "review", "review"], ["patch", "final-master", "correct"], ["post", "pd-review", "pd-review"], ["post", "finalize", "finalize"]]) {
+  router[method]('/:id/master-workflow/' + suffix, auth, requirePermission("pis", "view"), masterWorkflow.action(action));
+}
+
 router.get(
   "/",
   auth,
@@ -165,8 +168,8 @@ router.get(
   "/pis-diffs",
   auth,
   requirePermission("pis", "view"),
-  cacheRoute("pis-diffs-v2", MEDIUM_CACHE_TTL),
-  getPisDiffItems,
+  cacheRoute("pis-diffs-v3", MEDIUM_CACHE_TTL),
+  masterWorkflow.list("pis-diffs"),
 );
 
 router.get(
@@ -181,8 +184,8 @@ router.get(
   "/pis-diffs/export-preview",
   auth,
   requirePermission("pis", "export"),
-  cacheRoute("pis-diff-reports-v2", MEDIUM_CACHE_TTL),
-  getPisDiffCheckedReportPreview,
+  cacheRoute("pis-diff-reports-v3", MEDIUM_CACHE_TTL),
+  masterWorkflow.report("pis-diffs"),
 );
 
 router.get(
@@ -192,31 +195,31 @@ router.get(
   securityLog("export_excel", "pis_diff_report", {
     metadata: (req) => ({ filters: req.query || {} }),
   }),
-  exportPisDiffCheckedReport,
+  masterWorkflow.report("pis-diffs", true),
 );
 
 router.get(
   "/final-pis-check",
   auth,
   requirePermission("pis", "view"),
-  cacheRoute("items", MEDIUM_CACHE_TTL),
-  getFinalPisCheckItems,
+  cacheRoute("master-workflow-v1", MEDIUM_CACHE_TTL),
+  masterWorkflow.list("final-pis-check"),
 );
 
 router.get(
   "/final-pis-check/options",
   auth,
   requirePermission("pis", "view"),
-  cacheRoute("items", MEDIUM_CACHE_TTL),
-  getFinalPisCheckOptions,
+  cacheRoute("master-workflow-v1", MEDIUM_CACHE_TTL),
+  masterWorkflow.options,
 );
 
 router.get(
   "/final-pis-check/export-preview",
   auth,
   requirePermission("pis", "export"),
-  cacheRoute("reports", MEDIUM_CACHE_TTL),
-  getFinalPisCheckReportPreview,
+  cacheRoute("master-workflow-v1", MEDIUM_CACHE_TTL),
+  masterWorkflow.report("final-pis-check"),
 );
 
 router.get(
@@ -226,7 +229,7 @@ router.get(
   securityLog("export_excel", "final_pis_check_report", {
     metadata: (req) => ({ filters: req.query || {} }),
   }),
-  exportFinalPisCheckReport,
+  masterWorkflow.report("final-pis-check", true),
 );
 
 router.post(
@@ -259,7 +262,7 @@ router.patch(
   requireAdminOnlyPisEdit,
   requirePermission("pis", "edit"),
   invalidateItemsOnSuccess,
-  updateFinalPisCheckMasterValues,
+  masterWorkflow.rejectLegacyMasterWrite,
 );
 
 router.get(

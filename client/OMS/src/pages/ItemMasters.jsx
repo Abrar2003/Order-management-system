@@ -1,3 +1,4 @@
+import { STAGE_LABELS } from "../utils/masterWorkflow";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
@@ -406,6 +407,7 @@ const ItemMasters = () => {
                         <tr key={item?._id || item?.code}>
                           <td>
                             <div className="fw-semibold">{formatText(item?.code)}</div>
+                            <span className="badge text-bg-light">{STAGE_LABELS[item?.master_workflow?.stage] || "Legacy master · Awaiting review"}</span>
                             <div className="small text-secondary">
                               {formatText(item?.description || item?.name)}
                             </div>

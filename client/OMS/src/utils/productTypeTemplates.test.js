@@ -5,6 +5,7 @@ import {
   applyLegacyComponentMaterialMigration,
   createProductTypeFormState,
   getLegacyComponentMaterialMigration,
+  getProductTypeTemplateForEdit,
   getProductTypeValidationErrorMessages,
   getUnresolvedLegacyComponentMaterials,
   isTemplateFieldVisible,
@@ -36,6 +37,31 @@ const payloadKeys = (fieldValues) =>
     selectedProductTypeKey: "cabinet",
     formState: { fieldValues },
   }).product_specs.fields.map((field) => field.key);
+
+test("editing legacy records selects the newest active definition for the same product type", () => {
+  for (const key of ["table", "cabinet"]) {
+    const v3 = { key, version: 3, status: "active", groups: [] };
+    const v2 = { key, version: 2, status: "inactive" };
+    const templates = [
+      { key: "other", version: 9, status: "active" },
+      { key, version: 5, status: "draft" },
+      v3,
+      { key, version: 4, status: "inactive" },
+      { key, version: 1, status: "inactive" },
+      v2,
+    ];
+
+    for (const version of [undefined, 0, 1, 2, "2", 3]) {
+      assert.equal(getProductTypeTemplateForEdit(templates, key.toUpperCase(), version), v3);
+      assert.equal(getProductTypeTemplateForEdit([v3], key, version), v3);
+    }
+    assert.equal(getProductTypeTemplateForEdit([v2], key, 2), v2);
+    assert.equal(getProductTypeTemplateForEdit([v3], key, 4), null);
+    assert.equal(getProductTypeTemplateForEdit(templates, "", 2), null);
+    assert.equal(getProductTypeTemplateForEdit(templates, "missing", 2), null);
+    assert.equal(getProductTypeTemplateForEdit([], key, 2), null);
+  }
+});
 
 test("conditional template fields are visible and saved only when their parents match", () => {
   const mountingField = template.groups[0].fields[1];

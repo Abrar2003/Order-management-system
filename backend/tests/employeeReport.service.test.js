@@ -9,6 +9,7 @@ const {
   countItemTaskMetrics,
   countItemTasks,
   ensureObjectIdList,
+  getTaskMetricsByCountry,
   getTaskMetrics,
   isFileApprovalEligible,
   isFileApprovalPending,
@@ -44,6 +45,23 @@ test("employee task predicates count only applicable missing uploads", () => {
   const metrics = countItemTaskMetrics([{ code: "ONE" }, { code: "TWO", kd: true }]);
   assert.deepEqual(metrics.cad_upload, { total: 2, pending: 2 });
   assert.deepEqual(metrics.assembly_upload, { total: 1, pending: 1 });
+});
+
+test("employee task metrics keep item workloads grouped by their stored country", async (t) => {
+  t.mock.method(Item, "find", () => ({
+    select() { return this; },
+    lean: async () => [
+      { code: "NL-1", country_of_origin: "Netherlands" },
+      { code: "DE-1", country_of_origin: "Germany", cad_file: stored("cad") },
+      { code: "UNKNOWN" },
+    ],
+  }));
+  t.mock.method(Order, "distinct", async () => []);
+
+  const metrics = await getTaskMetricsByCountry();
+  assert.deepEqual(metrics.Netherlands.cad_upload, { total: 1, pending: 1 });
+  assert.deepEqual(metrics.Germany.cad_upload, { total: 1, pending: 0 });
+  assert.deepEqual(metrics.Unspecified.shipping_marks_upload, { total: 1, pending: 1 });
 });
 
 test("QC approvals require an applicable Indian file and follow the stored file key", () => {

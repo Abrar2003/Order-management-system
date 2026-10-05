@@ -1,3 +1,7 @@
+const { stageMatch } = require("../services/masterWorkflow.service");
+const masterWorkflowController = require("./masterWorkflow.controller");
+const { buildItemMatch, applyItemDataAccess } = require("../helpers/itemQuery");
+const { parseSizeEntriesPayload, ITEM_SIZE_REMARK_OPTIONS } = require("../helpers/sizeEntryPayload");
 const Item = require("../models/item.model");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
@@ -37,41 +41,14 @@ const {
   deriveOrderProgress,
   deriveOrderStatus,
 } = require("../helpers/orderStatus");
-const {
-  BOX_PACKAGING_MODES,
-  BOX_SIZE_REMARK_OPTIONS,
-  buildBoxMeasurementCbmSummary,
-  detectBoxPackagingMode,
-  requiresInnerBarcode,
-  requiresMasterBarcode,
-} = require("../helpers/boxMeasurement");
-const {
-  FINAL_PIS_CHECK_ITEM_SELECT,
-  buildFinalPisCheckRows,
-  buildFinalPisCheckPayload,
-  buildFinalPisCheckReportPayload,
-  buildFinalPisCheckOptions,
-  filterFinalPisCheckRowsByDiffField,
-  normalizeFinalPisCheckSortBy,
-  normalizeSortOrder,
-  sortFinalPisCheckRows,
-} = require("../helpers/finalPisCheck");
+const { BOX_SIZE_REMARK_OPTIONS, buildBoxMeasurementCbmSummary, detectBoxPackagingMode, requiresInnerBarcode, requiresMasterBarcode } = require("../helpers/boxMeasurement");
+
 const {
   compareInspectionSizeSnapshot,
 } = require("../helpers/inspectionSizeSnapshot");
-const {
-  getValidInspectionPoLookup,
-  isValidInspectionHistoryRecord,
-} = require("../services/validInspectionHistory.service");
-const {
-  compareBoxSizeDimensionVariance,
-  compareItemSizeDimensionVariance,
-  compareWeightVariance,
-} = require("../helpers/measurementMismatchRules");
-const {
-  formatSizeArrayToReference,
-  hasReferenceSizeArray,
-} = require("../helpers/sizeDimensionFormatter");
+const { isValidInspectionHistoryRecord } = require("../services/validInspectionHistory.service");
+const { compareItemSizeDimensionVariance, compareWeightVariance } = require("../helpers/measurementMismatchRules");
+
 const {
   NOT_SET_STATUS,
   PD_STATUSES,
@@ -114,11 +91,7 @@ const {
   normalizeEan13Input,
 } = require("../helpers/barcodeFormat");
 const { isSuperAdminLikeRole, normalizeUserRoleKey } = require("../helpers/userRole");
-const {
-  normalizeSingleMasterItemSizeRemarks,
-  normalizeSingleMasterBoxSizeRemarks,
-  normalizeSingleMasterSizeRemarks,
-} = require("../helpers/masterSizeRemarks");
+
 const {
   buildComparisonRows,
 } = require("../helpers/pisInspectionMasterComparison");
@@ -276,17 +249,6 @@ const toPositiveCbmNumber = (value) => {
 
 const ITEM_SIZE_ENTRY_LIMIT = 5;
 const BOX_SIZE_ENTRY_LIMIT = 4;
-const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
-  "item",
-  "top",
-  "base",
-  "base2",
-  "pedestal",
-  "stretcher",
-  "item1",
-  "item2",
-  "item3",
-]);
 const WEIGHT_FIELD_KEYS = Object.freeze([
   "top_net",
   "top_gross",
@@ -420,15 +382,6 @@ const getPayloadWeightField = (payloadWeight = {}, fieldKey = "", fieldLabelPref
   return { provided: false, value: 0 };
 };
 
-const isBoxSizeFieldLabel = (fieldLabel = "") =>
-  fieldLabel === "inspected_box_sizes" ||
-  fieldLabel === "pis_box_sizes" ||
-  fieldLabel === "master_box_sizes" ||
-  fieldLabel === "pd_box_sizes";
-
-const getSizeEntryLimitForField = (fieldLabel = "") =>
-  isBoxSizeFieldLabel(fieldLabel) ? BOX_SIZE_ENTRY_LIMIT : ITEM_SIZE_ENTRY_LIMIT;
-
 const buildMeasurementCbmSummary = ({
   sizes = [],
   remarkOptions = [],
@@ -472,149 +425,6 @@ const buildMeasurementCbmSummary = ({
     third: "0",
     total: "0",
   };
-};
-
-const parseSizeEntriesPayload = (
-  entries = [],
-  {
-    fieldLabel = "size entries",
-    remarkOptions = [],
-    weightKey = "",
-    weightLabel = "weight",
-    mode = "",
-    allowIncomplete = false,
-  } = {},
-) => {
-  if (!Array.isArray(entries)) {
-    throw new Error(`${fieldLabel} must be an array`);
-  }
-
-  const sizeEntryLimit = getSizeEntryLimitForField(fieldLabel);
-  if (entries.length > sizeEntryLimit) {
-    throw new Error(`${fieldLabel} cannot exceed ${sizeEntryLimit} entries`);
-  }
-
-  const seenRemarks = new Set();
-  const isBoxSizeField = isBoxSizeFieldLabel(fieldLabel);
-  const resolvedBoxMode =
-    isBoxSizeField
-      ? detectBoxPackagingMode(mode, entries)
-      : BOX_PACKAGING_MODES.INDIVIDUAL;
-  const allowedRemarkValues = new Set(
-    (Array.isArray(remarkOptions) ? remarkOptions : [])
-      .map((option) => normalizeTextField(option).toLowerCase())
-      .filter(Boolean),
-  );
-  const allowedRemarkList = [...allowedRemarkValues].join(", ");
-
-  return entries.map((entry, index) => {
-    const entryLabel = `${fieldLabel} ${index + 1}`;
-    const L = toNonNegativeNumber(entry?.L, `${entryLabel}.L`);
-    const B = toNonNegativeNumber(entry?.B, `${entryLabel}.B`);
-    const H = toNonNegativeNumber(entry?.H, `${entryLabel}.H`);
-
-    if (!allowIncomplete && (L <= 0 || B <= 0 || H <= 0)) {
-      throw new Error(`${entryLabel} must have positive L, B, and H values`);
-    }
-
-    const isCartonBoxEntry =
-      isBoxSizeField && resolvedBoxMode === BOX_PACKAGING_MODES.CARTON;
-    const cartonRemark = isCartonBoxEntry ? (index === 0 ? "inner" : "master") : "";
-    const defaultSingleRemark = isBoxSizeField ? "box" : "item";
-    const normalizedRemark = isCartonBoxEntry
-      ? cartonRemark
-      : normalizeTextField(entry?.remark || "").toLowerCase();
-    if (entries.length > 1 && !isCartonBoxEntry) {
-      if (!normalizedRemark) {
-        if (!allowIncomplete) {
-          throw new Error(`${entryLabel}.remark is required`);
-        }
-      }
-      if (
-        normalizedRemark &&
-        allowedRemarkValues.size > 0 &&
-        !allowedRemarkValues.has(normalizedRemark)
-      ) {
-        throw new Error(`${entryLabel}.remark must be one of: ${allowedRemarkList}`);
-      }
-      if (seenRemarks.has(normalizedRemark)) {
-        throw new Error(`${fieldLabel} remarks must be unique`);
-      }
-      if (normalizedRemark) {
-        seenRemarks.add(normalizedRemark);
-      }
-    }
-
-    const parsedEntry = {
-      L,
-      B,
-      H,
-      remark: entries.length > 1 ? normalizedRemark : normalizedRemark || defaultSingleRemark,
-    };
-
-    if (weightKey) {
-      const parsedWeight = toNonNegativeNumber(
-        entry?.[weightKey],
-        `${entryLabel}.${weightLabel}`,
-      );
-      if (!allowIncomplete && parsedWeight <= 0) {
-        throw new Error(`${entryLabel}.${weightLabel} must be greater than 0`);
-      }
-      parsedEntry[weightKey] = parsedWeight;
-    }
-
-    if (isBoxSizeField) {
-      if (resolvedBoxMode === BOX_PACKAGING_MODES.CARTON) {
-        const entryType = cartonRemark;
-        parsedEntry.remark = entryType;
-        parsedEntry.box_type = entryType;
-        parsedEntry.item_count_in_inner =
-          entryType === "inner"
-            ? toNonNegativeNumber(entry?.item_count_in_inner, `${entryLabel}.item_count_in_inner`)
-            : 0;
-        parsedEntry.box_count_in_master =
-          entryType === "master"
-            ? toNonNegativeNumber(
-                entry?.box_count_in_master,
-                `${entryLabel}.box_count_in_master`,
-              )
-            : 0;
-
-        if (
-          !allowIncomplete &&
-          entryType === "inner" &&
-          parsedEntry.item_count_in_inner <= 0
-        ) {
-          throw new Error(`${entryLabel}.item_count_in_inner must be greater than 0`);
-        }
-        if (
-          !allowIncomplete &&
-          entryType === "master" &&
-          parsedEntry.box_count_in_master <= 0
-        ) {
-          throw new Error(`${entryLabel}.box_count_in_master must be greater than 0`);
-        }
-      } else if (resolvedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
-        parsedEntry.remark = "master";
-        parsedEntry.box_type = "master";
-        parsedEntry.item_count_in_inner = 0;
-        parsedEntry.box_count_in_master = toNonNegativeNumber(
-          entry?.box_count_in_master,
-          `${entryLabel}.box_count_in_master`,
-        );
-
-        if (!allowIncomplete && parsedEntry.box_count_in_master <= 0) {
-          throw new Error(`${entryLabel}.box_count_in_master must be greater than 0`);
-        }
-      } else {
-        parsedEntry.box_type = "individual";
-        parsedEntry.item_count_in_inner = 0;
-        parsedEntry.box_count_in_master = 0;
-      }
-    }
-
-    return parsedEntry;
-  });
 };
 
 const applyCalculatedCbmTotals = (item, setPath) => {
@@ -717,7 +527,7 @@ const applyCalculatedCbmTotals = (item, setPath) => {
           "cbm.calculated_pis_total",
         ),
   );
-  setPath(
+  if (item?.master_workflow?.stage !== "finalized") setPath(
     "cbm.calculated_master_total",
     hasDerivedMasterCbm
       ? masterBoxSummary.total
@@ -1590,79 +1400,6 @@ const resolveInspectorName = (inspectorValue) => {
   ).trim();
 };
 
-const BARCODE_SEARCH_FIELDS = [
-  "pis_barcode",
-  "pis_master_barcode",
-  "pis_inner_barcode",
-  "pis_logistics_ean",
-  "pis_logistics_eans",
-  "inspected_logistics_ean",
-  "inspected_logistics_eans",
-  "master_barcode",
-  "master_master_barcode",
-  "master_inner_barcode",
-  "pd_barcode",
-  "pd_master_barcode",
-  "pd_inner_barcode",
-  "qc.barcode",
-  "qc.master_barcode",
-  "qc.inner_barcode",
-];
-
-const buildBarcodeSearchConditions = (escapedSearch) =>
-  BARCODE_SEARCH_FIELDS.map((field) => ({
-    [field]: { $regex: escapedSearch, $options: "i" },
-  }));
-
-const buildItemMatch = ({ search, brand, vendor, country } = {}) => {
-  const conditions = [];
-  const normalizedSearch = normalizeFilterValue(search);
-  const normalizedBrand = normalizeFilterValue(brand);
-  const normalizedVendor = normalizeFilterValue(vendor);
-  const normalizedCountry = normalizeFilterValue(country);
-
-  if (normalizedSearch) {
-    const escaped = escapeRegex(normalizedSearch);
-    conditions.push({
-      $or: [
-        { code: { $regex: escaped, $options: "i" } },
-        { name: { $regex: escaped, $options: "i" } },
-        { description: { $regex: escaped, $options: "i" } },
-        { brand: { $regex: escaped, $options: "i" } },
-        { brand_name: { $regex: escaped, $options: "i" } },
-        ...buildBarcodeSearchConditions(escaped),
-      ],
-    });
-  }
-
-  if (normalizedBrand) {
-    conditions.push({
-      $or: [
-        { brand: normalizedBrand },
-        { brands: normalizedBrand },
-        { brand_name: normalizedBrand },
-      ],
-    });
-  }
-
-  if (normalizedVendor) {
-    conditions.push(buildVendorsArrayFilter({ field: "vendors", vendorId: normalizedVendor, vendorName: normalizedVendor }));
-  }
-
-  if (normalizedCountry) {
-    conditions.push({
-      country_of_origin: {
-        $regex: `^${escapeRegex(normalizedCountry)}$`,
-        $options: "i",
-      },
-    });
-  }
-
-  if (conditions.length === 0) return {};
-  if (conditions.length === 1) return conditions[0];
-  return { $and: conditions };
-};
-
 const PRODUCT_DATABASE_ITEM_SELECT = [
   "code",
   "name",
@@ -1938,14 +1675,6 @@ const combineMongoMatches = (...matches) => {
   return { $and: activeMatches };
 };
 
-const ITEM_DATA_ACCESS_FIELDS = {
-  brandFields: ["brand", "brand_name", "brands"],
-  vendorFields: ["vendors"],
-};
-
-const applyItemDataAccess = (match = {}, user = {}) =>
-  applyDataAccessMatch(match, user, ITEM_DATA_ACCESS_FIELDS);
-
 const buildItemFilePresenceMatch = (fileConfig = {}) => {
   const storedFileFields = ["key", "public_id", "link", "url"];
   if (fileConfig.multiple) {
@@ -2019,244 +1748,6 @@ const roundCbmForComparison = (value) => {
   return Number(parsed.toFixed(CBM_COMPARE_DECIMALS));
 };
 
-const compareRoundedCbmValues = (inspectedValue, pisValue) => {
-  const inspected = roundCbmForComparison(inspectedValue);
-  const pis = roundCbmForComparison(pisValue);
-  const hasInspected = inspected > 0;
-  const hasPis = pis > 0;
-  const delta = inspected - pis;
-
-  return {
-    mismatch:
-      hasInspected !== hasPis ||
-      (hasInspected && hasPis && Math.abs(delta) > CBM_COMPARE_TOLERANCE + CBM_COMPARE_EPSILON),
-    hasData: hasInspected || hasPis,
-    hasInspected,
-    hasPis,
-    inspected,
-    pis,
-    delta,
-  };
-};
-
-const buildComparableMeasurementEntries = ({
-  sizes = [],
-  weightKey = "",
-  remarkOptions = [],
-  limit = ITEM_SIZE_ENTRY_LIMIT,
-} = {}) =>
-  sortSizeEntriesByRemark(
-    buildSizeEntriesFromLegacy({
-      sizes,
-      weightKey,
-      limit,
-    }).filter((entry) => {
-      const hasSize = hasAnyPositiveMeasurementLbh(entry);
-      const hasWeight = weightKey
-        ? hasPositiveMeasurementWeight(entry?.[weightKey])
-        : false;
-      return hasSize || hasWeight;
-    }),
-    remarkOptions,
-  ).slice(0, limit);
-
-const compareMeasurementEntryGroups = (
-  inspectedEntries = [],
-  pisEntries = [],
-  {
-    weightKey = "",
-    sizeComparator = compareItemSizeDimensionVariance,
-  } = {},
-) => {
-  const inspectedNormalized = Array.isArray(inspectedEntries) ? inspectedEntries : [];
-  const pisNormalized = Array.isArray(pisEntries) ? pisEntries : [];
-
-  const inspectedEntriesWithKeys = inspectedNormalized.map((entry, index) => ({
-    ...entry,
-    __key: buildMeasurementEntryKey(entry, index),
-  }));
-  const pisEntriesWithKeys = pisNormalized.map((entry, index) => ({
-    ...entry,
-    __key: buildMeasurementEntryKey(entry, index),
-  }));
-
-  const inspectedMap = new Map(
-    inspectedEntriesWithKeys.map((entry) => [entry.__key, entry]),
-  );
-  const pisMap = new Map(pisEntriesWithKeys.map((entry) => [entry.__key, entry]));
-  const orderedKeys = [
-    ...new Set([
-      ...inspectedEntriesWithKeys.map((entry) => entry.__key),
-      ...pisEntriesWithKeys.map((entry) => entry.__key),
-    ]),
-  ];
-
-  let sizeMismatch = false;
-  let weightMismatch = false;
-
-  orderedKeys.forEach((key) => {
-    const inspectedEntry = inspectedMap.get(key) || null;
-    const pisEntry = pisMap.get(key) || null;
-    const hasInspectedSize = hasAnyPositiveMeasurementLbh(inspectedEntry || {});
-    const hasPisSize = hasAnyPositiveMeasurementLbh(pisEntry || {});
-
-    if (hasInspectedSize && hasPisSize) {
-      ["L", "B", "H"].forEach((axis) => {
-        const comparison = sizeComparator(inspectedEntry?.[axis], pisEntry?.[axis]);
-        if (comparison.mismatch) {
-          sizeMismatch = true;
-        }
-      });
-    }
-
-    if (!weightKey) return;
-
-    const hasInspectedWeight = hasPositiveMeasurementWeight(inspectedEntry?.[weightKey]);
-    const hasPisWeight = hasPositiveMeasurementWeight(pisEntry?.[weightKey]);
-    if (hasInspectedWeight && hasPisWeight) {
-      if (compareWeightVariance(inspectedEntry?.[weightKey], pisEntry?.[weightKey]).mismatch) {
-        weightMismatch = true;
-      }
-    }
-  });
-
-  return {
-    hasInspectedData: inspectedEntriesWithKeys.some(
-      (entry) =>
-        hasAnyPositiveMeasurementLbh(entry)
-        || (weightKey ? hasPositiveMeasurementWeight(entry?.[weightKey]) : false),
-    ),
-    hasPisData: pisEntriesWithKeys.some(
-      (entry) =>
-        hasAnyPositiveMeasurementLbh(entry)
-        || (weightKey ? hasPositiveMeasurementWeight(entry?.[weightKey]) : false),
-    ),
-    sizeMismatch,
-    weightMismatch,
-  };
-};
-
-const buildPisDiffSummary = (item = {}) => {
-  const {
-    inspectedEntries: inspectedItemEntries,
-    pisEntries: pisItemEntries,
-  } = buildPisDiffComparisonEntrySets(item, "item");
-  const {
-    inspectedEntries: inspectedBoxEntries,
-    pisEntries: pisBoxEntries,
-  } = buildPisDiffComparisonEntrySets(item, "box");
-
-  const itemComparison = compareMeasurementEntryGroups(
-    inspectedItemEntries,
-    pisItemEntries,
-    { weightKey: "net_weight" },
-  );
-  const boxComparison = compareMeasurementEntryGroups(
-    inspectedBoxEntries,
-    pisBoxEntries,
-    {
-      weightKey: "gross_weight",
-      sizeComparator: compareBoxSizeDimensionVariance,
-    },
-  );
-
-  const pisBarcode = normalizeTextField(
-    item?.pis_logistics_eans?.[0] || item?.pis_logistics_ean || item?.pis_master_barcode || item?.pis_barcode,
-  );
-  const inspectedBarcode = normalizeTextField(
-    item?.inspected_logistics_eans?.[0] || item?.inspected_logistics_ean || item?.qc?.master_barcode || item?.qc?.barcode,
-  );
-  const barcodeMismatch =
-    item?.barcode_exempted === true
-      ? false
-      : Boolean(pisBarcode || inspectedBarcode) && pisBarcode !== inspectedBarcode;
-  const cbmComparison = compareRoundedCbmValues(
-    item?.cbm?.calculated_inspected_total,
-    item?.cbm?.calculated_pis_total,
-  );
-  const hasPisMeasurementData =
-    itemComparison.hasPisData
-    || boxComparison.hasPisData;
-  if (!hasPisMeasurementData) {
-    return null;
-  }
-
-  const hasInspectedData =
-    itemComparison.hasInspectedData
-    || boxComparison.hasInspectedData
-    || cbmComparison.hasInspected
-    || Boolean(inspectedBarcode);
-  if (!hasInspectedData) {
-    return null;
-  }
-
-  const diffFields = [];
-  if (barcodeMismatch) diffFields.push("Barcode");
-  if (itemComparison.sizeMismatch) diffFields.push("Item Size");
-  if (itemComparison.weightMismatch) diffFields.push("Item Weight");
-  if (boxComparison.sizeMismatch) diffFields.push("Box Size");
-  if (boxComparison.weightMismatch) diffFields.push("Box Weight");
-  if (cbmComparison.mismatch) diffFields.push("CBM");
-
-  if (diffFields.length === 0) {
-    return null;
-  }
-
-  return {
-    fields: diffFields,
-    flags: {
-      barcode: barcodeMismatch,
-      item_size: itemComparison.sizeMismatch,
-      item_weight: itemComparison.weightMismatch,
-      box_size: boxComparison.sizeMismatch,
-      box_weight: boxComparison.weightMismatch,
-      cbm: cbmComparison.mismatch,
-    },
-  };
-};
-
-const PIS_DIFF_ITEM_SELECT = [
-  "code",
-  "name",
-  "description",
-  "brand",
-  "brand_name",
-  "brands",
-  "vendors",
-  "country_of_origin",
-  "barcode_exempted",
-  "pis_barcode",
-  "pis_master_barcode",
-  "pis_inner_barcode",
-  "pis_logistics_ean",
-  "inspected_logistics_ean",
-  "pis_logistics_eans",
-  "inspected_logistics_eans",
-  "kd",
-  "master_country_of_origin",
-  "master_barcode",
-  "master_master_barcode",
-  "master_inner_barcode",
-  "mounting_file_needed",
-  "mounting_file",
-  "pis_item_sizes",
-  "pis_box_sizes",
-  "pis_box_mode",
-  "master_item_sizes",
-  "master_box_sizes",
-  "master_box_mode",
-  "inspected_item_sizes",
-  "inspected_box_sizes",
-  "inspected_box_mode",
-  "cbm",
-  "pis_checked_flag",
-  "qc.barcode",
-  "qc.master_barcode",
-  "qc.inner_barcode",
-  "image",
-  "updatedAt",
-].join(" ");
-
 const ITEM_MASTER_SELECT = [
   "code",
   "name",
@@ -2273,6 +1764,8 @@ const ITEM_MASTER_SELECT = [
   "master_master_barcode",
   "master_inner_barcode",
   "master_country_of_origin",
+  "master_workflow",
+  "updatedAt",
 ].join(" ");
 
 const PIS_INSPECTION_MASTER_ITEM_SELECT = [
@@ -2330,19 +1823,7 @@ const ITEM_MASTER_ELIGIBLE_MATCH = Object.freeze({
   ],
 });
 
-const buildPisDiffMissingItemMasterMatch = () => ({
-  $nor: ITEM_MASTER_ELIGIBLE_MATCH.$or,
-});
-
-const getPisDiffBrand = (item = {}) =>
-  item?.brand_name
-  || item?.brand
-  || (Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands[0] : "");
-
-const getPisDiffVendors = (item = {}) =>
-  Array.isArray(item?.vendors) && item.vendors.length > 0
-    ? normalizeVendorDisplayList(item.vendors).join(", ")
-    : "";
+const buildPisDiffMissingItemMasterMatch = () => stageMatch("pis-diffs");
 
 const formatPisDiffRemarkLabel = (remark = "", fallback = "Value") => {
   const normalized = normalizeTextField(remark).toLowerCase();
@@ -2409,543 +1890,10 @@ const formatMeasurementBlockForReport = (
   };
 };
 
-const buildPisDiffMeasurementEntries = ({
-  item = {},
-  source = "pis",
-  group = "item",
-} = {}) => {
-  const isPis = source === "pis";
-  const isMaster = source === "master";
-  const isItemGroup = group === "item";
-
-  return buildComparableMeasurementEntries({
-    sizes: isMaster
-      ? (isItemGroup ? item?.master_item_sizes : item?.master_box_sizes)
-      : isPis
-        ? (isItemGroup ? item?.pis_item_sizes : item?.pis_box_sizes)
-        : (isItemGroup ? item?.inspected_item_sizes : item?.inspected_box_sizes),
-    weightKey: isItemGroup ? "net_weight" : "gross_weight",
-    remarkOptions: isItemGroup ? ITEM_SIZE_REMARK_OPTIONS : BOX_SIZE_REMARK_OPTIONS,
-    limit: isItemGroup ? ITEM_SIZE_ENTRY_LIMIT : BOX_SIZE_ENTRY_LIMIT,
-  });
-};
-
-const buildPisDiffNormalizedMeasurementEntries = ({
-  item = {},
-  source = "pis",
-  group = "item",
-} = {}) => {
-  const type = group === "box" ? "box" : "item";
-  const sourceEntries = buildPisDiffMeasurementEntries({ item, source, group });
-  const masterEntries = buildPisDiffMeasurementEntries({
-    item,
-    source: "master",
-    group,
-  });
-
-  if (source === "master" || !Array.isArray(sourceEntries) || sourceEntries.length === 0) {
-    return sourceEntries;
-  }
-
-  if (hasReferenceSizeArray(masterEntries)) {
-    return formatSizeArrayToReference(sourceEntries, masterEntries, { type });
-  }
-
-  if (source === "inspected") {
-    const pisEntries = buildPisDiffMeasurementEntries({ item, source: "pis", group });
-    if (hasReferenceSizeArray(pisEntries)) {
-      return formatSizeArrayToReference(sourceEntries, pisEntries, { type });
-    }
-  }
-
-  return sourceEntries;
-};
-
-const buildPisDiffComparisonEntrySets = (item = {}, group = "item") => ({
-  inspectedEntries: buildPisDiffNormalizedMeasurementEntries({
-    item,
-    source: "inspected",
-    group,
-  }),
-  pisEntries: buildPisDiffNormalizedMeasurementEntries({
-    item,
-    source: "pis",
-    group,
-  }),
-});
-
-const buildPisDiffRows = (items = []) =>
-  (Array.isArray(items) ? items : [])
-    .map((item) => {
-      const pisDiff = buildPisDiffSummary(item);
-      if (!pisDiff) return null;
-      return {
-        ...item,
-        pis_diff: pisDiff,
-      };
-    })
-    .filter(Boolean);
-
-const getPisDiffRowsForMatch = async (match = {}, sort = { updatedAt: -1, code: 1 }) => {
-  const items = await Item.find(match)
-    .select(PIS_DIFF_ITEM_SELECT)
-    .sort(sort)
-    .lean();
-  return buildPisDiffRows(items);
-};
-
-const formatPisDiffValueWithUnit = (value, unit = "") => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return "Not Set";
-  const formatted = parsed.toFixed(2).replace(/\.?0+$/, "");
-  return unit ? `${formatted} ${unit}` : formatted;
-};
-
-const formatPisDiffSignedDelta = (delta, unit = "") => {
-  const parsed = Number(delta);
-  if (!Number.isFinite(parsed) || Math.abs(parsed) < MEASUREMENT_COMPARE_TOLERANCE) {
-    return "0";
-  }
-  const formatted = Math.abs(parsed).toFixed(2).replace(/\.?0+$/, "");
-  return `${parsed > 0 ? "+" : "-"}${formatted}${unit ? ` ${unit}` : ""}`;
-};
-
-const formatPisDiffAbsDelta = (delta, unit = "") => {
-  const parsed = Number(delta);
-  if (!Number.isFinite(parsed)) return `0${unit ? ` ${unit}` : ""}`;
-  const formatted = Math.abs(parsed).toFixed(2).replace(/\.?0+$/, "");
-  return `${formatted}${unit ? ` ${unit}` : ""}`;
-};
-
-const formatPisDiffCbmValue = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return "Not Set";
-  return `${parsed.toFixed(CBM_COMPARE_DECIMALS)} cbm`;
-};
-
-const formatPisDiffSignedCbmDelta = (delta) => {
-  const parsed = Number(delta);
-  if (!Number.isFinite(parsed) || parsed === 0) return "0.00 cbm";
-  return `${parsed > 0 ? "+" : "-"}${Math.abs(parsed).toFixed(CBM_COMPARE_DECIMALS)} cbm`;
-};
-
-const getPisDiffEntryLabel = (entry = null, key = "", fallback = "Value") => {
-  const explicitLabel = formatPisDiffRemarkLabel(entry?.remark || "", "");
-  if (explicitLabel) return explicitLabel;
-
-  const normalizedKey = normalizeTextField(key).toLowerCase();
-  if (!normalizedKey || /^entry\d+$/.test(normalizedKey)) return fallback;
-  return formatPisDiffRemarkLabel(normalizedKey, fallback);
-};
-
-const getPisDiffOrderedEntryKeys = (inspectedEntries = [], pisEntries = []) => [
-  ...new Set([
-    ...(Array.isArray(inspectedEntries) ? inspectedEntries : [])
-      .map((entry, index) => buildMeasurementEntryKey(entry, index)),
-    ...(Array.isArray(pisEntries) ? pisEntries : [])
-      .map((entry, index) => buildMeasurementEntryKey(entry, index)),
-  ]),
-];
-
-const buildPisDiffDetailNote = ({
-  subject = "",
-  inspected = "",
-  pis = "",
-  delta = 0,
-  unit = "",
-  missingSide = "",
-} = {}) => {
-  if (missingSide === "pis") {
-    return `Inspected ${subject} is ${inspected}, while PIS is not set.`;
-  }
-  if (missingSide === "inspected") {
-    return `PIS ${subject} is ${pis}, while inspected value is not set.`;
-  }
-
-  const direction = Number(delta) > 0 ? "greater" : "smaller";
-  return `Inspected ${subject} is ${formatPisDiffAbsDelta(delta, unit)} ${direction} than PIS (${inspected} vs ${pis}).`;
-};
-
-const buildPisDiffMeasurementDetails = ({
-  item = {},
-  group = "item",
-  sizeSection = "Item Size",
-  weightSection = "Item Weight",
-  weightLabel = "Net Weight",
-  weightKey = "net_weight",
-  baseLabel = "Item",
-  sizeComparator = compareItemSizeDimensionVariance,
-} = {}) => {
-  const { inspectedEntries, pisEntries } = buildPisDiffComparisonEntrySets(item, group);
-  const inspectedEntriesWithKeys = inspectedEntries.map((entry, index) => ({
-    ...entry,
-    __key: buildMeasurementEntryKey(entry, index),
-  }));
-  const pisEntriesWithKeys = pisEntries.map((entry, index) => ({
-    ...entry,
-    __key: buildMeasurementEntryKey(entry, index),
-  }));
-  const inspectedMap = new Map(
-    inspectedEntriesWithKeys.map((entry) => [entry.__key, entry]),
-  );
-  const pisMap = new Map(pisEntriesWithKeys.map((entry) => [entry.__key, entry]));
-  const orderedKeys = getPisDiffOrderedEntryKeys(inspectedEntries, pisEntries);
-  const details = [];
-
-  orderedKeys.forEach((key, index) => {
-    const inspectedEntry = inspectedMap.get(key) || null;
-    const pisEntry = pisMap.get(key) || null;
-    const segment = getPisDiffEntryLabel(
-      inspectedEntry || pisEntry,
-      key,
-      baseLabel,
-    );
-    const hasInspectedSize = hasAnyPositiveMeasurementLbh(inspectedEntry || {});
-    const hasPisSize = hasAnyPositiveMeasurementLbh(pisEntry || {});
-
-    if (hasInspectedSize && hasPisSize) {
-      ["L", "B", "H"].forEach((axis) => {
-        const inspectedValueRaw = Number(inspectedEntry?.[axis] || 0);
-        const pisValueRaw = Number(pisEntry?.[axis] || 0);
-        const comparison = sizeComparator(inspectedValueRaw, pisValueRaw);
-        if (!comparison.mismatch) {
-          return;
-        }
-        const delta = comparison.delta;
-
-        const inspectedValue = formatPisDiffValueWithUnit(inspectedValueRaw, "cm");
-        const pisValue = formatPisDiffValueWithUnit(pisValueRaw, "cm");
-
-        details.push({
-          key: `${group}-${key}-${axis}-${index}`,
-          section: sizeSection,
-          segment,
-          attribute: axis,
-          inspected: inspectedValue,
-          pis: pisValue,
-          delta: formatPisDiffSignedDelta(delta, "cm"),
-          note: buildPisDiffDetailNote({
-            subject: `${segment} ${axis}`,
-            inspected: inspectedValue,
-            pis: pisValue,
-            delta,
-            unit: "cm",
-          }),
-        });
-      });
-    }
-
-    if (!weightKey) return;
-
-    const inspectedWeight = Number(inspectedEntry?.[weightKey] || 0);
-    const pisWeight = Number(pisEntry?.[weightKey] || 0);
-    const comparison = compareWeightVariance(inspectedWeight, pisWeight);
-    if (!comparison.mismatch) return;
-
-    const inspectedValue = formatPisDiffValueWithUnit(inspectedWeight, "kg");
-    const pisValue = formatPisDiffValueWithUnit(pisWeight, "kg");
-    const delta = comparison.delta;
-
-    details.push({
-      key: `${group}-${key}-${weightKey}-${index}`,
-      section: weightSection,
-      segment,
-      attribute: weightLabel,
-      inspected: inspectedValue,
-      pis: pisValue,
-      delta: formatPisDiffSignedDelta(delta, "kg"),
-      note: buildPisDiffDetailNote({
-        subject: `${segment} ${weightLabel.toLowerCase()}`,
-        inspected: inspectedValue,
-        pis: pisValue,
-        delta,
-        unit: "kg",
-      }),
-    });
-  });
-
-  return details;
-};
-
-const buildPisDiffCbmDetails = (item = {}) => {
-  const comparison = compareRoundedCbmValues(
-    item?.cbm?.calculated_inspected_total,
-    item?.cbm?.calculated_pis_total,
-  );
-  if (!comparison.mismatch) return [];
-
-  const inspectedValue = comparison.hasInspected
-    ? formatPisDiffCbmValue(comparison.inspected)
-    : "Not Set";
-  const pisValue = comparison.hasPis
-    ? formatPisDiffCbmValue(comparison.pis)
-    : "Not Set";
-
-  return [
-    {
-      key: "cbm-calculated-total",
-      section: "CBM",
-      segment: "Calculated",
-      attribute: "Total CBM",
-      inspected: inspectedValue,
-      pis: pisValue,
-      delta:
-        comparison.hasInspected && comparison.hasPis
-          ? formatPisDiffSignedCbmDelta(comparison.delta)
-          : (comparison.hasInspected ? "PIS not set" : "Inspected not set"),
-      note: buildPisDiffDetailNote({
-        subject: "calculated total CBM",
-        inspected: inspectedValue,
-        pis: pisValue,
-        delta: comparison.delta,
-        unit: "cbm",
-        missingSide: comparison.hasInspected === comparison.hasPis
-          ? ""
-          : (comparison.hasInspected ? "pis" : "inspected"),
-      }),
-    },
-  ];
-};
-
-const buildPisDiffDetailedComparisons = (item = {}) => {
-  const details = [
-    ...buildPisDiffMeasurementDetails({
-      item,
-      group: "item",
-      sizeSection: "Item Size",
-      weightSection: "Item Weight",
-      weightLabel: "Net Weight",
-      weightKey: "net_weight",
-      baseLabel: "Item",
-    }),
-    ...buildPisDiffMeasurementDetails({
-      item,
-      group: "box",
-      sizeSection: "Box Size",
-      weightSection: "Box Weight",
-      weightLabel: "Gross Weight",
-      weightKey: "gross_weight",
-      baseLabel: "Box",
-      sizeComparator: compareBoxSizeDimensionVariance,
-    }),
-    ...buildPisDiffCbmDetails(item),
-  ];
-
-  const pisBarcode =
-    normalizeTextField(item?.pis_master_barcode || item?.pis_barcode) || "Not Set";
-  const inspectedBarcode =
-    Number(item?.qc?.master_barcode || item?.qc?.barcode || 0) > 0
-      ? normalizeTextField(item?.qc?.master_barcode || item?.qc?.barcode)
-      : "Not Set";
-
-  if (
-    item?.barcode_exempted !== true
-    && item?.pis_diff?.flags?.barcode
-    && pisBarcode.toLowerCase() !== inspectedBarcode.toLowerCase()
-  ) {
-    details.push({
-      key: "barcode-master",
-      section: "Barcode",
-      segment: "Master",
-      attribute: "Barcode",
-      inspected: formatEan13BarcodeDisplay(inspectedBarcode),
-      pis: formatEan13BarcodeDisplay(pisBarcode),
-      delta: "Mismatch",
-      note: `Inspected barcode ${formatEan13BarcodeDisplay(inspectedBarcode)} does not match PIS barcode ${formatEan13BarcodeDisplay(pisBarcode)}.`,
-    });
-  }
-
-  return details;
-};
-
-const buildPisDiffReportPreviewRow = (item = {}) => {
-  const inspectedItemBlock = formatMeasurementBlockForReport(
-    buildPisDiffNormalizedMeasurementEntries({ item, source: "inspected", group: "item" }),
-    { weightKey: "net_weight" },
-  );
-  const pisItemBlock = formatMeasurementBlockForReport(
-    buildPisDiffNormalizedMeasurementEntries({ item, source: "pis", group: "item" }),
-    { weightKey: "net_weight" },
-  );
-  const inspectedBoxBlock = formatMeasurementBlockForReport(
-    buildPisDiffNormalizedMeasurementEntries({ item, source: "inspected", group: "box" }),
-    { weightKey: "gross_weight" },
-  );
-  const pisBoxBlock = formatMeasurementBlockForReport(
-    buildPisDiffNormalizedMeasurementEntries({ item, source: "pis", group: "box" }),
-    { weightKey: "gross_weight" },
-  );
-
-  return {
-    id: String(item?._id || item?.code || ""),
-    code: normalizeTextField(item?.code) || "N/A",
-    description: normalizeTextField(item?.description || item?.name) || "N/A",
-    brand: getPisDiffBrand(item) || "N/A",
-    vendors: getPisDiffVendors(item) || "N/A",
-    diff_fields: Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : [],
-    updated_at: item?.updatedAt ? new Date(item.updatedAt).toISOString().slice(0, 10) : "",
-    inspection_report_mismatch: Boolean(item?.inspection_report_mismatch),
-    inspection_report_mismatch_count: Number(item?.inspection_report_mismatch_count || 0),
-    measurements: {
-      inspected_item: inspectedItemBlock,
-      pis_item: pisItemBlock,
-      inspected_box: inspectedBoxBlock,
-      pis_box: pisBoxBlock,
-    },
-    differences: buildPisDiffDetailedComparisons(item),
-  };
-};
-
-const formatPisDiffMismatchStatus = (row = {}) => {
-  if (row?.inspection_report_mismatch) return "Inspection report mismatch";
-  const diffFields = Array.isArray(row?.diff_fields)
-    ? row.diff_fields
-    : Array.isArray(row?.pis_diff?.fields)
-      ? row.pis_diff.fields
-      : [];
-  return diffFields.length > 0 ? "PIS mismatch" : "No mismatch";
-};
-
-const buildPisDiffReportPayload = ({
-  checkedDiffRows = [],
-  search = "",
-  brand = "",
-  vendor = "",
-  country = "",
-} = {}) => {
-  const rows = checkedDiffRows.map((item) => buildPisDiffReportPreviewRow(item));
-  const uniqueBrands = normalizeDistinctValues(
-    checkedDiffRows.map((item) => getPisDiffBrand(item)),
-  );
-  const uniqueVendors = normalizeVendorDisplayList(
-    checkedDiffRows.flatMap((item) => Array.isArray(item?.vendors) ? item.vendors : []),
-  );
-
-  return {
-    generated_at: new Date().toISOString(),
-    filters: {
-      search: normalizeTextField(search) || "All",
-      brand: normalizeTextField(brand) || "All",
-      vendor: normalizeTextField(vendor) || "All",
-      country: normalizeTextField(country) || "All",
-    },
-    summary: {
-      checked_diff_items: rows.length,
-      detailed_difference_rows: rows.reduce(
-        (sum, row) => sum + (Array.isArray(row?.differences) ? row.differences.length : 0),
-        0,
-      ),
-      unique_brands: uniqueBrands,
-      unique_vendors: uniqueVendors,
-    },
-    rows,
-  };
-};
-
-const getCheckedPisDiffRowsForReport = async ({ search, brand, vendor, country, user } = {}) => {
-  const match = applyItemDataAccess({
-    ...buildItemMatch({ search, brand, vendor, country }),
-    pis_checked_flag: true,
-    is_rectify_imported: { $ne: true },
-  }, user);
-
-  const checkedItems = await Item.find(match)
-    .select(PIS_DIFF_ITEM_SELECT)
-    .sort({ updatedAt: -1, code: 1 })
-    .lean();
-  const mismatchLookup = await buildInspectionReportMismatchLookup(checkedItems);
-
-  return buildPisDiffRows(checkedItems)
-    .filter((item) => item?.pis_checked_flag === true)
-    .map((item) => {
-      const mismatchEntry = mismatchLookup.get(normalizeLookupKey(item?.code)) || {};
-      return {
-        ...item,
-        inspection_report_mismatch: Boolean(mismatchEntry?.inspection_report_mismatch),
-        inspection_report_mismatch_count: Number(
-          mismatchEntry?.inspection_report_mismatch_count || 0,
-        ),
-      };
-    });
-};
-
-const buildFinalPisCheckMatch = ({ search, brand, vendor, country } = {}) => {
-  const conditions = [
-    { pis_checked_flag: true },
-    { is_rectify_imported: { $ne: true } },
-    {
-      $or: [
-        { "master_item_sizes.0": { $exists: true } },
-        { "master_box_sizes.0": { $exists: true } },
-        { master_barcode: { $exists: true, $ne: "" } },
-        { master_master_barcode: { $exists: true, $ne: "" } },
-        { master_inner_barcode: { $exists: true, $ne: "" } },
-      ],
-    },
-  ];
-  const normalizedSearch = normalizeFilterValue(search);
-  const normalizedBrand = normalizeFilterValue(brand);
-  const normalizedVendor = normalizeFilterValue(vendor);
-  const normalizedCountry = normalizeFilterValue(country);
-
-  if (normalizedSearch) {
-    const escaped = escapeRegex(normalizedSearch);
-    conditions.push({
-      $or: [
-        { code: { $regex: escaped, $options: "i" } },
-        { name: { $regex: escaped, $options: "i" } },
-        { description: { $regex: escaped, $options: "i" } },
-        ...buildBarcodeSearchConditions(escaped),
-      ],
-    });
-  }
-
-  if (normalizedBrand) {
-    conditions.push({
-      $or: [
-        { brand: normalizedBrand },
-        { brands: normalizedBrand },
-        { brand_name: normalizedBrand },
-      ],
-    });
-  }
-
-  if (normalizedVendor) {
-    conditions.push(buildVendorsArrayFilter({ field: "vendors", vendorId: normalizedVendor, vendorName: normalizedVendor }));
-  }
-
-  if (normalizedCountry) {
-    conditions.push({
-      country_of_origin: {
-        $regex: `^${escapeRegex(normalizedCountry)}$`,
-        $options: "i",
-      },
-    });
-  }
-
-  return { $and: conditions };
-};
+const buildFinalPisCheckMatch = (filters = {}) => ({ $and: [buildItemMatch(filters), stageMatch("final-pis-check")] });
 
 const buildFinalPisCheckAccessMatch = (filters = {}, user = {}) =>
   applyItemDataAccess(buildFinalPisCheckMatch(filters), user);
-
-const getMasterDataCreatedAtByItemId = async (items = []) => {
-  const itemIds = (Array.isArray(items) ? items : [])
-    .map((item) => item?._id)
-    .filter((itemId) => mongoose.Types.ObjectId.isValid(itemId))
-    .map((itemId) => new mongoose.Types.ObjectId(itemId));
-  if (itemIds.length === 0) return new Map();
-
-  const rows = await PisUpdateLog.aggregate([
-    { $match: { item: { $in: itemIds }, data_scope: AUDIT_SCOPES.MASTER } },
-    { $group: { _id: "$item", created_at: { $min: "$createdAt" } } },
-  ]);
-  return new Map(
-    rows
-      .map((row) => [String(row?._id || ""), row?.created_at])
-      .filter(([itemId, createdAt]) => itemId && createdAt),
-  );
-};
 
 exports.__test__ = {
   buildItemMatch,
@@ -2959,63 +1907,6 @@ exports.__test__ = {
   requiresPisBarcodes,
 };
 
-const getFinalPisCheckRowsForQuery = async ({
-  search,
-  brand,
-  vendor,
-  country,
-  diffField,
-  sortBy,
-  sortOrder,
-  user,
-} = {}) => {
-  const match = buildFinalPisCheckAccessMatch(
-    { search, brand, vendor, country },
-    user,
-  );
-  const items = await Item.find(match)
-    .select(FINAL_PIS_CHECK_ITEM_SELECT)
-    .sort({ updatedAt: -1, code: 1 })
-    .lean();
-  const masterDataCreatedAtByItemId = await getMasterDataCreatedAtByItemId(items);
-  const masterDataCreatedAtByItemCode = new Map(
-    items
-      .map((item) => [
-        normalizeLookupKey(item?.code),
-        masterDataCreatedAtByItemId.get(String(item?._id || "")),
-      ])
-      .filter(([itemCode, createdAt]) => itemCode && createdAt),
-  );
-  const validInspectionPoLookup = await getValidInspectionPoLookup(
-    items.map((item) => item?.code),
-    {
-      afterInspectionDateByItemCode: masterDataCreatedAtByItemCode,
-      requireAfterInspectionDate: true,
-    },
-  );
-  const eligibleItems = items.filter((item) =>
-    validInspectionPoLookup.get(normalizeLookupKey(item?.code))?.eligible === true,
-  );
-  const mismatchLookup = await buildInspectionReportMismatchLookup(eligibleItems);
-
-  const rows = buildFinalPisCheckRows(eligibleItems).map((row) => {
-    const mismatchEntry = mismatchLookup.get(normalizeLookupKey(row?.code)) || {};
-    return {
-      ...row,
-      inspection_report_mismatch: Boolean(mismatchEntry?.inspection_report_mismatch),
-      inspection_report_mismatch_count: Number(
-        mismatchEntry?.inspection_report_mismatch_count || 0,
-      ),
-    };
-  });
-  const filteredRows = filterFinalPisCheckRowsByDiffField(rows, diffField);
-
-  return sortFinalPisCheckRows(filteredRows, {
-    sortBy: normalizeFinalPisCheckSortBy(sortBy),
-    sortOrder: normalizeSortOrder(sortOrder),
-  });
-};
-
 const FINAL_PIS_COMMENT_ROLE_KEYS = new Set([
   "manager",
   "product_manager",
@@ -3025,161 +1916,8 @@ const FINAL_PIS_COMMENT_ROLE_KEYS = new Set([
 const canCreateFinalPisComment = (user = {}) =>
   FINAL_PIS_COMMENT_ROLE_KEYS.has(normalizeUserRoleKey(user?.role));
 
-const canUpdateFinalPisMasterValues = (user = {}) =>
-  ["admin", "super_admin"].includes(normalizeUserRoleKey(user?.role));
-
 const clonePlainObject = (value = {}) =>
   JSON.parse(JSON.stringify(value || {}));
-
-const normalizeFinalPisBoxModeInput = (value = "") => {
-  const normalized = normalizeTextField(value).toLowerCase();
-  if (!normalized) return BOX_PACKAGING_MODES.INDIVIDUAL;
-  if (
-    normalized === BOX_PACKAGING_MODES.CARTON ||
-    normalized.includes("carton") ||
-    normalized.includes("inner")
-  ) {
-    return BOX_PACKAGING_MODES.CARTON;
-  }
-  if (
-    normalized === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER ||
-    normalized.includes("individual_master") ||
-    normalized.includes("individual packing") ||
-    normalized.includes("individual + master")
-  ) {
-    return BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
-  }
-  if (normalized === BOX_PACKAGING_MODES.INDIVIDUAL || normalized.includes("individual")) {
-    return BOX_PACKAGING_MODES.INDIVIDUAL;
-  }
-  throw new Error("Box mode must be Individual, Carton, or Individual packing + master");
-};
-
-const buildDefaultMasterItemSizeEntry = ({ remark = "" } = {}) => ({
-  L: 0,
-  B: 0,
-  H: 0,
-  remark: normalizeTextField(remark).toLowerCase() || "item",
-  net_weight: 0,
-});
-
-const buildDefaultMasterBoxSizeEntry = ({ remark = "", boxType = "" } = {}) => {
-  const normalizedBoxType = normalizeTextField(boxType).toLowerCase();
-  const normalizedRemark = normalizeTextField(remark).toLowerCase();
-  return {
-    L: 0,
-    B: 0,
-    H: 0,
-    remark: normalizedRemark || normalizedBoxType || "box",
-    box_type: normalizedBoxType || "individual",
-    gross_weight: 0,
-    item_count_in_inner: 0,
-    box_count_in_master: 0,
-  };
-};
-
-const ensureArrayEntry = (
-  entries = [],
-  index = 0,
-  fallbackEntry = {},
-  { limit = BOX_SIZE_ENTRY_LIMIT } = {},
-) => {
-  const safeIndex = Number.parseInt(String(index), 10);
-  if (!Number.isInteger(safeIndex) || safeIndex < 0 || safeIndex >= limit) {
-    throw new Error("Difference row points to an invalid master entry");
-  }
-
-  const nextEntries = (Array.isArray(entries) ? entries : []).map((entry) =>
-    clonePlainObject(entry),
-  );
-  while (nextEntries.length <= safeIndex) {
-    nextEntries.push(clonePlainObject(fallbackEntry));
-  }
-
-  nextEntries[safeIndex] = {
-    ...clonePlainObject(fallbackEntry),
-    ...clonePlainObject(nextEntries[safeIndex]),
-  };
-  return { entries: nextEntries, entry: nextEntries[safeIndex], index: safeIndex };
-};
-
-const applyFinalPisMasterOverride = ({
-  item,
-  difference,
-  rawValue,
-  state,
-} = {}) => {
-  const metadata = difference?.master_update || {};
-  const target = normalizeTextField(metadata?.target);
-  const field = normalizeTextField(metadata?.field);
-  const valueText = normalizeTextField(rawValue);
-  if (!valueText) return false;
-
-  if (target === "master_item_sizes") {
-    const parsedValue = toNonNegativeNumber(valueText, `${difference?.key || "difference"}.value`);
-    const { entries, entry } = ensureArrayEntry(
-      state.masterItemSizes,
-      metadata.index,
-      buildDefaultMasterItemSizeEntry({ remark: metadata.remark }),
-      { limit: ITEM_SIZE_ENTRY_LIMIT },
-    );
-    if (!["L", "B", "H", "net_weight"].includes(field)) {
-      throw new Error(`Unsupported item size field for ${difference?.key}`);
-    }
-    entry[field] = parsedValue;
-    state.masterItemSizes = parseSizeEntriesPayload(entries, {
-      fieldLabel: "master_item_sizes",
-      remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
-      weightKey: "net_weight",
-      weightLabel: "net_weight",
-      allowIncomplete: true,
-    });
-    return true;
-  }
-
-  if (target === "master_box_sizes") {
-    const parsedValue = toNonNegativeNumber(valueText, `${difference?.key || "difference"}.value`);
-    const currentMode = state.masterBoxMode || detectBoxPackagingMode(item?.master_box_mode, state.masterBoxSizes);
-    const { entries, entry } = ensureArrayEntry(
-      state.masterBoxSizes,
-      metadata.index,
-      buildDefaultMasterBoxSizeEntry({
-        remark: metadata.remark,
-        boxType: metadata.box_type,
-      }),
-      { limit: BOX_SIZE_ENTRY_LIMIT },
-    );
-    if (!["L", "B", "H", "gross_weight", "item_count_in_inner", "box_count_in_master"].includes(field)) {
-      throw new Error(`Unsupported box size field for ${difference?.key}`);
-    }
-    entry[field] = parsedValue;
-    state.masterBoxSizes = parseSizeEntriesPayload(entries, {
-      fieldLabel: "master_box_sizes",
-      remarkOptions: BOX_SIZE_REMARK_OPTIONS,
-      weightKey: "gross_weight",
-      weightLabel: "gross_weight",
-      mode: currentMode,
-      allowIncomplete: true,
-    });
-    state.masterBoxMode = detectBoxPackagingMode(currentMode, state.masterBoxSizes);
-    return true;
-  }
-
-  if (target === "master_box_mode") {
-    state.masterBoxMode = normalizeFinalPisBoxModeInput(valueText);
-    return true;
-  }
-
-  if (target === "cbm.calculated_master_total") {
-    state.masterCbmOverride = toNormalizedDecimalText(
-      valueText,
-      `${difference?.key || "difference"}.value`,
-    );
-    return true;
-  }
-
-  throw new Error(`Difference row ${difference?.key || ""} cannot update master data`);
-};
 
 const getActorDisplayName = (user = {}) =>
   normalizeTextField(user?.name || user?.username || user?.email || user?.role) || "User";
@@ -3277,72 +2015,6 @@ const buildLatestInspectionReportLookup = async (itemCodes = []) => {
 };
 
 exports.__test__.buildLatestInspectionReportLookup = buildLatestInspectionReportLookup;
-
-const buildInspectionReportMismatchLookup = async (items = []) => {
-  const itemByCode = new Map(
-    (Array.isArray(items) ? items : [])
-      .map((item) => [normalizeLookupKey(item?.code), item])
-      .filter(([key]) => Boolean(key)),
-  );
-  const itemCodes = [...itemByCode.keys()];
-
-  if (itemCodes.length === 0) {
-    return new Map();
-  }
-
-  const qcRows = await QC.find({
-    $or: itemCodes.map((codeKey) => ({
-      "item.item_code": new RegExp(`^\\s*${escapeRegex(codeKey)}\\s*$`, "i"),
-    })),
-  })
-    .select("_id item.item_code")
-    .lean();
-
-  const qcIdToItemCode = new Map(
-    (Array.isArray(qcRows) ? qcRows : []).map((qcDoc) => [
-      String(qcDoc?._id || ""),
-      normalizeLookupKey(qcDoc?.item?.item_code),
-    ]),
-  );
-  const qcIds = [...qcIdToItemCode.keys()].filter((value) =>
-    mongoose.Types.ObjectId.isValid(value),
-  );
-
-  if (qcIds.length === 0) {
-    return new Map();
-  }
-
-  const inspections = await Inspection.find({
-    qc: {
-      $in: qcIds.map((value) => new mongoose.Types.ObjectId(value)),
-    },
-  })
-    .select("qc inspected_item_sizes inspected_box_sizes inspected_box_mode")
-    .lean();
-
-  const mismatchLookup = new Map();
-
-  (Array.isArray(inspections) ? inspections : []).forEach((inspection) => {
-    const itemCodeKey = qcIdToItemCode.get(String(inspection?.qc || ""));
-    const currentItemDoc = itemByCode.get(itemCodeKey);
-    if (!itemCodeKey || !currentItemDoc) return;
-
-    const mismatch = compareInspectionSizeSnapshot(inspection, currentItemDoc);
-    const currentEntry = mismatchLookup.get(itemCodeKey) || {
-      inspection_report_mismatch: false,
-      inspection_report_mismatch_count: 0,
-    };
-
-    if (mismatch.has_mismatch) {
-      currentEntry.inspection_report_mismatch = true;
-      currentEntry.inspection_report_mismatch_count += 1;
-    }
-
-    mismatchLookup.set(itemCodeKey, currentEntry);
-  });
-
-  return mismatchLookup;
-};
 
 exports.getProductDatabaseItems = async (req, res) => {
   try {
@@ -4865,431 +3537,15 @@ exports.getItemMasters = async (req, res) => {
   }
 };
 
-exports.getPisDiffItems = async (req, res) => {
-  try {
-    const search = req.query.search;
-    const brand = req.query.brand;
-    const vendor = req.query.vendor;
-    const country = req.query.country;
-    const page = parsePositiveInt(req.query.page, 1);
-    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
-    const skip = (page - 1) * limit;
+exports.getPisDiffItems = masterWorkflowController.list("pis-diffs");
 
-    const approvedQcIds = await Inspection.distinct("qc", { is_approved: true });
-    const approvedItemCodes = approvedQcIds.length > 0
-      ? await QC.find({ _id: { $in: approvedQcIds } }).distinct("item.item_code")
-      : [];
-    const approvedInspectionMatch = { code: { $in: approvedItemCodes } };
+exports.getPisDiffCheckedReportPreview = masterWorkflowController.report("pis-diffs");
 
-    const uncheckedPisMatch = {
-      pis_checked_flag: { $ne: true },
-      is_rectify_imported: { $ne: true },
-    };
-    const missingItemMasterMatch = buildPisDiffMissingItemMasterMatch();
-    const match = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, brand, vendor, country }), req.user),
-      uncheckedPisMatch,
-      missingItemMasterMatch,
-      approvedInspectionMatch,
-    );
-    const brandOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, vendor, country }), req.user),
-      uncheckedPisMatch,
-      missingItemMasterMatch,
-      approvedInspectionMatch,
-    );
-    const vendorOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, brand, country }), req.user),
-      uncheckedPisMatch,
-      missingItemMasterMatch,
-      approvedInspectionMatch,
-    );
-    const codeOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ brand, vendor, country }), req.user),
-      uncheckedPisMatch,
-      missingItemMasterMatch,
-      approvedInspectionMatch,
-    );
+exports.exportPisDiffCheckedReport = masterWorkflowController.report("pis-diffs", true);
 
-    const [diffRowsBase, brandOptionRows, vendorOptionRows, codeOptionRows] =
-      await Promise.all([
-        getPisDiffRowsForMatch(match),
-        getPisDiffRowsForMatch(brandOptionsMatch, { code: 1 }),
-        getPisDiffRowsForMatch(vendorOptionsMatch, { code: 1 }),
-        getPisDiffRowsForMatch(codeOptionsMatch, { code: 1 }),
-      ]);
-    const mismatchLookup = await buildInspectionReportMismatchLookup(diffRowsBase);
-    const diffRows = diffRowsBase.map((item) => {
-      const mismatchEntry = mismatchLookup.get(normalizeLookupKey(item?.code)) || {};
-      return {
-        ...item,
-        inspection_report_mismatch: Boolean(mismatchEntry?.inspection_report_mismatch),
-        inspection_report_mismatch_count: Number(
-          mismatchEntry?.inspection_report_mismatch_count || 0,
-        ),
-      };
-    });
+exports.getFinalPisCheckItems = masterWorkflowController.list("final-pis-check");
 
-    const paginatedRows = diffRows.slice(skip, skip + limit);
-    const itemLookup = new Map(
-      paginatedRows.map((item) => [normalizeTextField(item?._id), item]),
-    );
-    const rowsWithThumbnails = await attachProductImageThumbnails(
-      paginatedRows,
-      itemLookup,
-      shouldIncludeProductImageThumbnails(req),
-    );
-
-    return res.status(200).json({
-      success: true,
-      data: rowsWithThumbnails,
-      pagination: {
-        page,
-        limit,
-        totalPages: Math.max(1, Math.ceil(diffRows.length / limit)),
-        totalRecords: diffRows.length,
-      },
-      filters: {
-        brands: normalizeDistinctValues(
-          brandOptionRows.flatMap((item) => [
-            item?.brand,
-            item?.brand_name,
-            ...(Array.isArray(item?.brands) ? item.brands : []),
-          ]),
-        ),
-        vendors: normalizeVendorDisplayList(
-          vendorOptionRows.flatMap((item) =>
-            Array.isArray(item?.vendors) ? item.vendors : [],
-          ),
-        ),
-        item_codes: normalizeDistinctValues(codeOptionRows.map((item) => item?.code)),
-      },
-    });
-  } catch (error) {
-    console.error("Get PIS Diff Items Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch PIS diff items",
-      error: error.message,
-    });
-  }
-};
-
-exports.getPisDiffCheckedReportPreview = async (req, res) => {
-  try {
-    const search = req.query.search;
-    const brand = req.query.brand;
-    const vendor = req.query.vendor;
-    const country = req.query.country;
-
-    const checkedDiffRows = await getCheckedPisDiffRowsForReport({
-      search,
-      brand,
-      vendor,
-      country,
-      user: req.user,
-    });
-
-    if (checkedDiffRows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No checked PIS diff items found for preview",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      data: buildPisDiffReportPayload({
-        checkedDiffRows,
-        search,
-        brand,
-        vendor,
-        country,
-      }),
-    });
-  } catch (error) {
-    console.error("Preview Checked PIS Diff Report Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to preview checked PIS diff report",
-      error: error.message,
-    });
-  }
-};
-
-exports.exportPisDiffCheckedReport = async (req, res) => {
-  try {
-    const search = req.query.search;
-    const brand = req.query.brand;
-    const vendor = req.query.vendor;
-    const country = req.query.country;
-
-    const checkedDiffRows = await getCheckedPisDiffRowsForReport({
-      search,
-      brand,
-      vendor,
-      country,
-      user: req.user,
-    });
-
-    if (checkedDiffRows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No checked PIS diff items found for export",
-      });
-    }
-
-    const detailColumns = [
-      { key: "code", header: "Item Code" },
-      { key: "description", header: "Description" },
-      { key: "brand", header: "Brand" },
-      { key: "vendors", header: "Vendors" },
-      { key: "diff_fields", header: "Diff Fields" },
-      { key: "inspection_report", header: "Inspection Report" },
-      { key: "inspected_item_size", header: "Inspected Item Size" },
-      { key: "inspected_item_weight", header: "Inspected Item Net Weight" },
-      { key: "pis_item_size", header: "PIS Item Size" },
-      { key: "pis_item_weight", header: "PIS Item Net Weight" },
-      { key: "inspected_box_size", header: "Inspected Box Size" },
-      { key: "inspected_box_weight", header: "Inspected Box Gross Weight" },
-      { key: "pis_box_size", header: "PIS Box Size" },
-      { key: "pis_box_weight", header: "PIS Box Gross Weight" },
-      { key: "inspected_barcode", header: "Inspected Barcode" },
-      { key: "pis_barcode", header: "PIS Barcode" },
-      { key: "pis_inner_barcode", header: "PIS Inner Barcode" },
-      { key: "updated_at", header: "Last Updated" },
-    ];
-
-    const detailRows = checkedDiffRows.map((item) => {
-      const inspectedItemBlock = formatMeasurementBlockForReport(
-        buildPisDiffNormalizedMeasurementEntries({ item, source: "inspected", group: "item" }),
-        { weightKey: "net_weight" },
-      );
-      const pisItemBlock = formatMeasurementBlockForReport(
-        buildPisDiffNormalizedMeasurementEntries({ item, source: "pis", group: "item" }),
-        { weightKey: "net_weight" },
-      );
-      const inspectedBoxBlock = formatMeasurementBlockForReport(
-        buildPisDiffNormalizedMeasurementEntries({ item, source: "inspected", group: "box" }),
-        { weightKey: "gross_weight" },
-      );
-      const pisBoxBlock = formatMeasurementBlockForReport(
-        buildPisDiffNormalizedMeasurementEntries({ item, source: "pis", group: "box" }),
-        { weightKey: "gross_weight" },
-      );
-
-      return {
-        code: normalizeTextField(item?.code) || "N/A",
-        description: normalizeTextField(item?.description || item?.name) || "N/A",
-        brand: getPisDiffBrand(item) || "N/A",
-        vendors: getPisDiffVendors(item) || "N/A",
-        diff_fields: Array.isArray(item?.pis_diff?.fields)
-          ? item.pis_diff.fields.join(", ")
-          : "N/A",
-        inspection_report: formatPisDiffMismatchStatus(item),
-        inspected_item_size: inspectedItemBlock.sizeDisplay,
-        inspected_item_weight: inspectedItemBlock.weightDisplay,
-        pis_item_size: pisItemBlock.sizeDisplay,
-        pis_item_weight: pisItemBlock.weightDisplay,
-        inspected_box_size: inspectedBoxBlock.sizeDisplay,
-        inspected_box_weight: inspectedBoxBlock.weightDisplay,
-        pis_box_size: pisBoxBlock.sizeDisplay,
-        pis_box_weight: pisBoxBlock.weightDisplay,
-        inspected_barcode: formatEan13BarcodeDisplay(
-          normalizeTextField(item?.qc?.master_barcode || item?.qc?.barcode),
-        ),
-        pis_barcode: formatEan13BarcodeDisplay(
-          normalizeTextField(item?.pis_master_barcode || item?.pis_barcode),
-        ),
-        pis_inner_barcode: formatEan13BarcodeDisplay(
-          normalizeTextField(item?.pis_inner_barcode),
-        ),
-        updated_at: item?.updatedAt
-          ? new Date(item.updatedAt).toISOString().slice(0, 10)
-          : "",
-      };
-    });
-    const reportPreviewRows = checkedDiffRows.map((item) =>
-      buildPisDiffReportPreviewRow(item),
-    );
-    const detailedDiffColumns = [
-      { key: "code", header: "Item Code" },
-      { key: "description", header: "Description" },
-      { key: "brand", header: "Brand" },
-      { key: "vendors", header: "Vendors" },
-      { key: "section", header: "Area" },
-      { key: "segment", header: "Measurement Segment" },
-      { key: "attribute", header: "Attribute" },
-      { key: "inspected", header: "Inspected" },
-      { key: "pis", header: "PIS" },
-      { key: "delta", header: "Difference" },
-      { key: "note", header: "Remark" },
-    ];
-    const detailedDiffRows = reportPreviewRows.flatMap((row) =>
-      (Array.isArray(row?.differences) ? row.differences : []).map((difference) => ({
-        code: row?.code || "N/A",
-        description: row?.description || "N/A",
-        brand: row?.brand || "N/A",
-        vendors: row?.vendors || "N/A",
-        section: difference?.section || "",
-        segment: difference?.segment || "",
-        attribute: difference?.attribute || "",
-        inspected: difference?.inspected || "Not Set",
-        pis: difference?.pis || "Not Set",
-        delta: difference?.delta || "",
-        note: difference?.note || "",
-      })),
-    );
-
-    const filterSummaryRows = [
-      ["Checked PIS Diffs Report", ""],
-      ["Generated On", new Date().toISOString().slice(0, 19).replace("T", " ")],
-      ["Search Filter", normalizeTextField(search) || "All"],
-      ["Brand Filter", normalizeTextField(brand) || "All"],
-      ["Vendor Filter", normalizeTextField(vendor) || "All"],
-      ["Checked Diff Items", checkedDiffRows.length],
-      [
-        "Unique Brands",
-        normalizeDistinctValues(checkedDiffRows.map((item) => getPisDiffBrand(item))).join(", "),
-      ],
-      [
-        "Unique Vendors",
-        normalizeDistinctValues(
-          checkedDiffRows.flatMap((item) => Array.isArray(item?.vendors) ? item.vendors : []),
-        ).join(", "),
-      ],
-    ];
-
-    const detailHeaderRow = detailColumns.map((column) => column.header);
-    const detailDataRows = detailRows.map((row) =>
-      detailColumns.map((column) => row[column.key] ?? ""),
-    );
-    const detailedDiffHeaderRow = detailedDiffColumns.map((column) => column.header);
-    const detailedDiffDataRows = detailedDiffRows.map((row) =>
-      detailedDiffColumns.map((column) => row[column.key] ?? ""),
-    );
-
-    const summarySheet = XLSX.utils.aoa_to_sheet(filterSummaryRows);
-    summarySheet["!cols"] = [{ wch: 24 }, { wch: 90 }];
-
-    const detailSheet = XLSX.utils.aoa_to_sheet([detailHeaderRow, ...detailDataRows]);
-    detailSheet["!cols"] = detailColumns.map((column, columnIndex) => {
-      const maxDataLength = Math.max(
-        ...detailDataRows.map((row) => String(row[columnIndex] ?? "").length),
-        column.header.length,
-      );
-      return { wch: Math.min(40, Math.max(14, maxDataLength + 2)) };
-    });
-    const detailedDiffSheet = XLSX.utils.aoa_to_sheet([
-      detailedDiffHeaderRow,
-      ...detailedDiffDataRows,
-    ]);
-    detailedDiffSheet["!cols"] = detailedDiffColumns.map((column, columnIndex) => {
-      const maxDataLength = Math.max(
-        ...detailedDiffDataRows.map((row) => String(row[columnIndex] ?? "").length),
-        column.header.length,
-      );
-      return { wch: Math.min(55, Math.max(14, maxDataLength + 2)) };
-    });
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
-    XLSX.utils.book_append_sheet(workbook, detailSheet, "Checked PIS Diffs");
-    XLSX.utils.book_append_sheet(workbook, detailedDiffSheet, "Detailed Differences");
-
-    const fileBuffer = XLSX.write(workbook, {
-      type: "buffer",
-      bookType: "xlsx",
-    });
-    const fileDate = new Date().toISOString().slice(0, 10);
-    const fileName = `pis-diffs-checked-${fileDate}.xlsx`;
-
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    );
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    return res.status(200).send(fileBuffer);
-  } catch (error) {
-    console.error("Export Checked PIS Diff Report Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to export checked PIS diff report",
-      error: error.message,
-    });
-  }
-};
-
-exports.getFinalPisCheckItems = async (req, res) => {
-  try {
-    const search = req.query.search;
-    const brand = req.query.brand;
-    const vendor = req.query.vendor;
-    const country = req.query.country;
-    const diffField = req.query.diff_field;
-    const page = parsePositiveInt(req.query.page, 1);
-    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
-    const sortBy = req.query.sortBy;
-    const sortOrder = req.query.sortOrder;
-
-    const rows = await getFinalPisCheckRowsForQuery({
-      search,
-      brand,
-      vendor,
-      country,
-      diffField,
-      sortBy,
-      sortOrder,
-      user: req.user,
-    });
-
-    return res.status(200).json(
-      buildFinalPisCheckPayload({
-        rows,
-        search,
-        brand,
-        vendor,
-        country,
-        diffField,
-        page,
-        limit,
-      }),
-    );
-  } catch (error) {
-    console.error("Get Final PIS Check Items Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch Final PIS Check items",
-      error: error.message,
-    });
-  }
-};
-
-exports.getFinalPisCheckOptions = async (req, res) => {
-  try {
-    const rows = await getFinalPisCheckRowsForQuery({
-      search: req.query.search,
-      brand: req.query.brand,
-      vendor: req.query.vendor,
-      country: req.query.country,
-      sortBy: "code",
-      sortOrder: "asc",
-      user: req.user,
-    });
-
-    return res.status(200).json({
-      success: true,
-      data: buildFinalPisCheckOptions(rows),
-    });
-  } catch (error) {
-    console.error("Get Final PIS Check Options Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch Final PIS Check options",
-      error: error.message,
-    });
-  }
-};
+exports.getFinalPisCheckOptions = masterWorkflowController.options;
 
 exports.createFinalPisCheckComment = async (req, res) => {
   try {
@@ -5518,409 +3774,11 @@ exports.deleteFinalPisCheckComment = async (req, res) => {
   }
 };
 
-exports.updateFinalPisCheckMasterValues = async (req, res) => {
-  try {
-    if (!canUpdateFinalPisMasterValues(req.user)) {
-      return res.status(403).json({
-        success: false,
-        message: "Only Admin or Super Admin can update master values.",
-      });
-    }
+exports.updateFinalPisCheckMasterValues = masterWorkflowController.rejectLegacyMasterWrite;
 
-    const itemCodeInput = normalizeTextField(req.params.code || req.params.itemCode);
-    const submittedUpdates = Array.isArray(req.body?.updates) ? req.body.updates : [];
-    const normalizedUpdates = submittedUpdates
-      .map((entry) => ({
-        differenceKey: normalizeTextField(entry?.difference_key || entry?.differenceKey || entry?.key),
-        value: normalizeTextField(entry?.value),
-      }))
-      .filter((entry) => entry.differenceKey && entry.value);
+exports.getFinalPisCheckReportPreview = masterWorkflowController.report("final-pis-check");
 
-    if (!itemCodeInput) {
-      return res.status(400).json({
-        success: false,
-        message: "Item code is required.",
-      });
-    }
-    if (normalizedUpdates.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No master values provided.",
-      });
-    }
-
-    const itemCodeMatch = new RegExp(`^\\s*${escapeRegex(itemCodeInput)}\\s*$`, "i");
-    const item = await Item.findOne(applyItemDataAccess({ code: itemCodeMatch }, req.user));
-    if (!item) {
-      return res.status(404).json({
-        success: false,
-        message: "Item not found.",
-      });
-    }
-
-    const currentRow = buildFinalPisCheckRows([item.toObject()])[0] || null;
-    const differenceLookup = new Map(
-      (Array.isArray(currentRow?.differences) ? currentRow.differences : [])
-        .map((difference) => [normalizeTextField(difference?.key), difference])
-        .filter(([key]) => key),
-    );
-    if (differenceLookup.size === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No active Final PIS Check differences found for this item.",
-      });
-    }
-
-    const beforeItemSnapshot = item.toObject();
-    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(beforeItemSnapshot);
-    const state = {
-      masterItemSizes: clonePlainObject(item?.master_item_sizes || []),
-      masterBoxSizes: clonePlainObject(item?.master_box_sizes || []),
-      masterBoxMode: detectBoxPackagingMode(item?.master_box_mode, item?.master_box_sizes),
-      masterCbmOverride: null,
-    };
-    const applied = [];
-
-    for (const update of normalizedUpdates) {
-      const difference = differenceLookup.get(update.differenceKey);
-      if (!difference) {
-        return res.status(400).json({
-          success: false,
-          message: `Difference row is no longer available: ${update.differenceKey}`,
-        });
-      }
-      if (!difference?.master_update) {
-        return res.status(400).json({
-          success: false,
-          message: `Difference row cannot be updated inline: ${update.differenceKey}`,
-        });
-      }
-
-      const changed = applyFinalPisMasterOverride({
-        item,
-        difference,
-        rawValue: update.value,
-        state,
-      });
-      if (changed) {
-        applied.push({
-          difference_key: update.differenceKey,
-          section: difference.section || "",
-          segment: difference.segment || "",
-          attribute: difference.attribute || "",
-          value: update.value,
-          target: difference.master_update?.target || "",
-          field: difference.master_update?.field || "",
-        });
-      }
-    }
-
-    if (applied.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No master values provided.",
-      });
-    }
-
-    const normalizedMasterSizes = normalizeSingleMasterSizeRemarks({
-      masterItemSizes: state.masterItemSizes,
-      masterBoxSizes: state.masterBoxSizes,
-    });
-    item.set("master_item_sizes", normalizedMasterSizes.master_item_sizes);
-    item.set("master_box_sizes", normalizedMasterSizes.master_box_sizes);
-    item.set("master_box_mode", state.masterBoxMode);
-    item.set("pis_checked_flag", true);
-    applyCalculatedCbmTotals(item, (pathKey, pathValue) => {
-      item.set(pathKey, pathValue);
-    });
-    if (state.masterCbmOverride !== null) {
-      item.set("cbm.calculated_master_total", state.masterCbmOverride);
-    }
-
-    appendItemUpdateHistory(item, {
-      before: beforeItemSnapshot,
-      after: item.toObject(),
-      reqUser: req.user,
-      action: "pis_diff_update",
-      source: "final_pis_check_inline",
-      route: "PATCH /items/final-pis-check/:code/master-values",
-      metadata: {
-        updates: applied,
-      },
-    });
-    await item.save();
-
-    const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
-    await createPisUpdateLog({
-      reqUser: req.user,
-      beforeSnapshot: beforeAuditSnapshot,
-      afterSnapshot: afterAuditSnapshot,
-      operationType: "pis_diff_update",
-      pageName: "Final PIS Check Inline",
-      source: "final_pis_check_inline",
-      dataScopes: [AUDIT_SCOPES.MASTER],
-      extraRemarks: ["Final PIS Check inline row values were saved to master data."],
-      metadata: {
-        updates: applied,
-      },
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: `Updated ${applied.length} master field${applied.length === 1 ? "" : "s"}.`,
-      data: {
-        item: item.toObject(),
-        updates: applied,
-      },
-    });
-  } catch (error) {
-    console.error("Update Final PIS Check Master Values Error:", error);
-    const status = /must be|invalid|unsupported|cannot|no master|difference row/i.test(error?.message || "")
-      ? 400
-      : 500;
-    return res.status(status).json({
-      success: false,
-      message: error.message || "Failed to update Final PIS Check master values.",
-    });
-  }
-};
-
-exports.getFinalPisCheckReportPreview = async (req, res) => {
-  try {
-    const search = req.query.search;
-    const brand = req.query.brand;
-    const vendor = req.query.vendor;
-    const country = req.query.country;
-    const diffField = req.query.diff_field;
-    const sortBy = req.query.sortBy;
-    const sortOrder = req.query.sortOrder;
-
-    const rows = await getFinalPisCheckRowsForQuery({
-      search,
-      brand,
-      vendor,
-      country,
-      diffField,
-      sortBy,
-      sortOrder,
-      user: req.user,
-    });
-
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No Final PIS Check items found for preview",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      data: buildFinalPisCheckReportPayload({
-        rows,
-        search,
-        brand,
-        vendor,
-        country,
-        diffField,
-      }),
-    });
-  } catch (error) {
-    console.error("Preview Final PIS Check Report Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to preview Final PIS Check report",
-      error: error.message,
-    });
-  }
-};
-
-exports.exportFinalPisCheckReport = async (req, res) => {
-  try {
-    const search = req.query.search;
-    const brand = req.query.brand;
-    const vendor = req.query.vendor;
-    const country = req.query.country;
-    const diffField = req.query.diff_field;
-    const sortBy = req.query.sortBy;
-    const sortOrder = req.query.sortOrder;
-
-    const rows = await getFinalPisCheckRowsForQuery({
-      search,
-      brand,
-      vendor,
-      country,
-      diffField,
-      sortBy,
-      sortOrder,
-      user: req.user,
-    });
-
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No Final PIS Check items found for export",
-      });
-    }
-
-    const reportPayload = buildFinalPisCheckReportPayload({
-      rows,
-      search,
-      brand,
-      vendor,
-      country,
-      diffField,
-    });
-    const detailColumns = [
-      { key: "code", header: "Item Code" },
-      { key: "description", header: "Description" },
-      { key: "brand", header: "Brand" },
-      { key: "vendors", header: "Vendors" },
-      { key: "diff_fields", header: "Diff Fields" },
-      { key: "inspection_report", header: "Inspection Report" },
-      { key: "inspected_item_size", header: "Inspected Item Size" },
-      { key: "inspected_item_weight", header: "Inspected Item Net Weight" },
-      { key: "pis_item_size", header: "Master Item Size" },
-      { key: "pis_item_weight", header: "Master Item Net Weight" },
-      { key: "inspected_box_size", header: "Inspected Box Size" },
-      { key: "inspected_box_weight", header: "Inspected Box Gross Weight" },
-      { key: "pis_box_size", header: "Master Box Size" },
-      { key: "pis_box_weight", header: "Master Box Gross Weight" },
-      { key: "updated_at", header: "Last Updated" },
-    ];
-    const detailRows = rows.map((row) => ({
-      code: row?.code || "N/A",
-      description: row?.description || "N/A",
-      brand: row?.brand || "N/A",
-      vendors: row?.vendors || "N/A",
-      diff_fields: Array.isArray(row?.diff_fields) ? row.diff_fields.join(", ") : "",
-      inspection_report: formatPisDiffMismatchStatus(row),
-      inspected_item_size: row?.measurements?.inspected_item?.sizeDisplay || "Not Set",
-      inspected_item_weight: row?.measurements?.inspected_item?.weightDisplay || "Not Set",
-      pis_item_size: row?.measurements?.pis_item?.sizeDisplay || "Not Set",
-      pis_item_weight: row?.measurements?.pis_item?.weightDisplay || "Not Set",
-      inspected_box_size: row?.measurements?.inspected_box?.sizeDisplay || "Not Set",
-      inspected_box_weight: row?.measurements?.inspected_box?.weightDisplay || "Not Set",
-      pis_box_size: row?.measurements?.pis_box?.sizeDisplay || "Not Set",
-      pis_box_weight: row?.measurements?.pis_box?.weightDisplay || "Not Set",
-      updated_at: row?.updated_at || "",
-    }));
-    const detailedDiffColumns = [
-      { key: "code", header: "Item Code" },
-      { key: "description", header: "Description" },
-      { key: "brand", header: "Brand" },
-      { key: "vendors", header: "Vendors" },
-      { key: "section", header: "Area" },
-      { key: "segment", header: "Measurement Segment" },
-      { key: "attribute", header: "Attribute" },
-      { key: "inspected", header: "Inspected" },
-      { key: "pis", header: "Master" },
-      { key: "delta", header: "Difference" },
-      { key: "note", header: "Remark" },
-    ];
-    const detailedDiffRows = rows.flatMap((row) =>
-      (Array.isArray(row?.differences) ? row.differences : []).map((difference) => ({
-        code: row?.code || "N/A",
-        description: row?.description || "N/A",
-        brand: row?.brand || "N/A",
-        vendors: row?.vendors || "N/A",
-        section: difference?.section || "",
-        segment: difference?.segment || "",
-        attribute: difference?.attribute || "",
-        inspected: difference?.inspected || "Not Set",
-        pis: difference?.pis || "Not Set",
-        delta: difference?.delta || "",
-        note: difference?.note || "",
-      })),
-    );
-    const filterSummaryRows = [
-      ["Final PIS Check Report", ""],
-      ["Generated On", new Date().toISOString().slice(0, 19).replace("T", " ")],
-      ["Search Filter", reportPayload?.filters?.search || "All"],
-      ["Brand Filter", reportPayload?.filters?.brand || "All"],
-      ["Vendor Filter", reportPayload?.filters?.vendor || "All"],
-      ["Difference Field Filter", reportPayload?.filters?.diff_field || "All"],
-      ["Items With Difference", Number(reportPayload?.summary?.checked_diff_items || 0)],
-      [
-        "Detailed Difference Rows",
-        Number(reportPayload?.summary?.detailed_difference_rows || 0),
-      ],
-      [
-        "Unique Brands",
-        Array.isArray(reportPayload?.summary?.unique_brands)
-          ? reportPayload.summary.unique_brands.join(", ")
-          : "",
-      ],
-      [
-        "Unique Vendors",
-        Array.isArray(reportPayload?.summary?.unique_vendors)
-          ? reportPayload.summary.unique_vendors.join(", ")
-          : "",
-      ],
-      ...Object.entries(reportPayload?.summary?.diff_field_counts || {}).map(
-        ([field, count]) => [`${field} Count`, Number(count || 0)],
-      ),
-    ];
-
-    const detailHeaderRow = detailColumns.map((column) => column.header);
-    const detailDataRows = detailRows.map((row) =>
-      detailColumns.map((column) => row[column.key] ?? ""),
-    );
-    const detailedDiffHeaderRow = detailedDiffColumns.map((column) => column.header);
-    const detailedDiffDataRows = detailedDiffRows.map((row) =>
-      detailedDiffColumns.map((column) => row[column.key] ?? ""),
-    );
-
-    const summarySheet = XLSX.utils.aoa_to_sheet(filterSummaryRows);
-    summarySheet["!cols"] = [{ wch: 28 }, { wch: 90 }];
-
-    const detailSheet = XLSX.utils.aoa_to_sheet([detailHeaderRow, ...detailDataRows]);
-    detailSheet["!cols"] = detailColumns.map((column, columnIndex) => {
-      const maxDataLength = Math.max(
-        ...detailDataRows.map((row) => String(row[columnIndex] ?? "").length),
-        column.header.length,
-      );
-      return { wch: Math.min(44, Math.max(14, maxDataLength + 2)) };
-    });
-
-    const detailedDiffSheet = XLSX.utils.aoa_to_sheet([
-      detailedDiffHeaderRow,
-      ...detailedDiffDataRows,
-    ]);
-    detailedDiffSheet["!cols"] = detailedDiffColumns.map((column, columnIndex) => {
-      const maxDataLength = Math.max(
-        ...detailedDiffDataRows.map((row) => String(row[columnIndex] ?? "").length),
-        column.header.length,
-      );
-      return { wch: Math.min(56, Math.max(14, maxDataLength + 2)) };
-    });
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
-    XLSX.utils.book_append_sheet(workbook, detailSheet, "Final PIS Check");
-    XLSX.utils.book_append_sheet(workbook, detailedDiffSheet, "Detailed Differences");
-
-    const fileBuffer = XLSX.write(workbook, {
-      type: "buffer",
-      bookType: "xlsx",
-    });
-    const fileDate = new Date().toISOString().slice(0, 10);
-    const fileName = `final-pis-check-${fileDate}.xlsx`;
-
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    );
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    return res.status(200).send(fileBuffer);
-  } catch (error) {
-    console.error("Export Final PIS Check Report Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to export Final PIS Check report",
-      error: error.message,
-    });
-  }
-};
+exports.exportFinalPisCheckReport = masterWorkflowController.report("final-pis-check", true);
 
 exports.getItemOrdersHistory = async (req, res) => {
   try {
@@ -7529,176 +5387,98 @@ exports.updateItemPis = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(itemId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid item id",
+        message: "Invalid item id"
       });
     }
-
     const payload = req.body && typeof req.body === "object" ? req.body : {};
     const roleKey = normalizeUserRoleKey(req.user?.role);
     const isStrictAdmin = ["admin", "super_admin"].includes(roleKey);
-    const adminOverrideRequiredFields =
-      payload?.admin_override_required_fields === true;
+    const adminOverrideRequiredFields = payload?.admin_override_required_fields === true;
     if (adminOverrideRequiredFields && !isStrictAdmin) {
       return res.status(403).json({
         success: false,
-        message: "Only Admin or Super Admin can override required fields.",
+        message: "Only Admin or Super Admin can override required fields."
       });
     }
-    const canCreatePisDiffMasterData = isStrictAdmin;
     const pisUpdateSource = normalizeTextField(payload?.pis_update_source).toLowerCase();
     const requestedFinalPisMasterUpdate = pisUpdateSource === "final_pis_check";
-    const requestedPisDiffCheck =
-      pisUpdateSource === "pis_diffs" ||
-      requestedFinalPisMasterUpdate ||
-      payload?.sync_master_data === true ||
-      payload?.pis_checked_flag === true;
-    if (requestedPisDiffCheck && !canCreatePisDiffMasterData) {
-      return res.status(403).json({
-        success: false,
-        message: "Only Admin or Super Admin can update master data.",
-      });
-    }
-
-    const legacyPisSizeFields = [
-      "pis_item_LBH",
-      "pis_item_top_LBH",
-      "pis_item_bottom_LBH",
-      "pis_box_LBH",
-      "pis_box_top_LBH",
-      "pis_box_bottom_LBH",
-    ];
-    const touchedLegacyPisSizeFields = legacyPisSizeFields.filter((field) =>
-      hasOwn(payload, field),
-    );
+    const requestedPisDiffCheck = pisUpdateSource === "pis_diffs" || requestedFinalPisMasterUpdate || payload?.sync_master_data === true || payload?.pis_checked_flag === true;
+    if (requestedPisDiffCheck) return masterWorkflowController.rejectLegacyMasterWrite(req, res);
+    const legacyPisSizeFields = ["pis_item_LBH", "pis_item_top_LBH", "pis_item_bottom_LBH", "pis_box_LBH", "pis_box_top_LBH", "pis_box_bottom_LBH"];
+    const touchedLegacyPisSizeFields = legacyPisSizeFields.filter(field => hasOwn(payload, field));
     if (touchedLegacyPisSizeFields.length > 0) {
       return res.status(400).json({
         success: false,
-        message: `Use pis_item_sizes and pis_box_sizes for size updates. Legacy fields are read-only: ${touchedLegacyPisSizeFields.join(", ")}`,
+        message: `Use pis_item_sizes and pis_box_sizes for size updates. Legacy fields are read-only: ${touchedLegacyPisSizeFields.join(", ")}`
       });
     }
-
-    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
+    const item = await Item.findOne(applyItemDataAccess({
+      _id: itemId
+    }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
-        message: "Item not found",
+        message: "Item not found"
       });
     }
     const beforeItemSnapshot = item.toObject();
     const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(beforeItemSnapshot);
-
     const setPath = (path, value) => {
       item.set(path, value);
     };
     let pisFieldsTouched = false;
-    let masterFieldsTouched = false;
     const setPisPath = (path, value) => {
       setPath(path, value);
       pisFieldsTouched = true;
     };
-    const normalizeMasterPathValue = (path, value) => {
-      if (path === "master_item_sizes") {
-        return normalizeSingleMasterItemSizeRemarks(value);
-      }
-      if (path === "master_box_sizes") {
-        return normalizeSingleMasterBoxSizeRemarks(value);
-      }
-      return value;
-    };
-    const setMasterPath = (path, value) => {
-      setPath(path, normalizeMasterPathValue(path, value));
-      masterFieldsTouched = true;
-    };
     const nextPisWeight = buildWeightRecord(item?.pis_weight);
     let pisWeightTouched = false;
-
-    if (!requestedPisDiffCheck && payload?.pis_weight && typeof payload.pis_weight === "object") {
+    if (payload?.pis_weight && typeof payload.pis_weight === "object") {
       for (const fieldKey of WEIGHT_FIELD_KEYS) {
-        const parsedField = getPayloadWeightField(
-          payload.pis_weight,
-          fieldKey,
-          "pis_weight",
-        );
+        const parsedField = getPayloadWeightField(payload.pis_weight, fieldKey, "pis_weight");
         if (!parsedField.provided) continue;
         nextPisWeight[fieldKey] = parsedField.value;
         pisWeightTouched = true;
         pisFieldsTouched = true;
       }
     }
-
-    if (
-      !adminOverrideRequiredFields &&
-      (
-        (hasOwn(payload, "pis_barcode") &&
-          !normalizeTextField(payload.pis_barcode)) ||
-        (hasOwn(payload, "pis_master_barcode") &&
-          !normalizeTextField(payload.pis_master_barcode)) ||
-        (hasOwn(payload, "pis_inner_barcode") &&
-          !normalizeTextField(payload.pis_inner_barcode)) ||
-        (hasOwn(payload, "pis_logistics_ean") &&
-          !normalizeTextField(payload.pis_logistics_ean))
-      )
-    ) {
+    if (!adminOverrideRequiredFields && (hasOwn(payload, "pis_barcode") && !normalizeTextField(payload.pis_barcode) || hasOwn(payload, "pis_master_barcode") && !normalizeTextField(payload.pis_master_barcode) || hasOwn(payload, "pis_inner_barcode") && !normalizeTextField(payload.pis_inner_barcode) || hasOwn(payload, "pis_logistics_ean") && !normalizeTextField(payload.pis_logistics_ean))) {
       return res.status(400).json({
         success: false,
-        message: "PIS barcode fields cannot be blank.",
+        message: "PIS barcode fields cannot be blank."
       });
     }
-
     if (hasOwn(payload, "pis_barcode")) {
       const nextMasterBarcode = normalizeTextField(payload.pis_barcode);
-      if (requestedPisDiffCheck) {
-        setMasterPath("master_barcode", nextMasterBarcode);
-        setMasterPath("master_master_barcode", nextMasterBarcode);
-        setPisPath("pis_barcode", nextMasterBarcode);
-        setPisPath("pis_master_barcode", nextMasterBarcode);
-      } else {
-        setPisPath("pis_barcode", nextMasterBarcode);
-        setPisPath("pis_master_barcode", nextMasterBarcode);
-      }
+      setPisPath("pis_barcode", nextMasterBarcode);
+      setPisPath("pis_master_barcode", nextMasterBarcode);
     }
     if (hasOwn(payload, "pis_master_barcode")) {
       const nextMasterBarcode = normalizeTextField(payload.pis_master_barcode);
-      if (requestedPisDiffCheck) {
-        setMasterPath("master_master_barcode", nextMasterBarcode);
-        setMasterPath("master_barcode", nextMasterBarcode);
-        setPisPath("pis_master_barcode", nextMasterBarcode);
-        setPisPath("pis_barcode", nextMasterBarcode);
-      } else {
-        setPisPath("pis_master_barcode", nextMasterBarcode);
-        setPisPath("pis_barcode", nextMasterBarcode);
-      }
+      setPisPath("pis_master_barcode", nextMasterBarcode);
+      setPisPath("pis_barcode", nextMasterBarcode);
     }
     if (hasOwn(payload, "pis_inner_barcode")) {
       const nextInnerBarcode = normalizeTextField(payload.pis_inner_barcode);
-      if (requestedPisDiffCheck) {
-        setMasterPath("master_inner_barcode", nextInnerBarcode);
-        setPisPath("pis_inner_barcode", nextInnerBarcode);
-      } else {
-        setPisPath("pis_inner_barcode", nextInnerBarcode);
-      }
+      setPisPath("pis_inner_barcode", nextInnerBarcode);
     }
     if (hasOwn(payload, "pis_logistics_ean")) {
       const nextLogisticsEan = normalizeEan13Input(payload.pis_logistics_ean);
       if (!isValidEan13(nextLogisticsEan)) {
         return res.status(400).json({
           success: false,
-          message: "PIS Logistics EAN must be a valid 13-digit EAN.",
+          message: "PIS Logistics EAN must be a valid 13-digit EAN."
         });
       }
       setPisPath("pis_logistics_ean", nextLogisticsEan);
     }
     if (hasOwn(payload, "pis_logistics_eans")) {
       const nextLogisticsEans = normalizeLogisticsEans(payload.pis_logistics_eans);
-      const boxCount = Array.isArray(payload.pis_box_sizes)
-        ? payload.pis_box_sizes.length
-        : Array.isArray(item?.pis_box_sizes)
-          ? item.pis_box_sizes.length
-          : 0;
-      if (!nextLogisticsEans || (nextLogisticsEans.length && nextLogisticsEans.length !== boxCount)) {
+      const boxCount = Array.isArray(payload.pis_box_sizes) ? payload.pis_box_sizes.length : Array.isArray(item?.pis_box_sizes) ? item.pis_box_sizes.length : 0;
+      if (!nextLogisticsEans || nextLogisticsEans.length && nextLogisticsEans.length !== boxCount) {
         return res.status(400).json({
           success: false,
-          message: "Provide one valid 13-digit Logistics EAN for each box.",
+          message: "Provide one valid 13-digit Logistics EAN for each box."
         });
       }
       setPisPath("pis_logistics_eans", nextLogisticsEans);
@@ -7706,173 +5486,98 @@ exports.updateItemPis = async (req, res) => {
     }
     if (hasOwn(payload, "country_of_origin")) {
       const nextCountryOfOrigin = normalizeTextField(payload.country_of_origin);
-      if (requestedPisDiffCheck) {
-        setMasterPath("master_country_of_origin", nextCountryOfOrigin);
-        setPisPath("country_of_origin", nextCountryOfOrigin);
-      } else {
-        setPisPath("country_of_origin", nextCountryOfOrigin);
-      }
+      setPisPath("country_of_origin", nextCountryOfOrigin);
     }
     if (hasOwn(payload, "kd")) {
       setPisPath("kd", toBooleanValue(payload.kd, "kd"));
     }
     if (hasOwn(payload, "mounting_file_needed")) {
-      setPisPath(
-        "mounting_file_needed",
-        toBooleanValue(payload.mounting_file_needed, "mounting_file_needed"),
-      );
+      setPisPath("mounting_file_needed", toBooleanValue(payload.mounting_file_needed, "mounting_file_needed"));
     }
-
     if (hasOwn(payload, "barcode_exempted")) {
       if (!isStrictAdmin) {
         return res.status(403).json({
           success: false,
-          message: "Only Admin or Super Admin can enable or disable barcode exempt items.",
+          message: "Only Admin or Super Admin can enable or disable barcode exempt items."
         });
       }
-      setPisPath(
-        "barcode_exempted",
-        toBooleanValue(payload.barcode_exempted, "barcode_exempted"),
-      );
+      setPisPath("barcode_exempted", toBooleanValue(payload.barcode_exempted, "barcode_exempted"));
     }
-
     if (hasOwn(payload, "pis_item_sizes")) {
       const parsedPisItemSizes = parseSizeEntriesPayload(payload.pis_item_sizes, {
         fieldLabel: "pis_item_sizes",
         remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
         weightKey: "net_weight",
         weightLabel: "net_weight",
-        allowIncomplete: true,
+        allowIncomplete: true
       });
-
-      if (requestedPisDiffCheck) {
-        setMasterPath("master_item_sizes", parsedPisItemSizes);
-      } else {
-        setPisPath("pis_item_sizes", parsedPisItemSizes);
-      }
+      setPisPath("pis_item_sizes", parsedPisItemSizes);
     }
-
     if (hasOwn(payload, "pis_box_sizes")) {
-      const parsedPisBoxMode = detectBoxPackagingMode(
-        payload?.pis_box_mode,
-        payload.pis_box_sizes,
-      );
+      const parsedPisBoxMode = detectBoxPackagingMode(payload?.pis_box_mode, payload.pis_box_sizes);
       const parsedPisBoxSizes = parseSizeEntriesPayload(payload.pis_box_sizes, {
         fieldLabel: "pis_box_sizes",
         remarkOptions: BOX_SIZE_REMARK_OPTIONS,
         weightKey: "gross_weight",
         weightLabel: "gross_weight",
         mode: parsedPisBoxMode,
-        allowIncomplete: true,
+        allowIncomplete: true
       });
-
-      if (requestedPisDiffCheck) {
-        setMasterPath("master_box_sizes", parsedPisBoxSizes);
-        setMasterPath("master_box_mode", parsedPisBoxMode);
-      } else {
-        setPisPath("pis_box_sizes", parsedPisBoxSizes);
-        setPisPath("pis_box_mode", parsedPisBoxMode);
-      }
+      setPisPath("pis_box_sizes", parsedPisBoxSizes);
+      setPisPath("pis_box_mode", parsedPisBoxMode);
     }
-
     if (hasOwn(payload, "pis_box_mode") && !hasOwn(payload, "pis_box_sizes")) {
-      if (requestedPisDiffCheck) {
-        setMasterPath(
-          "master_box_mode",
-          detectBoxPackagingMode(payload?.pis_box_mode, item?.master_box_sizes),
-        );
-      } else {
-        setPisPath(
-          "pis_box_mode",
-          detectBoxPackagingMode(payload?.pis_box_mode, item?.pis_box_sizes),
-        );
-      }
+      setPisPath("pis_box_mode", detectBoxPackagingMode(payload?.pis_box_mode, item?.pis_box_sizes));
     }
-
     if (pisWeightTouched) {
       setPisPath("pis_weight", nextPisWeight);
     }
-
-    const effectivePisBoxMode = detectBoxPackagingMode(
-      item?.pis_box_mode,
-      item?.pis_box_sizes,
-    );
-    const effectivePisMasterBarcode = normalizeTextField(
-      item?.pis_master_barcode || item?.pis_barcode,
-    );
+    const effectivePisBoxMode = detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes);
+    const effectivePisMasterBarcode = normalizeTextField(item?.pis_master_barcode || item?.pis_barcode);
     const pisBarcodesRequired = requiresPisBarcodes(item);
-    if (
-      !adminOverrideRequiredFields &&
-      pisBarcodesRequired &&
-      !effectivePisMasterBarcode
-    ) {
+    if (!adminOverrideRequiredFields && pisBarcodesRequired && !effectivePisMasterBarcode) {
       return res.status(400).json({
         success: false,
-        message: requiresMasterBarcode(effectivePisBoxMode)
-          ? "PIS master barcode is required for this box mode."
-          : "PIS barcode is required.",
+        message: requiresMasterBarcode(effectivePisBoxMode) ? "PIS master barcode is required for this box mode." : "PIS barcode is required."
       });
     }
-    if (
-      !adminOverrideRequiredFields &&
-      pisBarcodesRequired &&
-      requiresInnerBarcode(effectivePisBoxMode) &&
-      !normalizeTextField(item?.pis_inner_barcode)
-    ) {
+    if (!adminOverrideRequiredFields && pisBarcodesRequired && requiresInnerBarcode(effectivePisBoxMode) && !normalizeTextField(item?.pis_inner_barcode)) {
       return res.status(400).json({
         success: false,
-        message: "PIS inner barcode is required for this box mode.",
+        message: "PIS inner barcode is required for this box mode."
       });
     }
-
-    if (requestedPisDiffCheck && !masterFieldsTouched) {
+    if (!pisFieldsTouched) {
       return res.status(400).json({
         success: false,
-        message: "No master fields provided",
+        message: "No PIS fields provided"
       });
     }
-
-    if (!requestedPisDiffCheck && !pisFieldsTouched) {
-      return res.status(400).json({
-        success: false,
-        message: "No PIS fields provided",
+    const pisCleanupGroups = [];
+    if (hasOwn(payload, "pis_item_sizes")) pisCleanupGroups.push("pis_item");
+    if (hasOwn(payload, "pis_box_sizes")) pisCleanupGroups.push("pis_box");
+    if (pisCleanupGroups.length > 0) {
+      const cleanupResult = cleanupLegacyItemSizeFields(item, {
+        groups: pisCleanupGroups
       });
-    }
-
-    if (requestedPisDiffCheck) {
-      setPath("pis_checked_flag", true);
-    }
-
-    if (!requestedPisDiffCheck) {
-      const pisCleanupGroups = [];
-      if (hasOwn(payload, "pis_item_sizes")) pisCleanupGroups.push("pis_item");
-      if (hasOwn(payload, "pis_box_sizes")) pisCleanupGroups.push("pis_box");
-      if (pisCleanupGroups.length > 0) {
-        const cleanupResult = cleanupLegacyItemSizeFields(item, {
-          groups: pisCleanupGroups,
-        });
-        if (cleanupResult.changed) {
-          pisFieldsTouched = true;
-        }
+      if (cleanupResult.changed) {
+        pisFieldsTouched = true;
       }
     }
-
     applyCalculatedCbmTotals(item, setPath);
     appendItemUpdateHistory(item, {
       before: beforeItemSnapshot,
       after: item.toObject(),
       reqUser: req.user,
-      action: requestedPisDiffCheck ? "pis_diff_update" : "pis_update",
-      source: requestedPisDiffCheck
-        ? (requestedFinalPisMasterUpdate ? "final_pis_check_modal" : "pis_diffs_modal")
-        : "pis_update_modal",
+      action: "pis_update",
+      source: "pis_update_modal",
       route: "PATCH /items/:id/pis",
       metadata: {
         pis_update_source: pisUpdateSource,
         sync_master_data: Boolean(payload?.sync_master_data),
         pis_checked_flag_requested: Boolean(payload?.pis_checked_flag),
-        admin_override_required_fields: adminOverrideRequiredFields,
-      },
+        admin_override_required_fields: adminOverrideRequiredFields
+      }
     });
     await item.save();
     const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
@@ -7880,41 +5585,28 @@ exports.updateItemPis = async (req, res) => {
       reqUser: req.user,
       beforeSnapshot: beforeAuditSnapshot,
       afterSnapshot: afterAuditSnapshot,
-      operationType: requestedPisDiffCheck ? "pis_diff_update" : "pis_update",
-      pageName: requestedPisDiffCheck
-        ? (requestedFinalPisMasterUpdate ? "Final PIS Check Modal" : "PIS Diff Modal")
-        : "PIS Update Modal",
-      source: requestedPisDiffCheck
-        ? (requestedFinalPisMasterUpdate ? "final_pis_check_modal" : "pis_diffs_modal")
-        : "pis_update_modal",
-      dataScopes: requestedPisDiffCheck
-        ? [AUDIT_SCOPES.MASTER, AUDIT_SCOPES.PIS]
-        : [AUDIT_SCOPES.PIS],
-      extraRemarks: requestedPisDiffCheck
-        ? ["PIS diff was checked and submitted values were saved to master and PIS data."]
-        : adminOverrideRequiredFields
-          ? ["Admin override saved required PIS barcode fields as entered."]
-          : [],
+      operationType: "pis_update",
+      pageName: "PIS Update Modal",
+      source: "pis_update_modal",
+      dataScopes: [AUDIT_SCOPES.PIS],
+      extraRemarks: adminOverrideRequiredFields ? ["Admin override saved required PIS barcode fields as entered."] : [],
       metadata: {
         pis_update_source: pisUpdateSource,
         sync_master_data: Boolean(payload?.sync_master_data),
         pis_checked_flag_requested: Boolean(payload?.pis_checked_flag),
-        admin_override_required_fields: adminOverrideRequiredFields,
-      },
+        admin_override_required_fields: adminOverrideRequiredFields
+      }
     });
-
     return res.status(200).json({
       success: true,
-      message: requestedPisDiffCheck
-        ? "Master values updated successfully"
-        : "PIS values updated successfully",
-      data: item.toObject(),
+      message: "PIS values updated successfully",
+      data: item.toObject()
     });
   } catch (error) {
     console.error("Update Item PIS Error:", error);
     return res.status(400).json({
       success: false,
-      message: error.message || "Failed to update PIS values",
+      message: error.message || "Failed to update PIS values"
     });
   }
 };

@@ -26,8 +26,7 @@ test("all browser report exports use the centralized PDF client", () => {
     "components/UpcomingEtdExportModal.jsx",
     "pages/DailyReport.jsx",
     "pages/DelayedPoReports.jsx",
-    "pages/FinalPISCheck.jsx",
-    "pages/PISDiffs.jsx",
+    "components/MasterWorkflowPage.jsx",
     "pages/PackedGoods.jsx",
     "pages/PendingPoReport.jsx",
     "pages/PoStatusReport.jsx",
@@ -50,7 +49,8 @@ test("no live report export uses screenshot or jsPDF generation", () => {
     /html2canvas/i,
     /from\s+["']jspdf["']/i,
     /new\s+jsPDF/i,
-    /\.addImage\s*\(/i,
+    // ExcelJS workbook/worksheet.addImage embeds XLSX charts, not PDF screenshots.
+    /(?<!workbook|worksheet)\.addImage\s*\(/i,
     /canvas\.toDataURL\s*\(/i,
   ];
   const files = [
@@ -70,6 +70,15 @@ test("no live report export uses screenshot or jsPDF generation", () => {
       );
     });
   });
+});
+
+test("all master workflow pages share the centralized PDF export implementation", () => {
+  for (const page of ["PISDiffs", "FinalPISCheck", "FinalMaster", "MasterVsPD"]) {
+    assert.match(fs.readFileSync(path.join(CLIENT_SRC, "pages", `${page}.jsx`), "utf8"), /MasterWorkflowPage/);
+  }
+  const { PDF_REPORT_KEYS } = require("../controllers/pdf.controller");
+  assert.ok(PDF_REPORT_KEYS.has("final-masters"));
+  assert.ok(PDF_REPORT_KEYS.has("master-vs-pd"));
 });
 
 test("permission-protected PDF routes delegate to the central renderer", () => {

@@ -70,30 +70,20 @@ test("item country filter combines with existing filters", () => {
   });
 });
 
-test("buildFinalPisCheckMatch builds expected filters and excludes rectify items", () => {
+test("Final PIS Check filters the current Master 1 stage and keeps the country filter", () => {
   const match = buildFinalPisCheckMatch({ country: "India" });
-  assert.ok(match.$and);
-  // conditions: pis_checked_flag, is_rectify_imported, size_or_barcode_exists, country_of_origin
-  assert.equal(match.$and.length, 4);
-  assert.deepEqual(match.$and[1], { is_rectify_imported: { $ne: true } });
-  assert.deepEqual(match.$and[3], {
-    country_of_origin: {
-      $regex: "^India$",
-      $options: "i",
-    },
-  });
+  assert.deepEqual(match.$and[0], buildItemMatch({ country: "India" }));
+  assert.deepEqual(match.$and[1]["master_workflow.stage"], { $in: ["master_1"] });
+  assert.doesNotMatch(JSON.stringify(match), /pis_checked_flag|is_rectify_imported/);
 });
-
-test("buildFinalPisCheckMatch ignores country filter if country is 'all'", () => {
-  const match = buildFinalPisCheckMatch({ country: "all" });
-  assert.equal(match.$and.length, 3); // no country filter added
+test("Final PIS Check ignores country when all is selected", () => {
+  assert.deepEqual(buildFinalPisCheckMatch({ country: "all" }).$and[0], {});
 });
-
-test("PIS Diffs include only items without master data", () => {
+test("PIS Diffs requeue legacy items regardless of existing masters or old flags", () => {
   const match = buildPisDiffMissingItemMasterMatch();
-  assert.equal(match.$nor.length, 6);
-  assert.deepEqual(match.$nor[0], { "master_item_sizes.0": { $exists: true } });
-  assert.deepEqual(match.$nor.at(-1), { master_country_of_origin: { $exists: true, $ne: "" } });
+  assert.equal(match.$or[0]["master_workflow.cycle_version"].$ne, "2026-10-03");
+  assert.equal(match.$or[1]["master_workflow.stage"], "awaiting_master_1");
+  assert.doesNotMatch(JSON.stringify(match), /master_item_sizes|pis_checked_flag/);
 });
 
 test("Final PIS Check applies the user's brand and vendor access", () => {
