@@ -14,6 +14,7 @@ import { PermissionProvider } from "./auth/PermissionContext";
 import { getUserFromToken } from "./auth/auth.service";
 import { normalizeUserRole } from "./auth/permissions";
 import useMobileKeyboardHandler from "./hooks/useMobileKeyboardHandler";
+import LoginTaskPopup from "./components/LoginTaskPopup";
 
 const SignIn = lazy(() => import("./pages/Signin"));
 const BrandScopeChoice = lazy(() => import("./pages/BrandScopeChoice"));
@@ -229,6 +230,7 @@ const App = () => {
           <ModalNumberInputGuard />
           <MobileKeyboardGuard />
           <RouteUiCleanup />
+          <LoginTaskPopup />
           <Suspense fallback={<PageFallback />}>
           <Routes>
           {/* Public */}
