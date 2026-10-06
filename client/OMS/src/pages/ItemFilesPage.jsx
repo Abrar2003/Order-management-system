@@ -367,6 +367,8 @@ const ItemFilesPage = () => {
   const [itemFilePickerItemId, setItemFilePickerItemId] = useState("");
   const [openingFileItemId, setOpeningFileItemId] = useState("");
   const [approvingItemId, setApprovingItemId] = useState("");
+  const [submittingCommentItemId, setSubmittingCommentItemId] = useState("");
+  const [approvalComments, setApprovalComments] = useState({});
   const [previewFile, setPreviewFile] = useState(null);
   const itemFileInputRef = useRef(null);
   const [sortBy, setSortBy] = useState("code");
@@ -795,8 +797,14 @@ const ItemFilesPage = () => {
       setSuccess("");
       const response = await api.post(
         `/items/${encodeURIComponent(itemId)}/file-approvals/${encodeURIComponent(activeFileType)}/approve`,
+        { comment: String(approvalComments[itemId] || "").trim() },
       );
       setSuccess(response?.data?.message || `${activeFileOption.label} approved.`);
+      setApprovalComments((current) => {
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+      });
       await fetchItems();
     } catch (approveError) {
       setError(
@@ -807,7 +815,37 @@ const ItemFilesPage = () => {
     } finally {
       setApprovingItemId("");
     }
-  }, [activeFileOption.label, activeFileType, fetchItems]);
+  }, [activeFileOption.label, activeFileType, approvalComments, fetchItems]);
+
+  const handleSubmitApprovalComment = useCallback(async (item) => {
+    const itemId = String(item?._id || "").trim();
+    const comment = String(approvalComments[itemId] || "").trim();
+    if (!itemId || !comment) {
+      setError("Enter a comment before submitting it.");
+      return;
+    }
+
+    try {
+      setSubmittingCommentItemId(itemId);
+      setError("");
+      setSuccess("");
+      const response = await api.post(
+        `/items/${encodeURIComponent(itemId)}/file-approvals/${encodeURIComponent(activeFileType)}/comment`,
+        { comment },
+      );
+      setSuccess(response?.data?.message || "Comment sent.");
+      setApprovalComments((current) => ({ ...current, [itemId]: "" }));
+      await fetchItems();
+    } catch (commentError) {
+      setError(
+        commentError?.response?.data?.message
+          || commentError?.message
+          || "Failed to submit comment.",
+      );
+    } finally {
+      setSubmittingCommentItemId("");
+    }
+  }, [activeFileType, approvalComments, fetchItems]);
 
   return (
     <>
@@ -1055,6 +1093,7 @@ const ItemFilesPage = () => {
                       const isUploadingThisItem = uploadingItemId === itemId;
                       const isOpeningThisItem = openingFileItemId === itemId;
                       const isApprovingThisItem = approvingItemId === itemId;
+                      const isSubmittingCommentThisItem = submittingCommentItemId === itemId;
                       const storedFiles = getItemFileValues(item, activeFileOption);
                       const storedFile = storedFiles[0] || null;
                       const hasFile = storedFiles.length > 0;
@@ -1134,10 +1173,62 @@ const ItemFilesPage = () => {
                                   {isUploadingThisItem ? "Uploading..." : `Drop ${activeFileOption.buttonLabel} here or click`}
                                 </button>
                               )}
+                              {canApproveActiveFile && hasFile && (
+                                <textarea
+                                  className="form-control form-control-sm item-file-approval-comment"
+                                  rows="2"
+                                  maxLength="2000"
+                                  disabled={isSubmittingCommentThisItem}
+                                  value={approvalComments[itemId] || ""}
+                                  onChange={(event) => setApprovalComments((current) => ({
+                                    ...current,
+                                    [itemId]: event.target.value,
+                                  }))}
+                                  placeholder="Describe the needed update or add an approval note"
+                                  aria-label={`${activeFileOption.label} approval comment`}
+                                />
+                              )}
+                              {canApproveActiveFile && hasFile && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-warning btn-sm item-file-submit-comment"
+                                  onClick={() => handleSubmitApprovalComment(item)}
+                                  disabled={!String(approvalComments[itemId] || "").trim() || isSubmittingCommentThisItem}
+                                >
+                                  {isSubmittingCommentThisItem ? "Sending..." : "Submit Comment"}
+                                </button>
+                              )}
+                              {item?.file_approvals?.[activeFileType]?.comment && (
+                                <small className="text-secondary">
+                                  QC comment: {item.file_approvals[activeFileType].comment}
+                                </small>
+                              )}
                             </div>
                           </td>
                           <td data-label="Action">
-                            <div className="dropdown">
+                            {isQcApprovalMode ? (
+                              <div className="d-flex flex-wrap gap-2 item-file-approval-actions">
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-secondary btn-sm item-file-approval-action"
+                                  onClick={() => handlePreviewFile(item)}
+                                  disabled={!hasFile || isOpeningThisItem}
+                                >
+                                  {isOpeningThisItem ? "Loading..." : "Preview"}
+                                </button>
+                                {canApproveActiveFile && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-success btn-sm item-file-approval-action"
+                                    onClick={() => handleApproveFile(item)}
+                                    disabled={!hasFile || isApprovingThisItem || isSubmittingCommentThisItem}
+                                  >
+                                    {isApprovingThisItem ? "Approving..." : "Approve"}
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="dropdown">
                               <button
                                 type="button"
                                 className="btn btn-outline-secondary btn-sm dropdown-toggle"
@@ -1148,34 +1239,32 @@ const ItemFilesPage = () => {
                                 Actions
                               </button>
                               <ul className="dropdown-menu dropdown-menu-end shadow">
-                                {!isQcApprovalMode && <>
-                                  <li>
-                                    <button
-                                      className="dropdown-item"
-                                      type="button"
-                                      onClick={() => navigateToItemDetails(item)}
-                                      disabled={!item?.code}
-                                      title="Open item details"
-                                    >
-                                      View Item
-                                    </button>
-                                  </li>
-                                  <li>
-                                    <button
-                                      className="dropdown-item"
-                                      type="button"
-                                      onClick={() => navigateToLatestInspectionReport(item)}
-                                      disabled={!item?.latest_inspection_report_qc_id}
-                                      title={
-                                        item?.latest_inspection_report_qc_id
-                                          ? "Open latest inspection report"
-                                          : "No inspection report available yet"
-                                      }
-                                    >
-                                      Inspection Report
-                                    </button>
-                                  </li>
-                                </>}
+                                <li>
+                                  <button
+                                    className="dropdown-item"
+                                    type="button"
+                                    onClick={() => navigateToItemDetails(item)}
+                                    disabled={!item?.code}
+                                    title="Open item details"
+                                  >
+                                    View Item
+                                  </button>
+                                </li>
+                                <li>
+                                  <button
+                                    className="dropdown-item"
+                                    type="button"
+                                    onClick={() => navigateToLatestInspectionReport(item)}
+                                    disabled={!item?.latest_inspection_report_qc_id}
+                                    title={
+                                      item?.latest_inspection_report_qc_id
+                                        ? "Open latest inspection report"
+                                        : "No inspection report available yet"
+                                    }
+                                  >
+                                    Inspection Report
+                                  </button>
+                                </li>
                                 <li>
                                   <button
                                     className="dropdown-item"
@@ -1186,18 +1275,6 @@ const ItemFilesPage = () => {
                                     {isOpeningThisItem ? "Loading..." : "Preview"}
                                   </button>
                                 </li>
-                                {canApproveActiveFile && (
-                                  <li>
-                                    <button
-                                      className="dropdown-item text-success fw-semibold"
-                                      type="button"
-                                      onClick={() => handleApproveFile(item)}
-                                      disabled={!hasFile || isApprovingThisItem}
-                                    >
-                                      {isApprovingThisItem ? "Approving..." : "Approve"}
-                                    </button>
-                                  </li>
-                                )}
                                 {canUploadActiveFile && (
                                   <>
                                     <li>
@@ -1216,7 +1293,8 @@ const ItemFilesPage = () => {
                                   </>
                                 )}
                               </ul>
-                            </div>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       );

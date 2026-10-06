@@ -260,7 +260,6 @@ const Navbar = () => {
   );
 
   const itemMenuItems = useMemo(() => {
-    if (!hasPermission("items", "view")) return [];
     if (isQcOnlyRole) {
       return [
         groupMenuItem("qc-file-approvals", "File Approvals", [
@@ -270,6 +269,7 @@ const Navbar = () => {
         ]),
       ];
     }
+    if (!hasPermission("items", "view")) return [];
     if (isViewer) {
       return [
         routeMenuItem("items-all", "View Items", "/items"),

@@ -53,6 +53,7 @@ const {
   getItemFileUrl,
   getPendingFileApprovals,
   approveItemFile,
+  commentOnItemFile,
   getItemPisFileUrl,
   uploadItemFile,
   uploadItemPisFile,
@@ -159,6 +160,14 @@ router.post(
   authorize("QC"),
   invalidateItemsOnSuccess,
   approveItemFile,
+);
+
+router.post(
+  "/:id/file-approvals/:fileType/comment",
+  auth,
+  authorize("QC"),
+  invalidateItemsOnSuccess,
+  commentOnItemFile,
 );
 
 router.get(

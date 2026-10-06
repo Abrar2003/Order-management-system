@@ -1929,6 +1929,17 @@ const buildFinalPisCheckMatch = (filters = {}) => ({ $and: [buildItemMatch(filte
 const buildFinalPisCheckAccessMatch = (filters = {}, user = {}) =>
   applyItemDataAccess(buildFinalPisCheckMatch(filters), user);
 
+const getFileUploadUserId = (item = {}, fileType = "") => {
+  const normalizedFileType = normalizeTextField(fileType).toLowerCase();
+  const history = Array.isArray(item?.update_history) ? item.update_history : [];
+  const entry = [...history].reverse().find((candidate) =>
+    candidate?.source === "item_file_upload" &&
+    normalizeTextField(candidate?.metadata?.file_type).toLowerCase() === normalizedFileType,
+  );
+  const userId = entry?.actor?.user;
+  return mongoose.Types.ObjectId.isValid(userId) ? String(userId) : "";
+};
+
 exports.__test__ = {
   buildItemMatch,
   buildFinalPisCheckAccessMatch,
@@ -1939,6 +1950,7 @@ exports.__test__ = {
   itemMatchesProductDatabaseTypeFilters,
   parseSizeEntriesPayload,
   requiresPisBarcodes,
+  getFileUploadUserId,
 };
 
 const FINAL_PIS_COMMENT_ROLE_KEYS = new Set([
@@ -1955,6 +1967,36 @@ const clonePlainObject = (value = {}) =>
 
 const getActorDisplayName = (user = {}) =>
   normalizeTextField(user?.name || user?.username || user?.email || user?.role) || "User";
+
+const notifyFileUploader = ({ item = {}, fileType = "", comment = "", actor = {}, req, approved = false }) => {
+  const uploaderId = getFileUploadUserId(item, fileType);
+  const actorId = String(actor?._id || actor?.id || "");
+  if (!uploaderId || uploaderId === actorId) return;
+
+  const itemCode = normalizeTextField(item?.code || item?._id);
+  const fileLabel = getItemFileConfig(fileType)?.label || fileType;
+  const actorName = getActorDisplayName(actor);
+  const action = approved ? "approved" : "requested an update to";
+  const title = approved ? `${fileLabel} approved` : `${fileLabel} update requested`;
+  notifyUsers(
+    [uploaderId],
+    {
+      type: approved ? "file_approval" : "file_comment",
+      title,
+      message: `${actorName} ${action} ${fileLabel} for item ${itemCode}${comment ? `: ${comment}` : "."}`,
+      priority: approved ? "normal" : "high",
+      category: "comment",
+      entity_type: "item",
+      entity_id: item._id,
+      deep_link: `/item-files?file_type=${encodeURIComponent(fileType)}&approval_status=${approved ? "completed" : "pending"}&search=${encodeURIComponent(itemCode)}`,
+      metadata: { item_code: itemCode, file_type: fileType, comment, source: approved ? "qc_file_approval" : "qc_file_comment" },
+      created_by: actor?._id || actor?.id || null,
+    },
+    { realtimeSource: req, dedupe: false },
+  ).catch((notificationError) => {
+    console.error("File approval notification failed:", notificationError);
+  });
+};
 
 const notifyAdminsForFinalPisComment = async ({ item = {}, comment = {}, actor = {}, req }) => {
   const adminUsers = await User.find({
@@ -6109,8 +6151,12 @@ exports.approveItemFile = async (req, res) => {
   try {
     const itemId = getRequestedItemId(req);
     const fileType = normalizeTextField(req.params?.fileType).toLowerCase();
+    const comment = normalizeTextField(req.body?.comment);
     if (!mongoose.Types.ObjectId.isValid(itemId) || !APPROVAL_FILE_TYPES.includes(fileType)) {
       return res.status(400).json({ message: "Invalid item or approval file type" });
+    }
+    if (comment.length > 2000) {
+      return res.status(400).json({ message: "Approval comment cannot exceed 2000 characters" });
     }
     const item = await Item.findById(itemId);
     if (!item) return res.status(404).json({ message: "Item not found" });
@@ -6125,6 +6171,12 @@ exports.approveItemFile = async (req, res) => {
     const beforeItemSnapshot = item.toObject();
     item.set(`file_approvals.${fileType}`, {
       file_key: getStoredFileKey(item?.[fileType]),
+      comment,
+      commented_by: {
+        user: req.user?._id || req.user?.id || null,
+        name: getActorDisplayName(req.user),
+      },
+      commented_at: new Date(),
       approved_by: {
         user: req.user?._id || req.user?.id || null,
         name: normalizeTextField(req.user?.name || req.user?.email || req.user?.username),
@@ -6138,9 +6190,10 @@ exports.approveItemFile = async (req, res) => {
       action: "file_approval",
       source: "qc_file_approval",
       route: "POST /items/:id/file-approvals/:fileType/approve",
-      metadata: { file_type: fileType, file_key: getStoredFileKey(item?.[fileType]) },
+      metadata: { file_type: fileType, file_key: getStoredFileKey(item?.[fileType]), comment },
     });
     await item.save();
+    notifyFileUploader({ item, fileType, comment, actor: req.user, req, approved: true });
     return res.json({
       message: "File approved",
       data: { item_id: String(item._id), file_type: fileType, approved: true },
@@ -6148,6 +6201,62 @@ exports.approveItemFile = async (req, res) => {
   } catch (error) {
     console.error("Approve item file error:", error);
     return res.status(500).json({ message: error?.message || "Failed to approve file" });
+  }
+};
+
+exports.commentOnItemFile = async (req, res) => {
+  try {
+    const itemId = getRequestedItemId(req);
+    const fileType = normalizeTextField(req.params?.fileType).toLowerCase();
+    const comment = normalizeTextField(req.body?.comment);
+    if (!mongoose.Types.ObjectId.isValid(itemId) || !APPROVAL_FILE_TYPES.includes(fileType)) {
+      return res.status(400).json({ message: "Invalid item or approval file type" });
+    }
+    if (!comment) return res.status(400).json({ message: "A comment is required" });
+    if (comment.length > 2000) {
+      return res.status(400).json({ message: "Comment cannot exceed 2000 characters" });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) return res.status(404).json({ message: "Item not found" });
+    if (!isFileApprovalEligible(item, fileType)) {
+      return res.status(400).json({ message: "Only uploaded, applicable Indian files can be commented on" });
+    }
+    if (!isFileApprovalPending(item, fileType)) {
+      return res.status(409).json({ message: "This file is already approved" });
+    }
+
+    const beforeItemSnapshot = item.toObject();
+    const previousApproval = item?.file_approvals?.[fileType] || {};
+    item.set(`file_approvals.${fileType}`, {
+      file_key: normalizeTextField(previousApproval.file_key),
+      comment,
+      commented_by: {
+        user: req.user?._id || req.user?.id || null,
+        name: getActorDisplayName(req.user),
+      },
+      commented_at: new Date(),
+      approved_by: previousApproval.approved_by || {},
+      approved_at: previousApproval.approved_at || null,
+    });
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "file_comment",
+      source: "qc_file_comment",
+      route: "POST /items/:id/file-approvals/:fileType/comment",
+      metadata: { file_type: fileType, comment },
+    });
+    await item.save();
+    notifyFileUploader({ item, fileType, comment, actor: req.user, req });
+    return res.json({
+      message: "Comment sent; file is still pending QC approval",
+      data: { item_id: String(item._id), file_type: fileType, approved: false },
+    });
+  } catch (error) {
+    console.error("Comment on item file error:", error);
+    return res.status(500).json({ message: error?.message || "Failed to submit comment" });
   }
 };
 

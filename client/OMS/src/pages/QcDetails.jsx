@@ -338,6 +338,19 @@ const hasStoredFile = (file = {}) =>
         ).trim(),
       );
 
+const QC_APPROVAL_FILE_TYPES = new Set(["cad_file", "assembly_file", "mounting_file"]);
+
+const isPendingQcFileApproval = (item = {}, entry = {}) => {
+  const fileType = String(entry?.fileType || entry?.value || "").trim().toLowerCase();
+  if (!QC_APPROVAL_FILE_TYPES.has(fileType) || String(item?.country_of_origin || "").trim().toLowerCase() !== "india") return false;
+  if (fileType === "assembly_file" && item?.kd !== true) return false;
+  if (fileType === "mounting_file" && item?.mounting_file_needed !== true) return false;
+
+  const fileKey = String(entry?.file?.key || entry?.file?.public_id || entry?.file?.link || "").trim();
+  const approvedKey = String(item?.file_approvals?.[fileType]?.file_key || "").trim();
+  return Boolean(fileKey) && fileKey !== approvedKey;
+};
+
 const getSelectedFileSignature = (file) =>
   [
     String(file?.name || "").trim().toLowerCase(),
@@ -570,6 +583,9 @@ const QcDetails = () => {
   const [relatedFileUploadProgress, setRelatedFileUploadProgress] = useState(0);
   const [openingRelatedFileType, setOpeningRelatedFileType] = useState("");
   const [downloadingRelatedFileType, setDownloadingRelatedFileType] = useState("");
+  const [approvingItemFileType, setApprovingItemFileType] = useState("");
+  const [submittingItemFileCommentType, setSubmittingItemFileCommentType] = useState("");
+  const [itemFileApprovalComments, setItemFileApprovalComments] = useState({});
   const [selectedItemMasterFileValue, setSelectedItemMasterFileValue] = useState("");
   const [previewFile, setPreviewFile] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -2033,6 +2049,53 @@ const QcDetails = () => {
     }
   }, [qc?.item_master]);
 
+  const handleApproveItemMasterFile = useCallback(async (entry) => {
+    const itemId = String(qc?.item_master?._id || "").trim();
+    const fileType = String(entry?.fileType || entry?.value || "").trim().toLowerCase();
+    if (!itemId || !isQcUser || !isPendingQcFileApproval(qc?.item_master, entry)) return;
+
+    try {
+      setApprovingItemFileType(fileType);
+      const response = await api.post(
+        `/items/${encodeURIComponent(itemId)}/file-approvals/${encodeURIComponent(fileType)}/approve`,
+        { comment: String(itemFileApprovalComments[fileType] || "").trim() },
+      );
+      setItemFileApprovalComments((current) => ({ ...current, [fileType]: "" }));
+      await fetchQcDetails();
+      alert(response?.data?.message || `${entry.label} approved.`);
+    } catch (error) {
+      alert(error?.response?.data?.message || error?.message || `Failed to approve ${entry?.label || "file"}.`);
+    } finally {
+      setApprovingItemFileType("");
+    }
+  }, [fetchQcDetails, isQcUser, itemFileApprovalComments, qc?.item_master]);
+
+  const handleSubmitItemMasterFileComment = useCallback(async (entry) => {
+    const itemId = String(qc?.item_master?._id || "").trim();
+    const fileType = String(entry?.fileType || entry?.value || "").trim().toLowerCase();
+    const comment = String(itemFileApprovalComments[fileType] || "").trim();
+    if (!itemId || !isQcUser || !isPendingQcFileApproval(qc?.item_master, entry)) return;
+    if (!comment) {
+      alert("Enter a comment before submitting it.");
+      return;
+    }
+
+    try {
+      setSubmittingItemFileCommentType(fileType);
+      const response = await api.post(
+        `/items/${encodeURIComponent(itemId)}/file-approvals/${encodeURIComponent(fileType)}/comment`,
+        { comment },
+      );
+      setItemFileApprovalComments((current) => ({ ...current, [fileType]: "" }));
+      await fetchQcDetails();
+      alert(response?.data?.message || "Comment sent.");
+    } catch (error) {
+      alert(error?.response?.data?.message || error?.message || "Failed to submit comment.");
+    } finally {
+      setSubmittingItemFileCommentType("");
+    }
+  }, [fetchQcDetails, isQcUser, itemFileApprovalComments, qc?.item_master]);
+
   const handleDownloadRelatedFile = useCallback(async (fileTypeOrEntry) => {
     const directEntry =
       fileTypeOrEntry && typeof fileTypeOrEntry === "object" ? fileTypeOrEntry : null;
@@ -3236,22 +3299,64 @@ const QcDetails = () => {
                 {itemMasterFiles.map((entry) => {
                   const hasFile = hasStoredFile(entry.file);
                   const isOpening = openingRelatedFileType === entry.value;
+                  const isPendingApproval = isQcUser && isPendingQcFileApproval(qc?.item_master, entry);
+                  const fileType = String(entry.fileType || entry.value || "").trim().toLowerCase();
+                  const isApproving = approvingItemFileType === fileType;
+                  const isSubmittingComment = submittingItemFileCommentType === fileType;
+                  const approvalComment = qc?.item_master?.file_approvals?.[fileType]?.comment;
 
                   return (
-                    <button
-                      key={entry.value}
-                      type="button"
-                      className="btn btn-outline-secondary btn-sm rounded-pill"
-                      onClick={() => handleOpenRelatedFile(entry)}
-                      disabled={!hasFile || isOpening || Boolean(downloadingRelatedFileType)}
-                      title={
-                        hasFile
-                          ? entry.file?.originalName || `Open ${entry.label}`
-                          : `${entry.label} is not uploaded yet.`
-                      }
-                    >
-                      {isOpening ? "Opening..." : entry.buttonLabel}
-                    </button>
+                    <div key={entry.value} className="d-flex flex-column gap-1">
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary btn-sm rounded-pill"
+                        onClick={() => handleOpenRelatedFile(entry)}
+                        disabled={!hasFile || isOpening || Boolean(downloadingRelatedFileType)}
+                        title={
+                          hasFile
+                            ? entry.file?.originalName || `Open ${entry.label}`
+                            : `${entry.label} is not uploaded yet.`
+                        }
+                      >
+                        {isOpening ? "Opening..." : entry.buttonLabel}
+                      </button>
+                      {isPendingApproval && (
+                        <>
+                          <textarea
+                            className="form-control form-control-sm"
+                            rows="2"
+                            maxLength="2000"
+                            disabled={isSubmittingComment}
+                            value={itemFileApprovalComments[fileType] || ""}
+                            onChange={(event) => setItemFileApprovalComments((current) => ({
+                              ...current,
+                              [fileType]: event.target.value,
+                            }))}
+                            placeholder="Describe the needed update or add an approval note"
+                            aria-label={`${entry.label} approval comment`}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-outline-warning btn-sm rounded-pill"
+                            onClick={() => handleSubmitItemMasterFileComment(entry)}
+                            disabled={!String(itemFileApprovalComments[fileType] || "").trim() || isSubmittingComment}
+                          >
+                            {isSubmittingComment ? "Sending..." : "Submit Comment"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-outline-success btn-sm rounded-pill"
+                            onClick={() => handleApproveItemMasterFile(entry)}
+                            disabled={isApproving || isSubmittingComment}
+                          >
+                            {isApproving ? "Approving..." : `Approve ${entry.label}`}
+                          </button>
+                        </>
+                      )}
+                      {approvalComment && (
+                        <small className="text-secondary">QC comment: {approvalComment}</small>
+                      )}
+                    </div>
                   );
                 })}
                 <select

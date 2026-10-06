@@ -124,9 +124,11 @@ test("QC approval stores audit metadata and clears the pending file state", asyn
     await itemController.approveItemFile({
       params: { id: firstId, fileType: "cad_file" },
       user: { _id: secondId, name: "QC User", role: "QC" },
+      body: { comment: "Looks good" },
     }, approved);
     assert.equal(approved.statusCode, 200);
     assert.equal(item.file_approvals.cad_file.file_key, "cad-v1");
+    assert.equal(item.file_approvals.cad_file.comment, "Looks good");
     assert.equal(item.file_approvals.cad_file.approved_by.user, secondId);
     assert.equal(item.update_history.at(-1).action, "file_approval");
     assert.equal(item.saved, true);
@@ -137,7 +139,28 @@ test("QC approval stores audit metadata and clears the pending file state", asyn
       user: { _id: secondId, name: "QC User", role: "QC" },
     }, duplicate);
     assert.equal(duplicate.statusCode, 409);
+
+    item.file_approvals = {};
+    const comment = response();
+    await itemController.commentOnItemFile({
+      params: { id: firstId, fileType: "cad_file" },
+      body: { comment: "Please update the dimensions" },
+      user: { _id: secondId, name: "QC User", role: "QC" },
+    }, comment);
+    assert.equal(comment.statusCode, 200);
+    assert.equal(comment.body.data.approved, false);
+    assert.equal(item.file_approvals.cad_file.comment, "Please update the dimensions");
+    assert.equal(item.file_approvals.cad_file.file_key, "");
   } finally {
     Item.findById = originalFindById;
   }
+});
+
+test("finds the uploader for a file approval notification", () => {
+  assert.equal(itemController.__test__.getFileUploadUserId({
+    update_history: [
+      { source: "item_file_upload", metadata: { file_type: "cad_file" }, actor: { user: firstId } },
+      { source: "item_file_upload", metadata: { file_type: "assembly_file" }, actor: { user: secondId } },
+    ],
+  }, "cad_file"), firstId);
 });

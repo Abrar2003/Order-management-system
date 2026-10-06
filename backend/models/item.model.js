@@ -334,6 +334,12 @@ const fileSubSchema = new mongoose.Schema(
 const fileApprovalSchema = new mongoose.Schema(
   {
     file_key: { type: String, default: "", trim: true },
+    comment: { type: String, default: "", trim: true, maxlength: 2000 },
+    commented_by: {
+      user: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
+      name: { type: String, default: "", trim: true },
+    },
+    commented_at: { type: Date, default: null },
     approved_by: {
       user: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
       name: { type: String, default: "", trim: true },
