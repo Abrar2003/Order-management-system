@@ -115,6 +115,19 @@ export const hasInspectionRecordActivity = ({
   (Array.isArray(labelsAdded) && labelsAdded.length > 0) ||
   (Array.isArray(labelRanges) && labelRanges.length > 0);
 
+export const isPendingInspectionRecordWithActivity = (record = {}) =>
+  normalizeRequestHistoryStatus(record?.status) === "open" &&
+  hasInspectionRecordActivity({
+    checked: record?.checked,
+    passed: record?.passed,
+    rejected: record?.rejected,
+    vendorOffered: record?.vendor_offered,
+    labelsAdded: record?.labels_added,
+    labelRanges: record?.label_ranges,
+    goodsNotReady: record?.goods_not_ready,
+    status: record?.status,
+  });
+
 const QC_USER_UPDATE_WINDOW_MS = 60 * 60 * 1000;
 const QC_USER_MAX_UPDATES = 3;
 

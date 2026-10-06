@@ -834,6 +834,19 @@ const hasInspectionRecordActivity = ({
   (Array.isArray(labelsAdded) && labelsAdded.length > 0) ||
   (Array.isArray(labelRanges) && labelRanges.length > 0);
 
+const isPendingInspectionRecordWithActivity = (record = {}) =>
+  isInspectionStatusMatching(record?.status, INSPECTION_RECORD_STATUS.PENDING) &&
+  hasInspectionRecordActivity({
+    checked: record?.checked,
+    passed: record?.passed,
+    rejected: record?.rejected,
+    vendorOffered: record?.vendor_offered,
+    labelsAdded: record?.labels_added,
+    labelRanges: record?.label_ranges,
+    goodsNotReady: record?.goods_not_ready,
+    status: record?.status,
+  });
+
 const resolveInspectionRecordStatus = ({
   checked = 0,
   goodsNotReady = null,
@@ -6034,6 +6047,7 @@ const updateQC = async (req, res) => {
       inspected_bottom_LBH,
       inspected_weight,
       qc_rewrite_current_request_record,
+      rewrite_pending_request_record,
     } = req.body;
 
     const qc = await QC.findById(req.params.id)
@@ -6082,6 +6096,9 @@ const updateQC = async (req, res) => {
       isQcUser &&
       (qc_rewrite_current_request_record === true ||
         String(qc_rewrite_current_request_record || "").trim().toLowerCase() === "true");
+    const pendingRequestRewriteRequested =
+      rewrite_pending_request_record === true ||
+      String(rewrite_pending_request_record || "").trim().toLowerCase() === "true";
     let allowQcRequestRewrite = false;
     const allowQcFieldEdits = allowAdminRewrite || isQcUser;
     const allowQcSizeFieldEdits =
@@ -6128,6 +6145,13 @@ const updateQC = async (req, res) => {
         message: "QC is not requested yet. Align QC request before updating.",
       });
     }
+    const pendingRequestRecord = resolveLatestInspectionRecordForRequestEntry(
+      beforeInspectionRecords,
+      latestRequestEntry,
+    );
+    const allowPendingRequestRewrite =
+      pendingRequestRewriteRequested &&
+      isPendingInspectionRecordWithActivity(pendingRequestRecord);
 
     const inspectionDateForPermissionRaw =
       last_inspected_date !== undefined &&
@@ -6174,9 +6198,15 @@ const updateQC = async (req, res) => {
       }
 
       if (qcRewriteCurrentRequestRecord) {
+        const pendingRecordRewrite = isPendingInspectionRecordWithActivity(
+          qcUserRequestAvailability?.latestInspectionRecord,
+        );
         if (
           !qcUserRequestAvailability?.latestInspectionRecord?._id ||
-          Number(qcUserRequestAvailability.currentUpdateCount || 0) <= 0
+          (
+            Number(qcUserRequestAvailability.currentUpdateCount || 0) <= 0 &&
+            !pendingRecordRewrite
+          )
         ) {
           return res.status(400).json({
             message: "Only an existing inspection record can be rewritten.",
@@ -6185,7 +6215,8 @@ const updateQC = async (req, res) => {
         allowQcRequestRewrite = true;
       }
     }
-    const allowRecordRewrite = allowAdminRewrite || allowQcRequestRewrite;
+    const allowRecordRewrite =
+      allowAdminRewrite || allowQcRequestRewrite || allowPendingRequestRewrite;
 
     if (requestedInspectorId) {
       if (!mongoose.Types.ObjectId.isValid(requestedInspectorId)) {
@@ -7664,7 +7695,7 @@ const updateQC = async (req, res) => {
         addProvision: isVisitUpdate ? addProvision : 0,
         appendLabelRanges: isVisitUpdate ? labelRangesUsedThisVisit : [],
         appendLabels: isVisitUpdate ? labelsAddedThisVisit : [],
-        replaceCurrentRecord: allowQcRequestRewrite,
+        replaceCurrentRecord: allowRecordRewrite,
         replaceCbmSnapshot: hasCbmUpdate || isVisitUpdate,
         explicitStatus: isQcUser ? INSPECTION_RECORD_STATUS.DONE : "",
         currentSizeSource: inspectionSizeSource,

@@ -31,6 +31,7 @@ import {
 import {
   getQcUserUpdateRequestAvailability,
   hasInspectionRecordActivity,
+  isPendingInspectionRecordWithActivity,
 } from "../utils/qcRequests";
 import { formatNumberInputValue } from "../utils/measurementDisplay";
 import useFormDraft from "../hooks/useFormDraft";
@@ -1220,7 +1221,10 @@ const UpdateQcModal = ({
       : null;
   const isQcUserRewriteMode =
     Boolean(qcUserRewriteInspectionRecord?._id) &&
-    Number(qcUserRequestAvailability.currentUpdateCount || 0) > 0;
+    (
+      Number(qcUserRequestAvailability.currentUpdateCount || 0) > 0 ||
+      isPendingInspectionRecordWithActivity(qcUserRewriteInspectionRecord)
+    );
   const selectedInspectionRecord = isInspectionRecordUpdate
     ? inspectionRecord
     : canRewriteLatestInspectionRecord
@@ -2635,6 +2639,9 @@ const UpdateQcModal = ({
       0,
       Number(currentRequestInspectionRecord?.vendor_offered || 0) || 0,
     );
+    const rewritePendingRequestRecord = isPendingInspectionRecordWithActivity(
+      currentRequestInspectionRecord,
+    );
     const nextCurrentRequestCheckedForRejection = isInspectionRewriteMode
       ? qcChecked
       : currentRequestCheckedBefore + qcChecked;
@@ -3165,6 +3172,9 @@ const UpdateQcModal = ({
         if (isQcUserRewriteMode) {
           payload.qc_rewrite_current_request_record = true;
         }
+        if (rewritePendingRequestRecord) {
+          payload.rewrite_pending_request_record = true;
+        }
       }
 
       if (
@@ -3566,17 +3576,22 @@ const UpdateQcModal = ({
       return;
     }
 
-    const rawNextNetOffered =
-      (qc.quantities?.vendor_provision || 0) + offeredQuantity;
+    const rawNextNetOffered = rewritePendingRequestRecord
+      ? Math.max(0, (qc.quantities?.vendor_provision || 0) - currentRequestOfferedBefore) + offeredQuantity
+      : (qc.quantities?.vendor_provision || 0) + offeredQuantity;
     const totalOfferedNext = rawNextNetOffered;
-    const nextChecked = (qc.quantities?.qc_checked || 0) + qcChecked;
-    const nextCurrentRequestChecked =
-      currentRequestCheckedBefore + qcChecked;
-    const nextCurrentRequestSamplePassed =
-      currentRequestPassedBefore + qcPassed;
-    const nextCurrentRequestOffered =
-      currentRequestOfferedBefore + offeredQuantity;
-    const nextSamplePassedTotal = currentSamplePassedTotal + qcPassed;
+    const nextChecked = rewritePendingRequestRecord
+      ? Math.max(0, (qc.quantities?.qc_checked || 0) - currentRequestCheckedBefore) + qcChecked
+      : (qc.quantities?.qc_checked || 0) + qcChecked;
+    const nextCurrentRequestChecked = rewritePendingRequestRecord
+      ? qcChecked
+      : currentRequestCheckedBefore + qcChecked;
+    const nextCurrentRequestSamplePassed = rewritePendingRequestRecord
+      ? qcPassed
+      : currentRequestPassedBefore + qcPassed;
+    const nextCurrentRequestOffered = rewritePendingRequestRecord
+      ? offeredQuantity
+      : currentRequestOfferedBefore + offeredQuantity;
     const existingLabelsSet = new Set(normalizeLabels(qc?.labels));
     const incomingNewLabels = labelsForUpdate.filter(
       (label) => !existingLabelsSet.has(label),
@@ -3584,10 +3599,12 @@ const UpdateQcModal = ({
     const currentRequestLabelsBefore = normalizeLabels(
       currentRequestInspectionRecord?.labels_added || [],
     );
-    const currentRequestLabelsAfterUpdate = normalizeLabels([
-      ...currentRequestLabelsBefore,
-      ...incomingNewLabels,
-    ]);
+    const currentRequestLabelsAfterUpdate = rewritePendingRequestRecord
+      ? labelsForUpdate
+      : normalizeLabels([
+        ...currentRequestLabelsBefore,
+        ...incomingNewLabels,
+      ]);
     if (totalOfferedNext < 0) {
       setError("Offered quantity cannot be negative.");
       return;
