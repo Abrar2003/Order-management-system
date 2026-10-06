@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   getQcUserUpdateRequestAvailability,
-  isPendingInspectionRecordWithActivity,
+  isCurrentRequestInspectionRecordWithActivity,
   resolveLatestInspectionRecordForRequestEntry,
 } from "./qcRequests.js";
 
@@ -34,9 +34,9 @@ test("a placeholder inspection record is not a QC rewrite", () => {
   assert.ok(availability.latestInspectionRecord?._id);
 });
 
-test("a pending inspection with provisional quantities is rewritten, not added", () => {
-  assert.equal(isPendingInspectionRecordWithActivity({
-    status: "pending",
+test("an active current inspection can be rewritten regardless of its derived status", () => {
+  assert.equal(isCurrentRequestInspectionRecordWithActivity({
+    status: "Inspection Done",
     checked: 30,
     passed: 30,
     labels_added: [70081],

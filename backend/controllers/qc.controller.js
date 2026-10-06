@@ -834,8 +834,7 @@ const hasInspectionRecordActivity = ({
   (Array.isArray(labelsAdded) && labelsAdded.length > 0) ||
   (Array.isArray(labelRanges) && labelRanges.length > 0);
 
-const isPendingInspectionRecordWithActivity = (record = {}) =>
-  isInspectionStatusMatching(record?.status, INSPECTION_RECORD_STATUS.PENDING) &&
+const isCurrentRequestInspectionRecordWithActivity = (record = {}) =>
   hasInspectionRecordActivity({
     checked: record?.checked,
     passed: record?.passed,
@@ -6149,9 +6148,9 @@ const updateQC = async (req, res) => {
       beforeInspectionRecords,
       latestRequestEntry,
     );
-    const allowPendingRequestRewrite =
+    const allowCurrentRequestRewrite =
       pendingRequestRewriteRequested &&
-      isPendingInspectionRecordWithActivity(pendingRequestRecord);
+      isCurrentRequestInspectionRecordWithActivity(pendingRequestRecord);
 
     const inspectionDateForPermissionRaw =
       last_inspected_date !== undefined &&
@@ -6198,14 +6197,14 @@ const updateQC = async (req, res) => {
       }
 
       if (qcRewriteCurrentRequestRecord) {
-        const pendingRecordRewrite = isPendingInspectionRecordWithActivity(
+        const activeRecordRewrite = isCurrentRequestInspectionRecordWithActivity(
           qcUserRequestAvailability?.latestInspectionRecord,
         );
         if (
           !qcUserRequestAvailability?.latestInspectionRecord?._id ||
           (
             Number(qcUserRequestAvailability.currentUpdateCount || 0) <= 0 &&
-            !pendingRecordRewrite
+            !activeRecordRewrite
           )
         ) {
           return res.status(400).json({
@@ -6216,7 +6215,7 @@ const updateQC = async (req, res) => {
       }
     }
     const allowRecordRewrite =
-      allowAdminRewrite || allowQcRequestRewrite || allowPendingRequestRewrite;
+      allowAdminRewrite || allowQcRequestRewrite || allowCurrentRequestRewrite;
 
     if (requestedInspectorId) {
       if (!mongoose.Types.ObjectId.isValid(requestedInspectorId)) {

@@ -115,8 +115,7 @@ export const hasInspectionRecordActivity = ({
   (Array.isArray(labelsAdded) && labelsAdded.length > 0) ||
   (Array.isArray(labelRanges) && labelRanges.length > 0);
 
-export const isPendingInspectionRecordWithActivity = (record = {}) =>
-  normalizeRequestHistoryStatus(record?.status) === "open" &&
+export const isCurrentRequestInspectionRecordWithActivity = (record = {}) =>
   hasInspectionRecordActivity({
     checked: record?.checked,
     passed: record?.passed,

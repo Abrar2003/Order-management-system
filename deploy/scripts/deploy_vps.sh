@@ -278,6 +278,9 @@ if command -v curl >/dev/null 2>&1; then
   curl --fail --silent --show-error "$PDF_STATUS_URL" >/dev/null
   echo "PDF renderer route check passed"
 
+  log "Verifying deployed backend commit"
+  npm --prefix "$BACKEND_DIR" run verify:build-info
+
   if [[ -n "$FRONTEND_HEALTHCHECK_URL" ]]; then
     log "Checking frontend health"
     curl --fail --silent --show-error "$FRONTEND_HEALTHCHECK_URL" >/dev/null
