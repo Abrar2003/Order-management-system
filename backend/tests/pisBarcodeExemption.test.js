@@ -74,6 +74,18 @@ test("QC does not require a Logistics EAN for one box size", () => {
   );
 });
 
+test("QC requires a Logistics EAN only for individual boxes", () => {
+  const item = {
+    pis_logistics_ean: "8721274914153",
+    pis_box_sizes: [{}, {}],
+    logistics_ean: { key: "ean.pdf" },
+  };
+
+  assert.equal(requiresLogisticsEanScanValidation({ ...item, pis_box_mode: "individual" }), true);
+  assert.equal(requiresLogisticsEanScanValidation({ ...item, pis_box_mode: "carton" }), false);
+  assert.equal(requiresLogisticsEanScanValidation({ ...item, pis_box_mode: "individual_master" }), false);
+});
+
 test("QC only adds a Logistics EAN scan when its file is uploaded", () => {
   assert.deepEqual(
     getQcBarcodeValidationRequirements("individual", { pis_master_barcode: "123456" })

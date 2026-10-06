@@ -472,7 +472,10 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const isPisCartonMode =
     detectBoxPackagingMode(form.pis_box_mode, form.pis_box_sizes) ===
     BOX_PACKAGING_MODES.CARTON;
-  const requiresLogisticsEan = Number(form.pis_box_count) >= 2;
+  const requiresLogisticsEan =
+    detectBoxPackagingMode(form.pis_box_mode, form.pis_box_sizes) ===
+      BOX_PACKAGING_MODES.INDIVIDUAL &&
+    Number(form.pis_box_count) >= 2;
   const storedMasterBarcode = toText(
     isPisDiffUpdate
       ? item?.master_master_barcode || item?.master_barcode || item?.pis_master_barcode || item?.pis_barcode

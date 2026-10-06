@@ -31,7 +31,7 @@ const LoginTaskPopup = () => {
       if (!active) return;
       setTasks(remaining);
       setSeconds(ACKNOWLEDGEMENT_DELAY_SECONDS);
-      setOpen(true);
+      setOpen(remaining.length > 0);
     }).catch(() => {});
 
     return () => {

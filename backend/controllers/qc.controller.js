@@ -272,6 +272,8 @@ const getPisMasterBarcode = (item = {}) =>
 const requiresPisBarcodeValidation = (item = {}) => item?.barcode_exempted !== true;
 const requiresLogisticsEanScanValidation = (item = {}) =>
   requiresPisBarcodeValidation(item) &&
+  detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes) ===
+    BOX_PACKAGING_MODES.INDIVIDUAL &&
   Array.isArray(item?.pis_box_sizes) && item.pis_box_sizes.length >= 2 &&
   Boolean(getPisLogisticsEan(item)) &&
   hasStoredLogisticsEan(item?.logistics_ean);
