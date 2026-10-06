@@ -221,3 +221,31 @@ test("detects standalone transaction errors without retrying outside the transac
       "QC updates are temporarily unavailable because atomic database writes are not configured.",
   });
 });
+
+test("delegates a duplicate idempotency key after rolling back the transaction", async () => {
+  const connection = {
+    async transaction(callback) {
+      await callback();
+      const error = new Error("duplicate key");
+      error.code = 11000;
+      throw error;
+    },
+  };
+  const { res, state } = createResponse();
+  let duplicateHandled = false;
+
+  await runTransactionalController({
+    connection,
+    req: { method: "PATCH", originalUrl: "/qc/update-qc/1" },
+    res,
+    handler: async (_req, deferredRes) => deferredRes.json({ ok: true }),
+    onDuplicateKey: async () => {
+      duplicateHandled = true;
+      res.json({ ok: true, idempotent: true });
+      return true;
+    },
+  });
+
+  assert.equal(duplicateHandled, true);
+  assert.deepEqual(state.body, { ok: true, idempotent: true });
+});

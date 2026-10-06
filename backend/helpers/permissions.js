@@ -140,6 +140,10 @@ const canRoleUsePisAction = (roleKey, action) => {
 };
 
 const applyRequiredPermissionFloors = (roleKey, permissions) => {
+  if (normalizeUserRoleKey(roleKey) === "inspection_manager") {
+    grant(permissions, "jobs", ["view", "manage"]);
+  }
+
   if (isAdminLikeRole(roleKey) || isSuperAdminLikeRole(roleKey)) {
     grant(permissions, "pis", PIS_ADMIN_ONLY_ACTIONS);
     return permissions;

@@ -50,3 +50,12 @@ test("viewer is rejected from restricted item-detail endpoints", () => {
 
   assert.equal(statusCode, 403);
 });
+
+test("inspection managers retain QC follow-up job access in customized profiles", () => {
+  const permissions = sanitizePermissionsForRole("inspection_manager", {
+    jobs: { view: false, manage: false },
+  });
+
+  assert.equal(permissions.jobs.view, true);
+  assert.equal(permissions.jobs.manage, true);
+});

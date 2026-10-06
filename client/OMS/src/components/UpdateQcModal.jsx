@@ -1038,6 +1038,7 @@ const UpdateQcModal = ({
   const [inspectors, setInspectors] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const saveRequestKeyRef = useRef("");
   const [rejectionImages, setRejectionImages] = useState([]);
   const [reminderDrafts, setReminderDrafts] = useState([]);
   const [savingReminders, setSavingReminders] = useState(false);
@@ -3643,18 +3644,31 @@ const UpdateQcModal = ({
     }
 
     const payload = buildQcPayload();
+    const requestKey = saveRequestKeyRef.current || (
+      globalThis.crypto?.randomUUID?.()
+      || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    saveRequestKeyRef.current = requestKey;
 
     try {
       pauseDraftSaves();
       setSaving(true);
       await uploadRejectionEvidence();
-      await api.patch(`/qc/update-qc/${qc._id}`, payload);
+      await api.patch(`/qc/update-qc/${qc._id}`, payload, {
+        timeout: 20_000,
+        headers: { "Idempotency-Key": requestKey },
+      });
+      saveRequestKeyRef.current = "";
       await clearDraft({ resetStatus: false });
       alert("QC updated successfully.");
       onUpdated?.();
       onClose();
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to update QC record.");
+      setError(
+        err?.code === "ECONNABORTED"
+          ? "The update is taking longer than expected. Refresh QC details before trying again."
+          : err.response?.data?.message || "Failed to update QC record.",
+      );
     } finally {
       resumeDraftSaves();
       setSaving(false);

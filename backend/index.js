@@ -40,6 +40,7 @@ const employeeReportRouter = require("./routers/employeeReport.routes");
 const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
 const { createNotificationSocketServer } = require("./realtime/notificationSocket");
+const { closeNotificationRelay, startNotificationRelay } = require("./services/notificationRelay.service");
 const {
   startSecurityBaselineCron,
   stopSecurityBaselineCron,
@@ -215,6 +216,7 @@ const startServer = async () => {
       allowCredentials: corsOptions.credentials,
     });
     app.set("io", io);
+    startNotificationRelay(io).catch((error) => console.warn("Notification relay unavailable:", error.message));
     startSecurityBaselineCron();
 
     server.listen(PORT, () => {
@@ -228,6 +230,7 @@ const startServer = async () => {
         try {
           stopSecurityBaselineCron();
           await io.close();
+          await closeNotificationRelay();
           await closePdfRenderer();
           await closeQueues();
           await closeRedisClients();

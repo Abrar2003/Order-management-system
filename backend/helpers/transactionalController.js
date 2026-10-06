@@ -70,6 +70,7 @@ const sendTransactionsRequired = (res) =>
 const runTransactionalController = async ({
   connection,
   handler,
+  onDuplicateKey,
   req,
   res,
 }) => {
@@ -101,6 +102,10 @@ const runTransactionalController = async ({
     } catch (error) {
       if (error instanceof DeferredHttpResponseError) {
         return res.status(error.statusCode).json(error.body);
+      }
+
+      if (Number(error?.code) === 11000 && typeof onDuplicateKey === "function") {
+        if (await onDuplicateKey({ error, req, res })) return;
       }
 
       if (isTransactionUnsupportedError(error)) {

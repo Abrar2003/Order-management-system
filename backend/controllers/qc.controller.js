@@ -7,6 +7,7 @@ const Tenure = require("../models/tenure.model");
 const Finish = require("../models/finish.model");
 const QcEditLog = require("../models/qcEditLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
+const { QcUpdateFollowUp } = require("../models/qcUpdateFollowUp.model");
 const XLSX = require("xlsx");
 const fsp = require("fs/promises");
 const path = require("path");
@@ -1217,7 +1218,7 @@ const buildAuditChanges = (
   }, []);
 };
 
-const createQcEditLog = async ({
+const buildQcEditLogPayload = ({
   reqUser = null,
   qcDoc = null,
   beforeSnapshot = {},
@@ -1257,34 +1258,37 @@ const createQcEditLog = async ({
       .filter(Boolean),
   ];
 
-  if (changes.length === 0) {
-    return;
-  }
+  if (changes.length === 0) return null;
 
+  return {
+    edited_by:
+      reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
+        ? reqUser._id
+        : null,
+    edited_by_name: normalizeText(
+      reqUser?.name || reqUser?.username || reqUser?.email || "",
+    ),
+    qc: qcDoc?._id || null,
+    order: qcDoc?.order?._id || qcDoc?.order || null,
+    order_id: afterSnapshot?.order_id || beforeSnapshot?.order_id || "",
+    brand: afterSnapshot?.brand || beforeSnapshot?.brand || "",
+    vendor: afterSnapshot?.vendor || beforeSnapshot?.vendor || "",
+    item_code: afterSnapshot?.item_code || beforeSnapshot?.item_code || "",
+    operation_type: operationType,
+    changed_fields_count: changes.length,
+    changed_fields: changes.map((entry) => entry.field),
+    changes,
+    remarks,
+  };
+};
+
+const createQcEditLog = async (options = {}) => {
   try {
-    await QcEditLog.create({
-      edited_by:
-        reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
-          ? reqUser._id
-          : null,
-      edited_by_name: normalizeText(
-        reqUser?.name || reqUser?.username || reqUser?.email || "",
-      ),
-      qc: qcDoc?._id || null,
-      order: qcDoc?.order?._id || qcDoc?.order || null,
-      order_id: afterSnapshot?.order_id || beforeSnapshot?.order_id || "",
-      brand: afterSnapshot?.brand || beforeSnapshot?.brand || "",
-      vendor: afterSnapshot?.vendor || beforeSnapshot?.vendor || "",
-      item_code: afterSnapshot?.item_code || beforeSnapshot?.item_code || "",
-      operation_type: operationType,
-      changed_fields_count: changes.length,
-      changed_fields: changes.map((entry) => entry.field),
-      changes,
-      remarks,
-    });
+    const payload = buildQcEditLogPayload(options);
+    if (payload) await QcEditLog.create(payload);
   } catch (error) {
     console.error("QC edit log save failed:", {
-      qcId: qcDoc?._id,
+      qcId: options.qcDoc?._id,
       error: error?.message || String(error),
     });
   }
@@ -1421,7 +1425,7 @@ const refreshQcAggregateState = async (qcDoc, reqUser) => {
   return refreshedInspections;
 };
 
-const createOrderEditLogFromQc = async ({
+const buildOrderEditLogPayload = ({
   reqUser = null,
   orderDoc = null,
   beforeSnapshot = {},
@@ -1433,9 +1437,7 @@ const createOrderEditLogFromQc = async ({
     { key: "qc_record", label: "QC Record" },
   ]);
 
-  if (changes.length === 0) {
-    return;
-  }
+  if (changes.length === 0) return null;
 
   const remarks = [
     changes.length > 0
@@ -1446,28 +1448,33 @@ const createOrderEditLogFromQc = async ({
       .filter(Boolean),
   ];
 
+  return {
+    edited_by:
+      reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
+        ? reqUser._id
+        : null,
+    edited_by_name: normalizeText(
+      reqUser?.name || reqUser?.username || reqUser?.email || "",
+    ),
+    order_id: afterSnapshot?.order_id || beforeSnapshot?.order_id || "UNKNOWN",
+    brand: afterSnapshot?.brand || beforeSnapshot?.brand || "",
+    vendor: afterSnapshot?.vendor || beforeSnapshot?.vendor || "",
+    item_code: afterSnapshot?.item_code || beforeSnapshot?.item_code || "",
+    operation_type: "order_edit",
+    changed_fields_count: changes.length,
+    changed_fields: changes.map((entry) => entry.field),
+    changes,
+    remarks,
+  };
+};
+
+const createOrderEditLogFromQc = async (options = {}) => {
   try {
-    await OrderEditLog.create({
-      edited_by:
-        reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
-          ? reqUser._id
-          : null,
-      edited_by_name: normalizeText(
-        reqUser?.name || reqUser?.username || reqUser?.email || "",
-      ),
-      order_id: afterSnapshot?.order_id || beforeSnapshot?.order_id || "UNKNOWN",
-      brand: afterSnapshot?.brand || beforeSnapshot?.brand || "",
-      vendor: afterSnapshot?.vendor || beforeSnapshot?.vendor || "",
-      item_code: afterSnapshot?.item_code || beforeSnapshot?.item_code || "",
-      operation_type: "order_edit",
-      changed_fields_count: changes.length,
-      changed_fields: changes.map((entry) => entry.field),
-      changes,
-      remarks,
-    });
+    const payload = buildOrderEditLogPayload(options);
+    if (payload) await OrderEditLog.create(payload);
   } catch (error) {
     console.error("Order edit log save failed from QC flow:", {
-      orderId: afterSnapshot?.order_id || beforeSnapshot?.order_id,
+      orderId: options.afterSnapshot?.order_id || options.beforeSnapshot?.order_id,
       error: error?.message || String(error),
     });
   }
@@ -5962,6 +5969,27 @@ exports.updateShippingMarkUpdated = async (req, res) => {
  */
 const updateQC = async (req, res) => {
   try {
+    const idempotencyKey = normalizeText(req.get?.("Idempotency-Key")).slice(0, 200);
+    if (idempotencyKey) {
+      const existingFollowUp = await QcUpdateFollowUp.findOne({
+        qc: req.params.id,
+        idempotency_key: idempotencyKey,
+      }).lean();
+      if (existingFollowUp) {
+        const existingQc = await QC.findOne(
+          applyDataAccessMatch({ _id: req.params.id }, req.user),
+        );
+        if (existingQc) {
+          return res.json({
+            message: "QC updated successfully",
+            data: existingQc,
+            follow_up: { id: String(existingFollowUp._id), status: existingFollowUp.state },
+            idempotent: true,
+          });
+        }
+      }
+    }
+
     const {
       qc_checked,
       qc_passed,
@@ -7546,6 +7574,8 @@ const updateQC = async (req, res) => {
         remarks !== undefined
       );
 
+    let followUpInspectionId = null;
+    let persistedInspectionRecords = null;
     if (shouldUpdateInspectionRecord) {
       const inspectionSizeSource = await findInspectionSizeSourceForQc(
         qc,
@@ -7665,24 +7695,9 @@ const updateQC = async (req, res) => {
 
       if (inspectionRecord) {
         await recalculateInspectorUsedLabels([inspectionInspectorId]);
-        try {
-          await syncItemInspectedDataFromInspection({
-            qcDoc: qc,
-            inspectionRecord,
-            itemDoc: itemDocForInspectedSizeUpdate,
-            user: req.user,
-            route: "PATCH /qc/update-qc/:id",
-            source: "qc_update_modal",
-          });
-        } catch (itemInspectionSyncError) {
-          console.error("Item inspected data sync after QC update failed:", {
-            qcId: qc?._id,
-            inspectionId: inspectionRecord?._id,
-            error: itemInspectionSyncError?.message || String(itemInspectionSyncError),
-          });
-        }
+        followUpInspectionId = inspectionRecord._id;
 
-        const persistedInspectionRecords = await Inspection.find({
+        persistedInspectionRecords = await Inspection.find({
           qc: qc._id,
         }).lean();
         recalculateQcAggregateQuantities(qc, persistedInspectionRecords);
@@ -7923,7 +7938,6 @@ const updateQC = async (req, res) => {
       }
     }
 
-    // ponytail: the current order is recalculated below; backfill historical PO-CBM cache outside this transaction if needed.
     qc.updated_by = buildAuditActor(req.user);
     await qc.save();
 
@@ -7934,12 +7948,11 @@ const updateQC = async (req, res) => {
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
       applyQcOrderStatus(qc, orderRecord);
       orderRecord.updated_by = buildAuditActor(req.user);
-      await applyQcOrderPoCbm(orderRecord);
       await orderRecord.save();
     }
 
-    const afterInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
-    await createQcEditLog({
+    const afterInspectionRecords = persistedInspectionRecords || await Inspection.find({ qc: qc._id }).lean();
+    const qcEditLog = buildQcEditLogPayload({
       reqUser: req.user,
       qcDoc: qc,
       beforeSnapshot: beforeQcSnapshot,
@@ -7947,28 +7960,38 @@ const updateQC = async (req, res) => {
       operationType: "qc_update",
       extraRemarks: ["QC updated through update-qc route."],
     });
-    if (orderRecord) {
-      await createOrderEditLogFromQc({
-        reqUser: req.user,
-        orderDoc: orderRecord,
-        beforeSnapshot: beforeOrderSnapshot,
-        afterSnapshot: buildOrderAuditSnapshotForQc(orderRecord),
-        extraRemarks: ["Order status evaluated from QC update flow."],
-      });
-    }
-
-    try {
-      await upsertItemFromQc(qc);
-    } catch (itemSyncError) {
-      console.error("Item sync after QC update failed:", {
-        qcId: qc?._id,
-        error: itemSyncError?.message || String(itemSyncError),
-      });
-    }
+    const orderEditLog = orderRecord
+      ? buildOrderEditLogPayload({
+          reqUser: req.user,
+          orderDoc: orderRecord,
+          beforeSnapshot: beforeOrderSnapshot,
+          afterSnapshot: buildOrderAuditSnapshotForQc(orderRecord),
+          extraRemarks: ["Order status evaluated from QC update flow."],
+        })
+      : null;
+    const followUp = await QcUpdateFollowUp.create({
+      qc: qc._id,
+      order: orderRecord?._id || null,
+      inspection: followUpInspectionId,
+      idempotency_key: idempotencyKey,
+      payload: {
+        actor: {
+          _id: req.user?._id || req.user?.id || null,
+          name: req.user?.name || req.user?.username || req.user?.email || "",
+        },
+        order_id: qc?.order_meta?.order_id || orderRecord?.order_id || "",
+        recalculate_order_cbm: Boolean(
+          orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status),
+        ),
+        qc_edit_log: qcEditLog,
+        order_edit_log: orderEditLog,
+      },
+    });
 
     res.json({
       message: "QC updated successfully",
       data: qc,
+      follow_up: { id: String(followUp._id), status: followUp.state },
     });
   } catch (err) {
     if (
@@ -7983,6 +8006,9 @@ const updateQC = async (req, res) => {
     if (isTransactionUnsupportedError(err)) {
       throw err;
     }
+    if (Number(err?.code) === 11000) {
+      throw err;
+    }
     res.status(400).json({ message: err.message });
   }
 };
@@ -7991,6 +8017,26 @@ exports.updateQC = async (req, res) =>
   runTransactionalController({
     connection: mongoose.connection,
     handler: updateQC,
+    onDuplicateKey: async () => {
+      const idempotencyKey = normalizeText(req.get?.("Idempotency-Key")).slice(0, 200);
+      if (!idempotencyKey) return false;
+      const followUp = await QcUpdateFollowUp.findOne({
+        qc: req.params.id,
+        idempotency_key: idempotencyKey,
+      }).lean();
+      if (!followUp) return false;
+      const qc = await QC.findOne(
+        applyDataAccessMatch({ _id: req.params.id }, req.user),
+      );
+      if (!qc) return false;
+      res.json({
+        message: "QC updated successfully",
+        data: qc,
+        follow_up: { id: String(followUp._id), status: followUp.state },
+        idempotent: true,
+      });
+      return true;
+    },
     req,
     res,
   });

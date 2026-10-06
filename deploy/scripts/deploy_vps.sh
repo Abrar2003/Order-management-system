@@ -174,19 +174,19 @@ else
 fi
 
 REDIS_JOBS_ENABLED_EFFECTIVE="$(get_env_value REDIS_JOBS_ENABLED)"
+if pm2 describe oms-worker >/dev/null 2>&1; then
+  pm2 restart "$PM2_CONFIG" --only oms-worker --update-env
+else
+  pm2 start "$PM2_CONFIG" --only oms-worker --update-env
+fi
+
 if is_truthy "$REDIS_JOBS_ENABLED_EFFECTIVE"; then
-  if pm2 describe oms-worker >/dev/null 2>&1; then
-    pm2 restart "$PM2_CONFIG" --only oms-worker --update-env
-  else
-    pm2 start "$PM2_CONFIG" --only oms-worker --update-env
-  fi
   if pm2 describe oms-qc-image-worker >/dev/null 2>&1; then
     pm2 restart "$PM2_CONFIG" --only oms-qc-image-worker --update-env
   else
     pm2 start "$PM2_CONFIG" --only oms-qc-image-worker --update-env
   fi
 else
-  pm2 delete oms-worker >/dev/null 2>&1 || true
   pm2 delete oms-qc-image-worker >/dev/null 2>&1 || true
 fi
 
@@ -218,21 +218,19 @@ fi
 
 echo "oms-backend is running with $RUNNING_PM2_WEB_INSTANCES instance(s)"
 
+EXPECTED_PM2_WORKER_INSTANCES="${EXPECTED_PM2_WORKER_INSTANCES:-$(get_env_value PM2_WORKER_INSTANCES)}"
+EXPECTED_PM2_WORKER_INSTANCES="${EXPECTED_PM2_WORKER_INSTANCES:-1}"
+RUNNING_PM2_WORKER_INSTANCES="$(count_online_pm2_app oms-worker)"
+
+if [[ "$RUNNING_PM2_WORKER_INSTANCES" -ne "$EXPECTED_PM2_WORKER_INSTANCES" ]]; then
+  echo "Expected $EXPECTED_PM2_WORKER_INSTANCES oms-worker PM2 instance(s), but found $RUNNING_PM2_WORKER_INSTANCES"
+  pm2 list
+  exit 1
+fi
+
+echo "oms-worker is running with $RUNNING_PM2_WORKER_INSTANCES instance(s)"
+
 if is_truthy "$REDIS_JOBS_ENABLED_EFFECTIVE"; then
-  EXPECTED_PM2_WORKER_INSTANCES="${EXPECTED_PM2_WORKER_INSTANCES:-$(get_env_value PM2_WORKER_INSTANCES)}"
-  EXPECTED_PM2_WORKER_INSTANCES="${EXPECTED_PM2_WORKER_INSTANCES:-1}"
-  RUNNING_PM2_WORKER_INSTANCES="$(count_online_pm2_app oms-worker)"
-
-  if [[ "$RUNNING_PM2_WORKER_INSTANCES" -ne "$EXPECTED_PM2_WORKER_INSTANCES" ]]; then
-    echo "Expected $EXPECTED_PM2_WORKER_INSTANCES oms-worker PM2 instance(s), but found $RUNNING_PM2_WORKER_INSTANCES"
-    pm2 list
-    exit 1
-  fi
-
-  
-
-  echo "oms-worker is running with $RUNNING_PM2_WORKER_INSTANCES instance(s)"
-
   RUNNING_PM2_QC_IMAGE_WORKER_INSTANCES="$(count_online_pm2_app oms-qc-image-worker)"
   if [[ "$RUNNING_PM2_QC_IMAGE_WORKER_INSTANCES" -ne 1 ]]; then
     echo "Expected 1 oms-qc-image-worker PM2 instance, but found $RUNNING_PM2_QC_IMAGE_WORKER_INSTANCES"
@@ -242,7 +240,7 @@ if is_truthy "$REDIS_JOBS_ENABLED_EFFECTIVE"; then
 
   echo "oms-qc-image-worker is running with $RUNNING_PM2_QC_IMAGE_WORKER_INSTANCES instance(s)"
 else
-  echo "REDIS_JOBS_ENABLED is not true; skipping required oms-worker online check"
+  echo "REDIS_JOBS_ENABLED is not true; BullMQ workers are disabled"
 fi
 
 pm2 list

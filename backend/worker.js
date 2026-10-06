@@ -16,9 +16,16 @@ const {
 } = require("./config/redis");
 const { closeQueues } = require("./queues");
 const { startWorkers, closeWorkers } = require("./workers");
+const { startQcUpdateFollowUpWorker } = require("./services/qcUpdateFollowUp.service");
 
 let idleTimer = null;
 let shuttingDown = false;
+let stopQcUpdateFollowUpWorker = null;
+
+const parsePositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
 
 const shutdown = async (signal) => {
   if (shuttingDown) return;
@@ -28,6 +35,7 @@ const shutdown = async (signal) => {
   if (idleTimer) clearInterval(idleTimer);
 
   try {
+    stopQcUpdateFollowUpWorker?.();
     await closeWorkers();
     await closeQueues();
     await closeRedisClients();
@@ -43,9 +51,15 @@ const shutdown = async (signal) => {
 };
 
 const main = async () => {
+  await connectDB();
+  stopQcUpdateFollowUpWorker = startQcUpdateFollowUpWorker({
+    intervalMs: parsePositiveInt(process.env.QC_UPDATE_FOLLOW_UP_POLL_MS, 1000),
+    concurrency: parsePositiveInt(process.env.QC_UPDATE_FOLLOW_UP_CONCURRENCY, 2),
+  });
+  console.log("[worker] QC update follow-up worker started");
+
   if (!isRedisJobsEnabled()) {
-    console.log("[worker] REDIS_JOBS_ENABLED=false; worker is idle");
-    idleTimer = setInterval(() => {}, 60 * 60 * 1000);
+    console.log("[worker] REDIS_JOBS_ENABLED=false; BullMQ workers are disabled");
     return;
   }
 
@@ -68,7 +82,6 @@ const main = async () => {
 
         clearInterval(idleTimer);
         idleTimer = null;
-        await connectDB();
         startWorkers();
       } catch (error) {
         console.error("[worker] delayed worker start failed:", error);
@@ -77,7 +90,6 @@ const main = async () => {
     return;
   }
 
-  await connectDB();
   startWorkers();
 };
 

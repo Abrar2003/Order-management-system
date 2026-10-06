@@ -28,6 +28,11 @@ FILE_WORKER_CONCURRENCY=1
 CALENDAR_WORKER_CONCURRENCY=1
 CBM_WORKER_CONCURRENCY=2
 IMAGE_WORKER_CONCURRENCY=1
+
+# Durable Mongo-backed QC update follow-ups (runs even when Redis jobs are disabled)
+QC_UPDATE_FOLLOW_UP_POLL_MS=1000
+QC_UPDATE_FOLLOW_UP_CONCURRENCY=2
+QC_UPDATE_FOLLOW_UP_LEASE_MS=300000
 ```
 
 `REDIS_URL` is preferred when present. Use `rediss://` or `REDIS_TLS=true` for
@@ -53,8 +58,10 @@ redis-cli ping
 ## PM2 Processes
 
 The web backend runs clustered as `oms-backend`; the worker runs separately as
-`oms-worker` in fork mode. Scale web instances with `PM2_WEB_INSTANCES`. Keep
-`PM2_WORKER_INSTANCES=1` unless you intentionally want multiple BullMQ workers.
+`oms-worker` in fork mode. It always runs durable QC update follow-ups; BullMQ
+workers additionally start when Redis jobs are enabled. Scale web instances with
+`PM2_WEB_INSTANCES`. Keep `PM2_WORKER_INSTANCES=1` unless you intentionally want
+multiple workers.
 
 Expected PM2 shape:
 

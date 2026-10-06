@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const ExcelJS = require("exceljs");
+const XLSX = require("xlsx");
 const mongoose = require("mongoose");
 const {
   BOX_ENTRY_TYPES,
@@ -9,6 +10,7 @@ const {
 const {
   normalizeHeader,
   parseNumericValue,
+  parsePisUpload,
   parsePisWorkbook,
 } = require("../helpers/pisExcelParser");
 const {
@@ -276,6 +278,21 @@ test("parses the supplied PIS layout into item, carton, and barcode fields", () 
     },
   ]);
   assert.equal(parsed.boxMode, BOX_PACKAGING_MODES.CARTON);
+});
+
+test("loads PIS uploads in .xlsx and legacy .xls formats", async () => {
+  const xlsxBuffer = await buildFixtureWorkbook().xlsx.writeBuffer();
+  const xlsBuffer = XLSX.write(XLSX.read(xlsxBuffer, { type: "buffer" }), {
+    type: "buffer",
+    bookType: "xls",
+  });
+
+  for (const [originalname, buffer] of [["pis.xlsx", xlsxBuffer], ["pis.xls", xlsBuffer]]) {
+    const parsed = await parsePisUpload({ originalname, buffer });
+    assert.equal(parsed.articleNumber, "260484");
+    assert.equal(parsed.masterBarcode, "8721274914153");
+    assert.equal(parsed.boxSizes.length, 2);
+  }
 });
 
 test("parses cushion Dia layout and defaults flat item height to one", () => {

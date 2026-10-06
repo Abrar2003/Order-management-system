@@ -40,6 +40,10 @@ const OrderEditLogSchema = new mongoose.Schema(
     changed_fields: { type: [String], default: [] },
     changes: { type: [OrderEditChangeSchema], default: [] },
     remarks: { type: [String], default: [] },
+    source_follow_up: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "qc_update_follow_ups",
+    },
   },
   { timestamps: true },
 );
@@ -48,6 +52,10 @@ OrderEditLogSchema.index({ createdAt: -1 });
 OrderEditLogSchema.index({ order_id: 1, createdAt: -1 });
 OrderEditLogSchema.index({ edited_by: 1, createdAt: -1 });
 OrderEditLogSchema.index({ brand: 1, "vendor.vendor_id": 1, createdAt: -1 });
+OrderEditLogSchema.index(
+  { source_follow_up: 1 },
+  { unique: true, partialFilterExpression: { source_follow_up: { $exists: true } } },
+);
 
 OrderEditLogSchema.pre("validate", async function resolveVendorReferences() {
   await resolveDocumentVendorFields(this, { single: ["vendor"] });

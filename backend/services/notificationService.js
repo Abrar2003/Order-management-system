@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const { Notification } = require("../models/notification.model");
+const { publishNotificationEvent } = require("./notificationRelay.service");
 
 const normalizeId = (value) => String(value?._id || value?.id || value || "").trim();
 const normalizeText = (value) => String(value || "").trim();
@@ -35,12 +36,14 @@ const getUnreadCount = (userId) =>
 
 const emitNotificationState = async (reqOrIo, userId, notification = null) => {
   const io = resolveIo(reqOrIo);
-  if (!io) return;
+  const unreadCount = await getUnreadCount(userId);
   const room = buildNotificationUserRoom(userId);
-  if (notification) io.to(room).emit("notification:new", serializeNotification(notification));
-  io.to(room).emit("notification:unread_count", {
-    unreadCount: await getUnreadCount(userId),
-  });
+  const serialized = notification ? serializeNotification(notification) : null;
+  if (io) {
+    if (serialized) io.to(room).emit("notification:new", serialized);
+    io.to(room).emit("notification:unread_count", { unreadCount });
+  }
+  await publishNotificationEvent({ userId: normalizeId(userId), notification: serialized, unreadCount });
 };
 
 const createNotification = async (

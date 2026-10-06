@@ -60,6 +60,10 @@ const QcEditLogSchema = new mongoose.Schema(
     changed_fields: { type: [String], default: [] },
     changes: { type: [QcEditChangeSchema], default: [] },
     remarks: { type: [String], default: [] },
+    source_follow_up: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "qc_update_follow_ups",
+    },
   },
   { timestamps: true },
 );
@@ -69,6 +73,10 @@ QcEditLogSchema.index({ qc: 1, createdAt: -1 });
 QcEditLogSchema.index({ order_id: 1, createdAt: -1 });
 QcEditLogSchema.index({ edited_by: 1, createdAt: -1 });
 QcEditLogSchema.index({ "vendor.vendor_id": 1, createdAt: -1 });
+QcEditLogSchema.index(
+  { source_follow_up: 1 },
+  { unique: true, partialFilterExpression: { source_follow_up: { $exists: true } } },
+);
 
 QcEditLogSchema.pre("validate", async function resolveVendorReferences() {
   await resolveDocumentVendorFields(this, { single: ["vendor"] });

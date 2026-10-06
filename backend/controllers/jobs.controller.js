@@ -1,4 +1,11 @@
 const { getQueueIfAvailable, getQueueNames } = require("../queues");
+const {
+  listFollowUps,
+  retryFollowUp,
+} = require("../services/qcUpdateFollowUp.service");
+const { normalizeUserRoleKey } = require("../helpers/userRole");
+
+const QC_FOLLOW_UP_ROLE_KEYS = new Set(["admin", "super_admin", "inspection_manager"]);
 
 const SENSITIVE_RESULT_KEYS = new Set([
   "path",
@@ -50,6 +57,52 @@ const resolveQueue = async (queueName) => {
     throw error;
   }
   return queue;
+};
+
+const canManageQcFollowUps = (user) =>
+  QC_FOLLOW_UP_ROLE_KEYS.has(normalizeUserRoleKey(user?.role));
+
+exports.listQcUpdateFollowUps = async (req, res) => {
+  if (!canManageQcFollowUps(req.user)) {
+    return res.status(403).json({ message: "QC sync failures are restricted to admins and inspection managers." });
+  }
+  try {
+    const result = await listFollowUps(req.query || {});
+    return res.status(200).json({
+      success: true,
+      data: result.rows.map((row) => ({
+        id: String(row._id),
+        qc_id: String(row.qc || ""),
+        order_id: row.payload?.order_id || "",
+        state: row.state,
+        attempts: row.attempts,
+        last_error: row.last_error || "",
+        next_attempt_at: row.next_attempt_at || null,
+        failed_at: row.failed_at || null,
+        updated_at: row.updatedAt || null,
+      })),
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || "Failed to load QC sync failures" });
+  }
+};
+
+exports.retryQcUpdateFollowUp = async (req, res) => {
+  if (!canManageQcFollowUps(req.user)) {
+    return res.status(403).json({ message: "QC sync retries are restricted to admins and inspection managers." });
+  }
+  try {
+    const followUp = await retryFollowUp(req.params.id);
+    if (!followUp) return res.status(404).json({ success: false, message: "Failed QC sync not found" });
+    return res.status(200).json({
+      success: true,
+      message: "QC sync retry queued",
+      data: { id: String(followUp._id), state: followUp.state },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || "Failed to retry QC sync" });
+  }
 };
 
 exports.getJobStatus = async (req, res) => {

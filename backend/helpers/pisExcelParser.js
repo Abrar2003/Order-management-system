@@ -1,6 +1,7 @@
 const fs = require("fs/promises");
 const path = require("path");
 const ExcelJS = require("exceljs");
+const XLSX = require("xlsx");
 const Item = require("../models/item.model");
 const {
   BOX_ENTRY_TYPES,
@@ -424,20 +425,22 @@ const parsePisWorkbook = (workbook) => {
 
 const loadPisWorkbook = async (file = {}) => {
   const extension = path.extname(String(file.originalname || file.path || "")).toLowerCase();
-  if (extension !== ".xlsx") {
-    throw new PisImportError(400, "Only .xlsx files are supported for PIS uploads");
+  if (![".xlsx", ".xls"].includes(extension)) {
+    throw new PisImportError(400, "Only .xlsx and .xls files are supported for PIS uploads");
   }
 
   const workbook = new ExcelJS.Workbook();
   try {
-    if (file.buffer) {
-      await workbook.xlsx.load(file.buffer);
-    } else if (file.path) {
-      await fs.access(file.path);
-      await workbook.xlsx.readFile(file.path);
-    } else {
+    const source = file.buffer || (file.path && await fs.readFile(file.path));
+    if (!source) {
       throw new PisImportError(400, "Uploaded PIS file is unavailable");
     }
+
+    await workbook.xlsx.load(
+      extension === ".xls"
+        ? XLSX.write(XLSX.read(source, { type: "buffer" }), { type: "buffer", bookType: "xlsx" })
+        : source,
+    );
   } catch (error) {
     if (error instanceof PisImportError) throw error;
     throw new PisImportError(400, "Unable to read the uploaded PIS workbook");

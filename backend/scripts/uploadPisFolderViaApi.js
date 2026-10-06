@@ -278,7 +278,7 @@ const collectIsaaWorkbookFiles = async (targetPath) => {
       for (const file of files) {
         if (
           !file.isFile() ||
-          path.extname(file.name).toLowerCase() !== ".xlsx" ||
+          !EXCEL_EXTENSIONS.has(path.extname(file.name).toLowerCase()) ||
           file.name.startsWith("~$")
         ) {
           continue;
@@ -570,7 +570,7 @@ const uploadPisWorkbook = async ({ apiBaseUrl, token, itemId, filePath }) => {
 const runIsaaLayoutUpload = async ({ options, targetPath }) => {
   const candidates = await collectIsaaWorkbookFiles(targetPath);
   if (candidates.length === 0) {
-    throw new Error(`No direct item-folder .xlsx files found in ${targetPath}`);
+    throw new Error(`No direct item-folder .xlsx or .xls files found in ${targetPath}`);
   }
 
   const summary = {

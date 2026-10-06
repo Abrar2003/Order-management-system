@@ -37,6 +37,7 @@ export const useNotifications = ({ enabled = true } = {}) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const toastTimerRef = useRef(null);
+  const seenNotificationIdsRef = useRef(new Set());
 
   const unreadCount = Number(summary?.unreadCount || 0);
 
@@ -62,6 +63,7 @@ export const useNotifications = ({ enabled = true } = {}) => {
         ...getTabParams(activeTab),
       });
       const rows = Array.isArray(response?.data) ? response.data : [];
+      rows.forEach((row) => row?._id && seenNotificationIdsRef.current.add(row._id));
       setNotifications((current) => append ? [...current, ...rows] : rows);
       setPagination({
         page: Number(response?.pagination?.page || 1),
@@ -95,6 +97,7 @@ export const useNotifications = ({ enabled = true } = {}) => {
 
     const handleNewNotification = (payload) => {
       if (!payload?._id) return;
+      seenNotificationIdsRef.current.add(payload._id);
       setNotifications((current) =>
         current.some((entry) => entry._id === payload._id)
           ? current
@@ -133,6 +136,31 @@ export const useNotifications = ({ enabled = true } = {}) => {
       if (toastTimerRef.current) globalThis.clearTimeout(toastTimerRef.current);
     };
   }, [activeTab, dockOpen, enabled, loadNotifications, loadSummary]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let initialized = false;
+    const checkForWorkerNotifications = async () => {
+      try {
+        const response = await getNotifications({ page: 1, limit: DEFAULT_LIMIT, unreadOnly: "true" });
+        const rows = Array.isArray(response?.data) ? response.data : [];
+        const fresh = rows.filter((row) => row?._id && !seenNotificationIdsRef.current.has(row._id));
+        rows.forEach((row) => row?._id && seenNotificationIdsRef.current.add(row._id));
+        if (initialized && fresh[0]?.priority !== "silent") {
+          setToast(fresh[0]);
+          if (toastTimerRef.current) globalThis.clearTimeout(toastTimerRef.current);
+          toastTimerRef.current = globalThis.setTimeout(() => setToast(null), 2000);
+          loadSummary();
+        }
+        initialized = true;
+      } catch {
+        // Socket delivery remains the primary path; polling is only its worker fallback.
+      }
+    };
+    checkForWorkerNotifications();
+    const timer = globalThis.setInterval(checkForWorkerNotifications, 15_000);
+    return () => globalThis.clearInterval(timer);
+  }, [enabled, loadSummary]);
 
   const markRead = useCallback(async (notification) => {
     if (!notification?._id || notification.read) return notification;

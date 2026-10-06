@@ -7,6 +7,19 @@ const jobsController = require("../controllers/jobs.controller");
 const router = express.Router();
 
 router.get(
+  "/qc-update-followups",
+  auth,
+  requirePermission("jobs", "view"),
+  jobsController.listQcUpdateFollowUps,
+);
+router.post(
+  "/qc-update-followups/:id/retry",
+  auth,
+  requirePermission("jobs", "manage"),
+  jobsController.retryQcUpdateFollowUp,
+);
+
+router.get(
   "/:queueName/:jobId",
   auth,
   requirePermission("jobs", "view"),

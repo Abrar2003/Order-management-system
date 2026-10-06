@@ -5,6 +5,7 @@ import SortHeaderButton from "../components/SortHeaderButton";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import AlignQCModal from "../components/AlignQcModal";
+import QcFollowUpFailures from "../components/QcFollowUpFailures";
 import { getUserFromToken } from "../auth/auth.utils";
 import {
   isStrictAdminRole,
@@ -270,6 +271,7 @@ const QCPage = () => {
   const canManageCheckedStatus =
     isStrictAdminRole(normalizedRole)
     || normalizedRole === "inspection_manager";
+  const canManageQcFollowUps = ["admin", "super_admin", "inspection_manager"].includes(normalizedRole);
   const canAlignQc = hasPermission("qc", "assign");
   const canTransferRequest = hasPermission("qc", "assign");
   const showActionColumn = true;
@@ -318,6 +320,13 @@ const QCPage = () => {
   const [loading, setLoading] = useState(true);
   const [updatingCheckedIds, setUpdatingCheckedIds] = useState([]);
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [showQcFollowUps, setShowQcFollowUps] = useState(
+    searchParams.get("follow_up_state") === "failed",
+  );
+
+  useEffect(() => {
+    if (searchParams.get("follow_up_state") === "failed") setShowQcFollowUps(true);
+  }, [searchParams]);
 
   const fetchQC = useCallback(async () => {
     const fromIso = toISODateString(appliedFilters.from);
@@ -725,8 +734,10 @@ const QCPage = () => {
             Back
           </button>
           <h2 className="h4 mb-0">QC Records</h2>
-          {canExportQcList ? (
+          {canExportQcList || canManageQcFollowUps ? (
             <div className="d-flex gap-2 qc-list-export-actions">
+              {canManageQcFollowUps && <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setShowQcFollowUps(true)}>QC Sync Failures</button>}
+              {canExportQcList && <>
               <button
                 type="button"
                 className="btn btn-outline-primary btn-sm"
@@ -743,6 +754,7 @@ const QCPage = () => {
               >
                 {exporting ? "Exporting..." : "Export CSV"}
               </button>
+              </>}
             </div>
           ) : (
             <span className="d-none d-md-inline" />
@@ -1276,6 +1288,7 @@ const QCPage = () => {
           />
         )}
       </div>
+      {canManageQcFollowUps && <QcFollowUpFailures open={showQcFollowUps} onClose={() => setShowQcFollowUps(false)} />}
     </>
   );
 };
