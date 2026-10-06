@@ -842,9 +842,8 @@ const Items = () => {
   }, []);
 
   const handleShippingMarkUpdatedToggle = useCallback(async (item) => {
-    const qcId = String(item?.latest_inspection_report_qc_id || "").trim();
     const itemId = String(item?._id || "").trim();
-    if (!canUpdateShippingMark || !qcId || !itemId || updatingShippingMarkItemId) return;
+    if (!canUpdateShippingMark || !itemId || updatingShippingMarkItemId) return;
 
     const shippingMarkUpdated = !Boolean(item?.shipping_mark_updated);
     if (!window.confirm(
@@ -855,7 +854,7 @@ const Items = () => {
       setUpdatingShippingMarkItemId(itemId);
       setError("");
       setSuccess("");
-      await api.patch(`/qc/${qcId}/shipping-mark-updated`, {
+      await api.patch(`/items/${itemId}/shipping-mark-updated`, {
         shipping_mark_updated: shippingMarkUpdated,
       });
       setRows((currentRows) => currentRows.map((row) =>
@@ -1366,15 +1365,8 @@ const Items = () => {
                                       : "items-action-btn items-shipping-mark-action"
                                   }
                                   onClick={() => handleShippingMarkUpdatedToggle(item)}
-                                  disabled={
-                                    Boolean(updatingShippingMarkItemId)
-                                    || !item?.latest_inspection_report_qc_id
-                                  }
-                                  title={
-                                    item?.latest_inspection_report_qc_id
-                                      ? "Update shipping mark status for the latest inspection"
-                                      : "No inspection report available yet"
-                                  }
+                                  disabled={Boolean(updatingShippingMarkItemId)}
+                                  title="Update this item's shipping mark status"
                                 >
                                   {item?.shipping_mark_updated
                                     ? "Shipping Mark Updated"

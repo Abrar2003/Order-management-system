@@ -26,6 +26,7 @@ const {
   isValidEan13,
   normalizeEan13Input,
 } = require("../helpers/barcodeFormat");
+const { applyItemBrand } = require("../helpers/itemBrand");
 
 const item_type_enum = ["table", "cabinet", "soft_items", "other"];
 const ITEM_SIZE_ENTRY_LIMIT = 5;
@@ -727,6 +728,17 @@ itemSchema.index({ "product_specs.fields.key": 1 });
 itemSchema.index({ "product_specs.fields.value_text": 1 });
 itemSchema.index({ "product_specs.fields.value_number": 1 });
 itemSchema.index({ "product_specs.fields.value_boolean": 1 });
+
+itemSchema.pre("validate", function normalizeItemBrand() {
+  if (
+    this.isNew
+    || this.isModified("brand")
+    || this.isModified("brand_name")
+    || this.isModified("brands")
+  ) {
+    applyItemBrand(this);
+  }
+});
 
 itemSchema.pre("validate", function syncBarcodeAliases() {
   if (

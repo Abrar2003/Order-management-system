@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import AdminRequiredFieldsWarning from "./AdminRequiredFieldsWarning";
 import MeasuredSizeSection from "./MeasuredSizeSection";
@@ -21,6 +21,7 @@ import {
 } from "../utils/measuredSizeForm";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isStrictAdminRole, normalizeUserRole } from "../auth/permissions";
+import { normalizeTextOptions } from "../utils/optionText";
 import "../App.css";
 
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
@@ -81,6 +82,7 @@ const buildInitialForm = (item = {}) => {
       : 1);
 
   return {
+    brand: getBrandLabel(item),
     name: toText(item?.name),
     description: toText(item?.description),
     kd: Boolean(item?.kd),
@@ -132,6 +134,8 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
   const [form, setForm] = useState(() => buildInitialForm(item));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [brandOptions, setBrandOptions] = useState([]);
+  const [brandOptionsLoading, setBrandOptionsLoading] = useState(false);
   const [showRequiredFieldsWarning, setShowRequiredFieldsWarning] = useState(false);
   const user = getUserFromToken();
   const canOverrideRequiredFields = isStrictAdminRole(
@@ -139,8 +143,20 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
   );
 
   const itemCode = useMemo(() => toText(item?.code, "N/A"), [item?.code]);
-  const brandLabel = useMemo(() => getBrandLabel(item), [item]);
   const vendorsLabel = useMemo(() => getVendorsLabel(item), [item]);
+  const availableBrandOptions = useMemo(
+    () => normalizeTextOptions([...brandOptions, form.brand]),
+    [brandOptions, form.brand],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    setBrandOptionsLoading(true);
+    api.get("/orders/brands-and-vendors")
+      .then((response) => !cancelled && setBrandOptions(normalizeTextOptions(response?.data?.brands)))
+      .catch(() => !cancelled && setBrandOptions([]))
+      .finally(() => !cancelled && setBrandOptionsLoading(false));
+    return () => { cancelled = true; };
+  }, []);
   const displayedItemEntries = useMemo(
     () =>
       ensureMeasuredSizeEntryCount(form.inspected_item_sizes, form.inspected_item_count, {
@@ -362,6 +378,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       }
 
       const payload = {
+        brand: toText(form.brand),
         name: toText(form.name),
         description: toText(form.description),
         kd: Boolean(form.kd),
@@ -441,8 +458,16 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                 <input type="text" className="form-control" value={itemCode} disabled />
               </div>
               <div className="col-md-4">
-                <label className="form-label">Brand (Read Only)</label>
-                <input type="text" className="form-control" value={brandLabel} disabled />
+                <label className="form-label">Brand</label>
+                <select
+                  className="form-select"
+                  value={form.brand}
+                  disabled={saving || brandOptionsLoading}
+                  onChange={(event) => updateField("brand", event.target.value)}
+                >
+                  <option value="">{brandOptionsLoading ? "Loading brands..." : "Select Brand"}</option>
+                  {availableBrandOptions.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
+                </select>
               </div>
               <div className="col-md-4">
                 <label className="form-label">Vendors (Read Only)</label>

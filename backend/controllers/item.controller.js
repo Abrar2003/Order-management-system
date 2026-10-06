@@ -3,6 +3,7 @@ const masterWorkflowController = require("./masterWorkflow.controller");
 const { buildItemMatch, applyItemDataAccess } = require("../helpers/itemQuery");
 const { parseSizeEntriesPayload, ITEM_SIZE_REMARK_OPTIONS } = require("../helpers/sizeEntryPayload");
 const Item = require("../models/item.model");
+const Brand = require("../models/brand.model");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
@@ -90,7 +91,12 @@ const {
   isValidEan13,
   normalizeEan13Input,
 } = require("../helpers/barcodeFormat");
-const { isSuperAdminLikeRole, normalizeUserRoleKey } = require("../helpers/userRole");
+const {
+  isManagerLikeRole,
+  isSuperAdminLikeRole,
+  normalizeUserRoleKey,
+} = require("../helpers/userRole");
+const { applyItemBrand } = require("../helpers/itemBrand");
 
 const {
   buildComparisonRows,
@@ -5000,7 +5006,6 @@ exports.updateItem = async (req, res) => {
     }
     const lockedFields = [
       "code",
-      "brand",
       "brand_name",
       "brands",
       "vendors",
@@ -5050,6 +5055,29 @@ exports.updateItem = async (req, res) => {
     const nextInspectedWeight = buildWeightRecord(item?.inspected_weight);
     let inspectedWeightTouched = false;
     let inspectedBoxTouched = false;
+    let brandChanged = false;
+
+    if (hasOwn(payload, "brand")) {
+      const requestedBrand = normalizeTextField(payload.brand);
+      if (!requestedBrand) throw createHttpError(400, "brand is required");
+      const brand = await Brand.findOne({
+        name: new RegExp(`^\\s*${escapeRegex(requestedBrand)}\\s*$`, "i"),
+      }).select("name").lean();
+      if (!brand) throw createHttpError(400, "Select a valid brand");
+
+      assertUserDataAccess(req.user, { brands: [brand.name], vendors: item.vendors });
+      await assertBrandVendorAssociations([{ brand: brand.name, vendors: item.vendors }]);
+      if (
+        normalizeTextField(item.brand).toLocaleLowerCase() !== brand.name.toLocaleLowerCase()
+        || normalizeTextField(item.brand_name) !== brand.name
+        || item.brands?.length !== 1
+        || normalizeTextField(item.brands?.[0]) !== brand.name
+      ) {
+        touched = true;
+        brandChanged = true;
+        applyItemBrand(item, brand.name);
+      }
+    }
 
     if (hasOwn(payload, "name")) {
       setPath("name", normalizeTextField(payload.name));
@@ -5291,6 +5319,7 @@ exports.updateItem = async (req, res) => {
       source: "item_update",
       route: "PATCH /items/:id",
       metadata: {
+        brand_changed: brandChanged,
         inspected_box_touched: Boolean(inspectedBoxTouched),
         admin_override_required_fields: adminOverrideRequiredFields,
       },
@@ -5321,6 +5350,48 @@ exports.updateItem = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: error.message || "Failed to update item",
+    });
+  }
+};
+
+exports.updateShippingMarkUpdated = async (req, res) => {
+  try {
+    if (!isManagerLikeRole(req.user?.role)) {
+      return res.status(403).json({
+        message: "Only managers and admins can update shipping mark status",
+      });
+    }
+    if (!hasOwn(req.body, "shipping_mark_updated")) {
+      return res.status(400).json({ message: "shipping_mark_updated is required" });
+    }
+
+    const rawValue = req.body.shipping_mark_updated;
+    const normalizedValue = String(rawValue ?? "").trim().toLowerCase();
+    if (
+      typeof rawValue !== "boolean"
+      && !["true", "false", "1", "0"].includes(normalizedValue)
+    ) {
+      return res.status(400).json({
+        message: "shipping_mark_updated must be true or false",
+      });
+    }
+
+    const item = await Item.findOneAndUpdate(
+      applyItemDataAccess({ _id: req.params.id }, req.user),
+      {
+        $set: {
+          shipping_mark_updated:
+            rawValue === true || normalizedValue === "true" || normalizedValue === "1",
+        },
+      },
+      { new: true, runValidators: true },
+    ).lean();
+    if (!item) return res.status(404).json({ message: "Item not found" });
+
+    return res.json({ shipping_mark_updated: item.shipping_mark_updated });
+  } catch (err) {
+    return res.status(400).json({
+      message: err.message || "Failed to update shipping mark status",
     });
   }
 };

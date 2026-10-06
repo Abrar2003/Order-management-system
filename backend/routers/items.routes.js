@@ -47,6 +47,7 @@ const {
   createItem,
   syncItemsFromOrders,
   updateItem,
+  updateShippingMarkUpdated,
   updateItemPis,
   syncAllProductDatabaseToPis,
   syncProductDatabaseToPis,
@@ -472,6 +473,14 @@ router.delete(
   requireAdminOnlyPisEdit,
   requirePermission("pis", "edit"),
   deleteItemFormDraft,
+);
+
+router.patch(
+  "/:id/shipping-mark-updated",
+  auth,
+  requirePermission("qc", "edit"),
+  invalidateItemsOnSuccess,
+  updateShippingMarkUpdated,
 );
 
 router.patch(

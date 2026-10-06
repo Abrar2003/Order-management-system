@@ -8,6 +8,7 @@ const Brand = require("../models/brand.model");
 const Order = require("../models/order.model");
 const Tenure = require("../models/tenure.model");
 const Vendor = require("../models/vendor.model");
+const { getItemBrand } = require("../helpers/itemBrand");
 const {
   applyDataAccessMatch,
   assertUserDataAccess,
@@ -143,9 +144,6 @@ const INSPECTED_ITEMS_ORDER_SELECT = [
   "updatedAt",
 ].join(" ");
 
-const getItemBrand = (item = {}) =>
-  normalizeText(item?.brand_name || item?.brand || item?.brands?.[0]);
-
 const serializeTenure = (tenure = {}) => ({
   id: String(tenure?._id || tenure?.id || ""),
   brand: normalizeText(tenure?.brand),
@@ -253,7 +251,7 @@ const applyTenureAccessMatch = (match = {}, user = {}) => applyDataAccessMatch(
 );
 
 const buildItemBrandMatch = (brand = "") => ({
-  $or: [{ brand }, { brand_name: brand }, { brands: brand }],
+  $or: [{ brand }, { brand_name: brand }],
 });
 
 const getAccessibleTenures = async (user) => Tenure.find(
@@ -2388,7 +2386,6 @@ const getClaimsReportDataset = async ({ query, user }) => {
     { $or: tenures.flatMap((tenure) => [
       { brand: tenure.brand },
       { brand_name: tenure.brand },
-      { brands: tenure.brand },
     ]) },
     user,
     { brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"] },
@@ -2399,8 +2396,7 @@ const getClaimsReportDataset = async ({ query, user }) => {
 
   const tenureById = buildTenureMap(tenures);
   const allRows = tenures.flatMap((tenure) => items
-    .filter((item) => [item?.brand, item?.brand_name, ...(Array.isArray(item?.brands) ? item.brands : [])]
-      .some((brand) => normalizeText(brand).toLocaleLowerCase() === normalizeText(tenure.brand).toLocaleLowerCase()))
+    .filter((item) => getItemBrand(item).toLocaleLowerCase() === normalizeText(tenure.brand).toLocaleLowerCase())
     .map((item) => ({
       ...buildClaimsReportRow(item, tenureById, tenure._id),
       id: `${item._id}-${tenure._id}`,

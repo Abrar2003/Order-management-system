@@ -1,6 +1,7 @@
 const Item = require("../models/item.model");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
+const { applyItemBrand, getItemBrand } = require("../helpers/itemBrand");
 const Inspection = require("../models/inspection.model");
 const {
   BOX_PACKAGING_MODES,
@@ -94,39 +95,16 @@ const applyDerivedItemFields = (item, { preferredBrand = "" } = {}) => {
   let changed = false;
 
   const normalizedPreferredBrand = normalizeText(preferredBrand);
-  const currentBrand = normalizeText(item?.brand || "");
-  const currentBrandName = normalizeText(item?.brand_name || "");
-  const brandFallback = normalizeText(
-    Array.isArray(item?.brands) && item.brands.length > 0
-      ? item.brands[item.brands.length - 1]
-      : "",
-  );
-
-  const resolvedPrimaryBrand = normalizeText(
-    normalizedPreferredBrand || currentBrand || currentBrandName || brandFallback,
-  );
+  const resolvedPrimaryBrand = getItemBrand(item) || normalizedPreferredBrand;
 
   if (resolvedPrimaryBrand) {
-    if (currentBrand !== resolvedPrimaryBrand) {
-      item.brand = resolvedPrimaryBrand;
-      changed = true;
-    }
-    if (currentBrandName !== resolvedPrimaryBrand) {
-      item.brand_name = resolvedPrimaryBrand;
-      changed = true;
-    }
-
-    const currentBrands = Array.isArray(item?.brands) ? item.brands : [];
-    if (!currentBrands.includes(resolvedPrimaryBrand)) {
-      item.brands = normalizeUniqueList([...currentBrands, resolvedPrimaryBrand]);
-      changed = true;
-    }
-  } else {
-    if (currentBrand && !currentBrandName) {
-      item.brand_name = currentBrand;
-      changed = true;
-    } else if (!currentBrand && currentBrandName) {
-      item.brand = currentBrandName;
+    if (
+      normalizeText(item?.brand) !== resolvedPrimaryBrand
+      || normalizeText(item?.brand_name) !== resolvedPrimaryBrand
+      || item?.brands?.length !== 1
+      || normalizeText(item?.brands?.[0]) !== resolvedPrimaryBrand
+    ) {
+      applyItemBrand(item, resolvedPrimaryBrand);
       changed = true;
     }
   }
@@ -238,12 +216,6 @@ const applyOrderSnapshot = (item, orderLike) => {
     changed = true;
   }
 
-  const currentBrands = Array.isArray(item.brands) ? item.brands : [];
-  if (brand && !currentBrands.includes(brand)) {
-    item.brands = normalizeUniqueList([...currentBrands, brand]);
-    changed = true;
-  }
-
   const currentVendors = Array.isArray(item.vendors) ? item.vendors : [];
   if (vendor && !currentVendors.includes(vendor)) {
     item.vendors = normalizeUniqueList([...currentVendors, vendor]);
@@ -277,12 +249,6 @@ const applyQcSnapshot = (item, qcLike) => {
 
   if (description && item.description !== description) {
     item.description = description;
-    changed = true;
-  }
-
-  const currentBrands = Array.isArray(item.brands) ? item.brands : [];
-  if (brand && !currentBrands.includes(brand)) {
-    item.brands = normalizeUniqueList([...currentBrands, brand]);
     changed = true;
   }
 
@@ -641,4 +607,5 @@ module.exports = {
   syncQCCbmTotalsFromTopBottom,
   syncInspectionCbmSnapshots,
   syncAllItemsFromOrdersAndQc,
+  __test__: { applyOrderSnapshot },
 };
