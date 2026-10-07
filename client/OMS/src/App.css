@@ -2865,12 +2865,12 @@ small,
 
 .pis-table th:nth-child(2),
 .pis-table td:nth-child(2) {
-  width: 13%;
+  width: 5%;
 }
 
 .pis-table th:nth-child(3),
 .pis-table td:nth-child(3) {
-  width: 7%;
+  width: 12%;
 }
 
 .pis-table th:nth-child(4),
@@ -2879,27 +2879,32 @@ small,
 }
 
 .pis-table th:nth-child(5),
-.pis-table td:nth-child(5),
+.pis-table td:nth-child(5) {
+  width: 7%;
+}
+
 .pis-table th:nth-child(6),
-.pis-table td:nth-child(6) {
-  width: 5%;
-}
-
-.pis-table th:nth-child(9),
-.pis-table td:nth-child(9) {
-  width: 5%;
-}
-
+.pis-table td:nth-child(6),
 .pis-table th:nth-child(7),
-.pis-table td:nth-child(7),
-.pis-table th:nth-child(8),
-.pis-table td:nth-child(8) {
-  width: 20%;
+.pis-table td:nth-child(7) {
+  width: 5%;
 }
 
 .pis-table th:nth-child(10),
 .pis-table td:nth-child(10) {
-  width: 8%;
+  width: 5%;
+}
+
+.pis-table th:nth-child(8),
+.pis-table td:nth-child(8),
+.pis-table th:nth-child(9),
+.pis-table td:nth-child(9) {
+  width: 20%;
+}
+
+.pis-table th:nth-child(11),
+.pis-table td:nth-child(11) {
+  width: 7%;
 }
 
 .pis-table th,

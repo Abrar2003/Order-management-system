@@ -4,6 +4,7 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
 import MeasuredSizeDisplayTable from "../components/MeasuredSizeDisplayTable";
+import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import SortHeaderButton from "../components/SortHeaderButton";
 import UploadFinishModal from "../components/UploadFinishModal";
 import { usePermissions } from "../auth/PermissionContext";
@@ -148,6 +149,7 @@ const PIS = () => {
           brand: brandFilter,
           vendor: vendorFilter,
           country: countryFilter,
+          include_product_image_thumbnail: true,
           page,
           limit,
         },
@@ -517,6 +519,9 @@ const PIS = () => {
                         />
                       </th>
                       <th>
+                        Image
+                      </th>
+                      <th>
                         <SortHeaderButton
                           label="Description"
                           isActive={sortBy === "description"}
@@ -586,7 +591,7 @@ const PIS = () => {
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr className="responsive-card-table-empty-row">
-                        <td colSpan={canEditPis ? "10" : "9"} className="text-center py-4">
+                        <td colSpan={canEditPis ? "11" : "10"} className="text-center py-4">
                           No items found
                         </td>
                       </tr>
@@ -594,6 +599,14 @@ const PIS = () => {
                     {sortedRows.map((item) => (
                       <tr key={item?._id || item?.code}>
                         <td data-label="Item Code">{item?.code || "N/A"}</td>
+                        <td data-label="Image">
+                          <ProductImageThumbnail
+                            src={item?.product_image_url}
+                            originalName={item?.product_image?.originalName}
+                            alt={`${item?.code || "Item"} product image`}
+                            size="sm"
+                          />
+                        </td>
                         <td data-label="Description">{item?.description || item?.name || "N/A"}</td>
                         <td data-label="Brand">{getBrand(item) || "N/A"}</td>
                         <td data-label="Vendors">{getVendors(item)}</td>
