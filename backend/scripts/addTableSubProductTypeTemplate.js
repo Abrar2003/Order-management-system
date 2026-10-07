@@ -54,23 +54,19 @@ const main = async () => {
   loadEnvFiles({ cwd: path.resolve(__dirname, ".."), preserveExistingEnv: true });
   await connectDB();
 
-  let tableV2 = await ProductTypeTemplate.findOne({ key: "table", version: 2 });
-  if (!tableV2) {
-    const latest = await ProductTypeTemplate.findOne({ key: "table" })
-      .sort({ version: -1, updatedAt: -1 })
-      .lean();
-    tableV2 = await ProductTypeTemplate.create(buildTableTemplate(latest));
-  }
+  let tableTemplate = await ProductTypeTemplate.findOne({ key: "table" })
+    .sort({ version: -1, updatedAt: -1 });
+  if (!tableTemplate) tableTemplate = await ProductTypeTemplate.create(buildTableTemplate());
 
-  const changed = ensureTableSubProductType(tableV2);
-  if (tableV2.status !== "active") tableV2.status = "active";
-  if (changed || tableV2.isModified()) await tableV2.save();
+  const changed = ensureTableSubProductType(tableTemplate);
+  if (tableTemplate.status !== "active") tableTemplate.status = "active";
+  if (changed || tableTemplate.isModified()) await tableTemplate.save();
   await ProductTypeTemplate.updateMany(
-    { key: "table", status: "active", _id: { $ne: tableV2._id } },
+    { key: "table", status: "active", _id: { $ne: tableTemplate._id } },
     { $set: { status: "inactive" } },
   );
 
-  console.log("Table V2 sub product types are configured.");
+  console.log(`Table v${tableTemplate.version} sub product types are configured.`);
 };
 
 if (require.main === module) {
