@@ -697,6 +697,10 @@ const WeeklySummary = () => {
         extraCss: `
           .weekly-summary-report-header { display: flex !important; justify-content: space-between !important; align-items: flex-start !important; flex-wrap: nowrap !important; width: 100%; }
           .weekly-summary-report-header .weekly-summary-brand-panel { margin-left: auto !important; flex: 0 0 auto; }
+          .weekly-summary-export-surface .table-responsive { overflow: visible !important; }
+          .weekly-summary-export-surface .weekly-summary-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+          .weekly-summary-export-surface .weekly-summary-table th:last-child,
+          .weekly-summary-export-surface .weekly-summary-table td:last-child { overflow-wrap: normal !important; word-break: normal !important; }
         `,
       });
     } catch (err) {
@@ -861,14 +865,14 @@ const WeeklySummary = () => {
                     <div className="table-responsive">
                       <table className="table table-sm table-striped align-middle mb-0 weekly-summary-table">
                         <colgroup>
-                          <col style={{ width: "14%" }} />
-                          <col style={{ width: "12%" }} />
+                          <col style={{ width: "13%" }} />
+                          <col style={{ width: "11%" }} />
                           <col style={{ width: "20%" }} />
                           <col style={{ width: "12%" }} />
                           <col style={{ width: "10%" }} />
                           <col style={{ width: "12%" }} />
                           <col style={{ width: "10%" }} />
-                          <col style={{ width: "10%" }} />
+                          <col style={{ width: "12%" }} />
                         </colgroup>
                         <thead>
                           <tr>
