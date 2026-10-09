@@ -284,7 +284,8 @@ const buildVendorDisplayRows = (
         String(left?.item_code || "").localeCompare(String(right?.item_code || "")),
       );
       const inspectedItemsInRange = sortedItems.filter((item) =>
-        Boolean(item?.inspected_in_range),
+        Boolean(item?.inspected_in_range) &&
+        toReportQuantity(item?.quantity_passed) > 0,
       );
       const allItemsPacked =
         sortedItems.length > 0 &&
@@ -351,11 +352,7 @@ const buildVendorDisplayRows = (
         }];
       }
 
-      return sortedItems.filter((item) =>
-        item?.inspected_in_range ||
-        toReportQuantity(item?.pending) > 0 ||
-        !isPackedOrderStatus(item?.order_status),
-      ).map((item, index) => ({
+      return inspectedItemsInRange.map((item, index) => ({
         key: `${orderId}-${item?.item_code || "item"}-${index}`,
         po: orderId,
         itemLabel: item?.item_code || "N/A",
