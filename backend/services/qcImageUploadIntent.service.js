@@ -1,12 +1,8 @@
 const mongoose = require("mongoose");
 
 const QcImageUploadIntent = require("../models/qcImageUploadIntent.model");
+const Inspection = require("../models/inspection.model");
 const { buildAuditActor } = require("../helpers/permissions");
-const {
-  isAdminLikeRole,
-  isManagerLikeRole,
-  normalizeUserRoleKey,
-} = require("../helpers/userRole");
 const {
   QC_IMAGE_DIRECT_UPLOAD_URL_TTL_SECONDS,
 } = require("../config/qcImageUpload.config");
@@ -25,8 +21,6 @@ const normalizeKey = (value) => normalizeText(value).toLowerCase();
 const getUserId = (user = {}) => normalizeText(user?._id || user?.id || "");
 
 const canManageIntent = (intent = {}, user = {}) => {
-  const role = normalizeUserRoleKey(user?.role);
-  if (isAdminLikeRole(role) || isManagerLikeRole(role)) return true;
   const userId = getUserId(user);
   return Boolean(userId && userId === normalizeText(intent?.created_by?.user));
 };
@@ -57,7 +51,7 @@ const createImageUploadIntent = async ({
     throw createHttpError(400, "Invalid inspection id");
   }
   const normalizedRequestHistoryId = normalizeText(requestHistoryId);
-  if (normalizedRequestHistoryId && !mongoose.Types.ObjectId.isValid(normalizedRequestHistoryId)) {
+  if (!mongoose.Types.ObjectId.isValid(normalizedRequestHistoryId)) {
     throw createHttpError(400, "Invalid QC request id");
   }
   if (
@@ -67,6 +61,20 @@ const createImageUploadIntent = async ({
     )
   ) {
     throw createHttpError(400, "QC request does not belong to this QC record");
+  }
+  if (normalizedInspectionId) {
+    const inspection = await Inspection.findOne({
+      _id: normalizedInspectionId,
+      qc: qc._id,
+    })
+      .select("request_history_id")
+      .lean();
+    if (!inspection) {
+      throw createHttpError(400, "Inspection record does not belong to this QC record");
+    }
+    if (String(inspection.request_history_id || "") !== normalizedRequestHistoryId) {
+      throw createHttpError(400, "Inspection record does not belong to this QC request");
+    }
   }
 
   const intent = await QcImageUploadIntent.create({
@@ -98,6 +106,7 @@ const getOpenIntent = async ({
   imageType = "",
   inspectionId = "",
   requestHistoryId = "",
+  requireUnboundInspection = false,
   requireImages = true,
 } = {}) => {
   if (!mongoose.Types.ObjectId.isValid(normalizeText(intentId))) {
@@ -127,6 +136,9 @@ const getOpenIntent = async ({
   }
   if (normalizeText(inspectionId) && String(intent.inspection || "") !== normalizeText(inspectionId)) {
     throw createHttpError(400, "QC image upload intent inspection does not match");
+  }
+  if (requireUnboundInspection && intent.inspection) {
+    throw createHttpError(400, "QC image upload intent is bound to an inspection record");
   }
   if (
     normalizeText(requestHistoryId) &&

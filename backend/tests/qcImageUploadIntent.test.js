@@ -52,5 +52,5 @@ test("reject-all intents replace the new rejection-image array and remain owner 
   assert.deepEqual(inspection.rejected_images.map((entry) => entry._id), ["reject-all"]);
   assert.equal(canManageIntent(intent, { id: "owner-1", role: "QC" }), true);
   assert.equal(canManageIntent(intent, { id: "owner-2", role: "QC" }), false);
-  assert.equal(canManageIntent(intent, { id: "owner-2", role: "Admin" }), true);
+  assert.equal(canManageIntent(intent, { id: "owner-2", role: "Admin" }), false);
 });

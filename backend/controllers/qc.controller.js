@@ -7444,6 +7444,7 @@ const updateQC = async (req, res) => {
           qcId: String(qc._id),
           operation: "rejection",
           imageType: "rejected_images",
+          inspectionId: String(currentRequestInspectionRecord?._id || ""),
           requestHistoryId: String(targetRequestEntryForImages?._id || ""),
         })
       : null;
@@ -10177,6 +10178,7 @@ const markGoodsNotReady = async (req, res) => {
           qcId: String(qc._id),
           operation: "goods_not_ready",
           imageType: "goods_not_ready_images",
+          requireUnboundInspection: true,
           requestHistoryId: String(latestRequestEntry?._id || ""),
         })
       : null;
@@ -10413,6 +10415,7 @@ const rejectAllQc = async (req, res) => {
           qcId: String(qc._id),
           operation: "reject_all",
           imageType: "rejected_images",
+          requireUnboundInspection: true,
           requestHistoryId: String(latestRequestEntry._id),
         })
       : null;

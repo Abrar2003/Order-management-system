@@ -229,8 +229,6 @@ const userCanUseUploadSession = (image = {}, user = {}) => {
 };
 
 const userCanUseIntent = (intent = {}, user = {}) => {
-  const roleKey = normalizeUserRoleKey(user?.role);
-  if (isAdminLikeRole(roleKey) || isManagerLikeRole(roleKey)) return true;
   const currentUserId = normalizeText(user?._id || user?.id);
   return Boolean(currentUserId && currentUserId === normalizeText(intent?.created_by?.user));
 };
@@ -870,6 +868,20 @@ const completeUploadSession = async ({ user, uploadId = "" } = {}) => {
     };
   }
 
+  const now = new Date();
+  if (
+    ownerModel === OWNER_MODEL_INTENT &&
+    (intent?.state !== "open" || !intent?.expires_at || intent.expires_at <= now)
+  ) {
+    if (intent?.state === "open") {
+      await QcImageUploadIntent.updateOne(
+        { _id: intent._id, state: "open", expires_at: { $lte: now } },
+        { $set: { state: "expired" } },
+      );
+    }
+    throw createHttpError(409, "QC image upload intent is no longer active");
+  }
+
   const metadata = await getObjectMetadata(sourceKey);
   if (!metadata.exists) {
     throw createHttpError(404, "Uploaded source object was not found in Wasabi");
@@ -881,7 +893,6 @@ const completeUploadSession = async ({ user, uploadId = "" } = {}) => {
     throw createHttpError(400, `Uploaded source object exceeds ${QC_IMAGE_MAX_FILE_SIZE} bytes`);
   }
 
-  const now = new Date();
   const Model = ownerModel === OWNER_MODEL_INSPECTION
     ? Inspection
     : ownerModel === OWNER_MODEL_INTENT
@@ -898,33 +909,39 @@ const completeUploadSession = async ({ user, uploadId = "" } = {}) => {
       : ownerModel === OWNER_MODEL_INTENT
         ? {
             _id: intent._id,
+            state: "open",
+            expires_at: { $gt: now },
             [`${ownerImageField}.upload.upload_id`]: uploadId,
           }
         : {
           _id: qc._id,
           [`${imageField}.upload.upload_id`]: uploadId,
         };
+  const completionSet = {
+    [`${ownerImageField}.$[image].key`]: sourceKey,
+    [`${ownerImageField}.$[image].contentType`]:
+      metadata.contentType || image?.storage?.source_content_type || image?.contentType || "",
+    [`${ownerImageField}.$[image].size`]: metadata.size,
+    [`${ownerImageField}.$[image].storage.source_key`]: sourceKey,
+    [`${ownerImageField}.$[image].storage.source_content_type`]:
+      metadata.contentType || image?.storage?.source_content_type || image?.contentType || "",
+    [`${ownerImageField}.$[image].storage.source_size_bytes`]: metadata.size,
+    [`${ownerImageField}.$[image].storage.source_etag`]: metadata.etag || "",
+    [`${ownerImageField}.$[image].storage.source_uploaded_at`]: metadata.lastModified || now,
+    [`${ownerImageField}.$[image].storage.source_cleanup_status`]: "pending",
+    [`${ownerImageField}.$[image].processing.status`]: "queued",
+    [`${ownerImageField}.$[image].processing.error`]: "",
+    [`${ownerImageField}.$[image].processing.lock_until`]: null,
+    [`${ownerImageField}.$[image].upload.expires_at`]: null,
+  };
+  if (ownerModel !== OWNER_MODEL_INTENT) {
+    completionSet.updated_by = buildAuditActor(user);
+  }
+
   const result = await Model.updateOne(
     query,
     {
-      $set: {
-        [`${ownerImageField}.$[image].key`]: sourceKey,
-        [`${ownerImageField}.$[image].contentType`]:
-          metadata.contentType || image?.storage?.source_content_type || image?.contentType || "",
-        [`${ownerImageField}.$[image].size`]: metadata.size,
-        [`${ownerImageField}.$[image].storage.source_key`]: sourceKey,
-        [`${ownerImageField}.$[image].storage.source_content_type`]:
-          metadata.contentType || image?.storage?.source_content_type || image?.contentType || "",
-        [`${ownerImageField}.$[image].storage.source_size_bytes`]: metadata.size,
-        [`${ownerImageField}.$[image].storage.source_etag`]: metadata.etag || "",
-        [`${ownerImageField}.$[image].storage.source_uploaded_at`]: metadata.lastModified || now,
-        [`${ownerImageField}.$[image].storage.source_cleanup_status`]: "pending",
-        [`${ownerImageField}.$[image].processing.status`]: "queued",
-        [`${ownerImageField}.$[image].processing.error`]: "",
-        [`${ownerImageField}.$[image].processing.lock_until`]: null,
-        [`${ownerImageField}.$[image].upload.expires_at`]: null,
-        updated_by: buildAuditActor(user),
-      },
+      $set: completionSet,
     },
     {
       arrayFilters: [{ "image.upload.upload_id": uploadId }],
@@ -959,6 +976,20 @@ const refreshUploadSession = async ({ user, uploadId = "" } = {}) => {
     throw createHttpError(409, "Only incomplete upload sessions can be refreshed");
   }
 
+  const now = new Date();
+  if (
+    ownerModel === OWNER_MODEL_INTENT &&
+    (intent?.state !== "open" || !intent?.expires_at || intent.expires_at <= now)
+  ) {
+    if (intent?.state === "open") {
+      await QcImageUploadIntent.updateOne(
+        { _id: intent._id, state: "open", expires_at: { $lte: now } },
+        { $set: { state: "expired" } },
+      );
+    }
+    throw createHttpError(409, "QC image upload intent is no longer active");
+  }
+
   const sourceKey = normalizeText(image?.storage?.source_key || image?.key);
   const contentType = normalizeText(image?.storage?.source_content_type || image?.contentType);
   const expiresAt = new Date(Date.now() + QC_IMAGE_DIRECT_UPLOAD_URL_TTL_SECONDS * 1000);
@@ -977,18 +1008,28 @@ const refreshUploadSession = async ({ user, uploadId = "" } = {}) => {
           [`${imageField}.upload.upload_id`]: uploadId,
         }
       : ownerModel === OWNER_MODEL_INTENT
-        ? { _id: intent._id, [`${ownerImageField}.upload.upload_id`]: uploadId }
+        ? {
+            _id: intent._id,
+            state: "open",
+            expires_at: { $gt: now },
+            [`${ownerImageField}.upload.upload_id`]: uploadId,
+          }
         : {
           _id: qc._id,
           [`${imageField}.upload.upload_id`]: uploadId,
         };
 
+  const refreshSet = {
+    [`${ownerImageField}.$[image].upload.expires_at`]: expiresAt,
+  };
+  if (ownerModel === OWNER_MODEL_INTENT) {
+    refreshSet.expires_at = expiresAt;
+  }
+
   await Model.updateOne(
     query,
     {
-      $set: {
-        [`${ownerImageField}.$[image].upload.expires_at`]: expiresAt,
-      },
+      $set: refreshSet,
     },
     {
       arrayFilters: [{ "image.upload.upload_id": uploadId }],
@@ -1038,15 +1079,18 @@ const abortUploadSession = async ({ user, uploadId = "" } = {}) => {
         ? { _id: intent._id }
         : { _id: qc._id };
 
+  const abortSet = {};
+  if (ownerModel !== OWNER_MODEL_INTENT) {
+    abortSet.updated_by = buildAuditActor(user);
+  }
+
   await Model.updateOne(
     query,
     {
       $pull: {
         [ownerImageField]: { "upload.upload_id": uploadId },
       },
-      $set: {
-        updated_by: buildAuditActor(user),
-      },
+      ...(Object.keys(abortSet).length > 0 ? { $set: abortSet } : {}),
     },
   );
 
