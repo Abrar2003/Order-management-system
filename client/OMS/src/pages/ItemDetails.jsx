@@ -1378,7 +1378,7 @@ const ItemDetails = () => {
 
                 <QcItemComplaintsSection itemCode={item?.code || resolvedItemCode} />
 
-                <section className="border rounded p-3 d-grid gap-3">
+                <section className="border rounded p-3 d-grid gap-3 item-reminder-form">
                   <div>
                     <h3 className="h6 mb-1">Reminders</h3>
                     <div className="small text-secondary">
@@ -1393,7 +1393,7 @@ const ItemDetails = () => {
                       <textarea
                         id="item-reminder-comment"
                         className="form-control"
-                        rows="2"
+                        rows="1"
                         maxLength="2000"
                         value={reminderComment}
                         onChange={(event) => setReminderComment(event.target.value)}
@@ -1425,7 +1425,7 @@ const ItemDetails = () => {
                       />
                     </div>
                     <div className="col-md-1 d-grid">
-                      <button type="button" className="btn btn-primary btn-sm" onClick={saveItemReminder} disabled={!canCreateReminder || savingReminder}>
+                      <button type="button" className="btn btn-primary" onClick={saveItemReminder} disabled={!canCreateReminder || savingReminder}>
                         {savingReminder ? "Saving..." : "Save"}
                       </button>
                     </div>

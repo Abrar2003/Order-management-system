@@ -29,6 +29,9 @@ const {
   scanAndEnqueuePendingQcImages,
 } = require("./services/qcImageProcessing.service");
 const {
+  cleanupExpiredImageUploadIntents,
+} = require("./services/qcImageUploadIntent.service");
+const {
   DEFAULT_TZ,
   isWithinProcessingWindow,
 } = require("./services/qcImageProcessingWindow");
@@ -67,12 +70,14 @@ const getWindowConfig = () => ({
 const isWindowOpen = () => isWithinProcessingWindow(getWindowConfig());
 
 const scanPendingImages = async (reason = "timer") => {
-  if (scanInFlight || shuttingDown || !isWindowOpen()) return;
+  if (scanInFlight || shuttingDown) return;
   scanInFlight = true;
   try {
-    const cleanup = await cleanupAbandonedUploadSessions({
-      olderThan: new Date(),
-    });
+    const [cleanup, intentCleanup] = await Promise.all([
+      cleanupAbandonedUploadSessions({ olderThan: new Date() }),
+      cleanupExpiredImageUploadIntents({ olderThan: new Date() }),
+    ]);
+    if (!isWindowOpen()) return;
     const result = await scanAndEnqueuePendingQcImages({
       limit: parsePositiveInt(process.env.QC_IMAGE_PROCESSOR_SCAN_LIMIT, 500),
     });
@@ -80,6 +85,7 @@ const scanPendingImages = async (reason = "timer") => {
       reason,
       ...result,
       abandoned_cleaned: cleanup.cleaned,
+      expired_intents_cleaned: intentCleanup.cleaned,
     });
   } catch (error) {
     console.error("[qc-image-worker] scan failed", {

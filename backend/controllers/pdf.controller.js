@@ -1,6 +1,9 @@
 const path = require("path");
 
-const { renderPdf } = require("../services/pdfRenderer");
+const {
+  renderPdf,
+  verifyPdfRenderer,
+} = require("../services/pdfRenderer");
 
 const PDF_REPORT_KEYS = new Set([
   "daily-inspection-report",
@@ -83,12 +86,24 @@ const renderHtmlPdf = async (req, res) => {
   }
 };
 
-const getPdfRendererStatus = (_req, res) =>
-  res.status(200).json({
-    ok: true,
-    renderer: "chromium",
-    reports: [...PDF_REPORT_KEYS].sort(),
-  });
+const getPdfRendererStatus = async (_req, res) => {
+  try {
+    await verifyPdfRenderer();
+    return res.status(200).json({
+      ok: true,
+      renderer: "chromium",
+      reports: [...PDF_REPORT_KEYS].sort(),
+    });
+  } catch (error) {
+    console.error("PDF renderer health check failed", {
+      message: error?.message || String(error),
+    });
+    return res.status(503).json({
+      ok: false,
+      message: "PDF renderer is unavailable",
+    });
+  }
+};
 
 module.exports = {
   PDF_REPORT_KEYS,

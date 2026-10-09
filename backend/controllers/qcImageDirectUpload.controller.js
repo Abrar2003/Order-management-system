@@ -32,6 +32,7 @@ exports.createUploadSession = async (req, res) => {
       ),
       uploadMode: normalizeText(req.body?.upload_mode || req.body?.uploadMode || "bulk"),
       comment: normalizeText(req.body?.comment),
+      uploadIntentId: normalizeText(req.body?.upload_intent_id || req.body?.uploadIntentId),
     });
 
     return res.status(201).json({

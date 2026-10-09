@@ -23,6 +23,7 @@ const {
   qcUpdateLog,
 } = require("../middlewares/securityActivityLogger");
 const qcController = require("../controllers/qc.controller");
+const qcImageUploadIntentController = require("../controllers/qcImageUploadIntent.controller");
 const { renderHtmlPdf } = require("../controllers/pdf.controller");
 const invalidateQcOnSuccess = invalidateCacheOnSuccess(invalidateQcCaches);
 
@@ -143,6 +144,20 @@ router.patch(
   securityLog("reject", "qc"),
   invalidateQcOnSuccess,
   qcController.markGoodsNotReady
+);
+
+router.post(
+  "/:id/image-upload-intents",
+  auth,
+  requirePermission("qc", "edit"),
+  qcImageUploadIntentController.create,
+);
+
+router.delete(
+  "/image-upload-intents/:intentId",
+  auth,
+  requirePermission("qc", "edit"),
+  qcImageUploadIntentController.cancel,
 );
 
 router.patch(

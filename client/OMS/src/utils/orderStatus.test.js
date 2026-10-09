@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getOrderProgress } from "./orderStatus.js";
+import { getOrderProgress, isPackedOrderStatus } from "./orderStatus.js";
+
+test("only completed inspection or shipping statuses count as packed", () => {
+  assert.equal(isPackedOrderStatus("Pending"), false);
+  assert.equal(isPackedOrderStatus("Under Inspection"), false);
+  assert.equal(isPackedOrderStatus("Inspection Done"), true);
+  assert.equal(isPackedOrderStatus("Partial Shipped"), true);
+  assert.equal(isPackedOrderStatus("Shipped"), true);
+});
 
 test("a legacy QC request date without an active request remains pending", () => {
   assert.equal(getOrderProgress({

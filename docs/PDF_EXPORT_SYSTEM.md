@@ -133,11 +133,15 @@ not changed.
 4. Common Linux Chrome/Chromium locations
 5. Puppeteer's downloaded browser
 
-For a Linux VPS, install Chrome/Chromium and its required shared libraries, or
-run Puppeteer's browser installer during deployment:
+The VPS deploy script installs Puppeteer's pinned Chrome build into
+`backend/.cache/puppeteer` (or `PUPPETEER_CACHE_DIR`) and then checks that it
+can launch through `/reports/pdf/status`. This prevents a successful deploy
+with an export-time 500 caused by a missing browser.
+
+For a manual Linux deployment, run Puppeteer's browser installer after `npm ci`:
 
 ```bash
-npx puppeteer browsers install chrome --install-deps
+PUPPETEER_CACHE_DIR="$(pwd)/.cache/puppeteer" npx puppeteer browsers install chrome --install-deps
 ```
 
 The launch configuration includes:

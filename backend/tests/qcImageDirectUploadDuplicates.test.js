@@ -5,6 +5,7 @@ const {
   __test__: {
     buildDuplicateUploadSessionResponse,
     findImageByHash,
+    normalizeImageField,
     normalizeImageContentHash,
   },
 } = require("../services/qcImageDirectUpload.service");
@@ -29,6 +30,11 @@ test("finds QC images by stored content hash", () => {
   assert.equal(findImageByHash(qc, "qc_images", VALID_HASH)?._id, "second");
   assert.equal(findImageByHash(qc, "hardware_inspection", VALID_HASH), null);
   assert.equal(findImageByHash(qc, "qc_images", "invalid"), null);
+});
+
+test("direct sessions allow every QC workflow image field", () => {
+  assert.equal(normalizeImageField("rejected_images"), "rejected_images");
+  assert.equal(normalizeImageField("goods_not_ready_images"), "goods_not_ready_images");
 });
 
 test("builds a duplicate direct-upload response without an upload URL", () => {

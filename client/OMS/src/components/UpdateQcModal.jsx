@@ -35,6 +35,8 @@ import {
 } from "../utils/qcRequests";
 import { formatNumberInputValue } from "../utils/measurementDisplay";
 import useFormDraft from "../hooks/useFormDraft";
+import useBulkQcImageUpload from "../hooks/useBulkQcImageUpload";
+import { createQcImageUploadIntent } from "../services/qcImages.service";
 import {
   buildUpdateQcPastDaysMessage,
   getUpdateQcPastDaysLimit,
@@ -1039,6 +1041,14 @@ const UpdateQcModal = ({
   const [inspectors, setInspectors] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const {
+    state: rejectionUploadState,
+    startUpload: startRejectionImageUpload,
+    reset: resetRejectionImageUpload,
+  } = useBulkQcImageUpload({
+    qcId: qc?._id,
+    maxFiles: MAX_REJECTION_IMAGE_COUNT,
+  });
   const saveRequestKeyRef = useRef("");
   const [rejectionImages, setRejectionImages] = useState([]);
   const [reminderDrafts, setReminderDrafts] = useState([]);
@@ -2700,27 +2710,33 @@ const UpdateQcModal = ({
     }
 
     const uploadRejectionEvidence = async () => {
-      if (!requiresRejectionEvidence || rejectionImages.length === 0) return;
+      if (!requiresRejectionEvidence || rejectionImages.length === 0) return "";
 
-      const formData = new FormData();
-      rejectionImages.forEach((file) => formData.append("images", file));
-      formData.append("upload_mode", "bulk");
-      formData.append("comment", rejectionRemark);
-      if (currentRequestInspectionRecord?._id) {
-        formData.append("inspection_id", currentRequestInspectionRecord._id);
+      resetRejectionImageUpload();
+      const intentResponse = await createQcImageUploadIntent({
+        qcId: qc._id,
+        operation: "rejection",
+        imageType: "rejected_images",
+        inspectionId: currentRequestInspectionRecord?._id,
+        requestHistoryId:
+          currentRequestInspectionRecord?.request_history_id || latestRequestEntry?._id,
+        comment: rejectionRemark,
+      });
+      const uploadIntentId = intentResponse?.data?.data?.intent_id;
+      const uploadResult = await startRejectionImageUpload({
+        imageType: "rejected_images",
+        inspectionId: currentRequestInspectionRecord?._id,
+        uploadIntentId,
+        comment: rejectionRemark,
+        files: rejectionImages,
+      });
+      if (
+        Number(uploadResult?.failedCount || 0) > 0 ||
+        Number(uploadResult?.uploadedCount || 0) !== rejectionImages.length
+      ) {
+        throw new Error("Some rejection images could not be uploaded. Please retry.");
       }
-
-      const response = await api.post(
-        `/qc/${qc._id}/rejection-images`,
-        formData,
-      );
-      const failedCount = Number(response?.data?.data?.failed_count || 0);
-      if (failedCount > 0) {
-        throw new Error(
-          response?.data?.data?.failures?.[0]?.reason ||
-            "Some rejection images could not be uploaded.",
-        );
-      }
+      return uploadIntentId;
     };
     const currentSamplePassedTotal = inspectionRecords.reduce(
       (sum, record) => sum + (Number(record?.passed || 0) || 0),
@@ -3670,7 +3686,10 @@ const UpdateQcModal = ({
     try {
       pauseDraftSaves();
       setSaving(true);
-      await uploadRejectionEvidence();
+      const rejectionUploadIntentId = await uploadRejectionEvidence();
+      if (rejectionUploadIntentId) {
+        payload.image_upload_intent_id = rejectionUploadIntentId;
+      }
       await api.patch(`/qc/update-qc/${qc._id}`, payload, {
         timeout: 20_000,
         headers: { "Idempotency-Key": requestKey },
@@ -4800,6 +4819,11 @@ const UpdateQcModal = ({
                           </li>
                         ))}
                       </ul>
+                    )}
+                    {saving && rejectionUploadState.isUploading && (
+                      <div className="small text-secondary mt-2">
+                        Uploading rejection images directly to storage: {rejectionUploadState.progressPercent}%
+                      </div>
                     )}
                   </div>
                 </div>

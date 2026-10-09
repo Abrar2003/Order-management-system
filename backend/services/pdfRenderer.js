@@ -1,8 +1,10 @@
-const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
 const { fileURLToPath, pathToFileURL } = require("url");
 
+process.env.PUPPETEER_CACHE_DIR ||= path.resolve(__dirname, "../.cache/puppeteer");
+
+const puppeteer = require("puppeteer");
 const { buildPdfPrintStyles } = require("./pdfPrintStyles");
 
 let browserPromise = null;
@@ -77,6 +79,11 @@ const getBrowser = async () => {
     return getBrowser();
   }
   return browser;
+};
+
+const verifyPdfRenderer = async () => {
+  const browser = await getBrowser();
+  await browser.version();
 };
 
 const waitForAssets = async (page) => {
@@ -238,4 +245,5 @@ const closePdfRenderer = async () => {
 module.exports = {
   closePdfRenderer,
   renderPdf,
+  verifyPdfRenderer,
 };

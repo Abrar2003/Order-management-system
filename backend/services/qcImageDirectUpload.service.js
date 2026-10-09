@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
+const QcImageUploadIntent = require("../models/qcImageUploadIntent.model");
 const { buildAuditActor } = require("../helpers/permissions");
 const {
   isAdminLikeRole,
@@ -34,9 +35,21 @@ const ACTIVE_ORDER_MATCH = {
   archived: { $ne: true },
   status: { $ne: "Cancelled" },
 };
-const VALID_IMAGE_FIELDS = new Set(["qc_images", "hardware_inspection"]);
+const VALID_IMAGE_FIELDS = new Set([
+  "qc_images",
+  "hardware_inspection",
+  "goods_not_ready_images",
+  "rejected_images",
+]);
 const OWNER_MODEL_QC = "qc";
 const OWNER_MODEL_INSPECTION = "inspection";
+const OWNER_MODEL_INTENT = "intent";
+const IMAGE_FIELD_LIMITS = Object.freeze({
+  qc_images: QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD,
+  hardware_inspection: HARDWARE_INSPECTION_IMAGE_LIMIT,
+  goods_not_ready_images: 10,
+  rejected_images: 10,
+});
 
 const EXTENSION_TO_MIME = Object.freeze({
   ".jpg": "image/jpeg",
@@ -215,6 +228,16 @@ const userCanUseUploadSession = (image = {}, user = {}) => {
   return Boolean(currentUserId && uploadedBy && currentUserId === uploadedBy);
 };
 
+const userCanUseIntent = (intent = {}, user = {}) => {
+  const roleKey = normalizeUserRoleKey(user?.role);
+  if (isAdminLikeRole(roleKey) || isManagerLikeRole(roleKey)) return true;
+  const currentUserId = normalizeText(user?._id || user?.id);
+  return Boolean(currentUserId && currentUserId === normalizeText(intent?.created_by?.user));
+};
+
+const getOwnerImageField = (ownerModel = "", imageField = "qc_images") =>
+  ownerModel === OWNER_MODEL_INTENT ? "images" : imageField;
+
 const buildSourceStorageKey = ({
   qcId = "",
   inspectionId = "",
@@ -240,6 +263,7 @@ const buildSourceStorageKey = ({
 const buildUploadSessionResponse = async ({
   qc,
   inspection = null,
+  intent = null,
   image,
   imageField,
   contentType,
@@ -262,6 +286,7 @@ const buildUploadSessionResponse = async ({
   return {
     qc_id: String(qc?._id || ""),
     inspection_id: String(inspection?._id || ""),
+    upload_intent_id: String(intent?._id || ""),
     image_id: String(image?._id || ""),
     image_type: imageField,
     upload_id: uploadId,
@@ -348,6 +373,152 @@ const buildDuplicateUploadSessionResponse = ({
   headers: {},
 });
 
+const resolveIntentForUpload = async ({ intentId = "", user, qc, imageField }) => {
+  const normalizedIntentId = normalizeText(intentId);
+  if (!normalizedIntentId) return null;
+  if (!mongoose.Types.ObjectId.isValid(normalizedIntentId)) {
+    throw createHttpError(400, "Invalid QC image upload intent");
+  }
+  const intent = await QcImageUploadIntent.findById(normalizedIntentId);
+  if (!intent || String(intent.qc) !== String(qc?._id || "")) {
+    throw createHttpError(404, "QC image upload intent was not found");
+  }
+  if (!userCanUseIntent(intent, user)) {
+    throw createHttpError(403, "QC image upload intent belongs to another user");
+  }
+  if (intent.state !== "open") {
+    throw createHttpError(409, "QC image upload intent is no longer active");
+  }
+  if (!intent.expires_at || intent.expires_at.getTime() <= Date.now()) {
+    intent.state = "expired";
+    await intent.save();
+    throw createHttpError(409, "QC image upload intent has expired");
+  }
+  if (normalizeText(intent.image_type) !== imageField) {
+    throw createHttpError(400, "QC image upload intent image type does not match");
+  }
+  return intent;
+};
+
+const createIntentUploadSession = async ({
+  user,
+  qc,
+  intent,
+  imageField,
+  fileName,
+  contentType,
+  sizeBytes,
+  idempotencyKey,
+  contentHash,
+  comment,
+}) => {
+  const { contentType: resolvedContentType, extension } = resolveSupportedImageType({
+    contentType,
+    fileName,
+  });
+  const normalizedSize = toPositiveInteger(sizeBytes, 0);
+  if (normalizedSize <= 0) throw createHttpError(400, "Image size is required");
+  if (normalizedSize > QC_IMAGE_MAX_FILE_SIZE) {
+    throw createHttpError(400, `Image is too large. Max size is ${QC_IMAGE_MAX_FILE_SIZE} bytes`);
+  }
+  const normalizedIdempotencyKey = normalizeKey(idempotencyKey) || crypto.randomUUID();
+  const normalizedContentHash = normalizeImageContentHash(contentHash);
+  const intentImages = Array.isArray(intent.images) ? intent.images : [];
+  const existingImage = intentImages.find(
+    (image) => normalizeKey(image?.upload?.idempotency_key || image?.idempotency_key) === normalizedIdempotencyKey,
+  );
+  if (existingImage) {
+    return buildUploadSessionResponse({
+      qc,
+      intent,
+      image: existingImage,
+      imageField,
+      contentType: resolvedContentType,
+      completed: ["queued", "processing", "ready"].includes(normalizeKey(existingImage?.processing?.status)),
+    });
+  }
+  const duplicateImage = normalizedContentHash
+    ? intentImages.find((image) => normalizeImageContentHash(image?.hash) === normalizedContentHash)
+    : null;
+  if (duplicateImage) {
+    return buildDuplicateUploadSessionResponse({
+      qc,
+      image: duplicateImage,
+      imageField,
+      contentHash: normalizedContentHash,
+    });
+  }
+
+  const totalLimit = IMAGE_FIELD_LIMITS[imageField] || 0;
+  if (intentImages.length >= totalLimit) {
+    throw createHttpError(400, `Image limit reached (max ${totalLimit})`);
+  }
+  if (intent.operation === "reject_all" && intentImages.length >= 1) {
+    throw createHttpError(400, "Reject all accepts exactly one rejection image");
+  }
+
+  const imageId = new mongoose.Types.ObjectId();
+  const uploadId = crypto.randomUUID();
+  const sourceKey = buildSourceStorageKey({
+    qcId: String(qc._id),
+    inspectionId: `intent-${intent._id}`,
+    imageField,
+    imageId: String(imageId),
+    uploadId,
+    extension,
+  });
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + QC_IMAGE_DIRECT_UPLOAD_URL_TTL_SECONDS * 1000);
+  const safeOriginalName = normalizeText(fileName) || `qc-image${extension}`;
+  const imageEntry = {
+    _id: imageId,
+    key: sourceKey,
+    originalName: safeOriginalName,
+    contentType: resolvedContentType,
+    size: normalizedSize,
+    hash: normalizedContentHash,
+    idempotency_key: normalizedIdempotencyKey,
+    storage: {
+      source_key: sourceKey,
+      source_content_type: resolvedContentType,
+      source_size_bytes: normalizedSize,
+      source_etag: "",
+      source_uploaded_at: null,
+      source_deleted_at: null,
+      source_cleanup_status: "pending",
+    },
+    preview: { key: "", content_type: "", size_bytes: 0, width: 0, height: 0, generated_at: null },
+    thumbnail: { key: "", content_type: "", size_bytes: 0, width: 0, height: 0, generated_at: null },
+    processing: {
+      status: "uploading",
+      attempts: 0,
+      error: "",
+      started_at: null,
+      completed_at: null,
+      lock_until: null,
+    },
+    upload: {
+      upload_id: uploadId,
+      idempotency_key: normalizedIdempotencyKey,
+      uploaded_by: buildAuditActor(user),
+      expires_at: expiresAt,
+    },
+    comment: normalizeText(comment || intent.comment),
+    uploadedAt: now,
+    uploaded_by: buildAuditActor(user),
+  };
+  intent.images.push(imageEntry);
+  await intent.save();
+  return buildUploadSessionResponse({
+    qc,
+    intent,
+    image: imageEntry,
+    imageField,
+    contentType: resolvedContentType,
+    expiresAt,
+  });
+};
+
 const createUploadSession = async ({
   user,
   qcId = "",
@@ -360,11 +531,32 @@ const createUploadSession = async ({
   contentHash = "",
   uploadMode = "bulk",
   comment = "",
+  uploadIntentId = "",
 } = {}) => {
   assertWasabiConfigured();
 
   const qc = await findAccessibleQc(qcId, user);
   const imageField = normalizeImageField(imageType);
+  const intent = await resolveIntentForUpload({
+    intentId: uploadIntentId,
+    user,
+    qc,
+    imageField,
+  });
+  if (intent) {
+    return createIntentUploadSession({
+      user,
+      qc,
+      intent,
+      imageField,
+      fileName,
+      contentType,
+      sizeBytes,
+      idempotencyKey,
+      contentHash,
+      comment,
+    });
+  }
   const targetInspection = await resolveInspectionImageUploadTarget({
     qc,
     user,
@@ -425,21 +617,19 @@ const createUploadSession = async ({
   }
 
   const targetInspectionImages = getInspectionImageList(targetInspection, imageField);
-  const currentCount =
-    imageField === "hardware_inspection"
-      ? targetInspectionImages.length
-      : targetInspectionImages.length;
-  const totalLimit =
-    imageField === "hardware_inspection"
-      ? HARDWARE_INSPECTION_IMAGE_LIMIT
-      : QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD;
+  const currentCount = targetInspectionImages.length;
+  const totalLimit = IMAGE_FIELD_LIMITS[imageField] || QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD;
   const remainingSlots = Math.max(0, totalLimit - currentCount);
   if (remainingSlots <= 0) {
     throw createHttpError(
       400,
       imageField === "hardware_inspection"
         ? `Hardware inspection image limit reached (max ${HARDWARE_INSPECTION_IMAGE_LIMIT} images).`
-        : `QC image limit reached. ${currentCount} of ${totalLimit} images already uploaded for this inspection.`,
+        : imageField === "rejected_images"
+          ? `Rejection image limit reached (max ${totalLimit} images).`
+          : imageField === "goods_not_ready_images"
+            ? `Goods-not-ready image limit reached (max ${totalLimit} images).`
+            : `QC image limit reached. ${currentCount} of ${totalLimit} images already uploaded for this inspection.`,
     );
   }
 
@@ -566,11 +756,9 @@ const findUploadSessionById = async (uploadId = "", user = null) => {
     throw createHttpError(400, "Upload id is required");
   }
 
+  const imageFields = Array.from(VALID_IMAGE_FIELDS);
   const qc = await QC.findOne({
-    $or: [
-      { "qc_images.upload.upload_id": normalizedUploadId },
-      { "hardware_inspection.upload.upload_id": normalizedUploadId },
-    ],
+    $or: imageFields.map((field) => ({ [`${field}.upload.upload_id`]: normalizedUploadId })),
   })
     .populate("inspector")
     .populate({
@@ -581,18 +769,34 @@ const findUploadSessionById = async (uploadId = "", user = null) => {
 
   if (!qc || !qc.order) {
     const inspection = await Inspection.findOne({
-      $or: [
-        { "qc_images.upload.upload_id": normalizedUploadId },
-        { "hardware_inspection.upload.upload_id": normalizedUploadId },
-      ],
+      $or: imageFields.map((field) => ({ [`${field}.upload.upload_id`]: normalizedUploadId })),
     }).lean();
 
     if (!inspection) {
-      throw createHttpError(404, "Upload session not found");
+      const intent = await QcImageUploadIntent.findOne({
+        "images.upload.upload_id": normalizedUploadId,
+      });
+      if (!intent) throw createHttpError(404, "Upload session not found");
+      if (!userCanUseIntent(intent, user)) {
+        throw createHttpError(403, "Upload session belongs to another user");
+      }
+      const intentQc = await findAccessibleQc(String(intent.qc || ""), user);
+      const image = (Array.isArray(intent.images) ? intent.images : []).find(
+        (entry) => normalizeText(entry?.upload?.upload_id) === normalizedUploadId,
+      );
+      if (!image) throw createHttpError(404, "Upload session not found");
+      return {
+        qc: intentQc,
+        inspection: null,
+        intent,
+        imageField: normalizeText(intent.image_type),
+        image,
+        ownerModel: OWNER_MODEL_INTENT,
+      };
     }
 
     const inspectionQc = await findAccessibleQc(String(inspection.qc || ""), user);
-    const imageField = ["qc_images", "hardware_inspection"].find((field) =>
+    const imageField = imageFields.find((field) =>
       getImageListFromDoc(inspection, field).some((image) =>
         normalizeText(image?.upload?.upload_id) === normalizedUploadId,
       ),
@@ -617,7 +821,7 @@ const findUploadSessionById = async (uploadId = "", user = null) => {
     };
   }
 
-  const imageField = ["qc_images", "hardware_inspection"].find((field) =>
+  const imageField = imageFields.find((field) =>
     getImageListFromDoc(qc, field).some((image) =>
       normalizeText(image?.upload?.upload_id) === normalizedUploadId,
     ),
@@ -644,7 +848,7 @@ const findUploadSessionById = async (uploadId = "", user = null) => {
 
 const completeUploadSession = async ({ user, uploadId = "" } = {}) => {
   assertWasabiConfigured();
-  const { qc, inspection, imageField, image, ownerModel } =
+  const { qc, inspection, intent, imageField, image, ownerModel } =
     await findUploadSessionById(uploadId, user);
   const processingStatus = normalizeKey(image?.processing?.status);
   const sourceKey = normalizeText(image?.storage?.source_key || image?.key);
@@ -657,6 +861,7 @@ const completeUploadSession = async ({ user, uploadId = "" } = {}) => {
     return {
       qc_id: String(qc._id),
       inspection_id: String(inspection?._id || ""),
+      upload_intent_id: String(intent?._id || ""),
       image_id: String(image._id),
       image_type: imageField,
       upload_id: uploadId,
@@ -677,7 +882,12 @@ const completeUploadSession = async ({ user, uploadId = "" } = {}) => {
   }
 
   const now = new Date();
-  const Model = ownerModel === OWNER_MODEL_INSPECTION ? Inspection : QC;
+  const Model = ownerModel === OWNER_MODEL_INSPECTION
+    ? Inspection
+    : ownerModel === OWNER_MODEL_INTENT
+      ? QcImageUploadIntent
+      : QC;
+  const ownerImageField = getOwnerImageField(ownerModel, imageField);
   const query =
     ownerModel === OWNER_MODEL_INSPECTION
       ? {
@@ -685,7 +895,12 @@ const completeUploadSession = async ({ user, uploadId = "" } = {}) => {
           qc: qc._id,
           [`${imageField}.upload.upload_id`]: uploadId,
         }
-      : {
+      : ownerModel === OWNER_MODEL_INTENT
+        ? {
+            _id: intent._id,
+            [`${ownerImageField}.upload.upload_id`]: uploadId,
+          }
+        : {
           _id: qc._id,
           [`${imageField}.upload.upload_id`]: uploadId,
         };
@@ -693,21 +908,21 @@ const completeUploadSession = async ({ user, uploadId = "" } = {}) => {
     query,
     {
       $set: {
-        [`${imageField}.$[image].key`]: sourceKey,
-        [`${imageField}.$[image].contentType`]:
+        [`${ownerImageField}.$[image].key`]: sourceKey,
+        [`${ownerImageField}.$[image].contentType`]:
           metadata.contentType || image?.storage?.source_content_type || image?.contentType || "",
-        [`${imageField}.$[image].size`]: metadata.size,
-        [`${imageField}.$[image].storage.source_key`]: sourceKey,
-        [`${imageField}.$[image].storage.source_content_type`]:
+        [`${ownerImageField}.$[image].size`]: metadata.size,
+        [`${ownerImageField}.$[image].storage.source_key`]: sourceKey,
+        [`${ownerImageField}.$[image].storage.source_content_type`]:
           metadata.contentType || image?.storage?.source_content_type || image?.contentType || "",
-        [`${imageField}.$[image].storage.source_size_bytes`]: metadata.size,
-        [`${imageField}.$[image].storage.source_etag`]: metadata.etag || "",
-        [`${imageField}.$[image].storage.source_uploaded_at`]: metadata.lastModified || now,
-        [`${imageField}.$[image].storage.source_cleanup_status`]: "pending",
-        [`${imageField}.$[image].processing.status`]: "queued",
-        [`${imageField}.$[image].processing.error`]: "",
-        [`${imageField}.$[image].processing.lock_until`]: null,
-        [`${imageField}.$[image].upload.expires_at`]: null,
+        [`${ownerImageField}.$[image].storage.source_size_bytes`]: metadata.size,
+        [`${ownerImageField}.$[image].storage.source_etag`]: metadata.etag || "",
+        [`${ownerImageField}.$[image].storage.source_uploaded_at`]: metadata.lastModified || now,
+        [`${ownerImageField}.$[image].storage.source_cleanup_status`]: "pending",
+        [`${ownerImageField}.$[image].processing.status`]: "queued",
+        [`${ownerImageField}.$[image].processing.error`]: "",
+        [`${ownerImageField}.$[image].processing.lock_until`]: null,
+        [`${ownerImageField}.$[image].upload.expires_at`]: null,
         updated_by: buildAuditActor(user),
       },
     },
@@ -723,6 +938,7 @@ const completeUploadSession = async ({ user, uploadId = "" } = {}) => {
   return {
     qc_id: String(qc._id),
     inspection_id: String(inspection?._id || ""),
+    upload_intent_id: String(intent?._id || ""),
     image_id: String(image._id),
     image_type: imageField,
     upload_id: uploadId,
@@ -736,7 +952,7 @@ const completeUploadSession = async ({ user, uploadId = "" } = {}) => {
 
 const refreshUploadSession = async ({ user, uploadId = "" } = {}) => {
   assertWasabiConfigured();
-  const { qc, inspection, imageField, image, ownerModel } =
+  const { qc, inspection, intent, imageField, image, ownerModel } =
     await findUploadSessionById(uploadId, user);
   const processingStatus = normalizeKey(image?.processing?.status);
   if (processingStatus !== "uploading") {
@@ -747,7 +963,12 @@ const refreshUploadSession = async ({ user, uploadId = "" } = {}) => {
   const contentType = normalizeText(image?.storage?.source_content_type || image?.contentType);
   const expiresAt = new Date(Date.now() + QC_IMAGE_DIRECT_UPLOAD_URL_TTL_SECONDS * 1000);
 
-  const Model = ownerModel === OWNER_MODEL_INSPECTION ? Inspection : QC;
+  const Model = ownerModel === OWNER_MODEL_INSPECTION
+    ? Inspection
+    : ownerModel === OWNER_MODEL_INTENT
+      ? QcImageUploadIntent
+      : QC;
+  const ownerImageField = getOwnerImageField(ownerModel, imageField);
   const query =
     ownerModel === OWNER_MODEL_INSPECTION
       ? {
@@ -755,7 +976,9 @@ const refreshUploadSession = async ({ user, uploadId = "" } = {}) => {
           qc: qc._id,
           [`${imageField}.upload.upload_id`]: uploadId,
         }
-      : {
+      : ownerModel === OWNER_MODEL_INTENT
+        ? { _id: intent._id, [`${ownerImageField}.upload.upload_id`]: uploadId }
+        : {
           _id: qc._id,
           [`${imageField}.upload.upload_id`]: uploadId,
         };
@@ -764,7 +987,7 @@ const refreshUploadSession = async ({ user, uploadId = "" } = {}) => {
     query,
     {
       $set: {
-        [`${imageField}.$[image].upload.expires_at`]: expiresAt,
+        [`${ownerImageField}.$[image].upload.expires_at`]: expiresAt,
       },
     },
     {
@@ -775,6 +998,7 @@ const refreshUploadSession = async ({ user, uploadId = "" } = {}) => {
   return buildUploadSessionResponse({
     qc,
     inspection,
+    intent,
     image,
     imageField,
     contentType,
@@ -783,7 +1007,7 @@ const refreshUploadSession = async ({ user, uploadId = "" } = {}) => {
 };
 
 const abortUploadSession = async ({ user, uploadId = "" } = {}) => {
-  const { qc, inspection, imageField, image, ownerModel } =
+  const { qc, inspection, intent, imageField, image, ownerModel } =
     await findUploadSessionById(uploadId, user);
   const processingStatus = normalizeKey(image?.processing?.status);
   if (processingStatus !== "uploading") {
@@ -801,17 +1025,24 @@ const abortUploadSession = async ({ user, uploadId = "" } = {}) => {
     });
   }
 
-  const Model = ownerModel === OWNER_MODEL_INSPECTION ? Inspection : QC;
+  const Model = ownerModel === OWNER_MODEL_INSPECTION
+    ? Inspection
+    : ownerModel === OWNER_MODEL_INTENT
+      ? QcImageUploadIntent
+      : QC;
+  const ownerImageField = getOwnerImageField(ownerModel, imageField);
   const query =
     ownerModel === OWNER_MODEL_INSPECTION
       ? { _id: inspection._id, qc: qc._id }
-      : { _id: qc._id };
+      : ownerModel === OWNER_MODEL_INTENT
+        ? { _id: intent._id }
+        : { _id: qc._id };
 
   await Model.updateOne(
     query,
     {
       $pull: {
-        [imageField]: { "upload.upload_id": uploadId },
+        [ownerImageField]: { "upload.upload_id": uploadId },
       },
       $set: {
         updated_by: buildAuditActor(user),
@@ -822,6 +1053,7 @@ const abortUploadSession = async ({ user, uploadId = "" } = {}) => {
   return {
     qc_id: String(qc._id),
     inspection_id: String(inspection?._id || ""),
+    upload_intent_id: String(intent?._id || ""),
     image_type: imageField,
     upload_id: uploadId,
     cancelled: true,
@@ -833,10 +1065,12 @@ module.exports = {
   completeUploadSession,
   createUploadSession,
   refreshUploadSession,
+  findAccessibleQc,
   resolveSupportedImageType,
   __test__: {
     buildDuplicateUploadSessionResponse,
     findImageByHash,
+    normalizeImageField,
     normalizeImageContentHash,
   },
 };

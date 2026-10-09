@@ -45,6 +45,11 @@ const {
   deleteObject,
 } = require("../services/wasabiStorage.service");
 const {
+  addIntentImagesToInspection,
+  commitImageUploadIntent,
+  getOpenIntent,
+} = require("../services/qcImageUploadIntent.service");
+const {
   formatDateOnlyDDMMYYYY,
   parseDateOnly,
   toDateOnlyIso,
@@ -6168,6 +6173,7 @@ const updateQC = async (req, res) => {
       inspected_weight,
       qc_rewrite_current_request_record,
       rewrite_pending_request_record,
+      image_upload_intent_id,
     } = req.body;
 
     const qc = await QC.findById(req.params.id)
@@ -7430,9 +7436,29 @@ const updateQC = async (req, res) => {
       });
     }
 
+    const targetRequestEntryForImages = currentRequestHistoryEntry || latestRequestEntry;
+    const rejectionUploadIntent = normalizeText(image_upload_intent_id)
+      ? await getOpenIntent({
+          intentId: image_upload_intent_id,
+          user: req.user,
+          qcId: String(qc._id),
+          operation: "rejection",
+          imageType: "rejected_images",
+          requestHistoryId: String(targetRequestEntryForImages?._id || ""),
+        })
+      : null;
+    const rejectionEvidenceInspection = rejectionUploadIntent
+      ? {
+          ...(currentRequestInspectionRecord || {}),
+          rejected_images: [
+            ...getImageListFromQc(currentRequestInspectionRecord, "rejected_images"),
+            ...(Array.isArray(rejectionUploadIntent.images) ? rejectionUploadIntent.images : []),
+          ],
+        }
+      : currentRequestInspectionRecord;
     const rejectionEvidenceError = getRejectionEvidenceError({
       rejected: nextCurrentRequestRejected,
-      inspection: currentRequestInspectionRecord,
+      inspection: rejectionEvidenceInspection,
     });
     if (rejectionEvidenceError) {
       return res.status(400).json({ message: rejectionEvidenceError });
@@ -7738,6 +7764,12 @@ const updateQC = async (req, res) => {
         remarks !== undefined
       );
 
+    if (rejectionUploadIntent && !shouldUpdateInspectionRecord) {
+      return res.status(400).json({
+        message: "Rejection images require an inspection record update",
+      });
+    }
+
     let followUpInspectionId = null;
     let persistedInspectionRecords = null;
     if (shouldUpdateInspectionRecord) {
@@ -7861,6 +7893,16 @@ const updateQC = async (req, res) => {
         restrictToInspectorId:
           isQcUser && !allowAdminRewrite ? currentUserId : "",
       });
+
+      if (rejectionUploadIntent && inspectionRecord) {
+        addIntentImagesToInspection({
+          intent: rejectionUploadIntent,
+          inspection: inspectionRecord,
+        });
+        inspectionRecord.updated_by = buildAuditActor(req.user);
+        await inspectionRecord.save();
+        await commitImageUploadIntent({ intent: rejectionUploadIntent });
+      }
 
       if (isQcUser && !allowAdminRewrite && inspectionRecord) {
         inspectionRecord.is_approved = false;
@@ -10032,7 +10074,7 @@ exports.markShiftedForLater = async (req, res) =>
     res,
   });
 
-exports.markGoodsNotReady = async (req, res) => {
+const markGoodsNotReady = async (req, res) => {
   const uploadedImageKeys = [];
   const preparedUploads = [];
   try {
@@ -10066,6 +10108,9 @@ exports.markGoodsNotReady = async (req, res) => {
 
     const latestRequestEntry = resolveLatestRequestEntry(
       qc?.request_history || [],
+    );
+    const imageUploadIntentId = normalizeText(
+      req.body?.image_upload_intent_id || req.body?.imageUploadIntentId,
     );
     const latestRequestedQuantity = resolveRequestedQuantityFromQc(qc);
     const hasQcRequest =
@@ -10125,6 +10170,16 @@ exports.markGoodsNotReady = async (req, res) => {
     const requestedQuantityForRecord = latestRequestedQuantity;
     const inspectionSizeSource = await findInspectionSizeSourceForQc(qc, null, req.user);
     const imageFiles = flattenUploadedFiles(req.files);
+    const goodsNotReadyUploadIntent = imageUploadIntentId
+      ? await getOpenIntent({
+          intentId: imageUploadIntentId,
+          user: req.user,
+          qcId: String(qc._id),
+          operation: "goods_not_ready",
+          imageType: "goods_not_ready_images",
+          requestHistoryId: String(latestRequestEntry?._id || ""),
+        })
+      : null;
     if (imageFiles.length > 0 && !isWasabiConfigured()) {
       return res.status(503).json({
         message: "Wasabi storage is not configured for goods-not-ready images",
@@ -10172,7 +10227,10 @@ exports.markGoodsNotReady = async (req, res) => {
     )
       ? inspectionRecord.goods_not_ready_images
       : [];
-    if (existingGoodsNotReadyImages.length + imageFiles.length > 10) {
+    const intentImageCount = Array.isArray(goodsNotReadyUploadIntent?.images)
+      ? goodsNotReadyUploadIntent.images.length
+      : 0;
+    if (existingGoodsNotReadyImages.length + imageFiles.length + intentImageCount > 10) {
       return res.status(400).json({
         message: `Goods-not-ready images are limited to 10. This inspection already has ${existingGoodsNotReadyImages.length}.`,
       });
@@ -10205,6 +10263,15 @@ exports.markGoodsNotReady = async (req, res) => {
         uploadedBy,
       }));
     }
+    if (goodsNotReadyUploadIntent) {
+      goodsNotReadyImages.push(
+        ...addIntentImagesToInspection({
+          intent: goodsNotReadyUploadIntent,
+          inspection: { goods_not_ready_images: [] },
+          replace: true,
+        }),
+      );
+    }
 
     qc.last_inspected_date = inspectionDate;
     qc.remarks = reason;
@@ -10216,6 +10283,9 @@ exports.markGoodsNotReady = async (req, res) => {
       ];
       inspectionRecord.updated_by = buildAuditActor(req.user);
       await inspectionRecord.save();
+    }
+    if (goodsNotReadyUploadIntent) {
+      await commitImageUploadIntent({ intent: goodsNotReadyUploadIntent });
     }
 
     if (latestRequestEntry && inspectionRecord) {
@@ -10266,7 +10336,15 @@ exports.markGoodsNotReady = async (req, res) => {
   }
 };
 
-exports.rejectAllQc = async (req, res) => {
+exports.markGoodsNotReady = async (req, res) =>
+  runTransactionalController({
+    connection: mongoose.connection,
+    handler: markGoodsNotReady,
+    req,
+    res,
+  });
+
+const rejectAllQc = async (req, res) => {
   let uploadedImageKey = "";
   let shouldCleanupUploadedImage = false;
   let preparedUpload = null;
@@ -10277,12 +10355,15 @@ exports.rejectAllQc = async (req, res) => {
       return res.status(400).json({ message: "Reason is required" });
     }
 
+    const imageUploadIntentId = normalizeText(
+      req.body?.image_upload_intent_id || req.body?.imageUploadIntentId,
+    );
     const imageFile = req.file;
-    if (!imageFile || !normalizeText(imageFile.path)) {
+    if (!imageUploadIntentId && (!imageFile || !normalizeText(imageFile.path))) {
       return res.status(400).json({ message: "One rejection image is required" });
     }
 
-    if (!isWasabiConfigured()) {
+    if (!imageUploadIntentId && !isWasabiConfigured()) {
       return res.status(503).json({
         message: "Wasabi storage is not configured for rejected images",
       });
@@ -10325,6 +10406,16 @@ exports.rejectAllQc = async (req, res) => {
         message: "QC request history is required before rejecting all",
       });
     }
+    const rejectAllUploadIntent = imageUploadIntentId
+      ? await getOpenIntent({
+          intentId: imageUploadIntentId,
+          user: req.user,
+          qcId: String(qc._id),
+          operation: "reject_all",
+          imageType: "rejected_images",
+          requestHistoryId: String(latestRequestEntry._id),
+        })
+      : null;
 
     let qcUserRequestAvailability = null;
     if (!hasElevatedAccess && normalizedRole === "qc") {
@@ -10379,29 +10470,31 @@ exports.rejectAllQc = async (req, res) => {
       });
     }
 
-    const fallbackOriginalName = `${normalizeText(
-      qc?.order_meta?.order_id || qc?._id || "qc",
-    )}-rejected${path.extname(String(imageFile?.originalname || "")).toLowerCase() || ".jpg"}`;
-    preparedUpload = await prepareSingleQcImageUpload({
-      file: imageFile,
-      fallbackOriginalName,
-    });
-    const uploadResult = await uploadPreparedQcImage({
-      preparedUpload,
-      folder: "qc-rejected-images",
-    });
-    uploadedImageKey = normalizeText(uploadResult?.key || "");
-    shouldCleanupUploadedImage = Boolean(uploadedImageKey);
-
-    const uploadedAt = new Date();
-    const uploadedBy = buildAuditActor(req.user);
-    const nextRejectedImageEntry = buildStoredQcImageEntry({
-      uploadResult,
-      hash: preparedUpload.hash,
-      comment: reason,
-      uploadedAt,
-      uploadedBy,
-    });
+    let nextRejectedImageEntry = null;
+    if (rejectAllUploadIntent) {
+      nextRejectedImageEntry = rejectAllUploadIntent.images[0];
+    } else {
+      const fallbackOriginalName = `${normalizeText(
+        qc?.order_meta?.order_id || qc?._id || "qc",
+      )}-rejected${path.extname(String(imageFile?.originalname || "")).toLowerCase() || ".jpg"}`;
+      preparedUpload = await prepareSingleQcImageUpload({
+        file: imageFile,
+        fallbackOriginalName,
+      });
+      const uploadResult = await uploadPreparedQcImage({
+        preparedUpload,
+        folder: "qc-rejected-images",
+      });
+      uploadedImageKey = normalizeText(uploadResult?.key || "");
+      shouldCleanupUploadedImage = Boolean(uploadedImageKey);
+      nextRejectedImageEntry = buildStoredQcImageEntry({
+        uploadResult,
+        hash: preparedUpload.hash,
+        comment: reason,
+        uploadedAt: new Date(),
+        uploadedBy: buildAuditActor(req.user),
+      });
+    }
     let previousRejectedImageKey = "";
     const inspectionSizeSource = await findInspectionSizeSourceForQc(qc, null, req.user);
     const inspectionSizeSnapshot = buildInspectionSizeSnapshot({
@@ -10503,7 +10596,16 @@ exports.rejectAllQc = async (req, res) => {
     previousRejectedImageKey = normalizeText(
       inspectionRecord?.rejected_image?.key || "",
     );
-    inspectionRecord.rejected_image = nextRejectedImageEntry;
+    if (rejectAllUploadIntent) {
+      addIntentImagesToInspection({
+        intent: rejectAllUploadIntent,
+        inspection: inspectionRecord,
+        replace: true,
+      });
+      inspectionRecord.rejected_image = null;
+    } else {
+      inspectionRecord.rejected_image = nextRejectedImageEntry;
+    }
     if (!hasElevatedAccess && normalizedRole === "qc") {
       const currentUpdateCount = Number(
         qcUserRequestAvailability?.currentUpdateCount || 0,
@@ -10515,6 +10617,9 @@ exports.rejectAllQc = async (req, res) => {
           : new Date();
     }
     await inspectionRecord.save();
+    if (rejectAllUploadIntent) {
+      await commitImageUploadIntent({ intent: rejectAllUploadIntent });
+    }
 
     qc.inspection_record = Array.isArray(qc.inspection_record)
       ? qc.inspection_record
@@ -10620,6 +10725,14 @@ exports.rejectAllQc = async (req, res) => {
     await cleanupLocalQcImageFiles(preparedUpload?.cleanupPaths || [req.file?.path]);
   }
 };
+
+exports.rejectAllQc = async (req, res) =>
+  runTransactionalController({
+    connection: mongoose.connection,
+    handler: rejectAllQc,
+    req,
+    res,
+  });
 
 exports.transferQcRequest = async (req, res) => {
   try {
@@ -13702,7 +13815,7 @@ exports.getQCById = async (req, res) => {
   }
 };
 
-exports.editInspectionRecords = async (req, res) => {
+const editInspectionRecords = async (req, res) => {
   try {
     const qcId = String(req.params.id || "").trim();
     const payloadRecords = Array.isArray(req.body?.records)
@@ -13789,6 +13902,8 @@ exports.editInspectionRecords = async (req, res) => {
     const inspectorChangedRequestHistoryEntries = new Set();
     const touchedInspectors = new Set();
     const requestHistoryDateUpdates = new Map();
+    const imageUploadIntents = [];
+    const usedImageUploadIntentIds = new Set();
     const qcRequestedQuantityCap = resolveRequestedQuantityFromQc(qc);
     const normalizedRole = normalizeUserRoleKey(req.user?.role);
     const isQcUser = normalizedRole === "qc";
@@ -14088,6 +14203,30 @@ exports.editInspectionRecords = async (req, res) => {
         throw new Error(
           `Inspection record ${recordId} does not belong to this QC`,
         );
+      }
+
+      const imageUploadIntentId = normalizeText(
+        row?.image_upload_intent_id || row?.imageUploadIntentId,
+      );
+      if (imageUploadIntentId) {
+        if (usedImageUploadIntentIds.has(imageUploadIntentId)) {
+          throw new Error("Each rejection image upload intent can be used once");
+        }
+        const imageUploadIntent = await getOpenIntent({
+          intentId: imageUploadIntentId,
+          user: req.user,
+          qcId: String(qc._id),
+          operation: "rejection",
+          imageType: "rejected_images",
+          inspectionId: recordId,
+          requestHistoryId: String(record.request_history_id || ""),
+        });
+        addIntentImagesToInspection({
+          intent: imageUploadIntent,
+          inspection: record,
+        });
+        usedImageUploadIntentIds.add(imageUploadIntentId);
+        imageUploadIntents.push(imageUploadIntent);
       }
 
       const canEditRecord =
@@ -14542,6 +14681,9 @@ exports.editInspectionRecords = async (req, res) => {
     applyInspectionRecordPendingAfter(qc, inspectionDocs);
 
     await Promise.all(inspectionDocs.map((doc) => doc.save()));
+    await Promise.all(
+      imageUploadIntents.map((intent) => commitImageUploadIntent({ intent })),
+    );
     for (const inspectionDoc of inspectionDocs) {
       await mirrorInspectionLabelUsageProjection({
         inspection: inspectionDoc,
@@ -14713,6 +14855,14 @@ exports.editInspectionRecords = async (req, res) => {
       .json({ message: err.message || "Failed to edit inspection records" });
   }
 };
+
+exports.editInspectionRecords = async (req, res) =>
+  runTransactionalController({
+    connection: mongoose.connection,
+    handler: editInspectionRecords,
+    req,
+    res,
+  });
 
 exports.deleteInspectionRecord = async (req, res) => {
   try {

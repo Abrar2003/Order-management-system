@@ -2972,6 +2972,16 @@ small,
   box-shadow: none;
 }
 
+.item-reminder-form .form-control,
+.item-reminder-form .form-select,
+.item-reminder-form .btn {
+  height: 2.9rem;
+}
+
+.item-reminder-form textarea.form-control {
+  resize: vertical;
+}
+
 .input-group-text {
   color: var(--om-color-text-muted);
 }

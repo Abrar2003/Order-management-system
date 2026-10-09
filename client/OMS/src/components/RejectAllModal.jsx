@@ -1,11 +1,18 @@
 import { useState } from "react";
 import api from "../api/axios";
+import useBulkQcImageUpload from "../hooks/useBulkQcImageUpload";
+import { createQcImageUploadIntent } from "../services/qcImages.service";
+import { resolveLatestRequestEntry } from "../utils/qcRequests";
 
 const RejectAllModal = ({ qc, onClose, onSuccess }) => {
   const [reason, setReason] = useState("");
   const [imageFile, setImageFile] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const { state: uploadState, startUpload, reset: resetUpload } = useBulkQcImageUpload({
+    qcId: qc?._id,
+    maxFiles: 1,
+  });
 
   const handleSubmit = async () => {
     const trimmedReason = String(reason || "").trim();
@@ -22,12 +29,29 @@ const RejectAllModal = ({ qc, onClose, onSuccess }) => {
     try {
       setSaving(true);
       setError("");
-
-      const formData = new FormData();
-      formData.append("reason", trimmedReason);
-      formData.append("image", imageFile);
-
-      await api.patch(`/qc/reject-all/${qc?._id}`, formData);
+      const intentResponse = await createQcImageUploadIntent({
+        qcId: qc?._id,
+        operation: "reject_all",
+        imageType: "rejected_images",
+        requestHistoryId: resolveLatestRequestEntry(qc?.request_history)?._id,
+        comment: trimmedReason,
+      });
+      const uploadIntentId = intentResponse?.data?.data?.intent_id;
+      resetUpload();
+      const uploadResult = await startUpload({
+        uploadMode: "single",
+        imageType: "rejected_images",
+        uploadIntentId,
+        comment: trimmedReason,
+        files: [imageFile],
+      });
+      if (Number(uploadResult?.failedCount || 0) > 0 || Number(uploadResult?.uploadedCount || 0) !== 1) {
+        throw new Error("The rejection image could not be uploaded. Please retry.");
+      }
+      await api.patch(`/qc/reject-all/${qc?._id}`, {
+        reason: trimmedReason,
+        image_upload_intent_id: uploadIntentId,
+      });
       onSuccess?.();
     } catch (err) {
       setError(err?.response?.data?.message || "Failed to reject this QC request.");
@@ -80,7 +104,7 @@ const RejectAllModal = ({ qc, onClose, onSuccess }) => {
               <input
                 type="file"
                 className="form-control"
-                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif"
                 onChange={(event) => {
                   const nextFile = event.target.files?.[0] || null;
                   setImageFile(nextFile);
@@ -93,6 +117,11 @@ const RejectAllModal = ({ qc, onClose, onSuccess }) => {
             </div>
 
             {error && <div className="alert alert-danger mb-0">{error}</div>}
+            {saving && uploadState.isUploading && (
+              <div className="small text-secondary">
+                Uploading image directly to storage: {uploadState.progressPercent}%
+              </div>
+            )}
           </div>
 
           <div className="modal-footer">

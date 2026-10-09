@@ -6,9 +6,31 @@ const {
   closePdfRenderer,
   renderPdf,
 } = require("../services/pdfRenderer");
+const { getPdfRendererStatus } = require("../controllers/pdf.controller");
 
 test.after(async () => {
   await closePdfRenderer();
+});
+
+test("PDF renderer status verifies Chromium can launch", async () => {
+  let statusCode;
+  let body;
+  const res = {
+    status: (code) => {
+      statusCode = code;
+      return res;
+    },
+    json: (payload) => {
+      body = payload;
+      return res;
+    },
+  };
+
+  await getPdfRendererStatus({}, res);
+
+  assert.equal(statusCode, 200);
+  assert.equal(body?.ok, true);
+  assert.equal(body?.renderer, "chromium");
 });
 
 test("Chromium PDF repeats table headers and keeps rows together", async () => {

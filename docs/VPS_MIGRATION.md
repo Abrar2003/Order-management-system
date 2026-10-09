@@ -125,6 +125,7 @@ VITE_API_BASE_URL=https://api.ghouse-sourcing.com
 ```bash
 cd /var/www/order-management-system/backend
 npm ci --omit=dev
+PUPPETEER_CACHE_DIR="$PWD/.cache/puppeteer" npx puppeteer browsers install chrome
 NODE_ENV=production npm run check:env
 
 cd /var/www/order-management-system/client/OMS

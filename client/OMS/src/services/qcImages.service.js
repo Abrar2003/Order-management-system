@@ -144,6 +144,7 @@ export const uploadQcImageBatch = async ({
 export const createQcImageUploadSession = async ({
   qcId,
   inspectionId = "",
+  uploadIntentId = "",
   file,
   imageType = "qc_images",
   uploadMode = "bulk",
@@ -157,6 +158,7 @@ export const createQcImageUploadSession = async ({
     {
       qc_id: normalizeText(qcId),
       inspection_id: normalizeText(inspectionId),
+      upload_intent_id: normalizeText(uploadIntentId),
       image_type: normalizeText(imageType || "qc_images"),
       upload_mode: normalizeText(uploadMode || "bulk").toLowerCase(),
       comment: normalizeText(comment),
@@ -168,6 +170,25 @@ export const createQcImageUploadSession = async ({
     },
     { signal },
   );
+
+export const createQcImageUploadIntent = async ({
+  qcId,
+  operation,
+  imageType,
+  inspectionId = "",
+  requestHistoryId = "",
+  comment = "",
+} = {}) =>
+  api.post(`/qc/${encodeURIComponent(qcId)}/image-upload-intents`, {
+    operation: normalizeText(operation),
+    image_type: normalizeText(imageType),
+    inspection_id: normalizeText(inspectionId),
+    request_history_id: normalizeText(requestHistoryId),
+    comment: normalizeText(comment),
+  });
+
+export const cancelQcImageUploadIntent = async ({ intentId } = {}) =>
+  api.delete(`/qc/image-upload-intents/${encodeURIComponent(intentId)}`);
 
 export const refreshQcImageUploadSession = async ({ uploadId, signal } = {}) =>
   api.post(`/qc-images/upload-session/${encodeURIComponent(uploadId)}/refresh`, {}, { signal });

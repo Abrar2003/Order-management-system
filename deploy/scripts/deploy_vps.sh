@@ -135,7 +135,13 @@ git reset --hard "origin/$GIT_BRANCH"
 
 log "Installing backend dependencies"
 cd "$BACKEND_DIR"
+PUPPETEER_CACHE_DIR="${PUPPETEER_CACHE_DIR:-$(get_env_value PUPPETEER_CACHE_DIR)}"
+PUPPETEER_CACHE_DIR="${PUPPETEER_CACHE_DIR:-$BACKEND_DIR/.cache/puppeteer}"
+export PUPPETEER_CACHE_DIR
+mkdir -p "$PUPPETEER_CACHE_DIR"
 npm ci --omit=dev
+log "Installing Chromium for PDF exports"
+npx puppeteer browsers install chrome --install-deps
 NODE_ENV=production npm run check:env
 NODE_ENV=production npm run update:table-template-fields
 NODE_ENV=production npm run seed:table-sub-product-type

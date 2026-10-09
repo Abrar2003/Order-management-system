@@ -25,6 +25,11 @@ export const normalizeOrderStatus = (value = "") => {
   );
 };
 
+export const isPackedOrderStatus = (value = "") =>
+  ["Inspection Done", "Partial Shipped", "Shipped"].includes(
+    normalizeOrderStatus(value),
+  );
+
 const normalizeRequestHistoryStatus = (value = "") => {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "pending") return "open";

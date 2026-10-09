@@ -503,6 +503,7 @@ export const useBulkQcImageUpload = ({
     uploadMode,
     imageType,
     inspectionId,
+    uploadIntentId,
     comment,
     signal,
     uploadRunContentHashes,
@@ -590,6 +591,7 @@ export const useBulkQcImageUpload = ({
           const sessionResponse = await createQcImageUploadSession({
             qcId,
             inspectionId,
+            uploadIntentId,
             file: uploadFile,
             idempotencyKey: fileStatus.idempotencyKey,
             uploadMode,
@@ -759,6 +761,7 @@ export const useBulkQcImageUpload = ({
     uploadMode = "bulk",
     imageType = "qc_images",
     inspectionId = "",
+    uploadIntentId = "",
     comment = "",
     fileStatusesToUpload = [],
   } = {}) => {
@@ -854,6 +857,7 @@ export const useBulkQcImageUpload = ({
             uploadMode: normalizedUploadMode,
             imageType: normalizedImageType,
             inspectionId,
+            uploadIntentId,
             comment,
             signal: abortController.signal,
             uploadRunContentHashes,
@@ -905,6 +909,7 @@ export const useBulkQcImageUpload = ({
     uploadMode = "bulk",
     imageType = "qc_images",
     inspectionId = "",
+    uploadIntentId = "",
     comment = "",
     files = null,
   } = {}) => {
@@ -938,6 +943,7 @@ export const useBulkQcImageUpload = ({
       uploadMode,
       imageType,
       inspectionId,
+      uploadIntentId,
       comment,
       fileStatusesToUpload: uploadCandidates,
     });
@@ -947,6 +953,7 @@ export const useBulkQcImageUpload = ({
     uploadMode = "bulk",
     imageType = "qc_images",
     inspectionId = "",
+    uploadIntentId = "",
     comment = "",
   } = {}) => {
     const retryStatuses = stateRef.current.fileStatuses.filter((fileStatus) => fileStatus.status === "failed");
@@ -963,6 +970,7 @@ export const useBulkQcImageUpload = ({
       uploadMode,
       imageType,
       inspectionId,
+      uploadIntentId,
       comment,
       fileStatusesToUpload: retryStatuses,
     });

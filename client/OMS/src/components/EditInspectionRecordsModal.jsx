@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
+import useBulkQcImageUpload from "../hooks/useBulkQcImageUpload";
+import { createQcImageUploadIntent } from "../services/qcImages.service";
 import {
   isValidDDMMYYYY,
   toDDMMYYYYInputValue,
@@ -204,6 +206,14 @@ const EditInspectionRecordsModal = ({
   const [inspectors, setInspectors] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const {
+    state: rejectionUploadState,
+    startUpload: startRejectionImageUpload,
+    reset: resetRejectionImageUpload,
+  } = useBulkQcImageUpload({
+    qcId: qc?._id,
+    maxFiles: MAX_REJECTION_IMAGE_COUNT,
+  });
 
   useEffect(() => {
     setRows(buildInitialRows(qc));
@@ -379,28 +389,44 @@ const EditInspectionRecordsModal = ({
       });
 
       setSaving(true);
-      await Promise.all(
-        rows.map(async (row) => {
-          const files = Array.isArray(row.new_rejection_images)
-            ? row.new_rejection_images
-            : [];
-          if (files.length === 0 || Number(row.rejected || 0) <= 0) return;
+      const uploadIntentIdByRecord = new Map();
+      for (const row of rows) {
+        const files = Array.isArray(row.new_rejection_images)
+          ? row.new_rejection_images
+          : [];
+        if (files.length === 0 || Number(row.rejected || 0) <= 0) continue;
 
-          const formData = new FormData();
-          files.forEach((file) => formData.append("images", file));
-          formData.append("upload_mode", "bulk");
-          formData.append("comment", String(row.rejection_remark || "").trim());
-          formData.append("inspection_id", row._id);
-          const response = await api.post(`/qc/${qc?._id}/rejection-images`, formData);
-          if (Number(response?.data?.data?.failed_count || 0) > 0) {
-            throw new Error(
-              response?.data?.data?.failures?.[0]?.reason ||
-                "Some rejection images could not be uploaded.",
-            );
-          }
-        }),
-      );
-      await api.patch(`/qc/${qc?._id}/inspection-records`, { records: payload });
+        resetRejectionImageUpload();
+        const intentResponse = await createQcImageUploadIntent({
+          qcId: qc?._id,
+          operation: "rejection",
+          imageType: "rejected_images",
+          inspectionId: row._id,
+          requestHistoryId: row.request_history_id,
+          comment: String(row.rejection_remark || "").trim(),
+        });
+        const uploadIntentId = intentResponse?.data?.data?.intent_id;
+        const uploadResult = await startRejectionImageUpload({
+          imageType: "rejected_images",
+          inspectionId: row._id,
+          uploadIntentId,
+          comment: String(row.rejection_remark || "").trim(),
+          files,
+        });
+        if (
+          Number(uploadResult?.failedCount || 0) > 0 ||
+          Number(uploadResult?.uploadedCount || 0) !== files.length
+        ) {
+          throw new Error("Some rejection images could not be uploaded. Please retry.");
+        }
+        uploadIntentIdByRecord.set(String(row._id), uploadIntentId);
+      }
+      await api.patch(`/qc/${qc?._id}/inspection-records`, {
+        records: payload.map((row) => ({
+          ...row,
+          image_upload_intent_id: uploadIntentIdByRecord.get(String(row._id)) || undefined,
+        })),
+      });
       onSuccess?.();
       onClose?.();
     } catch (err) {
@@ -423,6 +449,11 @@ const EditInspectionRecordsModal = ({
             <div className="alert alert-info mb-0" role="alert">
               Removing labels from a QC record here will free them for reuse after save.
             </div>
+            {saving && rejectionUploadState.isUploading && (
+              <div className="alert alert-secondary mb-0 py-2">
+                Uploading rejection evidence directly to storage: {rejectionUploadState.progressPercent}%
+              </div>
+            )}
             {rows.length > 0 && (
               <div className="edit-inspection-totals" aria-label="Inspection record totals">
                 <div>

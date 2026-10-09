@@ -6,6 +6,7 @@ import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { formatCbm } from "../utils/cbm";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
+import { isPackedOrderStatus } from "../utils/orderStatus";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { getOptionText } from "../utils/optionText";
@@ -258,9 +259,6 @@ const getItemInspectionDateInRange = (item = {}) =>
 const getItemLatestOverallInspectionDate = (item = {}) =>
   String(item?.latest_overall_inspection_date || "").trim();
 
-const isUnderInspectionStatus = (value) =>
-  String(value || "").trim().toLowerCase() === "under inspection";
-
 const buildVendorDisplayRows = (
   items = [],
   {
@@ -293,7 +291,7 @@ const buildVendorDisplayRows = (
         sortedItems.every(
           (item) =>
             toReportQuantity(item?.pending) <= 0 &&
-            !isUnderInspectionStatus(item?.order_status),
+            isPackedOrderStatus(item?.order_status),
         );
       const latestOverallInspectionMeta = sortedItems.reduce(
         (latest, item) => {

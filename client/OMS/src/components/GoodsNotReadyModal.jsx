@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import api from "../api/axios";
+import useBulkQcImageUpload from "../hooks/useBulkQcImageUpload";
+import { createQcImageUploadIntent } from "../services/qcImages.service";
+import { resolveLatestRequestEntry } from "../utils/qcRequests";
 
 const MAX_GOODS_NOT_READY_IMAGES = 10;
-const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png"]);
-
 const GoodsNotReadyModal = ({ qc, onClose, onSuccess }) => {
   const [reason, setReason] = useState("");
   const [images, setImages] = useState([]);
@@ -17,6 +18,10 @@ const GoodsNotReadyModal = ({ qc, onClose, onSuccess }) => {
     0,
     MAX_GOODS_NOT_READY_IMAGES - existingImageCount,
   );
+  const { state: uploadState, startUpload, reset: resetUpload } = useBulkQcImageUpload({
+    qcId: qc?._id,
+    maxFiles: remainingImageSlots,
+  });
 
   const handleSubmit = async () => {
     const trimmedReason = String(reason || "").trim();
@@ -32,12 +37,31 @@ const GoodsNotReadyModal = ({ qc, onClose, onSuccess }) => {
     try {
       setSaving(true);
       setError("");
-      const formData = new FormData();
-      formData.append("reason", trimmedReason);
-      images.forEach((image) => {
-        formData.append("goods_not_ready_images", image);
+      let uploadIntentId = "";
+      if (images.length > 0) {
+        const intentResponse = await createQcImageUploadIntent({
+          qcId: qc?._id,
+          operation: "goods_not_ready",
+          imageType: "goods_not_ready_images",
+          requestHistoryId: resolveLatestRequestEntry(qc?.request_history)?._id,
+          comment: trimmedReason,
+        });
+        uploadIntentId = intentResponse?.data?.data?.intent_id || "";
+        resetUpload();
+        const uploadResult = await startUpload({
+          imageType: "goods_not_ready_images",
+          uploadIntentId,
+          comment: trimmedReason,
+          files: images,
+        });
+        if (Number(uploadResult?.failedCount || 0) > 0) {
+          throw new Error("Some goods-not-ready images could not be uploaded. Please retry.");
+        }
+      }
+      await api.patch(`/qc/goods-not-ready/${qc?._id}`, {
+        reason: trimmedReason,
+        image_upload_intent_id: uploadIntentId || undefined,
       });
-      await api.patch(`/qc/goods-not-ready/${qc?._id}`, formData);
       onSuccess?.();
     } catch (err) {
       setError(err?.response?.data?.message || "Failed to mark goods as not ready.");
@@ -51,15 +75,6 @@ const GoodsNotReadyModal = ({ qc, onClose, onSuccess }) => {
     if (selectedImages.length > remainingImageSlots) {
       setImages([]);
       setError(`You can add up to ${remainingImageSlots} more images.`);
-      event.target.value = "";
-      return;
-    }
-    const invalidImage = selectedImages.find(
-      (file) => !ALLOWED_IMAGE_TYPES.has(String(file?.type || "").toLowerCase()),
-    );
-    if (invalidImage) {
-      setImages([]);
-      setError("Only JPG, JPEG, and PNG images are allowed.");
       event.target.value = "";
       return;
     }
@@ -133,7 +148,7 @@ const GoodsNotReadyModal = ({ qc, onClose, onSuccess }) => {
                 id="goods-not-ready-images"
                 type="file"
                 className="form-control"
-                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif"
                 multiple
                 disabled={saving || remainingImageSlots === 0}
                 onChange={handleImagesChange}
@@ -165,6 +180,11 @@ const GoodsNotReadyModal = ({ qc, onClose, onSuccess }) => {
             </div>
 
             {error && <div className="alert alert-danger mb-0">{error}</div>}
+            {saving && uploadState.isUploading && (
+              <div className="small text-secondary">
+                Uploading images directly to storage: {uploadState.progressPercent}%
+              </div>
+            )}
           </div>
 
           <div className="modal-footer">
