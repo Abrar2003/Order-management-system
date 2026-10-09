@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 DEFAULT_APP_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 APP_DIR="${APP_DIR:-$DEFAULT_APP_DIR}"
@@ -133,6 +134,11 @@ git fetch --all --prune
 git checkout "$GIT_BRANCH"
 git reset --hard "origin/$GIT_BRANCH"
 
+if [[ "${OMS_DEPLOY_REEXEC:-0}" != "1" ]]; then
+  export OMS_DEPLOY_REEXEC=1
+  exec bash "$SCRIPT_PATH" "$@"
+fi
+
 log "Installing backend dependencies"
 cd "$BACKEND_DIR"
 PUPPETEER_CACHE_DIR="${PUPPETEER_CACHE_DIR:-$(get_env_value PUPPETEER_CACHE_DIR)}"
@@ -141,11 +147,7 @@ export PUPPETEER_CACHE_DIR
 mkdir -p "$PUPPETEER_CACHE_DIR"
 npm ci --omit=dev
 log "Installing Chromium for PDF exports"
-if [[ "$(id -u)" -eq 0 ]]; then
-  npx puppeteer browsers install chrome --install-deps
-else
-  npx puppeteer browsers install chrome
-fi
+npx puppeteer browsers install chrome
 NODE_ENV=production npm run check:env
 NODE_ENV=production npm run update:table-template-fields
 NODE_ENV=production npm run seed:table-sub-product-type
