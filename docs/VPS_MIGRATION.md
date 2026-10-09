@@ -181,12 +181,11 @@ This repository now includes:
 - `.github/workflows/deploy-vps.yml`
 
 Required GitHub secrets:
-- `VPS_SSH_HOST`: VPS public IP or hostname
-- `VPS_SSH_PORT`: optional, defaults to `22`
-- `VPS_SSH_USER`: deploy user on the VPS
-- `VPS_SSH_PRIVATE_KEY`: private key used by GitHub Actions to SSH into the VPS
-- `VPS_SSH_KNOWN_HOSTS`: output of `ssh-keyscan -H <host>`
-- `VPS_APP_DIR`: optional, defaults to `/var/www/order-management-system`
+- `VPS_SSH_HOST`: `31.97.58.48` (the Hostinger OMS VPS)
+- `VPS_SSH_PORT`: `22`
+- `VPS_SSH_USER`: `root`; its GitHub key is restricted server-side to the OMS deploy command
+- `VPS_SSH_PRIVATE_KEY`: the dedicated unencrypted deploy key used only by GitHub Actions
+- `VPS_SSH_KNOWN_HOSTS`: the Hostinger VPS host keys, pinned by IP
 
 Recommended secret creation steps:
 
@@ -197,19 +196,17 @@ cat ~/.ssh/github-actions-oms
 ssh-keyscan -H <your-vps-host>
 ```
 
-Add the public key to `~/.ssh/authorized_keys` for the VPS deploy user.
+On the Hostinger OMS VPS, install the public key with a forced command that invokes
+`/usr/local/sbin/oms-github-deploy`. That command runs the deploy script as the `oms`
+service user from `/srv/oms/current`; the key cannot open an interactive root shell.
 Store the private key as `VPS_SSH_PRIVATE_KEY`.
 Store the `ssh-keyscan` output as `VPS_SSH_KNOWN_HOSTS`.
 
 How the workflows behave:
 - `CI` runs backend env validation and frontend build on pushes and pull requests.
-- `Deploy VPS` runs on push to `main` and on manual dispatch.
-- The deploy workflow SSHes into the VPS and runs `deploy/scripts/deploy_vps.sh`.
-- nginx reload is off by default for automated deploys and can be enabled in manual dispatch when config changes.
-
-If you enable nginx validation or reload from GitHub Actions, the deploy user must be able to run these without an interactive password prompt:
-- `sudo nginx -t`
-- `sudo systemctl reload nginx`
+- `Deploy Hostinger OMS` runs on push to `main` and on manual dispatch.
+- The workflow can reach only the Hostinger forced deploy command, which deploys `main`.
+- nginx configuration changes are handled separately; ordinary application deploys do not reload nginx.
 
 ## 9. Health Checks
 
