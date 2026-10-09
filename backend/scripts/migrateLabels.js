@@ -609,15 +609,17 @@ const compareExistingModern = (analysis, expectedLabels, transactions, usages, s
         sourceDocumentIds: [existing?._id],
       });
     }
-    const incompatible = [
-      ["owner_inspector", id(existing?.owner_inspector), expected.owner_inspector],
-      ["rejected_by_inspector", id(existing?.rejected_by_inspector), expected.rejected_by_inspector],
-    ].filter(
-      ([, actual, desired]) =>
-        actual &&
-        actual !== desired &&
-        actual !== analysis.inspector_id,
-    );
+    const incompatible = migrationOwned
+      ? []
+      : [
+        ["owner_inspector", id(existing?.owner_inspector), expected.owner_inspector],
+        ["rejected_by_inspector", id(existing?.rejected_by_inspector), expected.rejected_by_inspector],
+      ].filter(
+        ([, actual, desired]) =>
+          actual &&
+          actual !== desired &&
+          actual !== analysis.inspector_id,
+      );
     if (
       !migrationOwned &&
       Array.isArray(existing?.usage?.inspectors)

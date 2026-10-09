@@ -312,7 +312,7 @@ test('historical use by A coexists with current rejection by B', () => {
   assert.equal(result.can_apply, true);
 });
 
-test('genuine modern owner mismatch remains blocking', () => {
+test('genuine non-migration owner mismatch remains blocking', () => {
   const inspectorA = objectId();
   const inspectorC = objectId();
   const userA = objectId();
@@ -326,13 +326,41 @@ test('genuine modern owner mismatch remains blocking', () => {
       owner_inspector: inspectorC,
       rejected_by_inspector: null,
       usage: { inspector: null, inspectors: [] },
-      migration: { source: MIGRATION_SOURCE },
+      migration: { source: 'manual-modern-write' },
     }],
   }));
   assert.equal(result.conflicts.some((entry) => entry.conflict_type === 'modern_label_incompatible' && entry.severity === 'error'), true);
   assert.equal(result.can_apply, false);
   assert.equal(result.can_backfill, true);
   assert.equal(result.skip_label_numbers.has(129), true);
+});
+
+test('rerun refreshes a stale migration-owned owner projection', () => {
+  const inspectorA = objectId();
+  const inspectorB = objectId();
+  const userA = objectId();
+  const result = buildMigrationAnalysis(snapshot({
+    inspectorId: inspectorA,
+    userId: userA,
+    allocated: [136],
+    existingLabels: [{
+      _id: objectId(),
+      number: 136,
+      owner_inspector: inspectorB,
+      rejected_by_inspector: null,
+      usage: { inspector: null, inspectors: [] },
+      migration: { source: MIGRATION_SOURCE },
+    }],
+  }));
+
+  assert.equal(
+    result.conflicts.some(
+      (entry) => entry.conflict_type === 'modern_label_incompatible',
+    ),
+    false,
+  );
+  assert.equal(String(label(result, 136).owner_inspector), String(inspectorA));
+  assert.equal(result.can_apply, true);
 });
 
 test('rerun refreshes a stale migration-owned usage projection', () => {
