@@ -141,7 +141,11 @@ with an export-time 500 caused by a missing browser.
 For a manual Linux deployment, run Puppeteer's browser installer after `npm ci`:
 
 ```bash
-PUPPETEER_CACHE_DIR="$(pwd)/.cache/puppeteer" npx puppeteer browsers install chrome --install-deps
+# As the oms application user:
+PUPPETEER_CACHE_DIR="$(pwd)/.cache/puppeteer" npx puppeteer browsers install chrome
+
+# Or as root to also install required OS package dependencies:
+sudo PUPPETEER_CACHE_DIR="$(pwd)/.cache/puppeteer" npx puppeteer browsers install chrome --install-deps
 ```
 
 The launch configuration includes:

@@ -141,7 +141,11 @@ export PUPPETEER_CACHE_DIR
 mkdir -p "$PUPPETEER_CACHE_DIR"
 npm ci --omit=dev
 log "Installing Chromium for PDF exports"
-npx puppeteer browsers install chrome --install-deps
+if [[ "$(id -u)" -eq 0 ]]; then
+  npx puppeteer browsers install chrome --install-deps
+else
+  npx puppeteer browsers install chrome
+fi
 NODE_ENV=production npm run check:env
 NODE_ENV=production npm run update:table-template-fields
 NODE_ENV=production npm run seed:table-sub-product-type
@@ -274,7 +278,14 @@ if command -v curl >/dev/null 2>&1; then
 
   PDF_STATUS_URL="${PDF_STATUS_URL:-http://127.0.0.1:8008/reports/pdf/status}"
   log "Checking PDF renderer route"
-  curl --fail --silent --show-error "$PDF_STATUS_URL" >/dev/null
+  PDF_STATUS_RESPONSE="$(curl --silent --show-error --write-out "\nHTTP_STATUS:%{http_code}" "$PDF_STATUS_URL" || true)"
+  PDF_HTTP_CODE="$(printf '%s\n' "$PDF_STATUS_RESPONSE" | grep '^HTTP_STATUS:' | tail -n 1 | cut -d: -f2)"
+  PDF_STATUS_BODY="$(printf '%s\n' "$PDF_STATUS_RESPONSE" | grep -v '^HTTP_STATUS:')"
+  if [[ "$PDF_HTTP_CODE" != "200" ]]; then
+    echo "PDF renderer route check failed with status ${PDF_HTTP_CODE:-unknown}:"
+    echo "$PDF_STATUS_BODY"
+    exit 1
+  fi
   echo "PDF renderer route check passed"
 
   log "Verifying deployed backend commit"

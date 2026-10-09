@@ -101,6 +101,7 @@ const getPdfRendererStatus = async (_req, res) => {
     return res.status(503).json({
       ok: false,
       message: "PDF renderer is unavailable",
+      error: error?.message || String(error),
     });
   }
 };
