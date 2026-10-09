@@ -1,8 +1,10 @@
 import PreviewImage from "../components/PreviewImage";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import { usePermissions } from "../auth/PermissionContext";
+import { getUserFromToken } from "../auth/auth.utils";
+import { isManagerLikeRole, normalizeUserRole } from "../auth/permissions";
 import { confirmFileDeletion } from "../utils/fileDeletePassword";
 import Navbar from "../components/Navbar";
 import FilePreviewModal from "../components/FilePreviewModal";
@@ -538,8 +540,17 @@ const ItemDetails = () => {
   const [claimPercentageItem, setClaimPercentageItem] = useState(null);
   const [poSortBy, setPoSortBy] = useState("po");
   const [poSortOrder, setPoSortOrder] = useState("asc");
+  const [reminderComment, setReminderComment] = useState("");
+  const [reminderType, setReminderType] = useState("qc");
+  const [reminderImage, setReminderImage] = useState(null);
+  const [savingReminder, setSavingReminder] = useState(false);
+  const [reminderMessage, setReminderMessage] = useState("");
+  const [adminReminderPopupOpen, setAdminReminderPopupOpen] = useState(false);
+  const [resolvingReminderId, setResolvingReminderId] = useState("");
+  const adminReminderPopupShownRef = useRef("");
   const canDeleteItemFiles = hasPermission("images_documents", "delete");
   const canEditItems = hasPermission("items", "edit");
+  const canEditQc = hasPermission("qc", "edit");
 
   const fetchDetails = useCallback(async () => {
     if (!resolvedItemCode) {
@@ -568,6 +579,75 @@ const ItemDetails = () => {
   const item = details?.item || {};
   const productDatabase = details?.product_database || {};
   const orders = Array.isArray(details?.orders) ? details.orders : [];
+  const itemReminders = Array.isArray(details?.reminders) ? details.reminders : [];
+  const reminderAnchor = details?.reminder_anchor || null;
+  const currentRole = normalizeUserRole(getUserFromToken()?.role);
+  const isManager = isManagerLikeRole(currentRole);
+  const canCreateReminder = canEditQc && (isManager || Boolean(reminderAnchor?.can_qc_create));
+  const pendingAdminReminders = itemReminders.filter(
+    (reminder) => reminder?.type === "admin" && reminder?.status === "pending",
+  );
+  const pendingAdminReminderKey = [
+    String(item?.code || resolvedItemCode || "").trim(),
+    ...pendingAdminReminders.map((reminder) => String(reminder?._id || "")).sort(),
+  ].filter(Boolean).join(":");
+
+  useEffect(() => {
+    if (!isManager || pendingAdminReminders.length === 0 || !pendingAdminReminderKey) {
+      setAdminReminderPopupOpen(false);
+      return;
+    }
+    if (adminReminderPopupShownRef.current === pendingAdminReminderKey) {
+      return;
+    }
+    adminReminderPopupShownRef.current = pendingAdminReminderKey;
+    setAdminReminderPopupOpen(true);
+  }, [isManager, pendingAdminReminderKey, pendingAdminReminders.length]);
+
+  const saveItemReminder = useCallback(async () => {
+    if (!canCreateReminder || !reminderAnchor) return;
+    const comment = String(reminderComment || "").trim();
+    if (!comment) {
+      setReminderMessage("A reminder comment is required.");
+      return;
+    }
+
+    const formData = new FormData();
+    const reminder = { type: isManager ? reminderType : "qc", comment };
+    if (reminderImage) {
+      reminder.image_index = 0;
+      formData.append("images", reminderImage);
+    }
+    formData.append("reminders", JSON.stringify([reminder]));
+
+    try {
+      setSavingReminder(true);
+      setReminderMessage("");
+      const response = await api.post(`/items/${encodeURIComponent(resolvedItemCode)}/reminders`, formData);
+      setReminderComment("");
+      setReminderImage(null);
+      setReminderType("qc");
+      setReminderMessage(response?.data?.message || "Reminder saved successfully.");
+      await fetchDetails();
+    } catch (saveError) {
+      setReminderMessage(saveError?.response?.data?.message || "Failed to save reminder.");
+    } finally {
+      setSavingReminder(false);
+    }
+  }, [canCreateReminder, fetchDetails, isManager, reminderAnchor, reminderComment, reminderImage, reminderType, resolvedItemCode]);
+
+  const resolveReminder = useCallback(async (reminderId) => {
+    if (!reminderId || resolvingReminderId) return;
+    try {
+      setResolvingReminderId(reminderId);
+      await api.patch(`/qc/reminders/${encodeURIComponent(reminderId)}/resolve`);
+      await fetchDetails();
+    } catch (resolveError) {
+      setReminderMessage(resolveError?.response?.data?.message || "Failed to resolve reminder.");
+    } finally {
+      setResolvingReminderId("");
+    }
+  }, [fetchDetails, resolvingReminderId]);
   const brandName = getPrimaryBrand(item);
   const productImageUrl = getStoredItemFileUrl(item?.image);
   const claimPercentage = Math.max(0, toSafeNumber(item?.claim_percentage));
@@ -1298,6 +1378,92 @@ const ItemDetails = () => {
 
                 <QcItemComplaintsSection itemCode={item?.code || resolvedItemCode} />
 
+                <section className="border rounded p-3 d-grid gap-3">
+                  <div>
+                    <h3 className="h6 mb-1">Reminders</h3>
+                    <div className="small text-secondary">
+                      {reminderAnchor
+                        ? `New reminders link to PO ${reminderAnchor.order_id} (${reminderAnchor.source}).`
+                        : "No eligible PO is available for a reminder."}
+                    </div>
+                  </div>
+                  <div className="row g-2 align-items-end">
+                    <div className="col-md-6">
+                      <label className="form-label small mb-1" htmlFor="item-reminder-comment">Comment</label>
+                      <textarea
+                        id="item-reminder-comment"
+                        className="form-control"
+                        rows="2"
+                        maxLength="2000"
+                        value={reminderComment}
+                        onChange={(event) => setReminderComment(event.target.value)}
+                        disabled={!canCreateReminder || savingReminder}
+                      />
+                    </div>
+                    <div className="col-md-2">
+                      <label className="form-label small mb-1" htmlFor="item-reminder-type">Type</label>
+                      <select
+                        id="item-reminder-type"
+                        className="form-select"
+                        value={isManager ? reminderType : "qc"}
+                        onChange={(event) => setReminderType(event.target.value)}
+                        disabled={!isManager || !canCreateReminder || savingReminder}
+                      >
+                        <option value="qc">QC</option>
+                        {isManager && <option value="admin">Admin</option>}
+                      </select>
+                    </div>
+                    <div className="col-md-3">
+                      <label className="form-label small mb-1" htmlFor="item-reminder-image">Image (optional)</label>
+                      <input
+                        id="item-reminder-image"
+                        className="form-control"
+                        type="file"
+                        accept=".jpg,.jpeg,.png"
+                        onChange={(event) => setReminderImage(event.target.files?.[0] || null)}
+                        disabled={!canCreateReminder || savingReminder}
+                      />
+                    </div>
+                    <div className="col-md-1 d-grid">
+                      <button type="button" className="btn btn-primary btn-sm" onClick={saveItemReminder} disabled={!canCreateReminder || savingReminder}>
+                        {savingReminder ? "Saving..." : "Save"}
+                      </button>
+                    </div>
+                  </div>
+                  {!canCreateReminder && reminderAnchor && (
+                    <div className="small text-secondary">Only the QC aligned to this PO, or a manager/admin, can add a reminder.</div>
+                  )}
+                  {reminderMessage && <div className="small text-secondary">{reminderMessage}</div>}
+
+                  {isManager && (
+                    <div className="d-grid gap-2">
+                      {itemReminders.length === 0 ? (
+                        <div className="small text-secondary">No reminders for this item.</div>
+                      ) : itemReminders.map((reminder) => {
+                        const imageUrl = reminder?.image?.preview?.url || reminder?.image?.url || reminder?.image?.storage?.source_url || "";
+                        return (
+                          <div key={reminder._id} className="border rounded p-2">
+                            <div className="d-flex justify-content-between gap-2">
+                              <div className="fw-semibold text-capitalize">{reminder.type} reminder · PO {reminder.order_id || "N/A"}</div>
+                              <span className={`badge ${reminder.status === "resolved" ? "text-bg-success" : "text-bg-warning"}`}>{reminder.status === "resolved" ? "Resolved" : "Pending"}</span>
+                            </div>
+                            <div className="mt-1">{reminder.comment}</div>
+                            {imageUrl && <img src={imageUrl} alt="Reminder attachment" className="img-thumbnail mt-2" style={{ maxHeight: "120px" }} />}
+                            <div className="small text-secondary mt-1">
+                              {[reminder.created_by?.name, reminder.createdAt ? formatDateDDMMYYYY(reminder.createdAt) : ""].filter(Boolean).join(" | ")}
+                            </div>
+                            {reminder.status === "pending" && (
+                              <button type="button" className="btn btn-outline-success btn-sm mt-2" onClick={() => resolveReminder(reminder._id)} disabled={Boolean(resolvingReminderId)}>
+                                {resolvingReminderId === reminder._id ? "Resolving..." : "Resolve"}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
                 <section>
                   <h3 className="h6 mb-3">POs</h3>
                   <div className="table-responsive inspection-report-table-wrap">
@@ -1427,6 +1593,32 @@ const ItemDetails = () => {
           </div>
         </div>
       </div>
+
+      {adminReminderPopupOpen && (
+        <div className="om-notification-popup-backdrop" role="dialog" aria-modal="true" aria-labelledby="admin-reminders-title">
+          <div className="om-notification-popup qc-claim-warning-modal">
+            <div className="om-notification-popup-header">
+              <div>
+                <h5 id="admin-reminders-title" className="mb-1">Pending Admin Reminders</h5>
+                <div className="text-secondary small">These reminders remain open for this item.</div>
+              </div>
+            </div>
+            <div className="om-notification-popup-body overflow-auto" style={{ maxHeight: "60vh" }}>
+              <div className="d-grid gap-2">
+                {pendingAdminReminders.map((reminder) => (
+                  <div key={reminder._id} className="border rounded p-2">
+                    <div className="fw-semibold">PO {reminder.order_id || "N/A"}</div>
+                    <div>{reminder.comment}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="om-notification-popup-footer">
+              <button type="button" className="btn btn-primary" onClick={() => setAdminReminderPopupOpen(false)}>Acknowledge</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {previewFile && (
         <FilePreviewModal

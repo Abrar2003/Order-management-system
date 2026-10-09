@@ -3696,7 +3696,7 @@ const UpdateQcModal = ({
     reminderDraftIdRef.current += 1;
     setReminderDrafts((current) => [
       ...current,
-      { id: `reminder-${reminderDraftIdRef.current}`, comment: "", image: null },
+      { id: `reminder-${reminderDraftIdRef.current}`, type: "qc", comment: "", image: null },
     ]);
     setReminderError("");
     setReminderStatus("");
@@ -3738,6 +3738,7 @@ const UpdateQcModal = ({
     const reminders = reminderDrafts.map((reminder) => {
       const image = reminder.image || null;
       const payload = {
+        type: reminder.type || "qc",
         comment: String(reminder.comment || "").trim(),
       };
       if (image) {
@@ -5028,7 +5029,7 @@ const UpdateQcModal = ({
                       <div>
                         <h6 className="mb-1">Reminders</h6>
                         <div className="small text-secondary">
-                          Saved reminders appear whenever a QC user opens an aligned request for this item.
+                          QC reminders appear on aligned QC requests; Admin reminders appear in admin workflows.
                         </div>
                       </div>
                       <button
@@ -5043,7 +5044,7 @@ const UpdateQcModal = ({
 
                     {reminderDrafts.map((reminder, index) => (
                       <div key={reminder.id} className="border rounded p-2 row g-2 align-items-end">
-                        <div className="col-md-7">
+                        <div className="col-md-6">
                           <label className="form-label small mb-1" htmlFor={`${reminder.id}-comment`}>
                             Reminder {index + 1}
                           </label>
@@ -5059,7 +5060,22 @@ const UpdateQcModal = ({
                             disabled={saving || savingReminders}
                           />
                         </div>
-                        <div className="col-md-4">
+                        <div className="col-md-2">
+                          <label className="form-label small mb-1" htmlFor={`${reminder.id}-type`}>
+                            Type
+                          </label>
+                          <select
+                            id={`${reminder.id}-type`}
+                            className="form-select"
+                            value={reminder.type || "qc"}
+                            onChange={(event) => updateReminderDraft(reminder.id, { type: event.target.value })}
+                            disabled={saving || savingReminders || isQcUser}
+                          >
+                            <option value="qc">QC</option>
+                            {!isQcUser && <option value="admin">Admin</option>}
+                          </select>
+                        </div>
+                        <div className="col-md-3">
                           <label className="form-label small mb-1" htmlFor={`${reminder.id}-image`}>
                             Image (optional)
                           </label>

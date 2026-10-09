@@ -1,4 +1,5 @@
 const QC = require("../models/qc.model");
+const Test = require("../models/tests.model");
 const Inspection = require("../models/inspection.model");
 const Inspector = require("../models/inspector.model");
 const User = require("../models/user.model");
@@ -53,6 +54,8 @@ const {
   isLabelExemptUser,
   parseUserIdList,
 } = require("../helpers/labelExemptUsers");
+const labelStorageService = require("../services/labels/labelStorage.service");
+const liveLabelProjection = require("../services/labels/liveLabelProjection.service");
 const {
   BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
@@ -74,6 +77,7 @@ const {
   deriveOrderStatus,
   normalizeOrderStatus,
 } = require("../helpers/orderStatus");
+const { buildRequirementStatus } = require("../helpers/dropTest");
 const {
   QC_IMAGE_UPLOAD_MODES,
   QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD,
@@ -127,6 +131,15 @@ const {
   buildEffectiveEtdMatch,
   resolveEtdDateRange,
 } = require("./vendorPerformanceReport.controller");
+const {
+  REMINDER_TYPES,
+  findPendingAdminReminderWarnings,
+  getUnacknowledgedReminderWarnings,
+  normalizeReminderStatus,
+  normalizeReminderType,
+  parseAcknowledgedReminderIds,
+  serializeReminder,
+} = require("../services/orderReminder.service");
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 const MIN_REJECTION_IMAGE_COUNT = 2;
@@ -850,6 +863,7 @@ const resolveInspectionRecordStatus = ({
   checked = 0,
   goodsNotReady = null,
   explicitStatus = "",
+  testRequirementPending = false,
 } = {}) => {
   if (isInspectionStatusMatching(explicitStatus, INSPECTION_RECORD_STATUS.TRANSFERRED)) {
     return INSPECTION_RECORD_STATUS.TRANSFERRED;
@@ -870,6 +884,10 @@ const resolveInspectionRecordStatus = ({
 
   if (isGoodsNotReadyMarked(goodsNotReady, explicitStatus)) {
     return INSPECTION_RECORD_STATUS.GOODS_NOT_READY;
+  }
+
+  if (testRequirementPending) {
+    return INSPECTION_RECORD_STATUS.PENDING;
   }
 
   if (
@@ -920,6 +938,7 @@ const syncQcRequestHistoryStatuses = (
       checked: record?.checked,
       goodsNotReady: record?.goods_not_ready,
       explicitStatus: record?.status,
+      testRequirementPending: record?.test_requirement_pending,
     });
 
     const hasActivity = hasInspectionRecordActivity({
@@ -933,7 +952,9 @@ const syncQcRequestHistoryStatuses = (
       status: resolvedInspectionStatus,
     });
     const nextRequestHistoryStatus =
-      normalizeInspectionStatus(resolvedInspectionStatus) ===
+      record?.test_requirement_pending === true
+        ? REQUEST_HISTORY_STATUS.OPEN
+        : normalizeInspectionStatus(resolvedInspectionStatus) ===
       normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
         ? REQUEST_HISTORY_STATUS.TRANSFERRED
         : normalizeInspectionStatus(resolvedInspectionStatus) ===
@@ -1388,7 +1409,7 @@ const refreshQcAggregateState = async (qcDoc, reqUser) => {
 
   const refreshedInspections = await Inspection.find({ qc: qcDoc._id })
     .select(
-      "inspection_date requested_date request_history_id inspector checked passed rejected vendor_requested vendor_offered labels_added label_ranges goods_not_ready status createdAt",
+      "inspection_date requested_date request_history_id inspector checked passed rejected vendor_requested vendor_offered labels_added label_ranges goods_not_ready status test_requirement_pending createdAt",
     )
     .lean();
 
@@ -2216,39 +2237,41 @@ const findPreviousPoImageHistoryForItem = async ({
 };
 
 const findItemRemindersForQc = async ({ qcDoc = {}, user = null } = {}) => {
+  const currentUserId = String(user?._id || user?.id || "").trim();
+  if (
+    normalizeUserRoleKey(user?.role) !== "qc" ||
+    !currentUserId ||
+    String(qcDoc?.inspector?._id || qcDoc?.inspector || "") !== currentUserId
+  ) {
+    return [];
+  }
   const itemCode = normalizeText(
     qcDoc?.item?.item_code || qcDoc?.order?.item?.item_code || "",
   );
   if (!itemCode) return [];
 
-  const reminderQcs = await QC.find({
-    "item.item_code": {
-      $regex: `^${escapeRegex(itemCode)}$`,
-      $options: "i",
-    },
-    "reminders.0": { $exists: true },
-  })
-    .select("_id order order_meta reminders")
-    .populate({
-      path: "order",
-      match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, user),
-      select: "_id",
-    })
-    .lean();
+  const reminderOrders = await Order.find(
+    applyDataAccessMatch(
+      {
+        ...ACTIVE_ORDER_MATCH,
+        "item.item_code": { $regex: `^${escapeRegex(itemCode)}$`, $options: "i" },
+        "reminders.0": { $exists: true },
+      },
+      user,
+    ),
+  ).select("_id order_id reminders").lean();
 
-  const reminders = (Array.isArray(reminderQcs) ? reminderQcs : [])
-    .filter((record) => record?.order)
-    .flatMap((record) =>
-      (Array.isArray(record?.reminders) ? record.reminders : []).map((reminder) => ({
-        ...reminder,
-        qc_id: String(record?._id || ""),
-        order_id: normalizeText(record?.order_meta?.order_id),
-      })),
+  const reminders = (Array.isArray(reminderOrders) ? reminderOrders : [])
+    .flatMap((order) =>
+      (Array.isArray(order?.reminders) ? order.reminders : [])
+        .filter(
+          (reminder) =>
+            normalizeReminderType(reminder?.type) === REMINDER_TYPES.QC &&
+            normalizeReminderStatus(reminder?.status) === "pending",
+        )
+        .map((reminder) => serializeReminder({ reminder, order })),
     )
-    .sort(
-      (left, right) =>
-        toSortableTimestamp(right?.createdAt) - toSortableTimestamp(left?.createdAt),
-    );
+    .sort((left, right) => toSortableTimestamp(right?.createdAt) - toSortableTimestamp(left?.createdAt));
 
   return Promise.all(
     reminders.map(async (reminder) => ({
@@ -2260,6 +2283,80 @@ const findItemRemindersForQc = async ({ qcDoc = {}, user = null } = {}) => {
           }
         : null,
     })),
+  );
+};
+
+const canUseModernLabelWrites = (state = {}) =>
+  Number(state?.schema_version) >= 2 &&
+  ["verified", "modern"].includes(String(state?.migration_status || "")) &&
+  ["dual", "modern"].includes(String(state?.write_mode || ""));
+
+const loadLabelProjectionContext = async (inspectorUserId) => {
+  const normalizedUserId = String(inspectorUserId || "").trim();
+  if (!mongoose.Types.ObjectId.isValid(normalizedUserId)) return null;
+
+  const inspector = await Inspector.findOne({ user: normalizedUserId })
+    .select("_id")
+    .lean();
+  if (!inspector) return null;
+
+  return {
+    inspector,
+    state: await labelStorageService.getState(inspector._id),
+  };
+};
+
+const syncInspectionLabelUsageProjection = async ({
+  context = null,
+  inspection = null,
+  inspectorUserId = "",
+  qcDoc = null,
+} = {}) => {
+  const resolvedContext = context || await loadLabelProjectionContext(
+    inspectorUserId || inspection?.inspector,
+  );
+  if (!resolvedContext || !canUseModernLabelWrites(resolvedContext.state)) {
+    return false;
+  }
+
+  await liveLabelProjection.syncInspectionUsage({
+    inspectorId: resolvedContext.inspector._id,
+    inspection,
+    qc: qcDoc,
+  });
+  return true;
+};
+
+const mirrorInspectionLabelUsageProjection = async ({
+  inspection = null,
+  qcDoc = null,
+} = {}) => {
+  const context = await loadLabelProjectionContext(inspection?.inspector);
+  if (!context || !canUseModernLabelWrites(context.state)) return;
+
+  if (context.state.write_mode === "modern") {
+    await liveLabelProjection.syncInspectionUsage({
+      inspectorId: context.inspector._id,
+      inspection,
+      qc: qcDoc,
+    });
+    return;
+  }
+
+  await labelStorageService.mirrorLegacyWrite(
+    context.inspector._id,
+    "inspection_usage",
+    {
+      payload: {
+        inspection_record: String(inspection?._id || ""),
+        labels: normalizeLabels(inspection?.labels_added || []),
+      },
+      modernWrite: () => liveLabelProjection.syncInspectionUsage({
+        inspectorId: context.inspector._id,
+        inspection,
+        qc: qcDoc,
+      }),
+    },
   );
 };
 
@@ -3239,6 +3336,7 @@ const upsertInspectionRecordForRequest = async ({
   allowRequestedDateFallback = true,
   goodsNotReady = null,
   explicitStatus = "",
+  testRequirementPending = false,
   currentSizeSource = null,
   sizeSnapshotPayload = {},
   restrictToInspectorId = "",
@@ -3331,9 +3429,11 @@ const upsertInspectionRecordForRequest = async ({
         labelRanges: labelRangesToAppend,
         goodsNotReady: normalizedGoodsNotReady,
         explicitStatus: normalizedExplicitStatus,
+        testRequirementPending,
         requestType: qcDoc?.request_type,
       }),
       request_history_id: requestHistoryId || null,
+      test_requirement_pending: Boolean(testRequirementPending),
       requested_date: resolvedRequestDate,
       checked: toNonNegativeNumber(addChecked, 0),
       passed: toNonNegativeNumber(addPassed, 0),
@@ -3373,6 +3473,7 @@ const upsertInspectionRecordForRequest = async ({
   inspectionRecord.requested_date = resolvedRequestDate;
   inspectionRecord.request_history_id =
     requestHistoryId || inspectionRecord.request_history_id || null;
+  inspectionRecord.test_requirement_pending = Boolean(testRequirementPending);
   inspectionRecord.inspection_date = resolvedInspectionDate;
   inspectionRecord.vendor_requested = requestedQty;
 
@@ -3457,6 +3558,7 @@ const upsertInspectionRecordForRequest = async ({
     labelRanges: inspectionRecord.label_ranges,
     goodsNotReady: inspectionRecord.goods_not_ready,
     explicitStatus: normalizedExplicitStatus,
+    testRequirementPending,
     requestType: qcDoc?.request_type,
   });
 
@@ -5385,6 +5487,25 @@ exports.alignQC = async (req, res) => {
     const normalizedItemCode = normalizeText(
       orderRecord?.item?.item_code || item?.item_code || "",
     );
+    const pendingAdminReminders = getUnacknowledgedReminderWarnings({
+      warnings: await findPendingAdminReminderWarnings({
+        targets: [{
+          itemCode: normalizedItemCode,
+          targetOrderId: orderRecord?.order_id,
+        }],
+        user: req.user,
+      }),
+      acknowledgedReminderIds: parseAcknowledgedReminderIds(
+        req.body?.acknowledged_admin_reminder_ids ?? req.body?.acknowledgedAdminReminderIds,
+      ),
+    });
+    if (pendingAdminReminders.length > 0) {
+      return res.status(409).json({
+        code: "PENDING_ADMIN_REMINDERS",
+        message: "Resolve or acknowledge the pending Admin reminders before raising this QC request.",
+        reminders: pendingAdminReminders,
+      });
+    }
     const firstInspectionPolicy = await getFirstInspectionAlignmentPolicy(
       normalizedItemCode,
     );
@@ -7390,6 +7511,7 @@ const updateQC = async (req, res) => {
     let labelsAddedThisVisit = [];
     let labelRangesUsedThisVisit = [];
     let nextLabels = existingNormalizedLabels;
+    let labelProjectionContext = null;
     if (allowRecordRewrite && hasExplicitLabelsPayload) {
       const directLabels = Array.isArray(labels) ? labels : [];
       const parsedDirectLabels = directLabels.map(Number);
@@ -7437,11 +7559,11 @@ const updateQC = async (req, res) => {
       const inspectionInspectorUserId = qc.inspector?._id
         ? qc.inspector._id
         : qc.inspector;
-      const inspector = await Inspector.findOne({
-        user: inspectionInspectorUserId,
-      });
+      labelProjectionContext = await loadLabelProjectionContext(
+        inspectionInspectorUserId,
+      );
 
-      if (!inspector) {
+      if (!labelProjectionContext) {
         return res.status(404).json({ message: "Inspector record not found" });
       }
 
@@ -7475,13 +7597,25 @@ const updateQC = async (req, res) => {
       const incomingNew = uniqueIncoming.filter(
         (label) => !existingSet.has(label),
       );
-      const allocatedSet = new Set(
-        normalizeLabels(inspector.alloted_labels || []),
-      );
-      const usedSet = new Set(normalizeLabels(inspector.used_labels || []));
-      const rejectedSet = new Set(
-        normalizeLabels(inspector.rejected_labels || []),
-      );
+      let allocatedSet;
+      let usedSet;
+      let rejectedSet;
+      if (canUseModernLabelWrites(labelProjectionContext.state)) {
+        ({ allocated: allocatedSet, used: usedSet, rejected: rejectedSet } =
+          await liveLabelProjection.getValidationState(
+            labelProjectionContext.inspector._id,
+            incomingNew,
+          ));
+      } else {
+        const legacyInspector = await Inspector.findById(
+          labelProjectionContext.inspector._id,
+        )
+          .select("alloted_labels used_labels rejected_labels")
+          .lean();
+        allocatedSet = new Set(normalizeLabels(legacyInspector?.alloted_labels || []));
+        usedSet = new Set(normalizeLabels(legacyInspector?.used_labels || []));
+        rejectedSet = new Set(normalizeLabels(legacyInspector?.rejected_labels || []));
+      }
 
       const rejectedIncoming = incomingNew.filter((label) =>
         rejectedSet.has(label),
@@ -7674,6 +7808,30 @@ const updateQC = async (req, res) => {
       }
 
       const requestedQuantityForRecord = currentRequestRequestedQuantity;
+      const claimItem = itemDocForInspectedSizeUpdate || await Item.findOne(
+        applyDataAccessMatch(
+          {
+            code: {
+              $regex: `^${escapeRegex(qc?.item?.item_code || "")}$`,
+              $options: "i",
+            },
+          },
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      ).select("claim_percentage").lean();
+      const activeTests = await Test.find({ is_active: true }).select("_id version").lean();
+      const testRequirement = buildRequirementStatus({
+        qc,
+        activeTests,
+        claimPercentage: Number(claimItem?.claim_percentage || 0) || 0,
+      });
+      const testRequirementPending =
+        testRequirement.required && testRequirement.missing_test_ids.length > 0;
+      qc.test_requirement_pending = testRequirementPending;
 
       const inspectionRecord = await upsertInspectionRecordForRequest({
         qcDoc: qc,
@@ -7697,6 +7855,7 @@ const updateQC = async (req, res) => {
         replaceCurrentRecord: allowRecordRewrite,
         replaceCbmSnapshot: hasCbmUpdate || isVisitUpdate,
         explicitStatus: isQcUser ? INSPECTION_RECORD_STATUS.DONE : "",
+        testRequirementPending,
         currentSizeSource: inspectionSizeSource,
         sizeSnapshotPayload: req.body || {},
         restrictToInspectorId:
@@ -7717,14 +7876,24 @@ const updateQC = async (req, res) => {
       }
 
       if (targetRequestEntry && inspectionRecord && (isVisitUpdate || isQcUser)) {
-        targetRequestEntry.status = REQUEST_HISTORY_STATUS.INSPECTED;
+        targetRequestEntry.status = testRequirementPending
+          ? REQUEST_HISTORY_STATUS.OPEN
+          : REQUEST_HISTORY_STATUS.INSPECTED;
         stampRequestHistoryEntry(targetRequestEntry, {
           user: req.user,
         });
       }
 
       if (inspectionRecord) {
-        await recalculateInspectorUsedLabels([inspectionInspectorId]);
+        const projectedUsage = await syncInspectionLabelUsageProjection({
+          context: labelProjectionContext,
+          inspection: inspectionRecord,
+          inspectorUserId: inspectionInspectorId,
+          qcDoc: qc,
+        });
+        if (!projectedUsage) {
+          await recalculateInspectorUsedLabels([inspectionInspectorId]);
+        }
         followUpInspectionId = inspectionRecord._id;
 
         persistedInspectionRecords = await Inspection.find({
@@ -7971,17 +8140,20 @@ const updateQC = async (req, res) => {
     qc.updated_by = buildAuditActor(req.user);
     await qc.save();
 
+    const afterInspectionRecords = persistedInspectionRecords || await Inspection.find({ qc: qc._id }).lean();
     const orderId = qc?.order?._id || qc.order;
     const orderRecord = await Order.findOne(
       applyDataAccessMatch({ _id: orderId }, req.user),
     );
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
-      applyQcOrderStatus(qc, orderRecord);
+      orderRecord.status = deriveOrderStatus({
+        orderEntry: orderRecord,
+        qcRecord: { ...qc.toObject(), inspection_record: afterInspectionRecords },
+      });
       orderRecord.updated_by = buildAuditActor(req.user);
       await orderRecord.save();
     }
 
-    const afterInspectionRecords = persistedInspectionRecords || await Inspection.find({ qc: qc._id }).lean();
     const qcEditLog = buildQcEditLogPayload({
       reqUser: req.user,
       qcDoc: qc,
@@ -11283,6 +11455,17 @@ exports.transferInspectionRecord = async (req, res) => {
       await targetInspection.save();
     }
 
+    await mirrorInspectionLabelUsageProjection({
+      inspection: sourceInspection,
+      qcDoc: sourceQc,
+    });
+    if (targetInspection) {
+      await mirrorInspectionLabelUsageProjection({
+        inspection: targetInspection,
+        qcDoc: targetQc,
+      });
+    }
+
     const sourceAfterInspections = await refreshQcAggregateState(sourceQc, req.user);
     const targetAfterInspections = await refreshQcAggregateState(targetQc, req.user);
 
@@ -12179,6 +12362,10 @@ exports.addQcReminders = async (req, res) => {
     }
 
     const usedImageIndexes = new Set();
+    const roleKey = normalizeUserRoleKey(req.user?.role);
+    if (roleKey !== "qc" && !isManagerLikeRole(roleKey)) {
+      return res.status(403).json({ message: "Only QC users, managers, and admins can create reminders" });
+    }
     const reminders = rawReminders.map((entry, index) => {
       const comment = normalizeText(entry?.comment || "");
       if (!comment) {
@@ -12188,9 +12375,17 @@ exports.addQcReminders = async (req, res) => {
         throw new Error(`Reminder ${index + 1} comment cannot exceed 2000 characters`);
       }
 
+      const rawType = normalizeText(entry?.type || REMINDER_TYPES.QC).toLowerCase();
+      if (![REMINDER_TYPES.QC, REMINDER_TYPES.ADMIN].includes(rawType)) {
+        throw new Error(`Reminder ${index + 1} has an invalid type`);
+      }
+      if (roleKey === "qc" && rawType !== REMINDER_TYPES.QC) {
+        throw new Error("QC users can only create QC reminders");
+      }
+
       const rawImageIndex = entry?.image_index;
       if (rawImageIndex === undefined || rawImageIndex === null || rawImageIndex === "") {
-        return { comment, imageIndex: null };
+        return { comment, type: rawType, imageIndex: null };
       }
 
       const imageIndex = Number(rawImageIndex);
@@ -12203,7 +12398,7 @@ exports.addQcReminders = async (req, res) => {
         throw new Error(`Reminder ${index + 1} has an invalid image`);
       }
       usedImageIndexes.add(imageIndex);
-      return { comment, imageIndex };
+      return { comment, type: rawType, imageIndex };
     });
     if (usedImageIndexes.size !== files.length) {
       return res.status(400).json({ message: "Each reminder image must be assigned once" });
@@ -12220,7 +12415,7 @@ exports.addQcReminders = async (req, res) => {
       return res.status(404).json({ message: "QC record not found" });
     }
 
-    if (normalizeUserRoleKey(req.user?.role) === "qc") {
+    if (roleKey === "qc") {
       const currentUserId = String(req.user?._id || req.user?.id || "").trim();
       const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
       if (!currentUserId || currentUserId !== alignedInspectorId) {
@@ -12232,8 +12427,11 @@ exports.addQcReminders = async (req, res) => {
     const createdAt = new Date();
     const remindersToSave = reminders.map((reminder) => ({
       _id: new mongoose.Types.ObjectId(),
+      type: reminder.type,
+      status: "pending",
       comment: reminder.comment,
       image: null,
+      linked_qc: qc._id,
       created_by: uploadedBy,
       createdAt,
     }));
@@ -12266,9 +12464,14 @@ exports.addQcReminders = async (req, res) => {
       });
     }
 
-    qc.reminders.push(...remindersToSave);
+    const order = await Order.findById(qc.order._id);
+    if (!order) {
+      throw new Error("Linked order not found");
+    }
+    order.reminders.push(...remindersToSave);
+    order.updated_by = uploadedBy;
     qc.updated_by = uploadedBy;
-    await qc.save();
+    await Promise.all([order.save(), qc.save()]);
     uploadedObjectKeys.length = 0;
 
     return res.status(201).json({
@@ -12284,6 +12487,72 @@ exports.addQcReminders = async (req, res) => {
     });
   } finally {
     await cleanupLocalQcImageFiles(localCleanupPaths);
+  }
+};
+
+exports.resolveOrderReminder = async (req, res) => {
+  try {
+    const reminderId = String(req.params.reminderId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(reminderId)) {
+      return res.status(400).json({ message: "Invalid reminder id" });
+    }
+
+    const order = await Order.findOne(
+      applyDataAccessMatch(
+        { archived: { $ne: true }, "reminders._id": reminderId },
+        req.user,
+      ),
+    );
+    if (!order) return res.status(404).json({ message: "Reminder not found" });
+
+    const reminder = order.reminders.id(reminderId);
+    if (!reminder) return res.status(404).json({ message: "Reminder not found" });
+
+    const roleKey = normalizeUserRoleKey(req.user?.role);
+    const reminderType = normalizeReminderType(reminder.type);
+    if (roleKey === "qc") {
+      const contextQcId = String(req.body?.qc_id || req.body?.qcId || "").trim();
+      if (reminderType !== REMINDER_TYPES.QC || !mongoose.Types.ObjectId.isValid(contextQcId)) {
+        return res.status(403).json({ message: "QC can only resolve QC reminders from an aligned request" });
+      }
+      const contextQc = await QC.findOne(
+        { _id: contextQcId },
+      )
+        .select("inspector item order")
+        .populate({
+          path: "order",
+          match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+          select: "_id item",
+        })
+        .lean();
+      const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+      if (
+        !contextQc?.order ||
+        !currentUserId ||
+        String(contextQc.inspector || "") !== currentUserId ||
+        normalizeText(contextQc?.item?.item_code || contextQc?.order?.item?.item_code) !==
+          normalizeText(order?.item?.item_code)
+      ) {
+        return res.status(403).json({ message: "QC can only resolve reminders from an aligned request" });
+      }
+    } else if (!isManagerLikeRole(roleKey)) {
+      return res.status(403).json({ message: "You are not authorized to resolve reminders" });
+    }
+
+    if (normalizeReminderStatus(reminder.status) !== "resolved") {
+      reminder.status = "resolved";
+      reminder.resolved_by = buildAuditActor(req.user);
+      reminder.resolvedAt = new Date();
+      order.updated_by = buildAuditActor(req.user);
+      await order.save();
+    }
+
+    return res.json({
+      message: "Reminder resolved",
+      data: serializeReminder({ reminder, order }),
+    });
+  } catch (error) {
+    return res.status(400).json({ message: error.message || "Failed to resolve reminder" });
   }
 };
 
@@ -14273,6 +14542,12 @@ exports.editInspectionRecords = async (req, res) => {
     applyInspectionRecordPendingAfter(qc, inspectionDocs);
 
     await Promise.all(inspectionDocs.map((doc) => doc.save()));
+    for (const inspectionDoc of inspectionDocs) {
+      await mirrorInspectionLabelUsageProjection({
+        inspection: inspectionDoc,
+        qcDoc: qc,
+      });
+    }
 
 	    const refreshedInspections = await Inspection.find({ qc: qc._id })
 	      .select(
@@ -14576,6 +14851,14 @@ exports.deleteInspectionRecord = async (req, res) => {
     }
 
     await Inspection.deleteOne({ _id: inspection._id });
+    await mirrorInspectionLabelUsageProjection({
+      inspection: {
+        _id: inspection._id,
+        inspector: inspection.inspector,
+        labels_added: [],
+      },
+      qcDoc: qc,
+    });
 
     await recalculateInspectorUsedLabels([inspection.inspector]);
 

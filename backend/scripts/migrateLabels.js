@@ -594,6 +594,8 @@ const compareExistingModern = (analysis, expectedLabels, transactions, usages, s
   for (const [number, expected] of expectedLabels) {
     const existing = existingByNumber.get(number)?.[0];
     if (!existing) continue;
+    const migrationOwned =
+      existing?.migration?.source === MIGRATION_SOURCE;
     const oldStatus = String(existing?.status || "").trim();
     if (oldStatus && oldStatus !== "unassigned") {
       addConflict(analysis, {
@@ -616,7 +618,10 @@ const compareExistingModern = (analysis, expectedLabels, transactions, usages, s
         actual !== desired &&
         actual !== analysis.inspector_id,
     );
-    if (Array.isArray(existing?.usage?.inspectors)) {
+    if (
+      !migrationOwned &&
+      Array.isArray(existing?.usage?.inspectors)
+    ) {
       const actualUsageInspectors = [...new Set(
         existing.usage.inspectors.map(id).filter(Boolean),
       )].sort();

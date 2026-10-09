@@ -24,6 +24,13 @@ const isSafePreCutoverStorageState = (state) =>
   String(state?.read_source || "") === "legacy" &&
   String(state?.write_mode || "") === "legacy";
 
+const isSafeDualWriteStorageState = (state) =>
+  Number(state?.schema_version) >= 2 &&
+  String(state?.migration_status || "") === "verified" &&
+  String(state?.read_source || "") === "legacy" &&
+  String(state?.write_mode || "") === "dual" &&
+  state?.legacy_fallback_enabled === true;
+
 class LabelStorageService {
   constructor({
     storageStateModel = LabelStorageState,
@@ -175,4 +182,5 @@ class LabelStorageService {
 module.exports = new LabelStorageService();
 module.exports.DEFAULT_LABEL_STORAGE_STATE = DEFAULT_LABEL_STORAGE_STATE;
 module.exports.LabelStorageService = LabelStorageService;
+module.exports.isSafeDualWriteStorageState = isSafeDualWriteStorageState;
 module.exports.isSafePreCutoverStorageState = isSafePreCutoverStorageState;

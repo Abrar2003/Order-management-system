@@ -13,7 +13,10 @@ const LabelTransaction = require("../models/labelTransaction.model");
 const LabelUsage = require("../models/labelUsage.model");
 const LabelStorageState = require("../models/labelStorageState.model");
 const LabelMigrationConflict = require("../models/labelMigrationConflict.model");
-const { isSafePreCutoverStorageState } = require('../services/labels/labelStorage.service');
+const {
+  isSafeDualWriteStorageState,
+  isSafePreCutoverStorageState,
+} = require('../services/labels/labelStorage.service');
 const {
   getVendorCountry,
   getVendorId,
@@ -270,12 +273,14 @@ const buildVerificationReport = ({
       actual: usageProjectionMismatches,
     },
     storage_safety: {
-      passed: isSafePreCutoverStorageState(storageState),
+      passed:
+        isSafePreCutoverStorageState(storageState) ||
+        isSafeDualWriteStorageState(storageState),
       expected: {
         schema_version: 2,
         migration_status: "backfilled|verifying|verified",
         read_source: "legacy",
-        write_mode: "legacy",
+        write_mode: "legacy|dual (dual requires verified + fallback)",
       },
       actual: storageState
         ? {
@@ -357,6 +362,20 @@ const buildAllVerificationSummary = (reports = []) => {
     total_used: summaries.reduce((total, summary) => total + Number(summary.total_used || 0), 0),
     total_unused: summaries.reduce((total, summary) => total + Number(summary.total_unused || 0), 0),
     total_rejected: summaries.reduce((total, summary) => total + Number(summary.total_rejected || 0), 0),
+  };
+};
+
+const buildRoutingSummary = (reports = []) => {
+  const states = reports
+    .map((report) => report?.checks?.storage_safety?.actual)
+    .filter(Boolean);
+  const summarize = (field) => {
+    const values = [...new Set(states.map((state) => state?.[field]).filter(Boolean))];
+    return values.length === 1 ? values[0] : "mixed";
+  };
+  return {
+    read_source: summarize("read_source"),
+    write_mode: summarize("write_mode"),
   };
 };
 
@@ -518,8 +537,7 @@ const main = async () => {
       mode: "verify-all",
       summary: buildAllVerificationSummary(reports),
       state_changed: false,
-      read_source: "legacy",
-      write_mode: "legacy",
+      ...buildRoutingSummary(reports),
     }, null, 2));
     if (reports.some((report) => !report.passed)) process.exitCode = 2;
     return;
@@ -534,8 +552,7 @@ const main = async () => {
         mode: shouldMarkVerified ? "verify-and-mark" : "verify",
         ...report,
         state_changed: shouldMarkVerified,
-        read_source: "legacy",
-        write_mode: "legacy",
+        ...buildRoutingSummary([report]),
       },
       null,
       2,
@@ -558,6 +575,7 @@ if (require.main === module) {
 module.exports = {
   buildSummary,
   buildAllVerificationSummary,
+  buildRoutingSummary,
   buildVerificationReport,
   getInspectorArgument,
   loadVerificationSnapshot,

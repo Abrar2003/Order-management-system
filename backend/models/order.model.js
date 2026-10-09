@@ -85,6 +85,21 @@ const ShipmentEntrySchema = new mongoose.Schema(
   { _id: true },
 );
 
+const ReminderSchema = new mongoose.Schema(
+  {
+    type: { type: String, enum: ["qc", "admin"], default: "qc", required: true },
+    status: { type: String, enum: ["pending", "resolved"], default: "pending", required: true },
+    comment: { type: String, required: true, trim: true, maxlength: 2000 },
+    image: { type: mongoose.Schema.Types.Mixed, default: null },
+    linked_qc: { type: mongoose.Schema.Types.ObjectId, ref: "qc", default: null },
+    created_by: { type: AuditActorSchema, default: () => ({}) },
+    createdAt: { type: Date, default: Date.now },
+    resolved_by: { type: AuditActorSchema, default: null },
+    resolvedAt: { type: Date, default: null },
+  },
+  { _id: true },
+);
+
 const Order_Schema = new mongoose.Schema(
   {
     order_id: { type: String, required: true },
@@ -121,6 +136,7 @@ const Order_Schema = new mongoose.Schema(
       ref: "qc",
       default: null,
     },
+    reminders: { type: [ReminderSchema], default: [] },
     archived: { type: Boolean, default: false },
     archived_remark: { type: String, default: "" },
     archived_at: { type: Date, default: null },

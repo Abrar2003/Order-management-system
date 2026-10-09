@@ -8,12 +8,26 @@ const {
   buildUsageWriteOperations,
 } = require("../scripts/migrateLabels");
 const {
+  buildRoutingSummary,
   buildSummary,
   buildVerificationReport,
 } = require("../scripts/verifyLabelMigration");
 
 const objectId = () => new mongoose.Types.ObjectId();
 const fixedDate = new Date("2026-01-02T03:04:05.000Z");
+
+test("verification reports the active routing mode instead of a hard-coded value", () => {
+  const routing = buildRoutingSummary([
+    {
+      checks: {
+        storage_safety: {
+          actual: { read_source: "legacy", write_mode: "dual" },
+        },
+      },
+    },
+  ]);
+  assert.deepEqual(routing, { read_source: "legacy", write_mode: "dual" });
+});
 
 const makeInspection = ({
   user,

@@ -91,6 +91,11 @@ const {
   getVendorName,
   normalizeVendorDisplayList,
 } = require("../helpers/vendorRef");
+const {
+  findPendingAdminReminderWarnings,
+  getUnacknowledgedReminderWarnings,
+  parseAcknowledgedReminderIds,
+} = require("../services/orderReminder.service");
 
 const DEFAULT_PO_STATUS_REPORT_STATUS = "Inspection Done";
 const PO_STATUS_REPORT_STATUS_OPTIONS = [
@@ -4779,11 +4784,34 @@ exports.uploadOrders = async (req, res) => {
     totalDistinctOrdersUploaded = preparedUpload.totalDistinctOrdersUploaded;
     duplicateEntries = preparedUpload.duplicateEntries;
 
+    const pendingAdminReminders = await findPendingAdminReminderWarnings({
+      targets: newRowsToInsert.map((row) => ({
+        itemCode: row?.item_code,
+        targetOrderId: row?.order_id,
+      })),
+      user: req.user,
+    });
+
     if (shouldPreviewOnly) {
       return res.status(200).json({
         message: "Upload preview ready",
         summary: preparedUpload.summary,
         preview_rows: preparedUpload.previewRows,
+        admin_reminder_warnings: pendingAdminReminders,
+      });
+    }
+
+    const unacknowledgedAdminReminders = getUnacknowledgedReminderWarnings({
+      warnings: pendingAdminReminders,
+      acknowledgedReminderIds: parseAcknowledgedReminderIds(
+        req.body?.acknowledged_admin_reminder_ids ?? req.body?.acknowledgedAdminReminderIds,
+      ),
+    });
+    if (unacknowledgedAdminReminders.length > 0) {
+      return res.status(409).json({
+        code: "PENDING_ADMIN_REMINDERS",
+        message: "Resolve or acknowledge the pending Admin reminders before adding these orders.",
+        reminders: unacknowledgedAdminReminders,
       });
     }
 
@@ -5451,6 +5479,27 @@ exports.createOrdersManually = async (req, res) => {
           return false;
         }
         return true;
+      });
+    }
+
+    const pendingAdminReminders = await findPendingAdminReminderWarnings({
+      targets: newOrders.map((order) => ({
+        itemCode: order?.item?.item_code,
+        targetOrderId: order?.order_id,
+      })),
+      user: req.user,
+    });
+    const unacknowledgedAdminReminders = getUnacknowledgedReminderWarnings({
+      warnings: pendingAdminReminders,
+      acknowledgedReminderIds: parseAcknowledgedReminderIds(
+        req.body?.acknowledged_admin_reminder_ids ?? req.body?.acknowledgedAdminReminderIds,
+      ),
+    });
+    if (unacknowledgedAdminReminders.length > 0) {
+      return res.status(409).json({
+        code: "PENDING_ADMIN_REMINDERS",
+        message: "Resolve or acknowledge the pending Admin reminders before adding these orders.",
+        reminders: unacknowledgedAdminReminders,
       });
     }
 

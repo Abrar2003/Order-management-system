@@ -27,6 +27,7 @@ export const previewUploadOrders = async (file) => {
 export const applyUploadedRows = async ({
   rows = [],
   sourceFileName = "",
+  acknowledgedReminderIds = [],
 } = {}) => {
   const selectedRows = Array.isArray(rows) ? rows : [];
   if (selectedRows.length === 0) {
@@ -37,6 +38,7 @@ export const applyUploadedRows = async ({
     {
       selected_rows: selectedRows,
       source_filename: String(sourceFileName || "").trim(),
+      acknowledged_admin_reminder_ids: acknowledgedReminderIds,
     },
     {
     },
@@ -50,8 +52,12 @@ export const getManualOrderOptions = async () => {
   return res.data;
 };
 
-export const createManualOrders = async ({ po = {}, items = [] } = {}) => {
-  const res = await axios.post("/orders/manual-orders", { po, items });
+export const createManualOrders = async ({ po = {}, items = [], acknowledgedReminderIds = [] } = {}) => {
+  const res = await axios.post("/orders/manual-orders", {
+    po,
+    items,
+    acknowledged_admin_reminder_ids: acknowledgedReminderIds,
+  });
 
   return res.data;
 };

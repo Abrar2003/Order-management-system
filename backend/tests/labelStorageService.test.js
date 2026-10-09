@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   DEFAULT_LABEL_STORAGE_STATE,
   LabelStorageService,
+  isSafeDualWriteStorageState,
 } = require("../services/labels/labelStorage.service");
 
 const createService = ({ state = null, legacyRead, modernRead } = {}) => {
@@ -33,6 +34,23 @@ const createService = ({ state = null, legacyRead, modernRead } = {}) => {
   });
   return { events, failures, service };
 };
+
+test("verified dual writes are safe only while legacy reads and fallback remain enabled", () => {
+  assert.equal(isSafeDualWriteStorageState({
+    schema_version: 2,
+    migration_status: "verified",
+    read_source: "legacy",
+    write_mode: "dual",
+    legacy_fallback_enabled: true,
+  }), true);
+  assert.equal(isSafeDualWriteStorageState({
+    schema_version: 2,
+    migration_status: "verified",
+    read_source: "modern",
+    write_mode: "dual",
+    legacy_fallback_enabled: true,
+  }), false);
+});
 
 test("missing storage state defaults reads and writes to legacy", async () => {
   const { events, service } = createService();

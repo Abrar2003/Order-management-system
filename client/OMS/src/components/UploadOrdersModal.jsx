@@ -106,6 +106,18 @@ const formatPreviousOrderActionSummary = (action = {}) => {
   return `Keep both with ${previousOrderId}`;
 };
 
+const formatAdminReminderWarnings = (reminders = []) => {
+  const groups = new Map();
+  (Array.isArray(reminders) ? reminders : []).forEach((reminder) => {
+    const label = `${reminder?.item_code || "Item"} · PO ${reminder?.order_id || "N/A"}`;
+    groups.set(label, [...(groups.get(label) || []), reminder?.comment || ""]);
+  });
+  return [
+    "Pending Admin reminders:",
+    ...[...groups].flatMap(([label, comments]) => [label, ...comments.map((comment) => `  - ${comment}`)]),
+  ].join("\n");
+};
+
 const UploadOrdersModal = ({
   onClose,
   onSuccess,
@@ -143,6 +155,7 @@ const UploadOrdersModal = ({
   const [uploadPreviewRows, setUploadPreviewRows] = useState([]);
   const [checkedUploadRows, setCheckedUploadRows] = useState({});
   const [activePreviousOrderRow, setActivePreviousOrderRow] = useState(null);
+  const [acknowledgedReminderIds, setAcknowledgedReminderIds] = useState([]);
   const itemLookupCacheRef = useRef(new Map());
 
   const selectableUploadRows = useMemo(
@@ -241,6 +254,7 @@ const UploadOrdersModal = ({
     setUploadPreviewSummary(null);
     setUploadPreviewRows([]);
     setCheckedUploadRows({});
+    setAcknowledgedReminderIds([]);
   };
 
   const toggleAllUploadRows = (checked) => {
@@ -292,6 +306,13 @@ const UploadOrdersModal = ({
       setUploadPreviewSummary(response?.summary || null);
       setUploadPreviewRows(normalizedRows);
       setCheckedUploadRows(nextCheckedRows);
+      const reminders = Array.isArray(response?.admin_reminder_warnings)
+        ? response.admin_reminder_warnings
+        : [];
+      if (reminders.length > 0) {
+        window.alert(formatAdminReminderWarnings(reminders));
+        setAcknowledgedReminderIds(reminders.map((reminder) => reminder?._id).filter(Boolean));
+      }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to preview upload rows");
     } finally {
@@ -309,10 +330,26 @@ const UploadOrdersModal = ({
     try {
       setLoading(true);
       setError("");
-      const response = await applyUploadedRows({
+      const applyRows = (acknowledgedIds = acknowledgedReminderIds) => applyUploadedRows({
         rows: rowsToApply,
         sourceFileName: file?.name || "",
+        acknowledgedReminderIds: acknowledgedIds,
       });
+      let response;
+      try {
+        response = await applyRows();
+      } catch (applyError) {
+        const reminders = Array.isArray(applyError?.response?.data?.reminders)
+          ? applyError.response.data.reminders
+          : [];
+        if (applyError?.response?.data?.code !== "PENDING_ADMIN_REMINDERS" || reminders.length === 0) {
+          throw applyError;
+        }
+        window.alert(formatAdminReminderWarnings(reminders));
+        const reminderIds = reminders.map((reminder) => reminder?._id).filter(Boolean);
+        setAcknowledgedReminderIds(reminderIds);
+        response = await applyRows(reminderIds);
+      }
       const warnings = Array.isArray(response?.warnings) ? response.warnings : [];
       if (warnings.length > 0) {
         window.alert(["Upload completed with warnings:", ...warnings].join("\n"));
@@ -578,7 +615,7 @@ const UploadOrdersModal = ({
     try {
       setLoading(true);
       setError("");
-      await createManualOrders({
+      const payload = {
         po: {
           order_id: toTrimmedString(manualPo.order_id),
           brand: toTrimmedString(manualPo.brand),
@@ -587,7 +624,22 @@ const UploadOrdersModal = ({
           ETD: toTrimmedString(manualPo.ETD),
         },
         items: payloadItems,
-      });
+      };
+      try {
+        await createManualOrders(payload);
+      } catch (manualError) {
+        const reminders = Array.isArray(manualError?.response?.data?.reminders)
+          ? manualError.response.data.reminders
+          : [];
+        if (manualError?.response?.data?.code !== "PENDING_ADMIN_REMINDERS" || reminders.length === 0) {
+          throw manualError;
+        }
+        window.alert(formatAdminReminderWarnings(reminders));
+        await createManualOrders({
+          ...payload,
+          acknowledgedReminderIds: reminders.map((reminder) => reminder?._id).filter(Boolean),
+        });
+      }
       onSuccess?.();
       onClose?.();
     } catch (err) {

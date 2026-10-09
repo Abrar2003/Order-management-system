@@ -18,6 +18,19 @@ const normalizeRequestType = (value) =>
 const normalizeInspectionStatus = (value) =>
   String(value || "").trim().toLowerCase();
 
+const formatAdminReminderWarnings = (reminders = []) => {
+  const groups = new Map();
+  (Array.isArray(reminders) ? reminders : []).forEach((reminder) => {
+    const label = `${reminder?.item_code || "Item"} · PO ${reminder?.order_id || "N/A"}`;
+    groups.set(label, [...(groups.get(label) || []), reminder?.comment || ""]);
+  });
+  return [
+    "Pending Admin reminders:",
+    ...[...groups].flatMap(([label, comments]) => [label, ...comments.map((comment) => `  - ${comment}`)]),
+    "Press OK to acknowledge and continue, or Cancel to keep this request open.",
+  ].join("\n");
+};
+
 const getInitialRequestDateValue = ({
   value = "",
 } = {}) => {
@@ -250,7 +263,7 @@ const AlignQCModal = ({
       return;
     }
 
-    const buildPayload = (ignoreUnworkedRequest = false) => ({
+    const buildPayload = (ignoreUnworkedRequest = false, acknowledgedReminderIds = []) => ({
       order: order._id,
       item: order.item,
       inspector,
@@ -261,10 +274,11 @@ const AlignQCModal = ({
         quantity_requested: requestedQuantityNumber,
       },
       ignore_unworked_request: ignoreUnworkedRequest,
+      acknowledged_admin_reminder_ids: acknowledgedReminderIds,
     });
 
-    const submitAlignmentRequest = async (ignoreUnworkedRequest = false) =>
-      axios.post("/qc/align-qc", buildPayload(ignoreUnworkedRequest), {
+    const submitAlignmentRequest = async (ignoreUnworkedRequest = false, acknowledgedReminderIds = []) =>
+      axios.post("/qc/align-qc", buildPayload(ignoreUnworkedRequest, acknowledgedReminderIds), {
       });
 
     try {
@@ -277,6 +291,26 @@ const AlignQCModal = ({
     } catch (err) {
       console.error(err);
       const suggestionPayload = err?.response?.data;
+      const pendingAdminReminders = Array.isArray(suggestionPayload?.reminders)
+        ? suggestionPayload.reminders
+        : [];
+      if (suggestionPayload?.code === "PENDING_ADMIN_REMINDERS" && pendingAdminReminders.length > 0) {
+        if (!window.confirm(formatAdminReminderWarnings(pendingAdminReminders))) return;
+        try {
+          await submitAlignmentRequest(
+            false,
+            pendingAdminReminders.map((reminder) => reminder?._id).filter(Boolean),
+          );
+          alert("QC alignment successful");
+          shouldResetSubmitting = false;
+          onSuccess();
+          return;
+        } catch (retryError) {
+          console.error(retryError);
+          alert(retryError?.response?.data?.message || "QC alignment failed");
+          return;
+        }
+      }
       const shouldSuggestTransfer =
         err?.response?.status === 409 &&
         suggestionPayload?.suggest_transfer &&

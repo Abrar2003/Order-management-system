@@ -335,6 +335,62 @@ test('genuine modern owner mismatch remains blocking', () => {
   assert.equal(result.skip_label_numbers.has(129), true);
 });
 
+test('rerun refreshes a stale migration-owned usage projection', () => {
+  const inspectorA = objectId();
+  const userA = objectId();
+  const usedInspection = inspection({ user: userA, labels: [134] });
+  const result = buildMigrationAnalysis(snapshot({
+    inspectorId: inspectorA,
+    userId: userA,
+    inspections: [usedInspection],
+    existingLabels: [{
+      _id: objectId(),
+      number: 134,
+      owner_inspector: null,
+      rejected_by_inspector: null,
+      usage: { inspector: null, inspectors: [] },
+      migration: { source: MIGRATION_SOURCE },
+    }],
+  }));
+
+  assert.equal(
+    result.conflicts.some(
+      (entry) => entry.conflict_type === 'modern_label_incompatible',
+    ),
+    false,
+  );
+  assert.equal(result.can_apply, true);
+  assert.equal(result.skip_label_numbers.has(134), false);
+});
+
+test('stale usage on a non-migration label remains blocking', () => {
+  const inspectorA = objectId();
+  const userA = objectId();
+  const usedInspection = inspection({ user: userA, labels: [135] });
+  const result = buildMigrationAnalysis(snapshot({
+    inspectorId: inspectorA,
+    userId: userA,
+    inspections: [usedInspection],
+    existingLabels: [{
+      _id: objectId(),
+      number: 135,
+      owner_inspector: null,
+      rejected_by_inspector: null,
+      usage: { inspector: null, inspectors: [] },
+      migration: { source: 'manual-modern-write' },
+    }],
+  }));
+
+  assert.equal(
+    result.conflicts.some(
+      (entry) => entry.conflict_type === 'modern_label_incompatible',
+    ),
+    true,
+  );
+  assert.equal(result.can_apply, false);
+  assert.equal(result.skip_label_numbers.has(135), true);
+});
+
 test('verifier accepts the scalar compatibility value only for a sole aggregate Inspector', () => {
   const inspectorA = objectId();
   const userA = objectId();

@@ -421,6 +421,12 @@ module.exports.handleComplaintUploadErrors = handleComplaintUploadErrors;
 module.exports.handleSampleUploadErrors = handleSampleUploadErrors;
 module.exports.complaintFilesUpload = (fieldName = "files") =>
   applyComplaintMulterMiddleware(complaintUpload.array(fieldName, COMPLAINT_UPLOAD_MAX_FILE_COUNT));
+module.exports.testMediaUpload = applyComplaintMulterMiddleware(
+  complaintUpload.fields([
+    { name: "images", maxCount: 10 },
+    { name: "videos", maxCount: 2 },
+  ]),
+);
 module.exports.sampleFilesUpload = (fieldName = "files") =>
   applySampleMulterMiddleware(sampleUpload.array(fieldName, SAMPLE_UPLOAD_MAX_FILE_COUNT));
 module.exports.QC_IMAGE_TEMP_DIR = QC_IMAGE_TEMP_DIR;

@@ -96,6 +96,22 @@ const {
   isSuperAdminLikeRole,
   normalizeUserRoleKey,
 } = require("../helpers/userRole");
+const { buildAuditActor } = require("../helpers/permissions");
+const {
+  flattenUploadedFiles,
+  buildStoredQcImageEntry,
+  prepareSingleQcImageUpload,
+  uploadPreparedQcImage,
+  cleanupUploadedQcImageObject,
+  cleanupLocalQcImageFiles,
+} = require("../services/qcImageUpload.service");
+const {
+  REMINDER_TYPES,
+  findReminderAnchorForItem,
+  normalizeReminderStatus,
+  normalizeReminderType,
+  serializeReminder,
+} = require("../services/orderReminder.service");
 const { applyItemBrand } = require("../helpers/itemBrand");
 
 const {
@@ -4172,6 +4188,41 @@ const enrichItemDetailFinishes = async (item = {}, req = {}) => {
   });
 };
 
+const buildSignedReminderImage = async (image = {}) => {
+  const previewKey = normalizeTextField(image?.preview?.key || image?.key || "");
+  const sourceKey = normalizeTextField(image?.storage?.source_key || "");
+  const key = previewKey || sourceKey;
+  if (!key) return image || null;
+
+  try {
+    const url = await getSignedObjectUrl(key, {
+      expiresIn: 24 * 60 * 60,
+      filename: normalizeTextField(image?.originalName) || "reminder-image",
+    });
+    return {
+      ...image,
+      url,
+      preview: { ...(image?.preview || {}), url },
+      storage: { ...(image?.storage || {}), source_url: sourceKey && sourceKey !== key ? await getSignedObjectUrl(sourceKey, { expiresIn: 24 * 60 * 60 }) : url },
+    };
+  } catch (error) {
+    console.error("Build reminder image URL failed:", error?.message || error);
+    return image || null;
+  }
+};
+
+const parseReminderRequest = (value) => {
+  try {
+    const reminders = JSON.parse(String(value || "[]"));
+    if (!Array.isArray(reminders) || reminders.length === 0) {
+      throw new Error("Add at least one reminder");
+    }
+    return reminders;
+  } catch (error) {
+    throw new Error(error.message === "Add at least one reminder" ? error.message : "Reminders must be valid data");
+  }
+};
+
 exports.getItemDetails = async (req, res) => {
   try {
     const itemCodeInput = String(req.params.itemCode || "").trim();
@@ -4195,7 +4246,7 @@ exports.getItemDetails = async (req, res) => {
     }
 
     const orders = await Order.find(applyDataAccessMatch({ "item.item_code": itemCodeMatch }, req.user))
-      .select("order_id item brand vendor status quantity archived qc_record updatedAt order_date ETD revised_ETD")
+      .select("order_id item brand vendor status quantity archived qc_record reminders shipment updatedAt createdAt order_date ETD revised_ETD")
       .populate({
         path: "qc_record",
         select: "last_inspected_date request_date quantities inspection_record updatedAt",
@@ -4243,6 +4294,34 @@ exports.getItemDetails = async (req, res) => {
       };
     });
 
+    const reminderAnchor = await findReminderAnchorForItem({
+      itemCode: item?.code || itemCodeInput,
+      user: req.user,
+    });
+    const isManager = isManagerLikeRole(req.user?.role);
+    const itemReminders = isManager
+      ? await Promise.all(
+        orders.filter((order) => order?.archived !== true).flatMap((order) =>
+          (Array.isArray(order?.reminders) ? order.reminders : [])
+            .filter((reminder) => normalizeReminderType(reminder?.type) === REMINDER_TYPES.ADMIN)
+            .map(async (reminder) => ({
+              ...serializeReminder({ reminder, order }),
+              image: await buildSignedReminderImage(reminder?.image),
+            })),
+        ),
+      )
+      : [];
+    const anchorInspectorId = String(
+      reminderAnchor?.order?.qc_record?.inspector?._id ||
+      reminderAnchor?.order?.qc_record?.inspector ||
+      "",
+    ).trim();
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    const canQcCreateReminder =
+      normalizeUserRoleKey(req.user?.role) === "qc" &&
+      Boolean(anchorInspectorId) &&
+      anchorInspectorId === currentUserId;
+
     const [files, finish] = await Promise.all([
       buildItemDetailFilePayloads(item),
       enrichItemDetailFinishes(item, req),
@@ -4259,6 +4338,17 @@ exports.getItemDetails = async (req, res) => {
         },
         product_database: productDatabaseRow,
         orders: orderRows,
+        reminders: itemReminders.sort(
+          (left, right) => new Date(right?.createdAt || 0) - new Date(left?.createdAt || 0),
+        ),
+        reminder_anchor: reminderAnchor
+          ? {
+            order_id: String(reminderAnchor.order?.order_id || ""),
+            order_db_id: String(reminderAnchor.order?._id || ""),
+            source: reminderAnchor.source,
+            can_qc_create: canQcCreateReminder,
+          }
+          : null,
         summary: {
           total_orders: orderRows.length,
           total_inspection_records: orderRows.reduce(
@@ -4275,6 +4365,122 @@ exports.getItemDetails = async (req, res) => {
       message: "Failed to fetch item details",
       error: error.message,
     });
+  }
+};
+
+exports.createItemReminders = async (req, res) => {
+  const files = flattenUploadedFiles(req.files);
+  const cleanupPaths = files.map((file) => file?.path);
+  const uploadedObjectKeys = [];
+
+  try {
+    const itemCode = normalizeTextField(req.params.itemCode);
+    if (!itemCode) return res.status(400).json({ message: "Item code is required" });
+
+    const anchor = await findReminderAnchorForItem({ itemCode, user: req.user });
+    if (!anchor?.order?._id) {
+      return res.status(400).json({ message: "A linked PO is required before adding a reminder" });
+    }
+
+    const roleKey = normalizeUserRoleKey(req.user?.role);
+    if (roleKey !== "qc" && !isManagerLikeRole(roleKey)) {
+      return res.status(403).json({ message: "Only QC users, managers, and admins can create reminders" });
+    }
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    const anchorInspectorId = String(
+      anchor.order?.qc_record?.inspector?._id || anchor.order?.qc_record?.inspector || "",
+    ).trim();
+    if (roleKey === "qc" && (!anchorInspectorId || anchorInspectorId !== currentUserId)) {
+      return res.status(403).json({ message: "QC can only add reminders to their aligned PO" });
+    }
+
+    const rawReminders = parseReminderRequest(req.body?.reminders);
+    const usedImageIndexes = new Set();
+    const reminders = rawReminders.map((entry, index) => {
+      const comment = normalizeTextField(entry?.comment);
+      if (!comment) throw new Error(`Reminder ${index + 1} needs a comment`);
+      if (comment.length > 2000) throw new Error(`Reminder ${index + 1} comment cannot exceed 2000 characters`);
+
+      const type = normalizeTextField(entry?.type || REMINDER_TYPES.QC).toLowerCase();
+      if (![REMINDER_TYPES.QC, REMINDER_TYPES.ADMIN].includes(type)) {
+        throw new Error(`Reminder ${index + 1} has an invalid type`);
+      }
+      if (roleKey === "qc" && type !== REMINDER_TYPES.QC) {
+        throw new Error("QC users can only create QC reminders");
+      }
+
+      const rawImageIndex = entry?.image_index;
+      if (rawImageIndex === undefined || rawImageIndex === null || rawImageIndex === "") {
+        return { comment, type, imageIndex: null };
+      }
+      const imageIndex = Number(rawImageIndex);
+      if (!Number.isInteger(imageIndex) || imageIndex < 0 || imageIndex >= files.length || usedImageIndexes.has(imageIndex)) {
+        throw new Error(`Reminder ${index + 1} has an invalid image`);
+      }
+      usedImageIndexes.add(imageIndex);
+      return { comment, type, imageIndex };
+    });
+    if (usedImageIndexes.size !== files.length) {
+      return res.status(400).json({ message: "Each reminder image must be assigned once" });
+    }
+
+    const order = await Order.findOne(
+      applyDataAccessMatch({ _id: anchor.order._id }, req.user),
+    );
+    if (!order) return res.status(404).json({ message: "Linked PO not found" });
+
+    const createdBy = buildAuditActor(req.user);
+    const createdAt = new Date();
+    const linkedQc = anchor.order?.qc_record?._id || anchor.order?.qc_record || null;
+    const remindersToSave = reminders.map((reminder) => ({
+      _id: new mongoose.Types.ObjectId(),
+      type: reminder.type,
+      status: "pending",
+      comment: reminder.comment,
+      image: null,
+      linked_qc: linkedQc,
+      created_by: createdBy,
+      createdAt,
+    }));
+
+    for (let index = 0; index < reminders.length; index += 1) {
+      const imageIndex = reminders[index].imageIndex;
+      if (imageIndex === null) continue;
+      const preparedUpload = await prepareSingleQcImageUpload({
+        file: files[imageIndex],
+        fallbackOriginalName: `reminder-${index + 1}.jpg`,
+      });
+      cleanupPaths.push(...(preparedUpload?.cleanupPaths || []));
+      const uploadResult = await uploadPreparedQcImage({
+        preparedUpload,
+        folder: "qc-reminders",
+        qcId: String(linkedQc || order._id),
+        inspectionId: String(remindersToSave[index]._id),
+        targetField: "reminder_image",
+      });
+      if (uploadResult?.key && !uploadResult?.reusedExistingObject) uploadedObjectKeys.push(uploadResult.key);
+      remindersToSave[index].image = buildStoredQcImageEntry({
+        uploadResult,
+        hash: preparedUpload.hash,
+        uploadedAt: createdAt,
+        uploadedBy: createdBy,
+        thumbnail: { status: "pending" },
+      });
+    }
+
+    order.reminders.push(...remindersToSave);
+    order.updated_by = createdBy;
+    await order.save();
+    uploadedObjectKeys.length = 0;
+    return res.status(201).json({
+      message: `${remindersToSave.length} reminder${remindersToSave.length === 1 ? "" : "s"} saved successfully`,
+      data: remindersToSave.map((reminder) => serializeReminder({ reminder, order })),
+    });
+  } catch (error) {
+    await Promise.allSettled(uploadedObjectKeys.map((key) => cleanupUploadedQcImageObject(key)));
+    return res.status(400).json({ message: error.message || "Failed to save reminders" });
+  } finally {
+    await cleanupLocalQcImageFiles(cleanupPaths);
   }
 };
 

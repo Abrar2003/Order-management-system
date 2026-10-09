@@ -96,6 +96,7 @@ const resolveLatestInspectionRecord = (inspectionRecords = []) => {
 
 const isOpenInspectionRecord = (inspectionRecord = null) => {
   if (!inspectionRecord) return null;
+  if (inspectionRecord?.test_requirement_pending === true) return true;
   if (
     toNonNegativeNumber(inspectionRecord?.checked, 0) > 0 ||
     toNonNegativeNumber(inspectionRecord?.passed, 0) > 0
@@ -107,6 +108,13 @@ const isOpenInspectionRecord = (inspectionRecord = null) => {
   if (!status) return true;
   return ["pending", "open", "requested", "under inspection", "in progress", "in_progress"].includes(status);
 };
+
+const hasPendingTestRequirement = (qcRecord = null) =>
+  qcRecord?.test_requirement_pending === true ||
+  (Array.isArray(qcRecord?.inspection_record) &&
+    qcRecord.inspection_record.some(
+      (inspectionRecord) => inspectionRecord?.test_requirement_pending === true,
+    ));
 
 const normalizeOrderStatus = (value = "") => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -210,7 +218,8 @@ const deriveOrderProgress = ({
       passedQuantity - resolvedShippedQuantity,
     ),
   );
-  const hasOpenRequest = hasOpenQcRequest({
+  const hasPendingTest = hasPendingTestRequirement(resolvedQcRecord);
+  const hasOpenRequest = hasPendingTest || hasOpenQcRequest({
     qcRecord: resolvedQcRecord,
     remainingInspectionQuantity: pendingInspectionQuantity,
   });
@@ -221,6 +230,8 @@ const deriveOrderProgress = ({
     resolvedShippedQuantity >= resolvedOrderQuantity
   ) {
     status = "Shipped";
+  } else if (hasPendingTest) {
+    status = "Under Inspection";
   } else if (
     resolvedOrderQuantity > 0 &&
     passedQuantity >= resolvedOrderQuantity &&
@@ -309,6 +320,7 @@ module.exports = {
   getShipmentQuantityTotal,
   getShippableQuantity,
   hasOpenQcRequest,
+  hasPendingTestRequirement,
   normalizeOrderStatus,
   normalizeRequestHistoryStatus,
   resolveLatestRequestEntry,

@@ -37,6 +37,8 @@ const complaintsRouter = require("./routers/complaints.routes");
 const securityRouter = require("./routers/security.routes");
 const omsChatRouter = require("./routers/omsChat.routes");
 const employeeReportRouter = require("./routers/employeeReport.routes");
+const testsRouter = require("./routers/tests.routes");
+const { ensureDropTestTemplate } = require("./controllers/tests.controller");
 const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
 const { createNotificationSocketServer } = require("./realtime/notificationSocket");
@@ -155,6 +157,8 @@ app.use("/security", securityRouter);
 app.use("/api/security", securityRouter);
 app.use("/oms-chat", omsChatRouter);
 app.use("/api/oms-chat", omsChatRouter);
+app.use("/tests", testsRouter);
+app.use("/api/tests", testsRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK v2" });
@@ -208,6 +212,7 @@ app.use((error, req, res, _next) => {
 const startServer = async () => {
   try {
     await connectDB();
+    await ensureDropTestTemplate();
 
     const server = http.createServer(app);
     const io = createNotificationSocketServer({

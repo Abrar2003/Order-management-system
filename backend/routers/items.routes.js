@@ -1,6 +1,7 @@
 const masterWorkflow = require("../controllers/masterWorkflow.controller");
 const express = require("express");
 const upload = require("../config/multer.config");
+const qcImageAnyUpload = upload.qcImageAnyUpload;
 const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const {
@@ -40,6 +41,7 @@ const {
   checkProductDatabaseItem,
   approveProductDatabaseItem,
   getItemDetails,
+  createItemReminders,
   getItemOrderPresence,
   getItemOrdersHistory,
   getPisInspectionMasterComparison,
@@ -139,6 +141,15 @@ router.get(
   requirePermission("items", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getItems,
+);
+
+router.post(
+  "/:itemCode/reminders",
+  auth,
+  requirePermission("qc", "edit"),
+  qcImageAnyUpload,
+  invalidateItemsOnSuccess,
+  createItemReminders,
 );
 
 router.get(

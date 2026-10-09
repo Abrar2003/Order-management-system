@@ -87,6 +87,7 @@ const resolveLatestInspectionRecord = (inspectionRecords = []) => {
 
 const isOpenInspectionRecord = (inspectionRecord = null) => {
   if (!inspectionRecord) return null;
+  if (inspectionRecord?.test_requirement_pending === true) return true;
   if (
     toSafeOrderNumber(inspectionRecord?.checked, 0) > 0 ||
     toSafeOrderNumber(inspectionRecord?.passed, 0) > 0
@@ -98,6 +99,13 @@ const isOpenInspectionRecord = (inspectionRecord = null) => {
   if (!status) return true;
   return ["pending", "open", "requested", "under inspection", "in progress", "in_progress"].includes(status);
 };
+
+const hasPendingTestRequirement = (qc = null) =>
+  qc?.test_requirement_pending === true ||
+  (Array.isArray(qc?.inspection_record) &&
+    qc.inspection_record.some(
+      (inspectionRecord) => inspectionRecord?.test_requirement_pending === true,
+    ));
 
 export const getShipmentQuantityTotal = (orderOrShipment = {}) => {
   const shipmentEntries = Array.isArray(orderOrShipment)
@@ -153,11 +161,14 @@ export const getOrderProgress = ({ order = {}, qc = null } = {}) => {
     0,
     Math.min(orderQuantity - shippedQuantity, passedQuantity - shippedQuantity),
   );
-  const hasOpenRequest = hasOpenQcRequest(qcRecord, pendingInspectionQuantity);
+  const hasPendingTest = hasPendingTestRequirement(qcRecord);
+  const hasOpenRequest = hasPendingTest || hasOpenQcRequest(qcRecord, pendingInspectionQuantity);
 
   let status = "Pending";
   if (orderQuantity > 0 && shippedQuantity >= orderQuantity) {
     status = "Shipped";
+  } else if (hasPendingTest) {
+    status = "Under Inspection";
   } else if (
     orderQuantity > 0 &&
     passedQuantity >= orderQuantity &&

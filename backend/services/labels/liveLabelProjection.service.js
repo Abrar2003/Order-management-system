@@ -1,5 +1,9 @@
 const Label = require('../../models/label.model');
 const LabelTransaction = require('../../models/labelTransaction.model');
+const LabelUsage = require('../../models/labelUsage.model');
+const { coerceVendorValueForSchema } = require('../../helpers/vendorRef');
+
+const LIVE_USAGE_SOURCE = 'live_qc_usage';
 
 const normalizeLabels = (labels = []) => [...new Set(
   (Array.isArray(labels) ? labels : [])
@@ -13,9 +17,137 @@ const difference = (left = [], right = []) => {
 };
 
 class LiveLabelProjectionService {
-  constructor({ LabelModel = Label, LabelTransactionModel = LabelTransaction } = {}) {
+  constructor({
+    LabelModel = Label,
+    LabelTransactionModel = LabelTransaction,
+    LabelUsageModel = LabelUsage,
+  } = {}) {
     this.Label = LabelModel;
     this.LabelTransaction = LabelTransactionModel;
+    this.LabelUsage = LabelUsageModel;
+  }
+
+  async getValidationState(inspectorId, labels = []) {
+    const numbers = normalizeLabels(labels);
+    if (numbers.length === 0) {
+      return { allocated: new Set(), used: new Set(), rejected: new Set() };
+    }
+
+    const records = await this.Label.find({ number: { $in: numbers } })
+      .select('number allocation_state owner_inspector rejected_by_inspector usage')
+      .lean();
+    const sameId = (value) => String(value || '') === String(inspectorId || '');
+
+    return {
+      allocated: new Set(records
+        .filter((record) => (
+          record?.allocation_state !== 'conflicted'
+          && sameId(record?.owner_inspector)
+        ))
+        .map((record) => Number(record.number))),
+      used: new Set(records
+        .filter((record) => (
+          (Array.isArray(record?.usage?.inspectors)
+            && record.usage.inspectors.length > 0)
+          || record?.usage?.inspector
+        ))
+        .map((record) => Number(record.number))),
+      rejected: new Set(records
+        .filter((record) => sameId(record?.rejected_by_inspector))
+        .map((record) => Number(record.number))),
+    };
+  }
+
+  async refreshUsageLabels(labels = [], now = new Date()) {
+    const numbers = normalizeLabels(labels);
+    if (numbers.length === 0) return;
+
+    const evidence = await this.LabelUsage.aggregate([
+      { $match: { labels: { $in: numbers } } },
+      { $unwind: '$labels' },
+      { $match: { labels: { $in: numbers } } },
+      {
+        $group: {
+          _id: '$labels',
+          inspectors: { $addToSet: '$inspector' },
+          source_updated_at: { $max: '$source_updated_at' },
+        },
+      },
+    ]);
+    const evidenceByNumber = new Map(
+      evidence.map((entry) => [Number(entry._id), entry]),
+    );
+
+    await this.Label.bulkWrite(numbers.map((number) => {
+      const entry = evidenceByNumber.get(number);
+      const inspectors = Array.isArray(entry?.inspectors) ? entry.inspectors : [];
+      return {
+        updateOne: {
+          filter: { number },
+          update: {
+            $set: {
+              'usage.inspector': inspectors.length === 1 ? inspectors[0] : null,
+              'usage.inspectors': inspectors,
+              'usage.source_updated_at': entry?.source_updated_at || null,
+            },
+            $setOnInsert: {
+              number,
+              allocation_state: 'active',
+              'migration.source': LIVE_USAGE_SOURCE,
+              'migration.migrated_at': now,
+            },
+          },
+          upsert: true,
+        },
+      };
+    }), { ordered: false });
+  }
+
+  async syncInspectionUsage({ inspectorId, inspection = {}, qc = null } = {}) {
+    if (!inspectorId || !inspection?._id) {
+      throw new Error('Inspector and inspection record are required for usage projection');
+    }
+
+    const labels = normalizeLabels(inspection.labels_added);
+    const previous = await this.LabelUsage.findOne({
+      inspection_record: inspection._id,
+    }).select('labels').lean();
+    const affectedLabels = normalizeLabels([...(previous?.labels || []), ...labels]);
+    const now = new Date();
+
+    if (labels.length === 0) {
+      await this.LabelUsage.deleteOne({ inspection_record: inspection._id });
+    } else {
+      const qcDoc = qc && typeof qc === 'object' ? qc : null;
+      await this.LabelUsage.updateOne(
+        { inspection_record: inspection._id },
+        {
+          $set: {
+            inspector: inspectorId,
+            labels,
+            inspection_record: inspection._id,
+            qc: qcDoc?._id || inspection.qc || null,
+            request_history_id: inspection.request_history_id || null,
+            qc_meta: {
+              order_id: String(qcDoc?.order_meta?.order_id || ''),
+              brand: String(qcDoc?.order_meta?.brand || ''),
+              vendor: coerceVendorValueForSchema(qcDoc?.order_meta?.vendor),
+              item_code: String(qcDoc?.item?.item_code || ''),
+              description: String(qcDoc?.item?.description || ''),
+            },
+            inspection_date: String(inspection.inspection_date || ''),
+            used_at: inspection.createdAt || now,
+            source_updated_at: inspection.updatedAt || now,
+            'migration.migrated': false,
+            'migration.source': LIVE_USAGE_SOURCE,
+            'migration.migrated_at': null,
+          },
+        },
+        { upsert: true },
+      );
+    }
+
+    await this.refreshUsageLabels(affectedLabels, now);
   }
 
   async upsertTransaction(inspectorId, history = {}, now = new Date()) {
@@ -147,5 +279,6 @@ class LiveLabelProjectionService {
 
 module.exports = new LiveLabelProjectionService();
 module.exports.LiveLabelProjectionService = LiveLabelProjectionService;
+module.exports.LIVE_USAGE_SOURCE = LIVE_USAGE_SOURCE;
 module.exports.difference = difference;
 module.exports.normalizeLabels = normalizeLabels;

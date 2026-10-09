@@ -117,3 +117,105 @@ test('live transfer stops when its modern owner check is stale', async () => {
     /no longer matches/,
   );
 });
+
+test('live QC usage replaces one inspection projection and refreshes affected labels', async () => {
+  const usageWrites = [];
+  const usageDeletes = [];
+  const labelWrites = [];
+  const sourceUpdatedAt = new Date('2026-10-09T05:00:00.000Z');
+  const projector = new LiveLabelProjectionService({
+    LabelModel: {
+      async bulkWrite(operations, options) {
+        labelWrites.push({ operations, options });
+      },
+    },
+    LabelTransactionModel: {},
+    LabelUsageModel: {
+      findOne() {
+        return {
+          select() {
+            return { lean: async () => ({ labels: [10] }) };
+          },
+        };
+      },
+      async updateOne(filter, update, options) {
+        usageWrites.push({ filter, update, options });
+      },
+      async deleteOne(filter) {
+        usageDeletes.push(filter);
+      },
+      async aggregate() {
+        return [{
+          _id: 11,
+          inspectors: ['inspector-1'],
+          source_updated_at: sourceUpdatedAt,
+        }];
+      },
+    },
+  });
+
+  await projector.syncInspectionUsage({
+    inspectorId: 'inspector-1',
+    inspection: {
+      _id: 'inspection-1',
+      qc: 'qc-1',
+      labels_added: [11],
+      inspection_date: '2026-10-09',
+      createdAt: new Date('2026-10-09T04:00:00.000Z'),
+      updatedAt: sourceUpdatedAt,
+    },
+    qc: {
+      _id: 'qc-1',
+      order_meta: { order_id: 'PO-1', brand: 'Brand' },
+      item: { item_code: 'ITEM-1', description: 'Item' },
+    },
+  });
+
+  assert.equal(usageWrites.length, 1);
+  assert.equal(usageDeletes.length, 0);
+  assert.deepEqual(usageWrites[0].update.$set.labels, [11]);
+  assert.equal(usageWrites[0].update.$set['migration.source'], 'live_qc_usage');
+  assert.deepEqual(labelWrites[0].operations.map((entry) => ({
+    number: entry.updateOne.filter.number,
+    inspectors: entry.updateOne.update.$set['usage.inspectors'],
+  })), [
+    { number: 10, inspectors: [] },
+    { number: 11, inspectors: ['inspector-1'] },
+  ]);
+  assert.deepEqual(labelWrites[0].options, { ordered: false });
+});
+
+test('modern QC validation checks only the requested serials', async () => {
+  const queries = [];
+  const projector = new LiveLabelProjectionService({
+    LabelModel: {
+      find(filter) {
+        queries.push(filter);
+        return {
+          select() {
+            return {
+              lean: async () => [
+                { number: 1, allocation_state: 'active', owner_inspector: 'inspector-1' },
+                { number: 2, allocation_state: 'active', owner_inspector: 'inspector-1', usage: { inspectors: ['inspector-1'] } },
+                { number: 3, allocation_state: 'active', rejected_by_inspector: 'inspector-1' },
+                { number: 4, allocation_state: 'conflicted', owner_inspector: 'inspector-1' },
+              ],
+            };
+          },
+        };
+      },
+    },
+    LabelTransactionModel: {},
+    LabelUsageModel: {},
+  });
+
+  const state = await projector.getValidationState(
+    'inspector-1',
+    [1, 2, 3, 4],
+  );
+
+  assert.deepEqual(queries, [{ number: { $in: [1, 2, 3, 4] } }]);
+  assert.deepEqual([...state.allocated], [1, 2]);
+  assert.deepEqual([...state.used], [2]);
+  assert.deepEqual([...state.rejected], [3]);
+});

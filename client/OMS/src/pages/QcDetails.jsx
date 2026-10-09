@@ -5,6 +5,7 @@ import api from "../api/axios";
 import { confirmFileDeletion } from "../utils/fileDeletePassword";
 import Navbar from "../components/Navbar";
 import UpdateQcModal from "../components/UpdateQcModal";
+import DropTestModal from "../components/DropTestModal";
 import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
 import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
@@ -569,6 +570,7 @@ const QcDetails = () => {
     CLAIM_WARNING_DELAY_SECONDS,
   );
   const [reminderPopupOpen, setReminderPopupOpen] = useState(false);
+  const [resolvingReminderId, setResolvingReminderId] = useState("");
   const [loading, setLoading] = useState(true);
   const [relatedFileType, setRelatedFileType] = useState(() => {
     const initialRole = String(getUserFromToken()?.role || "").trim().toLowerCase();
@@ -589,6 +591,11 @@ const QcDetails = () => {
   const [selectedItemMasterFileValue, setSelectedItemMasterFileValue] = useState("");
   const [previewFile, setPreviewFile] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showTestsModal, setShowTestsModal] = useState(false);
+  const [activeTestTemplate, setActiveTestTemplate] = useState(null);
+  const [qcTests, setQcTests] = useState(null);
+  const [loadingTests, setLoadingTests] = useState(false);
+  const [submittingTest, setSubmittingTest] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
   const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
@@ -816,6 +823,7 @@ const QcDetails = () => {
     pendingAlignmentInfo.hasRequest &&
     isQcAlignedRecord &&
     (!isQcUser || qcUserRequestAvailability.isAvailable);
+  const canRunQcTests = isQcUser && isQcAlignedRecord;
   const qcUpdateDisabledReason = !canUpdateQc
     ? !pendingAlignmentInfo.hasRequest
       ? "QC is not requested yet. Align QC request before updating."
@@ -1961,6 +1969,47 @@ const QcDetails = () => {
     }
   }, [id]);
 
+  const fetchQcTests = useCallback(async () => {
+    try {
+      setLoadingTests(true);
+      const response = await api.get(`/tests/qc/${id}`);
+      setQcTests(response.data?.data || null);
+    } catch (error) {
+      console.error(error);
+      setQcTests(null);
+    } finally {
+      setLoadingTests(false);
+    }
+  }, [id]);
+
+  const submitDropTest = useCallback(async (body) => {
+    if (!activeTestTemplate) return;
+    try {
+      setSubmittingTest(true);
+      const response = await api.post(`/tests/qc/${id}/${activeTestTemplate._id}/runs`, body);
+      setActiveTestTemplate(null);
+      await Promise.all([fetchQcDetails(), fetchQcTests()]);
+      if (response.data?.data?.released) alert("Drop Test saved and the pending inspection was completed.");
+    } catch (error) {
+      alert(error?.response?.data?.message || "Failed to submit Drop Test.");
+    } finally {
+      setSubmittingTest(false);
+    }
+  }, [activeTestTemplate, fetchQcDetails, fetchQcTests, id]);
+
+  const resolveReminder = useCallback(async (reminderId) => {
+    if (!reminderId || resolvingReminderId) return;
+    try {
+      setResolvingReminderId(reminderId);
+      await api.patch(`/qc/reminders/${encodeURIComponent(reminderId)}/resolve`, { qc_id: id });
+      await fetchQcDetails();
+    } catch (error) {
+      alert(error?.response?.data?.message || "Failed to resolve reminder.");
+    } finally {
+      setResolvingReminderId("");
+    }
+  }, [fetchQcDetails, id, resolvingReminderId]);
+
   const handleShippingMarkUpdatedToggle = useCallback(async () => {
     if (!isAdmin || updatingShippingMark) return;
     const nextShippingMarkUpdated = !shippingMarkUpdated;
@@ -2714,6 +2763,10 @@ const QcDetails = () => {
   useEffect(() => {
     fetchQcDetails();
   }, [fetchQcDetails]);
+
+  useEffect(() => {
+    fetchQcTests();
+  }, [fetchQcTests]);
 
   useEffect(() => {
     if (
@@ -3928,6 +3981,20 @@ const QcDetails = () => {
               </div>
             </section>
 
+            <section>
+              <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
+                <h3 className="h6 mb-0">Tests</h3>
+                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => setShowTestsModal(true)}>
+                  View tests
+                </button>
+              </div>
+              {loadingTests ? <div className="text-secondary small">Loading test status…</div> : qcTests?.requirement?.required ? (
+                <div className={`alert py-2 mb-0 ${qcTests.requirement.missing_test_ids?.length ? "alert-warning" : "alert-success"}`}>
+                  Claim percentage is {formatClaimPercentage(qcTests.requirement.claim_percentage)}%. {qcTests.requirement.missing_test_ids?.length ? `${qcTests.requirement.missing_test_ids.length} required test${qcTests.requirement.missing_test_ids.length === 1 ? "" : "s"} pending.` : "All required tests are complete."}
+                </div>
+              ) : <div className="text-secondary small">No test is required for a claim percentage of 3% or lower.</div>}
+            </section>
+
             {!isViewOnly && (
               <div className="d-flex justify-content-end flex-wrap gap-2 qc-details-action-row">
                 {canFinalizeShipping &&
@@ -3983,6 +4050,16 @@ const QcDetails = () => {
 
                 <button
                   type="button"
+                  className="btn btn-outline-primary"
+                  onClick={() => setShowTestsModal(true)}
+                  disabled={!canRunQcTests}
+                  title={!canRunQcTests ? "Only the assigned QC inspector can run tests." : ""}
+                >
+                  Test
+                </button>
+
+                <button
+                  type="button"
                   className="btn btn-primary"
                   onClick={() => setShowUpdateModal(true)}
                   disabled={!canUpdateQc}
@@ -3996,7 +4073,7 @@ const QcDetails = () => {
         </div>
       </div>
 
-	      {showUpdateModal && !isViewOnly && canUpdateQc && (
+      {showUpdateModal && !isViewOnly && canUpdateQc && (
 	        <UpdateQcModal
 	          qc={qc}
 	          isAdmin={isAdmin}
@@ -4006,7 +4083,30 @@ const QcDetails = () => {
             fetchQcDetails();
           }}
 	        />
-	      )}
+      )}
+
+      {showTestsModal && (
+        <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog" aria-modal="true">
+          <div className="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div className="modal-content">
+              <div className="modal-header"><h5 className="modal-title">Test dashboard</h5><button type="button" className="btn-close" onClick={() => setShowTestsModal(false)} /></div>
+              <div className="modal-body">
+                {qcTests?.requirement?.required && <div className={`alert ${qcTests.requirement.missing_test_ids?.length ? "alert-warning" : "alert-success"}`}>{qcTests.requirement.missing_test_ids?.length ? "Required tests are pending; this inspection remains pending until each active test is submitted." : "Required tests are complete."}</div>}
+                <h6>Active tests</h6>
+                {(qcTests?.templates || []).map((template) => {
+                  const status = qcTests?.requirement?.tests?.find((entry) => entry.test_id === template._id);
+                  return <div className="border rounded p-3 mb-2 d-flex justify-content-between gap-3 align-items-center" key={template._id}><div><strong>{template.name}</strong> <span className="text-muted">v{template.version}</span><div className="small text-muted">{status?.completed ? "Completed for this request" : qcTests?.requirement?.required ? "Required for this request" : "Optional for this request"}</div></div><button className="btn btn-sm btn-primary" disabled={!canRunQcTests} onClick={() => { setActiveTestTemplate(template); setShowTestsModal(false); }}>{status?.completed ? "Retest" : "Run test"}</button></div>;
+                })}
+                <h6 className="mt-4">Prior runs</h6>
+                {(qcTests?.runs || []).length === 0 ? <div className="text-secondary small">No test runs submitted.</div> : (qcTests?.runs || []).map((run) => <div className="border rounded p-3 mb-2" key={run._id}><div className="d-flex justify-content-between gap-2"><strong>{run.test_name} v{run.test_version}</strong><span className={`badge text-bg-${run.result === "pass" ? "success" : "danger"}`}>{String(run.result || "").toUpperCase()}</span></div><div className="small text-muted">{run.request_date || "Legacy request"} · {run.gross_packed_weight_kg} kg · Drops 1–5: {run.drops_1_to_5_mm} mm · Drop 6: {run.drop_6_mm} mm</div>{[...(run.images || []), ...(run.videos || [])].length > 0 && <div className="small mt-2">Evidence: {[...(run.images || []), ...(run.videos || [])].map((media) => <span className="me-2" key={media._id}><a href={media.url} target="_blank" rel="noreferrer">{media.original_name || "Open file"}</a>{media.download_url && <a className="ms-1" href={media.download_url}>Download</a>}</span>)}</div>}</div>)}
+              </div>
+              <div className="modal-footer"><button type="button" className="btn btn-outline-secondary" onClick={() => setShowTestsModal(false)}>Close</button></div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTestTemplate && <DropTestModal template={activeTestTemplate} defaultWeight={Number(itemMasterDetails.weightGross) || 0} saving={submittingTest} onClose={() => setActiveTestTemplate(null)} onSubmit={submitDropTest} />}
 
 	      {inspectionRecordToUpdate &&
           !isViewOnly &&
@@ -4496,7 +4596,10 @@ const QcDetails = () => {
 
                   return (
                     <div key={reminder?._id || `${reminder?.qc_id || "reminder"}-${index}`} className="border rounded p-2">
-                      <div className="fw-semibold">Reminder {index + 1}</div>
+                      <div className="d-flex justify-content-between gap-2">
+                        <div className="fw-semibold">QC Reminder {index + 1}</div>
+                        <span className="badge text-bg-warning">Pending</span>
+                      </div>
                       <div className="mt-1">{reminder?.comment}</div>
                       {imageUrl && (
                         <a href={imageUrl} target="_blank" rel="noreferrer" className="d-inline-block mt-2" onClick={(event) => {
@@ -4512,6 +4615,14 @@ const QcDetails = () => {
                         </a>
                       )}
                       {source && <div className="small text-secondary mt-2">{source}</div>}
+                      <button
+                        type="button"
+                        className="btn btn-outline-success btn-sm mt-2"
+                        onClick={() => resolveReminder(reminder?._id)}
+                        disabled={!reminder?._id || Boolean(resolvingReminderId)}
+                      >
+                        {resolvingReminderId === reminder?._id ? "Resolving..." : "Resolve"}
+                      </button>
                     </div>
                   );
                 })}

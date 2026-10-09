@@ -19,6 +19,54 @@ const AuditActorSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const testMediaSchema = new mongoose.Schema(
+  {
+    key: { type: String, default: "", trim: true },
+    original_name: { type: String, default: "", trim: true },
+    content_type: { type: String, default: "", trim: true },
+    size: { type: Number, default: 0, min: 0 },
+    uploaded_by: { type: AuditActorSchema, default: () => ({}) },
+    uploaded_at: { type: Date, default: Date.now },
+  },
+  { _id: true },
+);
+
+const testRunSchema = new mongoose.Schema(
+  {
+    test: { type: mongoose.Schema.Types.ObjectId, ref: "tests", required: true },
+    test_type: { type: String, enum: ["drop"], required: true },
+    test_name: { type: String, required: true, trim: true },
+    test_version: { type: String, required: true, trim: true },
+    request_history_id: { type: mongoose.Schema.Types.ObjectId, default: null },
+    request_key: { type: String, required: true, trim: true },
+    request_date: { type: String, default: "", trim: true },
+    gross_packed_weight_kg: { type: Number, required: true, min: 0 },
+    drops_1_to_5_mm: { type: Number, required: true, min: 0 },
+    drop_6_mm: { type: Number, required: true, min: 0 },
+    confirmed_stages: { type: [String], default: [] },
+    result: { type: String, enum: ["pass", "fail"], required: true },
+    images: {
+      type: [testMediaSchema],
+      default: [],
+      validate: {
+        validator: (entries) => !Array.isArray(entries) || entries.length <= 10,
+        message: "Drop Test cannot exceed 10 images",
+      },
+    },
+    videos: {
+      type: [testMediaSchema],
+      default: [],
+      validate: {
+        validator: (entries) => !Array.isArray(entries) || entries.length <= 2,
+        message: "Drop Test cannot exceed 2 videos",
+      },
+    },
+    completed_by: { type: AuditActorSchema, default: () => ({}) },
+    completed_at: { type: Date, default: Date.now },
+  },
+  { _id: true },
+);
+
 const qcSchema = new mongoose.Schema(
   {
     order: {
@@ -462,6 +510,8 @@ const qcSchema = new mongoose.Schema(
       ],
       default: [],
     },
+    test_runs: { type: [testRunSchema], default: [] },
+    test_requirement_pending: { type: Boolean, default: false },
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

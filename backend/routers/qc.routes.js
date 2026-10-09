@@ -102,6 +102,14 @@ router.patch(
   qcController.updateQC
 );
 
+router.patch(
+  "/reminders/:reminderId/resolve",
+  auth,
+  requirePermission("qc", "edit"),
+  invalidateQcOnSuccess,
+  qcController.resolveOrderReminder,
+);
+
 router.post(
   "/:id/reminders",
   auth,

@@ -580,6 +580,10 @@ const Navbar = () => {
         );
       }
 
+      if (canAccessQc && isManagerLikeRole(permissionRole || role)) {
+        items.push(routeMenuItem("tests", "Tests", "/tests"));
+      }
+
       if (isAdmin) {
         items.push(
           routeMenuItem("permission-management", "Rights Management", "/settings/permissions"),
@@ -599,7 +603,7 @@ const Navbar = () => {
 
       return items;
     },
-    [canCreateUsers, canCreateVendors, hasPermission, isAdmin, permissionRole, role, themeLabel],
+    [canAccessQc, canCreateUsers, canCreateVendors, hasPermission, isAdmin, permissionRole, role, themeLabel],
   );
 
   const menuSections = useMemo(
