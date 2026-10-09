@@ -129,9 +129,9 @@ not changed.
 
 1. `PUPPETEER_EXECUTABLE_PATH`
 2. `CHROME_EXECUTABLE_PATH`
-3. Common Windows Chrome/Edge locations
-4. Common Linux Chrome/Chromium locations
-5. Puppeteer's downloaded browser
+3. Puppeteer's downloaded browser, when installed
+4. Common Windows Chrome/Edge locations
+5. Common Linux Chrome/Chromium locations
 
 The VPS deploy script installs Puppeteer's pinned Chrome build into
 `backend/.cache/puppeteer` (or `PUPPETEER_CACHE_DIR`) and then checks that it

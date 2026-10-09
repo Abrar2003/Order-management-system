@@ -98,3 +98,11 @@ test("shipping pending PDFs are permitted by the central renderer", () => {
   const { PDF_REPORT_KEYS } = require("../controllers/pdf.controller");
   assert.equal(PDF_REPORT_KEYS.has("shipping-pending"), true);
 });
+
+test("PDF renderer prefers Puppeteer's installed browser to a system browser", () => {
+  const source = fs.readFileSync(path.join(BACKEND_ROOT, "services", "pdfRenderer.js"), "utf8");
+  assert.match(
+    source,
+    /CHROME_EXECUTABLE_PATH\s*\|\|\s*\(fs\.existsSync\(bundledBrowser\) \? bundledBrowser : ""\)\s*\|\|\s*findSystemBrowser\(\)/,
+  );
+});

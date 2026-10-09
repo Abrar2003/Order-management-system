@@ -45,9 +45,11 @@ const findSystemBrowser = () => {
 };
 
 const getLaunchOptions = () => {
+  const bundledBrowser = puppeteer.executablePath();
   const executablePath = String(
     process.env.PUPPETEER_EXECUTABLE_PATH
       || process.env.CHROME_EXECUTABLE_PATH
+      || (fs.existsSync(bundledBrowser) ? bundledBrowser : "")
       || findSystemBrowser()
       || "",
   ).trim();
