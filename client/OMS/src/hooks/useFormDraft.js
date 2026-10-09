@@ -44,6 +44,7 @@ const useFormDraft = ({
   const lastSavedPayloadRef = useRef("");
   const loadTokenRef = useRef(0);
   const saveGenerationRef = useRef(0);
+  const pendingSaveRef = useRef(Promise.resolve());
   const onDraftRestoreRef = useRef(onDraftRestore);
   const effectiveDraftValue = draftValue === undefined ? form : draftValue;
 
@@ -125,32 +126,35 @@ const useFormDraft = ({
     }
     const saveGeneration = saveGenerationRef.current;
 
-    const timeoutId = setTimeout(async () => {
-      if (saveGenerationRef.current !== saveGeneration) return;
-      try {
-        setStatus("saving");
-        setMessage("Saving draft...");
-        const response = await api.put(draftUrl, {
-          mode,
-          record_id: recordId,
-          payload: formRef.current || {},
-        });
-        if (saveGenerationRef.current !== saveGeneration) {
-          try {
-            await api.delete(draftUrl);
-          } catch {
-            // Clearing after a stale save is best-effort only.
+    const timeoutId = setTimeout(() => {
+      const saveDraft = async () => {
+        if (saveGenerationRef.current !== saveGeneration) return;
+        try {
+          setStatus("saving");
+          setMessage("Saving draft...");
+          const response = await api.put(draftUrl, {
+            mode,
+            record_id: recordId,
+            payload: formRef.current || {},
+          });
+          if (saveGenerationRef.current !== saveGeneration) {
+            try {
+              await api.delete(draftUrl);
+            } catch {
+              // Clearing after a stale save is best-effort only.
+            }
+            return;
           }
-          return;
+          const savedPayload = response?.data?.data?.payload || formRef.current || {};
+          lastSavedPayloadRef.current = serializeDraftPayload(savedPayload);
+          setStatus("saved");
+          setMessage("Draft saved");
+        } catch {
+          setStatus("error");
+          setMessage("Draft save failed");
         }
-        const savedPayload = response?.data?.data?.payload || formRef.current || {};
-        lastSavedPayloadRef.current = serializeDraftPayload(savedPayload);
-        setStatus("saved");
-        setMessage("Draft saved");
-      } catch {
-        setStatus("error");
-        setMessage("Draft save failed");
-      }
+      };
+      pendingSaveRef.current = saveDraft();
     }, saveDelayMs);
 
     return () => {
@@ -176,9 +180,10 @@ const useFormDraft = ({
     }
   }, [draftUrl]);
 
-  const pauseDraftSaves = useCallback(() => {
+  const pauseDraftSaves = useCallback(async () => {
     saveGenerationRef.current += 1;
     loadedRef.current = false;
+    await pendingSaveRef.current;
   }, []);
 
   const resumeDraftSaves = useCallback(() => {

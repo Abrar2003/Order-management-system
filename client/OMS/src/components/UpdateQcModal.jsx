@@ -3371,8 +3371,8 @@ const UpdateQcModal = ({
       }
 
       try {
-        pauseDraftSaves();
         setSaving(true);
+        await pauseDraftSaves();
         await uploadRejectionEvidence();
         await api.patch(`/qc/${qc._id}/inspection-records`, {
           records: [
@@ -3543,8 +3543,8 @@ const UpdateQcModal = ({
       qcPayload.labels = allLabelsAfterRewrite;
 
       try {
-        pauseDraftSaves();
         setSaving(true);
+        await pauseDraftSaves();
         await uploadRejectionEvidence();
         await api.patch(`/qc/${qc._id}/inspection-records`, {
           records: [
@@ -3684,8 +3684,8 @@ const UpdateQcModal = ({
     saveRequestKeyRef.current = requestKey;
 
     try {
-      pauseDraftSaves();
       setSaving(true);
+      await pauseDraftSaves();
       const rejectionUploadIntentId = await uploadRejectionEvidence();
       if (rejectionUploadIntentId) {
         payload.image_upload_intent_id = rejectionUploadIntentId;

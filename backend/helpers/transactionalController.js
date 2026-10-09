@@ -53,6 +53,23 @@ const isTransactionUnsupportedError = (error) => {
   });
 };
 
+const isWriteConflictError = (error) => {
+  const candidates = [
+    error,
+    error?.cause,
+    error?.originalError,
+    error?.errorResponse,
+  ].filter(Boolean);
+
+  return candidates.some((candidate) =>
+    Number(candidate?.code) === 112 ||
+    String(candidate?.message || candidate?.errmsg || "")
+      .trim()
+      .toLowerCase()
+      .includes("write conflict"),
+  );
+};
+
 const sendDeferredResult = (res, result) => {
   if (!result?.sent) {
     return res.status(204).end();
@@ -120,7 +137,10 @@ const runTransactionalController = async ({
         return sendTransactionsRequired(res);
       }
 
-      if (error?.name === "VersionError" && attempt < maxAttempts) {
+      if (
+        (error?.name === "VersionError" || isWriteConflictError(error)) &&
+        attempt < maxAttempts
+      ) {
         continue;
       }
 
@@ -150,5 +170,6 @@ module.exports = {
   DeferredHttpResponseError,
   createDeferredResponse,
   isTransactionUnsupportedError,
+  isWriteConflictError,
   runTransactionalController,
 };

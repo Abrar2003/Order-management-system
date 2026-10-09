@@ -25,6 +25,7 @@ const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const {
   isTransactionUnsupportedError,
+  isWriteConflictError,
   runTransactionalController,
 } = require("../helpers/transactionalController");
 const { upsertItemFromQc } = require("../services/itemSync");
@@ -8248,6 +8249,9 @@ const updateQC = async (req, res) => {
     if (err?.name === "VersionError") {
       throw err;
     }
+    if (isWriteConflictError(err)) {
+      throw err;
+    }
     if (isTransactionUnsupportedError(err)) {
       throw err;
     }
@@ -9364,10 +9368,33 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       });
       return includedPoMap.has(poKey);
     });
+    const includedOrders = await Order.find(
+      applyDataAccessMatch(
+        {
+          ...ACTIVE_ORDER_MATCH,
+          order_id: { $in: includedOrderIds },
+        },
+        req.user,
+      ),
+    )
+      .select("order_id vendor brand quantity status shipment qc_record item")
+      .lean();
+    const qcOrderIds = new Set(
+      includedQcDocs.map((qcDoc) => String(qcDoc?.order?._id || qcDoc?.order || "").trim()),
+    );
+    const includedOrdersWithoutQc = includedOrders.filter((order) => {
+      const poMeta = resolveWeeklySummaryPoMeta({ order });
+      const poKey = buildWeeklySummaryPoKey({
+        orderId: poMeta.order_id,
+        vendor: poMeta.vendor,
+        brand: poMeta.brand,
+      });
+      return includedPoMap.has(poKey) && !qcOrderIds.has(String(order?._id || "").trim());
+    });
     const uniqueItemCodes = [
       ...new Set(
-        includedQcDocs
-          .map((qcDoc) => normalizeText(qcDoc?.item?.item_code || ""))
+        [...includedQcDocs, ...includedOrdersWithoutQc]
+          .map((entry) => normalizeText(entry?.item?.item_code || ""))
           .filter(Boolean),
       ),
     ];
@@ -9516,7 +9543,32 @@ exports.getWeeklyOrderSummary = async (req, res) => {
           userNameById.get(String(latestOverallInspection?.inspector_id || "").trim()) || "",
         ),
       };
-    });
+    }).concat(includedOrdersWithoutQc.map((order) => {
+      const poMeta = resolveWeeklySummaryPoMeta({ order });
+      const itemCode = normalizeText(order?.item?.item_code || "") || "N/A";
+      const itemDoc = itemDocByCodeKey.get(normalizeItemCodeKey(itemCode)) || null;
+
+      return {
+        order_id: poMeta.order_id || "N/A",
+        vendor: poMeta.vendor || "N/A",
+        brand: poMeta.brand || "N/A",
+        item_code: itemCode,
+        total_order_quantity: toNonNegativeNumber(order?.quantity, 0),
+        order_status: resolveQcOrderStatus(null, order),
+        quantity_passed: 0,
+        item_cbm: toRoundedNumber(resolveWeeklySummaryCbmPerUnit(itemDoc)),
+        total_cbm: 0,
+        pending: toNonNegativeNumber(order?.quantity, 0),
+        goods_not_ready: false,
+        goods_not_ready_reason: "",
+        goods_not_ready_inspection_date: "",
+        inspected_in_range: false,
+        last_inspection_date_in_range: "",
+        last_inspector_name_in_range: "",
+        latest_overall_inspection_date: "",
+        latest_overall_inspector_name: "",
+      };
+    }));
 
     const brandOptions = normalizeDistinctValues(
       normalizedRows.map((row) => row?.brand || ""),

@@ -351,7 +351,11 @@ const buildVendorDisplayRows = (
         }];
       }
 
-      return inspectedItemsInRange.map((item, index) => ({
+      return sortedItems.filter((item) =>
+        item?.inspected_in_range ||
+        toReportQuantity(item?.pending) > 0 ||
+        !isPackedOrderStatus(item?.order_status),
+      ).map((item, index) => ({
         key: `${orderId}-${item?.item_code || "item"}-${index}`,
         po: orderId,
         itemLabel: item?.item_code || "N/A",
