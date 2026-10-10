@@ -13933,7 +13933,6 @@ const editInspectionRecords = async (req, res) => {
       requestHistoryEntries.map((entry) => [String(entry?._id || "").trim(), entry]),
     );
     const inspectorChangedRequestHistoryEntries = new Set();
-    const touchedInspectors = new Set();
     const requestHistoryDateUpdates = new Map();
     const imageUploadIntents = [];
     const usedImageUploadIntentIds = new Set();
@@ -14704,8 +14703,6 @@ const editInspectionRecords = async (req, res) => {
       submittedInspectionRecordIds.add(recordId);
       if (hasInspectionLabelProjectionChange(labelProjectionBefore, record)) {
         labelProjectionChangedRecordIds.add(recordId);
-        touchedInspectors.add(existingInspectorId);
-        touchedInspectors.add(inspectorId);
       }
 	    }
 
@@ -14846,10 +14843,6 @@ const editInspectionRecords = async (req, res) => {
       await orderRecord.save();
     }
 
-    const inspectorIdsToRecalculate = [...touchedInspectors]
-      .map((value) => String(value || "").trim())
-      .filter((value) => mongoose.Types.ObjectId.isValid(value));
-
     const qcEditLog = buildQcEditLogPayload({
       reqUser: req.user,
       qcDoc: qc,
@@ -14881,7 +14874,6 @@ const editInspectionRecords = async (req, res) => {
         recalculate_order_cbm: Boolean(
           orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status),
         ),
-        recalculate_inspector_used_labels: inspectorIdsToRecalculate,
         qc_edit_log: qcEditLog,
         order_edit_log: orderEditLog,
       },

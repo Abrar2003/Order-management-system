@@ -8,9 +8,6 @@ const { upsertItemFromQc } = require("./itemSync");
 const { syncLatestInspectionToItem } = require("./inspectionItemSync.service");
 const { applyTotalPoCbmToOrder } = require("./orderCbm.service");
 const { notifyUsers } = require("./notificationService");
-const {
-  recalculateInspectorUsedLabels,
-} = require("./inspectorLabelCache.service");
 
 const MAX_ATTEMPTS = 5;
 const parsePositiveInt = (value, fallback) => {
@@ -73,10 +70,6 @@ const processFollowUp = async (followUp) => {
     await applyTotalPoCbmToOrder(order);
     await order.save();
   }
-
-  await recalculateInspectorUsedLabels(
-    followUp.payload?.recalculate_inspector_used_labels,
-  );
 
   await writeAuditLog(QcEditLog, followUp.payload?.qc_edit_log, followUp._id);
   await writeAuditLog(OrderEditLog, followUp.payload?.order_edit_log, followUp._id);
