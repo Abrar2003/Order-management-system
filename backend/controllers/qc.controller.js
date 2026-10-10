@@ -30,11 +30,7 @@ const {
 } = require("../helpers/transactionalController");
 const { upsertItemFromQc } = require("../services/itemSync");
 const {
-  syncItemInspectedDataFromInspection,
-} = require("../services/inspectionItemSync.service");
-const {
   applyTotalPoCbmToOrder,
-  syncTotalPoCbmForItem,
 } = require("../services/orderCbm.service");
 const {
   resolveShipmentRowCbm,
@@ -13891,12 +13887,33 @@ exports.getQCById = async (req, res) => {
 const editInspectionRecords = async (req, res) => {
   try {
     const qcId = String(req.params.id || "").trim();
+    const idempotencyKey = normalizeText(req.get?.("Idempotency-Key")).slice(0, 200);
     const payloadRecords = Array.isArray(req.body?.records)
       ? req.body.records
       : [];
 
     if (!mongoose.Types.ObjectId.isValid(qcId)) {
       return res.status(400).json({ message: "Invalid QC id" });
+    }
+
+    if (idempotencyKey) {
+      const existingFollowUp = await QcUpdateFollowUp.findOne({
+        qc: qcId,
+        idempotency_key: idempotencyKey,
+      }).lean();
+      if (existingFollowUp) {
+        const existingQc = await QC.findOne(
+          applyDataAccessMatch({ _id: qcId }, req.user),
+        );
+        if (existingQc) {
+          return res.status(200).json({
+            message: "Inspection records updated successfully",
+            data: existingQc,
+            follow_up: { id: String(existingFollowUp._id), status: existingFollowUp.state },
+            idempotent: true,
+          });
+        }
+      }
     }
 
     if (payloadRecords.length === 0) {
@@ -14876,27 +14893,6 @@ const editInspectionRecords = async (req, res) => {
     qc.updated_by = buildAuditActor(req.user);
     await qc.save();
 
-    if (latestRecord) {
-      try {
-        const itemInspectionSyncResult = await syncItemInspectedDataFromInspection({
-          qcDoc: qc,
-          inspectionRecord: latestRecord,
-          user: req.user,
-          route: "PATCH /qc/:id/inspection-records/:recordId",
-          source: "qc_inspection_record_update",
-        });
-        if (itemInspectionSyncResult?.updated && itemInspectionSyncResult?.item_doc) {
-          await syncTotalPoCbmForItem(itemInspectionSyncResult.item_doc.toObject());
-        }
-      } catch (itemInspectionSyncError) {
-        console.error("Item inspected data sync after inspection edit failed:", {
-          qcId: qc?._id,
-          inspectionId: latestRecord?._id,
-          error: itemInspectionSyncError?.message || String(itemInspectionSyncError),
-        });
-      }
-    }
-
     const orderId = qc?.order?._id || qc.order;
     const orderRecord = await Order.findOne(
       applyDataAccessMatch({ _id: orderId }, req.user),
@@ -14904,7 +14900,6 @@ const editInspectionRecords = async (req, res) => {
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
       applyQcOrderStatus(qc, orderRecord);
       orderRecord.updated_by = buildAuditActor(req.user);
-      await applyQcOrderPoCbm(orderRecord);
       await orderRecord.save();
     }
 
@@ -14914,7 +14909,7 @@ const editInspectionRecords = async (req, res) => {
 
     await recalculateInspectorUsedLabels(inspectorIdsToRecalculate);
 
-    await createQcEditLog({
+    const qcEditLog = buildQcEditLogPayload({
       reqUser: req.user,
       qcDoc: qc,
       beforeSnapshot: beforeQcSnapshot,
@@ -14922,30 +14917,58 @@ const editInspectionRecords = async (req, res) => {
       operationType: "qc_inspection_record_edit",
       extraRemarks: ["Inspection records edited through admin route."],
     });
-    if (orderRecord) {
-      await createOrderEditLogFromQc({
-        reqUser: req.user,
-        orderDoc: orderRecord,
-        beforeSnapshot: beforeOrderSnapshot,
-        afterSnapshot: buildOrderAuditSnapshotForQc(orderRecord),
-        extraRemarks: ["Order status recalculated from inspection record edit."],
-      });
-    }
-
-    try {
-      await upsertItemFromQc(qc);
-    } catch (itemSyncError) {
-      console.error("Item sync after inspection edit failed:", {
-        qcId: qc?._id,
-        error: itemSyncError?.message || String(itemSyncError),
-      });
-    }
+    const orderEditLog = orderRecord
+      ? buildOrderEditLogPayload({
+          reqUser: req.user,
+          orderDoc: orderRecord,
+          beforeSnapshot: beforeOrderSnapshot,
+          afterSnapshot: buildOrderAuditSnapshotForQc(orderRecord),
+          extraRemarks: ["Order status recalculated from inspection record edit."],
+        })
+      : null;
+    const followUp = await QcUpdateFollowUp.create({
+      qc: qc._id,
+      order: orderRecord?._id || null,
+      inspection: latestRecord?._id || null,
+      idempotency_key: idempotencyKey,
+      payload: {
+        actor: {
+          _id: req.user?._id || req.user?.id || null,
+          name: req.user?.name || req.user?.username || req.user?.email || "",
+        },
+        order_id: qc?.order_meta?.order_id || orderRecord?.order_id || "",
+        recalculate_order_cbm: Boolean(
+          orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status),
+        ),
+        qc_edit_log: qcEditLog,
+        order_edit_log: orderEditLog,
+      },
+    });
 
     return res.status(200).json({
       message: "Inspection records updated successfully",
       data: qc,
+      follow_up: { id: String(followUp._id), status: followUp.state },
     });
   } catch (err) {
+    if (
+      typeof err?.hasErrorLabel === "function" &&
+      err.hasErrorLabel("TransientTransactionError")
+    ) {
+      throw err;
+    }
+    if (err?.name === "VersionError") {
+      throw err;
+    }
+    if (isWriteConflictError(err)) {
+      throw err;
+    }
+    if (isTransactionUnsupportedError(err)) {
+      throw err;
+    }
+    if (Number(err?.code) === 11000) {
+      throw err;
+    }
     console.error("Edit Inspection Records Error:", err);
     return res
       .status(400)
@@ -14957,6 +14980,26 @@ exports.editInspectionRecords = async (req, res) =>
   runTransactionalController({
     connection: mongoose.connection,
     handler: editInspectionRecords,
+    onDuplicateKey: async () => {
+      const idempotencyKey = normalizeText(req.get?.("Idempotency-Key")).slice(0, 200);
+      if (!idempotencyKey) return false;
+      const followUp = await QcUpdateFollowUp.findOne({
+        qc: req.params.id,
+        idempotency_key: idempotencyKey,
+      }).lean();
+      if (!followUp) return false;
+      const qc = await QC.findOne(
+        applyDataAccessMatch({ _id: req.params.id }, req.user),
+      );
+      if (!qc) return false;
+      res.status(200).json({
+        message: "Inspection records updated successfully",
+        data: qc,
+        follow_up: { id: String(followUp._id), status: followUp.state },
+        idempotent: true,
+      });
+      return true;
+    },
     req,
     res,
   });

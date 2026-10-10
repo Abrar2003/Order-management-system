@@ -57,6 +57,7 @@ const {
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
+const GRACEFUL_SHUTDOWN_TIMEOUT_MS = 55_000;
 const isProduction =
   String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
 const {
@@ -252,7 +253,7 @@ const startServer = async () => {
       setTimeout(() => {
         console.error("Forced shutdown after timeout.");
         process.exit(1);
-      }, 10000).unref();
+      }, GRACEFUL_SHUTDOWN_TIMEOUT_MS).unref();
     };
 
     process.on("SIGINT", () => shutdown("SIGINT"));

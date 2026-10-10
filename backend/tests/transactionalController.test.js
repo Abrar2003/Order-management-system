@@ -182,6 +182,35 @@ test("retries the whole transaction once after a MongoDB write conflict", async 
   assert.deepEqual(state.body, { ok: true });
 });
 
+test("retries a write conflict passed through by the controller", async () => {
+  let attempts = 0;
+  const connection = {
+    async transaction(callback) {
+      attempts += 1;
+      await callback();
+    },
+  };
+  const { res, state } = createResponse();
+
+  await runTransactionalController({
+    connection,
+    req: { method: "PATCH", originalUrl: "/qc/1/inspection-records" },
+    res,
+    handler: async (_req, deferredRes) => {
+      if (attempts === 1) {
+        const error = new Error("Write conflict during plan execution");
+        error.code = 112;
+        throw error;
+      }
+      deferredRes.json({ ok: true });
+    },
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(state.statusCode, 200);
+  assert.deepEqual(state.body, { ok: true });
+});
+
 test("refuses to run when the connection is known to be standalone", async () => {
   let handlerCalls = 0;
   let transactionCalls = 0;

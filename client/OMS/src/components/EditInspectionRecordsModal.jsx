@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../api/axios";
 import useBulkQcImageUpload from "../hooks/useBulkQcImageUpload";
 import { createQcImageUploadIntent } from "../services/qcImages.service";
@@ -206,6 +206,7 @@ const EditInspectionRecordsModal = ({
   const [inspectors, setInspectors] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const saveRequestKeyRef = useRef("");
   const {
     state: rejectionUploadState,
     startUpload: startRejectionImageUpload,
@@ -421,12 +422,20 @@ const EditInspectionRecordsModal = ({
         }
         uploadIntentIdByRecord.set(String(row._id), uploadIntentId);
       }
+      const requestKey = saveRequestKeyRef.current || (
+        globalThis.crypto?.randomUUID?.()
+        || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      );
+      saveRequestKeyRef.current = requestKey;
       await api.patch(`/qc/${qc?._id}/inspection-records`, {
         records: payload.map((row) => ({
           ...row,
           image_upload_intent_id: uploadIntentIdByRecord.get(String(row._id)) || undefined,
         })),
+      }, {
+        headers: { "Idempotency-Key": requestKey },
       });
+      saveRequestKeyRef.current = "";
       onSuccess?.();
       onClose?.();
     } catch (err) {

@@ -1050,6 +1050,7 @@ const UpdateQcModal = ({
     maxFiles: MAX_REJECTION_IMAGE_COUNT,
   });
   const saveRequestKeyRef = useRef("");
+  const inspectionSaveRequestKeyRef = useRef("");
   const [rejectionImages, setRejectionImages] = useState([]);
   const [reminderDrafts, setReminderDrafts] = useState([]);
   const [savingReminders, setSavingReminders] = useState(false);
@@ -3374,6 +3375,11 @@ const UpdateQcModal = ({
         setSaving(true);
         await pauseDraftSaves();
         await uploadRejectionEvidence();
+        const requestKey = inspectionSaveRequestKeyRef.current || (
+          globalThis.crypto?.randomUUID?.()
+          || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+        );
+        inspectionSaveRequestKeyRef.current = requestKey;
         await api.patch(`/qc/${qc._id}/inspection-records`, {
           records: [
             {
@@ -3406,7 +3412,10 @@ const UpdateQcModal = ({
               inspected_box_sizes: inspectedBoxSizePayload.value,
             },
           ],
+        }, {
+          headers: { "Idempotency-Key": requestKey },
         });
+        inspectionSaveRequestKeyRef.current = "";
         await clearDraft({ resetStatus: false });
         alert("Inspection record updated successfully.");
         onUpdated?.();
@@ -3546,6 +3555,11 @@ const UpdateQcModal = ({
         setSaving(true);
         await pauseDraftSaves();
         await uploadRejectionEvidence();
+        const requestKey = inspectionSaveRequestKeyRef.current || (
+          globalThis.crypto?.randomUUID?.()
+          || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+        );
+        inspectionSaveRequestKeyRef.current = requestKey;
         await api.patch(`/qc/${qc._id}/inspection-records`, {
           records: [
             {
@@ -3578,7 +3592,10 @@ const UpdateQcModal = ({
               inspected_box_sizes: inspectedBoxSizePayload.value,
             },
           ],
+        }, {
+          headers: { "Idempotency-Key": requestKey },
         });
+        inspectionSaveRequestKeyRef.current = "";
         await clearDraft({ resetStatus: false });
         alert("QC updated successfully.");
         onUpdated?.();
