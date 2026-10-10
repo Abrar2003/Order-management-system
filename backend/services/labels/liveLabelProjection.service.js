@@ -58,6 +58,52 @@ class LiveLabelProjectionService {
     };
   }
 
+  async claimAllocation({ inspectorId, labels = [], session = null, now = new Date() } = {}) {
+    const numbers = normalizeLabels(labels);
+    if (!inspectorId || numbers.length === 0) {
+      throw new Error('Inspector and labels are required for allocation');
+    }
+
+    const result = await this.Label.bulkWrite(numbers.map((number) => ({
+      updateOne: {
+        // Claim only an unallocated, unused label. The unique number index also
+        // turns a concurrent claim into a duplicate-key error rather than a takeover.
+        filter: {
+          number,
+          owner_inspector: { $in: [null, inspectorId] },
+          rejected_by_inspector: null,
+          'usage.inspector': null,
+          'usage.inspectors.0': { $exists: false },
+          allocation_state: { $ne: 'conflicted' },
+        },
+        update: {
+          $set: {
+            owner_inspector: inspectorId,
+            rejected_by_inspector: null,
+            rejected_at: null,
+          },
+          $setOnInsert: {
+            number,
+            allocation_state: 'active',
+            'migration.source': 'live_atomic_allocation',
+            'migration.migrated_at': now,
+          },
+        },
+        upsert: true,
+      },
+    })), {
+      ordered: true,
+      ...(session ? { session } : {}),
+    });
+
+    const claimed = Number(result?.matchedCount || 0) + Number(result?.upsertedCount || 0);
+    if (claimed !== numbers.length) {
+      const error = new Error('One or more labels are no longer available. Refresh and try again.');
+      error.code = 'LABEL_CLAIM_CONFLICT';
+      throw error;
+    }
+  }
+
   async refreshUsageLabels(labels = [], now = new Date()) {
     const numbers = normalizeLabels(labels);
     if (numbers.length === 0) return;

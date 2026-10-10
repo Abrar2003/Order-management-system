@@ -4,7 +4,11 @@ const test = require("node:test");
 const inspectorController = require("../controllers/inspector.controller");
 const labelStorageService = require("../services/labels/labelStorage.service");
 const {
-  __test__: { getAllocatedElsewhereDetails, getInspectorUserId },
+  __test__: {
+    buildLabelAllocationHistory,
+    getAllocatedElsewhereDetails,
+    getInspectorUserId,
+  },
 } = inspectorController;
 
 test("uses the inspector user id without stringifying a populated user object", () => {
@@ -31,6 +35,20 @@ test("allocated-label conflicts identify the QC holding each label", () => {
     { label: 1001, inspectors: [{ inspector_id: "qc-ada", qc_name: "Ada" }] },
     { label: 1002, inspectors: [{ inspector_id: "qc-ben", qc_name: "Ben" }] },
   ]);
+});
+
+test("new allocation history stores only the allocation delta", () => {
+  const history = buildLabelAllocationHistory({
+    action: "allocate",
+    labels: [3, 1, 3],
+    actor: { _id: "66e5f2a0be4b1b8d4f841234", name: "Admin" },
+  });
+
+  assert.deepEqual(history.labels, [1, 3]);
+  assert.deepEqual(history.previous_labels, []);
+  assert.deepEqual(history.next_labels, []);
+  assert.equal(history.actor.name, "Admin");
+  assert.ok(history._id);
 });
 
 test("label-usage summary preserves the existing response envelope", async () => {

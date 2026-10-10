@@ -219,3 +219,51 @@ test('modern QC validation checks only the requested serials', async () => {
   assert.deepEqual([...state.used], [2]);
   assert.deepEqual([...state.rejected], [3]);
 });
+
+test('atomic allocation claims only currently available labels in the caller session', async () => {
+  const { projector, labelWrites } = createProjector();
+  projector.Label.bulkWrite = async (operations, options) => {
+    labelWrites.push({ operations, options });
+    return { matchedCount: 1, upsertedCount: 1 };
+  };
+  const session = { id: 'session-1' };
+  const now = new Date('2026-10-10T12:00:00.000Z');
+
+  await projector.claimAllocation({
+    inspectorId: 'inspector-1',
+    labels: [2, 1, 2],
+    session,
+    now,
+  });
+
+  assert.deepEqual(labelWrites[0].operations.map((entry) => entry.updateOne.filter), [
+    {
+      number: 1,
+      owner_inspector: { $in: [null, 'inspector-1'] },
+      rejected_by_inspector: null,
+      'usage.inspector': null,
+      'usage.inspectors.0': { $exists: false },
+      allocation_state: { $ne: 'conflicted' },
+    },
+    {
+      number: 2,
+      owner_inspector: { $in: [null, 'inspector-1'] },
+      rejected_by_inspector: null,
+      'usage.inspector': null,
+      'usage.inspectors.0': { $exists: false },
+      allocation_state: { $ne: 'conflicted' },
+    },
+  ]);
+  assert.deepEqual(labelWrites[0].options, { ordered: true, session });
+  assert.equal(labelWrites[0].operations[0].updateOne.update.$setOnInsert['migration.migrated_at'], now);
+});
+
+test('atomic allocation rejects a partial claim', async () => {
+  const { projector } = createProjector();
+  projector.Label.bulkWrite = async () => ({ matchedCount: 1, upsertedCount: 0 });
+
+  await assert.rejects(
+    projector.claimAllocation({ inspectorId: 'inspector-1', labels: [1, 2] }),
+    { code: 'LABEL_CLAIM_CONFLICT' },
+  );
+});

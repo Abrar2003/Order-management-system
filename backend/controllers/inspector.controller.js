@@ -1,6 +1,7 @@
 const Inspector = require("../models/inspector.model");
 const User = require("../models/user.model");
 const Inspection = require("../models/inspection.model");
+const LabelTransaction = require("../models/labelTransaction.model");
 const mongoose = require("mongoose");
 const { getVendorName } = require("../helpers/vendorRef");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
@@ -60,8 +61,7 @@ const buildLabelHistoryActor = (user = null) => ({
   name: String(user?.name || user?.username || user?.email || "").trim(),
 });
 
-const appendLabelAllocationHistory = (
-  inspector,
+const buildLabelAllocationHistory = (
   {
     action,
     labels = [],
@@ -73,13 +73,10 @@ const appendLabelAllocationHistory = (
     remarks = "",
   } = {},
 ) => {
-  if (!inspector || !action) return;
+  if (!action) return null;
 
-  inspector.label_allocation_history = Array.isArray(inspector.label_allocation_history)
-    ? inspector.label_allocation_history
-    : [];
-
-  inspector.label_allocation_history.push({
+  return {
+    _id: new mongoose.Types.ObjectId(),
     action,
     labels: normalizeInspectorLabels(labels),
     previous_labels: normalizeInspectorLabels(previousLabels),
@@ -89,7 +86,18 @@ const appendLabelAllocationHistory = (
     actor: buildLabelHistoryActor(actor),
     recorded_at: new Date(),
     remarks: String(remarks || "").trim(),
-  });
+  };
+};
+
+const appendLabelAllocationHistory = (inspector, details = {}) => {
+  if (!inspector) return;
+  const history = buildLabelAllocationHistory(details);
+  if (!history) return;
+
+  inspector.label_allocation_history = Array.isArray(inspector.label_allocation_history)
+    ? inspector.label_allocation_history
+    : [];
+  inspector.label_allocation_history.push(history);
 };
 
 const mirrorLatestLegacyLabelChange = async (inspector, operation) => {
@@ -317,7 +325,12 @@ const getAllocatedElsewhereDetails = (labels = [], allocatedByLabel = new Map())
   };
 };
 
-exports.__test__ = { collectGlobalInspectorLabelSets, getAllocatedElsewhereDetails, getInspectorUserId };
+exports.__test__ = {
+  buildLabelAllocationHistory,
+  collectGlobalInspectorLabelSets,
+  getAllocatedElsewhereDetails,
+  getInspectorUserId,
+};
 
 const QC_USER_FILTER = {
   $and: [
@@ -574,19 +587,21 @@ exports.allocateLabels = async (req, res) => {
       return res.status(400).json({ message: error });
     }
 
-    const inspector = await Inspector.findById(req.params.id);
+    const inspector = await Inspector.findById(req.params.id)
+      .select("_id alloted_labels rejected_labels")
+      .lean();
 
     if (!inspector) {
       return res.status(404).json({ message: "Inspector not found" });
     }
 
-    await syncInspectorUsedLabelsFromInspectionRecords(inspector);
-
     const {
       allocated: allocatedLabels,
-      used: usedLabels,
       rejected: rejectedLabels,
     } = getInspectorLabelState(inspector);
+    const usedLabels = normalizeInspectorLabels(
+      await labelStorageService.getUsedLabels(inspector._id),
+    );
     const existingLabels = new Set(allocatedLabels);
     const usedSet = new Set(usedLabels);
     const rejectedSet = new Set(rejectedLabels);
@@ -652,31 +667,80 @@ exports.allocateLabels = async (req, res) => {
       });
     }
 
-    inspector.alloted_labels = normalizeInspectorLabels([
+    const nextLabels = normalizeInspectorLabels([
       ...allocatedLabels,
       ...newLabels,
     ]);
-    inspector.labels_allotted_by = req.user._id;
-    appendLabelAllocationHistory(inspector, {
+    const history = buildLabelAllocationHistory({
       action: "allocate",
       labels: newLabels,
-      previousLabels: allocatedLabels,
-      nextLabels: inspector.alloted_labels,
       actor: req.user,
     });
 
-    await inspector.save();
-    await mirrorLatestLegacyLabelChange(inspector, "allocate");
-    await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
+    const writeLegacyAllocation = async (session = null) => {
+      const result = await Inspector.updateOne(
+        {
+          _id: inspector._id,
+          alloted_labels: { $nin: newLabels },
+        },
+        {
+          $addToSet: { alloted_labels: { $each: newLabels } },
+          $set: { labels_allotted_by: req.user._id },
+          $push: { label_allocation_history: history },
+        },
+        ...(session ? [{ session }] : []),
+      );
+      if (Number(result?.matchedCount || 0) !== 1) {
+        const error = new Error("Labels changed while allocating. Refresh and try again.");
+        error.code = "LABEL_CLAIM_CONFLICT";
+        throw error;
+      }
+    };
+
+    const storageState = await labelStorageService.getState(inspector._id);
+    if (["dual", "modern"].includes(storageState.write_mode)) {
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          await liveLabelProjection.claimAllocation({
+            inspectorId: inspector._id,
+            labels: newLabels,
+            session,
+            now: history.recorded_at,
+          });
+          await writeLegacyAllocation(session);
+          await LabelTransaction.create([{
+            inspector: inspector._id,
+            action: "allocate",
+            labels: newLabels,
+            actor: history.actor,
+            recorded_at: history.recorded_at,
+            migration: {
+              migrated: false,
+              source: "live_atomic_allocation",
+              migrated_at: history.recorded_at,
+              legacy_inspector: inspector._id,
+              legacy_history_id: history._id,
+            },
+          }], { session });
+        });
+      } finally {
+        await session.endSession();
+      }
+    } else {
+      await writeLegacyAllocation();
+    }
 
     res.json({
       message: `${newLabels.length} label(s) allocated successfully`,
-      data: inspector,
       newly_allocated_labels: newLabels,
-      total_allocated_labels: inspector.alloted_labels,
+      total_allocated_labels: nextLabels,
     });
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    res.status(
+      err?.code === "LABEL_CLAIM_CONFLICT" || err?.code === 11000 ? 409 : 400,
+    )
+      .json({ message: err.message });
   }
 };
 
