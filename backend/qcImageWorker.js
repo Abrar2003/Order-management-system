@@ -19,7 +19,6 @@ const {
 const {
   QUEUE_NAMES,
   closeQueues,
-  getQueues,
 } = require("./queues");
 const JOB_NAMES = require("./queues/jobNames");
 const {
@@ -221,7 +220,6 @@ const main = async () => {
     );
   }
 
-  getQueues();
   worker = createQcImageWorker();
 
   windowTimer = setInterval(() => {

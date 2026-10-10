@@ -1,4 +1,4 @@
-const { Queue, QueueEvents } = require("bullmq");
+const { Queue } = require("bullmq");
 const {
   getRedisConnectionOptions,
   isRedisJobsEnabled,
@@ -26,10 +26,8 @@ const DEFAULT_JOB_OPTIONS = Object.freeze({
 });
 
 let queues = null;
-let queueEvents = null;
 let jobsAvailableUntil = 0;
 let jobsUnavailableUntil = 0;
-const queueLogAt = new Map();
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -42,46 +40,10 @@ const sanitizeJobIdPart = (value = "") =>
 
 const buildJobId = (...parts) => parts.map(sanitizeJobIdPart).join("--");
 
-const logThrottled = (key, level, message, payload = {}, intervalMs = 60000) => {
-  const now = Date.now();
-  const previous = Number(queueLogAt.get(key) || 0);
-  if (previous && now - previous < intervalMs) return;
-  queueLogAt.set(key, now);
-
-  const logger = console[level] || console.log;
-  logger(message, payload);
-};
-
-const createQueueEvents = (queueName, connection) => {
-  const events = new QueueEvents(queueName, { connection });
-
-  events.on("completed", ({ jobId }) => {
-    console.info("[queue] job completed", { queue: queueName, jobId });
-  });
-
-  events.on("failed", ({ jobId, failedReason }) => {
-    console.warn("[queue] job failed", {
-      queue: queueName,
-      jobId,
-      reason: failedReason,
-    });
-  });
-
-  events.on("error", (error) => {
-    logThrottled(`${queueName}:events-error`, "warn", "[queue] events error", {
-      queue: queueName,
-      message: error?.message || String(error),
-    });
-  });
-
-  return events;
-};
-
 const initializeQueues = () => {
   if (queues) return queues;
 
   queues = {};
-  queueEvents = {};
 
   if (!isRedisJobsEnabled()) {
     console.info("[queue] Redis jobs disabled; queues will not be registered");
@@ -98,7 +60,6 @@ const initializeQueues = () => {
       connection,
       defaultJobOptions: DEFAULT_JOB_OPTIONS,
     });
-    queueEvents[queueName] = createQueueEvents(queueName, connection);
   }
 
   return queues;
@@ -325,12 +286,9 @@ const enqueueQcImageDerivativeProcessing = ({
 
 const closeQueues = async () => {
   const registeredQueues = queues || {};
-  const registeredEvents = queueEvents || {};
   queues = null;
-  queueEvents = null;
 
   await Promise.allSettled([
-    ...Object.values(registeredEvents).map((events) => events.close()),
     ...Object.values(registeredQueues).map((queue) => queue.close()),
   ]);
 };

@@ -7,7 +7,6 @@ const Item = require("../models/item.model");
 const { getRedisConnectionOptions, isRedisJobsEnabled } = require("../config/redis");
 const {
   QUEUE_NAMES,
-  getQueues,
 } = require("../queues");
 const JOB_NAMES = require("../queues/jobNames");
 const {
@@ -500,8 +499,6 @@ const startWorkers = () => {
     console.info("[worker] REDIS_JOBS_ENABLED is false; no BullMQ workers started");
     return [];
   }
-
-  getQueues();
 
   workers = [
     createWorker(
