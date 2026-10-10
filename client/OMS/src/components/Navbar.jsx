@@ -123,6 +123,9 @@ const Navbar = () => {
   const canViewPis = hasPermission("pis", "view");
   const canViewSamples = hasPermission("samples", "view");
   const canAccessOmsAssistant = hasPermission("oms_assistant", "view");
+  const canViewEudrTimber =
+    ["admin", "super_admin", "manager"].includes(normalizeUserRole(permissionRole || role)) &&
+    hasPermission("eudr_timber", "view");
 
   const closeAllMenus = useCallback(() => {
     setShowMobileMenu(false);
@@ -438,6 +441,15 @@ const Navbar = () => {
     return items;
   }, [canManageLabels, canViewSamples, hasPermission, isQcOnlyRole, isViewer]);
 
+  const eudrTimberMenuItems = useMemo(() => {
+    if (isQcOnlyRole || !canViewEudrTimber) return [];
+    return [
+      routeMenuItem("eudr-timber-purchases", "Timber Purchases", "/eudr/timber-purchases"),
+      routeMenuItem("eudr-timber-suppliers", "Timber Suppliers", "/eudr/timber-suppliers"),
+      routeMenuItem("eudr-timber-inventory", "Timber Inventory", "/eudr/timber-inventory"),
+    ];
+  }, [canViewEudrTimber, isQcOnlyRole]);
+
   const uploadOrdersMenuItems = useMemo(() => {
     if (!canManageOrders || isQcOnlyRole) return [];
 
@@ -614,6 +626,7 @@ const Navbar = () => {
         { key: "orders", label: "Orders", items: orderMenuItems },
         { key: "reports", label: "Reports", items: reportMenuItems },
         { key: "process", label: "Process", items: processMenuItems },
+        { key: "eudr-timber", label: "EUDR Timber Management", items: eudrTimberMenuItems },
         { key: "update-orders", label: "Update", items: updateOrdersMenuItems },
         { key: "upload-add", label: "Upload", items: uploadAddMenuItems },
         { key: "logs", label: "Logs", items: logMenuItems },
@@ -622,6 +635,7 @@ const Navbar = () => {
     [
       itemMenuItems,
       itemDetailsMenuItems,
+      eudrTimberMenuItems,
       logMenuItems,
       orderMenuItems,
       processMenuItems,

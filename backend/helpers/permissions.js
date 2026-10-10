@@ -46,6 +46,7 @@ const PERMISSION_MODULES = Object.freeze([
   { key: "labels", label: "Labels" },
   { key: "jobs", label: "Jobs" },
   { key: "permissions", label: "Permission Management" },
+  { key: "eudr_timber", label: "EUDR Timber Management" },
 ]);
 
 const ROLE_KEYS = Object.freeze([

@@ -82,6 +82,8 @@ const DailySummary = lazy(() => import("./pages/DailySummary"));
 const Complaints = lazy(() => import("./pages/Complaints"));
 const SecurityDashboard = lazy(() => import("./pages/SecurityDashboard"));
 const OmsAssistant = lazy(() => import("./pages/OmsAssistant"));
+const EudrTimber = lazy(() => import("./pages/EudrTimber"));
+const EudrInventory = lazy(() => import("./pages/EudrInventory"));
 
 // import Users from "./pages/Users"; // later
 const clearStaleUiOverlays = ({ removeCustomModalRoots = false } = {}) => {
@@ -822,6 +824,33 @@ const App = () => {
             element={
               <ProtectedRoute permissionModule="oms_assistant">
                 <OmsAssistant />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/eudr/timber-purchases"
+            element={
+              <ProtectedRoute permissionModule="eudr_timber">
+                <EudrTimber initialTab="purchases" />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/eudr/timber-suppliers"
+            element={
+              <ProtectedRoute permissionModule="eudr_timber">
+                <EudrTimber initialTab="suppliers" />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/eudr/timber-inventory"
+            element={
+              <ProtectedRoute permissionModule="eudr_timber">
+                <EudrInventory />
               </ProtectedRoute>
             }
           />
