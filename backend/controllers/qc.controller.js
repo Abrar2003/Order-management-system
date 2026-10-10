@@ -14768,16 +14768,15 @@ const editInspectionRecords = async (req, res) => {
     );
     applyInspectionRecordPendingAfter(qc, inspectionDocs);
 
-    await Promise.all(
-      inspectionDocs
-        .filter(
-          (doc) =>
-            submittedInspectionRecordIds.has(String(doc._id)) ||
-            doc.isModified() ||
-            pendingBefore.get(String(doc._id)) !== doc.pending_after,
-        )
-        .map((doc) => doc.save()),
+    const inspectionDocsToSave = inspectionDocs.filter(
+      (doc) =>
+        submittedInspectionRecordIds.has(String(doc._id)) ||
+        doc.isModified() ||
+        pendingBefore.get(String(doc._id)) !== doc.pending_after,
     );
+    for (const inspectionDoc of inspectionDocsToSave) {
+      await inspectionDoc.save();
+    }
     await Promise.all(
       imageUploadIntents.map((intent) => commitImageUploadIntent({ intent })),
     );
