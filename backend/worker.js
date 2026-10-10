@@ -54,7 +54,7 @@ const main = async () => {
   await connectDB();
   stopQcUpdateFollowUpWorker = startQcUpdateFollowUpWorker({
     intervalMs: parsePositiveInt(process.env.QC_UPDATE_FOLLOW_UP_POLL_MS, 1000),
-    concurrency: parsePositiveInt(process.env.QC_UPDATE_FOLLOW_UP_CONCURRENCY, 2),
+    concurrency: parsePositiveInt(process.env.QC_UPDATE_FOLLOW_UP_CONCURRENCY, 1),
   });
   console.log("[worker] QC update follow-up worker started");
 

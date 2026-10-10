@@ -102,7 +102,7 @@ const runTransactionalController = async ({
     return sendTransactionsRequired(res);
   }
 
-  const maxAttempts = 2;
+  const maxAttempts = 3;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const { response, getResult } = createDeferredResponse(res);

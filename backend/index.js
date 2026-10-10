@@ -57,7 +57,7 @@ const {
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
-const GRACEFUL_SHUTDOWN_TIMEOUT_MS = 55_000;
+const GRACEFUL_SHUTDOWN_TIMEOUT_MS = 15_000;
 const isProduction =
   String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
 const {
@@ -229,8 +229,14 @@ const startServer = async () => {
       console.log(`Server started on port ${PORT}`);
     });
 
+    let shuttingDown = false;
     const shutdown = (signal) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       console.log(`${signal} received. Starting graceful shutdown...`);
+
+      io.disconnectSockets(true);
+      server.closeIdleConnections?.();
 
       server.close(async () => {
         try {
@@ -252,6 +258,7 @@ const startServer = async () => {
 
       setTimeout(() => {
         console.error("Forced shutdown after timeout.");
+        server.closeAllConnections?.();
         process.exit(1);
       }, GRACEFUL_SHUTDOWN_TIMEOUT_MS).unref();
     };

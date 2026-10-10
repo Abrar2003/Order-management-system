@@ -9,6 +9,7 @@ const Finish = require("../models/finish.model");
 const QcEditLog = require("../models/qcEditLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
 const { QcUpdateFollowUp } = require("../models/qcUpdateFollowUp.model");
+const QcFormDraft = require("../models/qcFormDraft.model");
 const XLSX = require("xlsx");
 const fsp = require("fs/promises");
 const path = require("path");
@@ -112,16 +113,15 @@ const {
   normalizeEan13Input,
 } = require("../helpers/barcodeFormat");
 const {
-  buildFormDraftCleanupPipeline,
-  buildFormDraftDeletePipeline,
-  buildFormDraftUpsertPipeline,
-  cleanupExpiredFormDrafts,
-  deleteFormDraft,
   findFormDraft,
   getDraftUserId,
   serializeFormDraft,
   upsertFormDraft,
 } = require("../helpers/formDrafts");
+const {
+  buildInspectorUsedLabelState,
+  recalculateInspectorUsedLabels,
+} = require("../services/inspectorLabelCache.service");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const {
   buildVendorFilter,
@@ -1337,74 +1337,6 @@ const buildOrderAuditSnapshotForQc = (orderDoc = {}) => ({
   status: normalizeText(orderDoc?.status) || "Not Set",
   qc_record: normalizeText(orderDoc?.qc_record) || "Not Set",
 });
-
-const buildInspectorUsedLabelState = (labelUsageRecords = []) => ({
-  used_labels: normalizeLabels(
-    labelUsageRecords.flatMap((entry) =>
-      Array.isArray(entry?.labels_added) ? entry.labels_added : [],
-    ),
-  ),
-  label_used_history: labelUsageRecords
-    .map((entry) => {
-      const labels = normalizeLabels(entry?.labels_added || []);
-      if (labels.length === 0) return null;
-      const qcDoc = entry?.qc && typeof entry.qc === "object" ? entry.qc : null;
-
-      return {
-        labels,
-        inspection_record: entry?._id,
-        qc: qcDoc?._id || entry?.qc || null,
-        request_history_id: entry?.request_history_id || null,
-        qc_meta: {
-          order_id: String(qcDoc?.order_meta?.order_id || ""),
-          brand: String(qcDoc?.order_meta?.brand || ""),
-          vendor: qcDoc?.order_meta?.vendor || undefined,
-          item_code: String(qcDoc?.item?.item_code || ""),
-          description: String(qcDoc?.item?.description || ""),
-        },
-        inspection_date: String(entry?.inspection_date || ""),
-        used_at: entry?.createdAt || new Date(),
-        updated_at: entry?.updatedAt || entry?.createdAt || new Date(),
-      };
-    })
-    .filter(Boolean)
-    .sort(
-      (left, right) =>
-        new Date(right?.used_at || 0) - new Date(left?.used_at || 0),
-    ),
-});
-
-const recalculateInspectorUsedLabels = async (inspectorIds = []) => {
-  const normalizedInspectorIds = [...new Set(
-    (Array.isArray(inspectorIds) ? inspectorIds : [])
-      .map((value) => String(value || "").trim())
-      .filter((value) => mongoose.Types.ObjectId.isValid(value)),
-  )];
-
-  for (const inspectorUserId of normalizedInspectorIds) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const inspectorDoc = await Inspector.findOne({ user: inspectorUserId });
-      if (!inspectorDoc) break;
-
-      const labelUsageRecords = await Inspection.find({
-        inspector: inspectorUserId,
-        status: { $ne: INSPECTION_RECORD_STATUS.TRANSFERRED },
-        "labels_added.0": { $exists: true },
-      })
-        .select("qc request_history_id inspection_date labels_added createdAt updatedAt")
-        .populate("qc", "order_meta item request_date last_inspected_date")
-        .lean();
-
-      Object.assign(inspectorDoc, buildInspectorUsedLabelState(labelUsageRecords));
-      try {
-        await inspectorDoc.save();
-        break;
-      } catch (error) {
-        if (error?.name !== "VersionError" || attempt === 2) throw error;
-      }
-    }
-  }
-};
 
 const refreshQcAggregateState = async (qcDoc, reqUser) => {
   if (!qcDoc?._id) return [];
@@ -5887,7 +5819,7 @@ exports.alignQC = async (req, res) => {
 
 exports.getQcFormDraft = async (req, res) => {
   try {
-    const qc = await QC.findById(req.params.id).populate({
+    const qc = await QC.findById(req.params.id).select("_id order form_drafts").populate({
       path: "order",
       match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
       select: "_id",
@@ -5897,24 +5829,33 @@ exports.getQcFormDraft = async (req, res) => {
     }
 
     const now = new Date();
-    const hadExpiredDrafts = cleanupExpiredFormDrafts(qc, now);
-    const draft = findFormDraft(qc, {
-      userId: getDraftUserId(req.user),
-      mode: req.query?.mode,
-      recordId: req.query?.record_id,
-    }, now);
+    const userId = getDraftUserId(req.user);
+    const mode = req.query?.mode;
+    const recordId = req.query?.record_id;
+    const draft = await QcFormDraft.findOne({
+      qc: qc._id,
+      user: userId,
+      mode: String(mode || "").trim().toLowerCase(),
+      record_id: String(recordId || "").trim(),
+      expires_at: { $gt: now },
+    }).lean();
 
-    if (hadExpiredDrafts) {
-      await QC.updateOne(
-        { _id: qc._id },
-        buildFormDraftCleanupPipeline(now),
-        { updatePipeline: true },
-      );
+    if (draft) {
+      return res.json({
+        success: true,
+        data: draft.discarded_at ? null : serializeFormDraft(draft),
+      });
     }
+
+    const legacyDraft = findFormDraft(qc, {
+      userId: getDraftUserId(req.user),
+      mode,
+      recordId,
+    }, now);
 
     return res.json({
       success: true,
-      data: serializeFormDraft(draft),
+      data: serializeFormDraft(legacyDraft),
     });
   } catch (err) {
     return res.status(400).json({ message: err.message || "Failed to load QC draft" });
@@ -5923,7 +5864,7 @@ exports.getQcFormDraft = async (req, res) => {
 
 exports.saveQcFormDraft = async (req, res) => {
   try {
-    const qc = await QC.findById(req.params.id).populate({
+    const qc = await QC.findById(req.params.id).select("_id order").populate({
       path: "order",
       match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
       select: "_id",
@@ -5933,20 +5874,30 @@ exports.saveQcFormDraft = async (req, res) => {
     }
 
     const now = new Date();
-    const draft = upsertFormDraft(qc, {
+    const draftHolder = { form_drafts: [] };
+    const draft = upsertFormDraft(draftHolder, {
       userId: getDraftUserId(req.user),
       mode: req.body?.mode,
       recordId: req.body?.record_id,
       payload: req.body?.payload,
     }, now);
-
-    const { nextDraft, pipeline } = buildFormDraftUpsertPipeline({ draft, now });
-
-    await QC.updateOne(
-      { _id: qc._id },
-      pipeline,
-      { updatePipeline: true },
-    );
+    const nextDraft = await QcFormDraft.findOneAndUpdate(
+      {
+        qc: qc._id,
+        user: draft.user,
+        mode: draft.mode,
+        record_id: draft.record_id,
+      },
+      {
+        $set: {
+          payload: draft.payload,
+          updated_at: draft.updated_at,
+          expires_at: draft.expires_at,
+          discarded_at: null,
+        },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    ).lean();
 
     return res.json({
       success: true,
@@ -5959,7 +5910,7 @@ exports.saveQcFormDraft = async (req, res) => {
 
 exports.deleteQcFormDraft = async (req, res) => {
   try {
-    const qc = await QC.findById(req.params.id).populate({
+    const qc = await QC.findById(req.params.id).select("_id order").populate({
       path: "order",
       match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
       select: "_id",
@@ -5968,32 +5919,24 @@ exports.deleteQcFormDraft = async (req, res) => {
       return res.status(404).json({ message: "QC record not found" });
     }
 
-    const draftUserIdValue = getDraftUserId(req.user);
-    const draftMode = String(
-      req.query?.mode || req.body?.mode || "",
-    ).trim().toLowerCase();
-    const draftRecordId = String(
-      req.query?.record_id || req.body?.record_id || "",
-    ).trim();
-    const changed = deleteFormDraft(qc, {
-      userId: draftUserIdValue,
-      mode: req.query?.mode || req.body?.mode,
-      recordId: req.query?.record_id || req.body?.record_id,
-    });
-
-    if (changed) {
-      const now = new Date();
-      await QC.updateOne(
-        { _id: qc._id },
-        buildFormDraftDeletePipeline({
-          userId: draftUserIdValue,
-          mode: draftMode,
-          recordId: draftRecordId,
-          now,
-        }),
-        { updatePipeline: true },
-      );
-    }
+    const now = new Date();
+    await QcFormDraft.findOneAndUpdate(
+      {
+        qc: qc._id,
+        user: getDraftUserId(req.user),
+        mode: String(req.query?.mode || req.body?.mode || "").trim().toLowerCase(),
+        record_id: String(req.query?.record_id || req.body?.record_id || "").trim(),
+      },
+      {
+        $set: {
+          payload: {},
+          updated_at: now,
+          expires_at: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+          discarded_at: now,
+        },
+      },
+      { upsert: true, setDefaultsOnInsert: true },
+    );
 
     return res.json({
       success: true,
@@ -14907,8 +14850,6 @@ const editInspectionRecords = async (req, res) => {
       .map((value) => String(value || "").trim())
       .filter((value) => mongoose.Types.ObjectId.isValid(value));
 
-    await recalculateInspectorUsedLabels(inspectorIdsToRecalculate);
-
     const qcEditLog = buildQcEditLogPayload({
       reqUser: req.user,
       qcDoc: qc,
@@ -14940,6 +14881,7 @@ const editInspectionRecords = async (req, res) => {
         recalculate_order_cbm: Boolean(
           orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status),
         ),
+        recalculate_inspector_used_labels: inspectorIdsToRecalculate,
         qc_edit_log: qcEditLog,
         order_edit_log: orderEditLog,
       },
