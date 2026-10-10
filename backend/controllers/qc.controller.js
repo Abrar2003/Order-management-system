@@ -2366,6 +2366,23 @@ const mirrorInspectionLabelUsageProjection = async ({
   );
 };
 
+const hasInspectionLabelProjectionChange = (before = {}, after = {}) => {
+  const inspectorId = (record = {}) =>
+    String(record?.inspector?._id || record?.inspector || "").trim();
+  const requestHistoryId = (record = {}) =>
+    String(record?.request_history_id || "").trim();
+  const inspectionDate = (record = {}) =>
+    toISODateString(record?.inspection_date) || "";
+  const labels = (record = {}) => normalizeLabels(record?.labels_added || []).join(",");
+
+  return (
+    inspectorId(before) !== inspectorId(after) ||
+    requestHistoryId(before) !== requestHistoryId(after) ||
+    inspectionDate(before) !== inspectionDate(after) ||
+    labels(before) !== labels(after)
+  );
+};
+
 const getRequestBaseUrl = (req = {}) => {
   const protocol = String(req.get?.("x-forwarded-proto") || req.protocol || "http")
     .split(",")[0]
@@ -4084,6 +4101,7 @@ exports.__test__ = {
   requiresLogisticsEanScanValidation,
   recalculateInspectorUsedLabels,
   buildInspectionCbmSnapshot,
+  hasInspectionLabelProjectionChange,
 };
 
 const isIsoDateWithinInclusiveRange = (
@@ -13959,6 +13977,8 @@ const editInspectionRecords = async (req, res) => {
     const requestHistoryDateUpdates = new Map();
     const imageUploadIntents = [];
     const usedImageUploadIntentIds = new Set();
+    const submittedInspectionRecordIds = new Set();
+    const labelProjectionChangedRecordIds = new Set();
     const qcRequestedQuantityCap = resolveRequestedQuantityFromQc(qc);
     const normalizedRole = normalizeUserRoleKey(req.user?.role);
     const isQcUser = normalizedRole === "qc";
@@ -14328,6 +14348,12 @@ const editInspectionRecords = async (req, res) => {
       const existingInspectorId = String(
         record?.inspector?._id || record?.inspector || "",
       ).trim();
+      const labelProjectionBefore = {
+        inspector: record.inspector,
+        request_history_id: record.request_history_id,
+        inspection_date: record.inspection_date,
+        labels_added: record.labels_added,
+      };
       if (inspectorId !== existingInspectorId && !canChangeInspectionInspector) {
         return res.status(403).json({
           message: "Only admins can change inspection record inspectors",
@@ -14604,9 +14630,6 @@ const editInspectionRecords = async (req, res) => {
         inspectorChangedRequestHistoryEntries.add(linkedRequestHistoryEntry);
       }
 
-      touchedInspectors.add(String(record.inspector || ""));
-      touchedInspectors.add(inspectorId);
-
       record.request_history_id = linkedRequestHistoryId || record.request_history_id || null;
       record.requested_date = requestedDate;
       record.inspection_date = inspectionDate;
@@ -14717,6 +14740,13 @@ const editInspectionRecords = async (req, res) => {
             ? qcUpdateAllowance.windowStartedAt
             : new Date();
       }
+
+      submittedInspectionRecordIds.add(recordId);
+      if (hasInspectionLabelProjectionChange(labelProjectionBefore, record)) {
+        labelProjectionChangedRecordIds.add(recordId);
+        touchedInspectors.add(existingInspectorId);
+        touchedInspectors.add(inspectorId);
+      }
 	    }
 
     const requestHistoryUpdatedAt = new Date();
@@ -14733,13 +14763,26 @@ const editInspectionRecords = async (req, res) => {
       }
     }
 
+    const pendingBefore = new Map(
+      inspectionDocs.map((doc) => [String(doc._id), doc.pending_after]),
+    );
     applyInspectionRecordPendingAfter(qc, inspectionDocs);
 
-    await Promise.all(inspectionDocs.map((doc) => doc.save()));
+    await Promise.all(
+      inspectionDocs
+        .filter(
+          (doc) =>
+            submittedInspectionRecordIds.has(String(doc._id)) ||
+            doc.isModified() ||
+            pendingBefore.get(String(doc._id)) !== doc.pending_after,
+        )
+        .map((doc) => doc.save()),
+    );
     await Promise.all(
       imageUploadIntents.map((intent) => commitImageUploadIntent({ intent })),
     );
     for (const inspectionDoc of inspectionDocs) {
+      if (!labelProjectionChangedRecordIds.has(String(inspectionDoc._id))) continue;
       await mirrorInspectionLabelUsageProjection({
         inspection: inspectionDoc,
         qcDoc: qc,
