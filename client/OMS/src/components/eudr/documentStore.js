@@ -22,11 +22,13 @@ export function createDocumentStore(chainId) {
       record = { users: 0, used: Date.now(), abort: new AbortController() };
       resources.set(document.id, record);
       record.promise = (async () => {
-        const path = documentEndpoint(chainId, document, "content");
-        if (document.previewKind === "pdf") {
+        const path = documentEndpoint(chainId, document, document.previewKind === "office" ? "preview" : "content");
+        if (["pdf", "office"].includes(document.previewKind)) {
           const { openPdf } = await import("./pdfRuntime");
           if (disposed || record.abort.signal.aborted) throw new Error("Document workspace closed");
-          record.task = openPdf(new URL(api.getUri({ url: path }), window.location.origin).href);
+          const source = document.previewKind === "office" ? new Uint8Array((await api.get(path, { responseType: "arraybuffer", signal: record.abort.signal })).data) : new URL(api.getUri({ url: path }), window.location.origin).href;
+          if (disposed || record.abort.signal.aborted) throw new Error("Document workspace closed");
+          record.task = openPdf(source);
           return { kind: "pdf", pdf: await record.task.promise };
         }
         const response = await api.get(path, { responseType: "blob", signal: record.abort.signal });

@@ -27,6 +27,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm i -g pm2
 sudo apt install -y libreoffice libreoffice-calc
+sudo apt install -y --no-install-recommends bubblewrap libreoffice-writer fonts-liberation
 sudo apt install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2
 ```
 
@@ -106,6 +107,10 @@ If PIS spreadsheet uploads are enabled, make sure LibreOffice is installed on th
 ```env
 LIBREOFFICE_BIN=/usr/bin/soffice
 ```
+
+EUDR Office previews additionally require Linux user namespaces, `/usr/bin/bwrap`, and `/usr/bin/prlimit`. Conversion runs as the `oms` user with no network, no app/environment-file mounts, disabled macros/active content/link updates, a private temporary profile, and CPU/memory/output/time limits. Missing sandbox support fails closed; there is no unsandboxed production fallback. Existing PIS conversion callers are unchanged.
+
+Verify conversions without MongoDB or Wasabi using `node backend/tests/eudrOffice.integration.js` from a development install. Windows uses generated trusted fixtures only; Linux exercises the sandbox. On a production install without the development-only PDF parser, set `EUDR_OFFICE_FIXTURE_OUTPUT` to a temporary output directory and inspect the six generated PDFs separately. Converted previews are private Wasabi objects under `eudr-previews/<content-hash>/v1.pdf`; original evidence and review history are never replaced by previews.
 
 ### Frontend env
 

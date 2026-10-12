@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 
 const stageSchema = new mongoose.Schema({
   kind: { type: String, required: true, enum: ["sawmill", "transport", "receiver", "declaration"] },
+  workflow_version: { type: Number, default: 1 },
+  incoming_invoice_stage_id: { type: String, default: "" },
   fields: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
   documents: [{
     type: { type: String, required: true },

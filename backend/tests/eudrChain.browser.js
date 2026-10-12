@@ -26,10 +26,13 @@ const fullChain = () => ({
 let chain = fullChain();
 let pdf;
 let png;
+let jpeg;
+let webp;
 let downloads = 0;
 const writes = [];
 const contentRequests = [];
-const mime = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".wasm": "application/wasm" };
+// Reproduce production: unknown .mjs assets are served as octet-stream, not executable modules.
+const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".wasm": "application/wasm" };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   if (url.pathname.startsWith("/download/")) { res.writeHead(200, { "Content-Type": "application/pdf", "Content-Disposition": "attachment; filename=test.pdf" }); return res.end(pdf); }
@@ -48,11 +51,16 @@ const server = http.createServer((req, res) => {
     await fixture.setContent('<h1>Actual PDF test invoice</h1><p>GST-MILL · CUT001 · 17.600 CFT</p><div style="break-after:page"></div><h1>Actual PDF second page</h1><p>Transport evidence</p>');
     pdf = Buffer.from(await fixture.pdf({ format: "A4" }));
     png = Buffer.from(await fixture.evaluate(() => { const canvas = document.createElement("canvas"); canvas.width = 600; canvas.height = 800; const ctx = canvas.getContext("2d"); ctx.fillStyle = "white"; ctx.fillRect(0, 0, 600, 800); ctx.fillStyle = "#2e2925"; ctx.font = "28px sans-serif"; ctx.fillText("Actual uploaded test image", 40, 90); ctx.fillText("B001 / GST-MILL", 40, 150); return canvas.toDataURL("image/png").split(",")[1]; }), "base64");
+    for (const type of ["jpeg", "webp"]) {
+      const bytes = Buffer.from(await fixture.evaluate((type) => { const canvas = document.createElement("canvas"); canvas.width = 600; canvas.height = 800; const ctx = canvas.getContext("2d"); ctx.fillStyle = "white"; ctx.fillRect(0, 0, 600, 800); ctx.fillStyle = "black"; ctx.font = "30px sans-serif"; ctx.fillText(`Actual ${type} timber evidence`, 30, 100); return canvas.toDataURL(`image/${type}`).split(",")[1]; }, type), "base64");
+      if (type === "jpeg") jpeg = bytes; else webp = bytes;
+    }
     await fixture.close();
     const page = await browser.newPage();
     await page.setViewport({ width: 1440, height: 1000 });
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    page.on("dialog", (dialog) => dialog.accept());
     await page.setRequestInterception(true);
     page.on("request", async (request) => {
       const url = new URL(request.url());
@@ -67,12 +75,17 @@ const server = http.createServer((req, res) => {
         if (route.startsWith("/auth/")) return respond({ user });
         if (route === "/permissions/me") return respond({ role: user.role, permissions: {} });
         if (route.startsWith("/notifications")) return respond({ data: [], unreadCount: 0 });
+        if (route === "/eudr/directory") {
+          const kind = url.searchParams.get("kind");
+          return respond({ data: kind === "sawmill" ? [{ _id: "saved-mill", name: "Saved mill", identity_key: "GST-MILL|PAN-MILL", fields: { name: "Saved mill", gst: "GST-MILL", pan: "PAN-MILL", permission_number: "P-SAVED", cutting_limit_cft: "2000" }, evidence: [{ _id: "saved-license", type: "license", name: "saved-license.pdf" }] }] : kind === "transporter" ? [{ _id: "saved-transporter", name: "Saved transporter", identity_key: "saved-transporter", fields: { transporter_name: "Saved transporter", gst: "GST-TRANSPORT" }, evidence: [] }] : [{ _id: "saved-vehicle", name: "RJ-SAVED / DL-SAVED", fields: { truck_number: "RJ-SAVED", truck_registration_number: "REG-SAVED", driver_license_number: "DL-SAVED" }, evidence: [] }] });
+        }
         if (route === "/eudr") return respond({ data: [{ _id: chain._id, container: chain.container, vendor: chain.vendor, declared_cft: 17.6, complete: chain.complete }] });
-        if (route.endsWith("/content")) {
+        if (route.endsWith("/content") || route.endsWith("/preview")) {
           const id = route.split("/").at(-2); contentRequests.push(id);
           if (id === "missing") return respond({ message: "Document not found" }, 404);
           const document = chain.stages.flatMap((stage) => stage.documents).find((document) => document._id === id);
-          return request.respond({ status: 200, contentType: document.content_type, headers: { ...headers, "Content-Length": String(document.content_type === "application/pdf" ? pdf.length : png.length), "Accept-Ranges": "bytes" }, body: document.content_type === "application/pdf" ? pdf : png });
+          const bytes = route.endsWith("/preview") || document.content_type === "application/pdf" ? pdf : document.content_type === "image/jpeg" ? jpeg : document.content_type === "image/webp" ? webp : png;
+          return request.respond({ status: 200, contentType: route.endsWith("/preview") ? "application/pdf" : document.content_type, headers: { ...headers, "Content-Length": String(bytes.length), "Accept-Ranges": "bytes" }, body: bytes });
         }
         if (route.endsWith("/url")) { assert.equal(url.searchParams.get("download"), "1"); downloads += 1; return respond({ url: `${origin}/download/test.pdf` }); }
         if (route.startsWith(`/eudr/${chain._id}`)) {
@@ -81,6 +94,7 @@ const server = http.createServer((req, res) => {
           if (request.method() !== "GET") writes.push({ method: request.method(), route });
           if (request.method() === "PUT") stage.fields = JSON.parse(request.postData()).fields;
           if (route.endsWith("/documents") && request.method() === "POST") stage.documents.push(attachment("new-weight", "weight_slip", "eudr-fixture.pdf"));
+          if (route.endsWith("/reuse-evidence")) { assert.equal(JSON.parse(request.postData()).confirmed, true); stage.documents = stage.documents.filter((document) => document.type !== "license"); stage.documents.push(attachment("saved-license", "license", "saved-license.pdf")); }
           if (route.endsWith("/verify")) { stage.verified_at = time; stage.verified_by_name = user.name; chain.stages.push({ _id: "new-truck", kind: "transport", fields: {}, documents: [] }); chain.current_stage_id = "new-truck"; }
           if (request.method() === "PATCH") chain.declared_milli_cft = Math.round(JSON.parse(request.postData()).declared_cft * 1000);
           return respond({ data: chain });
@@ -141,7 +155,7 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.$eval(".eudr-gallery-body", (element) => element.scrollTop), galleryScroll);
     assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Preview");
     await click("All Documents (9)", ".eudr-gallery-dialog");
-    await page.type(".eudr-document-search input", "cutting invoice");
+    await page.type(".eudr-document-search input", "sawmill sale invoice");
     assert.equal(await page.$$eval(".eudr-gallery-dialog .eudr-document-card", (cards) => cards.length), 1);
     const session = await page.createCDPSession(); await session.send("Browser.setDownloadBehavior", { behavior: "deny" });
     await click("Download", ".eudr-gallery-dialog");
@@ -168,6 +182,13 @@ const server = http.createServer((req, res) => {
     assert.equal(chain.declared_milli_cft, 17600);
     await click("Edit Details");
     await page.waitForSelector(".eudr-drawer[open]");
+    await page.waitForSelector('#saved-sawmill option[value="saved-mill"]');
+    await page.select("#saved-sawmill", "saved-mill");
+    assert.equal(await page.$eval("#mill-name", (input) => input.value), "Saved mill");
+    assert.equal(await page.$eval("#mill-permission_number", (input) => input.value), "P-SAVED");
+    assert.equal(await page.$eval("#mill-invoice_number", (input) => input.value), "CUT001");
+    await click("Confirm validity and reuse", ".eudr-drawer");
+    await page.waitForFunction(() => document.querySelector(".eudr-drawer")?.textContent.includes("Currently uploaded: saved-license.pdf"));
     await page.click("#mill-name", { clickCount: 3 }); await page.type("#mill-name", "Updated test sawmill");
     await click("Save step", ".eudr-drawer");
     await page.waitForFunction(() => !document.querySelector("#mill-name").disabled);
@@ -177,6 +198,17 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.$(".eudr-drawer"), null);
     await page.$eval("#eudr-stage-new-truck button", (button) => button.click());
     await page.waitForSelector("#new-truck-weight_slip");
+    await page.waitForSelector('#saved-transporter option[value="saved-transporter"]');
+    await page.select("#saved-transporter", "saved-transporter");
+    await page.waitForSelector('#saved-truck option[value="saved-vehicle"]');
+    await page.select("#saved-truck", "saved-vehicle");
+    assert.equal(await page.$eval("#new-truck-truck_number", (input) => input.value), "RJ-SAVED");
+    assert.equal(await page.$eval("#new-truck-driver_license_number", (input) => input.value), "");
+    await page.waitForSelector('#saved-driver option[value="saved-vehicle"]');
+    await page.select("#saved-driver", "saved-vehicle");
+    assert.equal(await page.$eval("#new-truck-driver_license_number", (input) => input.value), "DL-SAVED");
+    assert.equal(await page.$eval("#new-truck-ewaybill_number", (input) => input.value), "");
+    assert.ok(await page.$("#new-truck-truck_registration"));
     const uploadPath = path.join(output, "eudr-fixture.pdf"); fs.writeFileSync(uploadPath, pdf);
     const fileInput = await page.$("#new-truck-weight_slip"); await fileInput.uploadFile(uploadPath);
     await page.waitForFunction(() => document.querySelector(".eudr-drawer")?.textContent.includes("Uploaded eudr-fixture.pdf"));
@@ -199,6 +231,30 @@ const server = http.createServer((req, res) => {
     await click("Close viewer"); await click("Close gallery"); await click("Back to Containers");
     await page.waitForSelector("#eudr-container");
     assert.equal(await page.$eval("#eudr-container", (input) => input.value), "TEST-CONTAINER");
+    chain = fullChain(); chain.complete = false; chain.current_stage_id = "mill"; chain.stages = chain.stages.slice(0, 2);
+    chain.stages[0].workflow_version = 2; chain.stages[0].verified_at = null;
+    Object.assign(chain.stages[0].fields, { sold_to: chain.vendor.name, buyer_gst: chain.vendor.gst, buyer_pan: chain.vendor.pan, sold_cft: "17.6" });
+    const formats = ["docx", "doc", "xls", "xlsx", "csv", "txt", "png", "jpeg", "pdf", "webp"];
+    const documentTypes = ["cutting_invoice", "license", "permission", "buyer_gst", "buyer_pan", "weight_slip", "billty", "driver_license", "ewaybill", "truck_registration"];
+    const allFiles = formats.map((ext, index) => ({ _id: `format-${ext}`, type: documentTypes[index], name: `verification.${ext}`, content_type: ["png", "jpeg", "webp"].includes(ext) ? `image/${ext}` : ext === "pdf" ? "application/pdf" : "application/octet-stream" }));
+    chain.stages[0].documents = allFiles.slice(0, 5); chain.stages[1].documents = allFiles.slice(5);
+    await open(); await click("View All Documents (10)");
+    for (const card of await page.$$(".eudr-gallery-dialog .eudr-document-card")) {
+      await card.evaluate((element) => element.scrollIntoView({ block: "center" }));
+      await page.waitForFunction((element) => element.querySelector("img")?.naturalWidth > 0, {}, card);
+    }
+    await page.$eval(".eudr-gallery-body", (element) => { element.scrollTop = 0; });
+    await page.waitForFunction(() => [...document.querySelectorAll(".eudr-gallery-dialog .eudr-thumbnail img")].filter((img) => img.complete && img.naturalWidth).length === 10);
+    await click("Preview", ".eudr-gallery-dialog");
+    await page.waitForSelector('.eudr-viewer-dialog canvas[aria-label="PDF page 1"]');
+    assert.match(await page.$eval(".eudr-viewer-preview", (element) => element.textContent), /Converted preview/);
+    for (let index = 1; index < 10; index += 1) {
+      await click("Next document");
+      if (["png", "jpeg", "webp"].includes(formats[index])) await page.waitForFunction(() => document.querySelector(".eudr-image-document img")?.naturalWidth > 0);
+      else await page.waitForFunction(() => document.querySelector('.eudr-viewer-dialog canvas[aria-label="PDF page 1"]')?.width > 0);
+    }
+    await page.screenshot({ path: path.join(output, "eudr-formats-viewer.png") });
+    await click("Close viewer"); await click("Close gallery");
     assert.deepEqual(errors, []);
     console.log("EUDR browser checks passed: read-only report, actual PDF/image previews, multipage controls, filtered navigation, authorized download requests, responsive gallery, editing/upload/verification, and empty/single-file states.");
     console.log(`Screenshots: ${output}`);

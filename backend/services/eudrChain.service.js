@@ -99,10 +99,12 @@ const documents = {
   receiver: ["invoice"],
   declaration: ["declaration"],
 };
+const saleFields = ["sold_to", "buyer_gst", "buyer_pan", "sold_cft"];
+const saleDocuments = ["buyer_gst", "buyer_pan"];
 const allowedFields = {
-  sawmill: [...required.sawmill, "cutting_limit_cft"],
+  sawmill: [...required.sawmill, "cutting_limit_cft", ...saleFields],
   transport: [...required.transport, "truck_registration_number", "gst"],
-  receiver: required.receiver,
+  receiver: [...required.receiver, ...saleFields],
   declaration: [],
 };
 const assertStageAvailable = (stages, index) => {
@@ -120,20 +122,45 @@ const assertFinalCft = (chain, group, unassigned) => {
   assertDeclaredCft(chain.declared_milli_cft, group);
 };
 
-const validateStage = (stage) => {
+const isSeller = (stage, vendor) => stage.kind === "sawmill" || stage.kind === "receiver" && !receiverMatches(stage.fields || {}, vendor || {});
+const requiredDocuments = (stage, vendor) => stage.workflow_version >= 2
+  ? stage.kind === "sawmill" ? [...documents.sawmill, ...saleDocuments]
+    : stage.kind === "receiver" ? isSeller(stage, vendor) ? ["invoice", ...saleDocuments] : [] : documents[stage.kind]
+  : documents[stage.kind];
+const validateStage = (stage, { vendor, declaredMilliCft } = {}) => {
   const fields = stage.fields || {};
-  for (const field of required[stage.kind]) if (!text(fields[field])) throw fail(`${field.replace(/_/g, " ")} is required`);
+  const modern = stage.workflow_version >= 2;
+  const fieldsRequired = modern && stage.kind === "receiver" ? ["name", "gst", "pan", "received_cft", ...(isSeller(stage, vendor) ? ["invoice_number", "invoice_date", ...saleFields] : [])] : [...required[stage.kind], ...(modern && stage.kind === "sawmill" ? saleFields : [])];
+  for (const field of fieldsRequired) if (!text(fields[field])) throw fail(`${field.replace(/_/g, " ")} is required`);
+  if (modern && isSeller(stage, vendor)) {
+    const sold = parseTimberCft(fields.sold_cft);
+    if (!(sold > 0)) throw fail("Sold CFT must be positive");
+    if (declaredMilliCft != null && toMilliCft(sold) < declaredMilliCft) throw fail(`Sold CFT must cover at least ${(declaredMilliCft / 1000).toFixed(3)} declared CFT`);
+  }
   if (stage.kind === "receiver") parseTimberCft(fields.received_cft);
   if (stage.kind === "sawmill" && text(fields.cutting_limit_cft)) parseTimberCft(fields.cutting_limit_cft);
   const present = new Set(stage.documents.map((document) => document.type));
-  for (const type of documents[stage.kind]) if (!present.has(type)) throw fail(`${type.replace(/_/g, " ")} document is required`);
+  for (const type of requiredDocuments(stage, vendor)) if (!present.has(type)) throw fail(`${type.replace(/_/g, " ")} document is required`);
   if (stage.kind === "transport" && text(fields.truck_registration_number) && !present.has("truck_registration")) throw fail("Truck registration document is required when its number is entered");
 };
 
 const collectInvoiceKeys = (stages) => {
-  const keys = stages.filter((stage) => ["sawmill", "receiver"].includes(stage.kind) && text(stage.fields?.invoice_number) && text(stage.fields?.invoice_date) && text(stage.kind === "sawmill" ? stage.fields?.gst : stage.fields?.issuer_gst)).map((stage) => invoiceKey({ issuer_gst: stage.kind === "sawmill" ? stage.fields?.gst : stage.fields?.issuer_gst, invoice_number: stage.fields?.invoice_number, invoice_date: stage.fields?.invoice_date }));
+  const keys = stages.filter((stage) => ["sawmill", "receiver"].includes(stage.kind) && text(stage.fields?.invoice_number) && text(stage.fields?.invoice_date) && text(stage.kind === "sawmill" || stage.incoming_invoice_stage_id ? stage.fields?.gst : stage.fields?.issuer_gst)).map((stage) => invoiceKey({ issuer_gst: stage.kind === "sawmill" || stage.incoming_invoice_stage_id ? stage.fields?.gst : stage.fields?.issuer_gst, invoice_number: stage.fields?.invoice_number, invoice_date: stage.fields?.invoice_date }));
   if (new Set(keys).size !== keys.length) throw fail("This invoice number is already used by this issuer in this financial year", 409);
   return keys;
 };
 
-module.exports = { text, key, fail, loadContainer, findGroup, receiverMatches, nextStageKind, externalInvalidation, required, documents, allowedFields, assertStageAvailable, assertDeclaredCft, assertFinalCft, validateStage, collectInvoiceKeys, toMilliCft };
+const receiverFromSeller = (seller) => {
+  for (const field of saleFields) if (!text(seller?.fields?.[field])) throw fail("Complete and reverify the preceding seller's buyer and Sold CFT details first", 409);
+  return { kind: "receiver", workflow_version: 2, incoming_invoice_stage_id: String(seller._id), fields: { name: seller.fields.sold_to, gst: seller.fields.buyer_gst, pan: seller.fields.buyer_pan } };
+};
+const assertReceiverLink = (chain, stage, fields = stage.fields) => {
+  if (!stage.incoming_invoice_stage_id) return;
+  const index = chain.stages.indexOf(stage);
+  const seller = chain.stages[index - 2];
+  if (!seller || String(seller._id) !== stage.incoming_invoice_stage_id || !seller.verified_at || chain.stages[index - 1]?.kind !== "transport") throw fail("Incoming sale reference is no longer valid", 409);
+  const expected = receiverFromSeller(seller).fields;
+  for (const field of ["name", "gst", "pan"]) if (text(fields[field]) !== text(expected[field])) throw fail("Receiver identity must match the preceding sale. Edit the seller to correct it.", 409);
+};
+
+module.exports = { text, key, fail, loadContainer, findGroup, receiverMatches, nextStageKind, externalInvalidation, required, documents, allowedFields, requiredDocuments, isSeller, receiverFromSeller, assertReceiverLink, assertStageAvailable, assertDeclaredCft, assertFinalCft, validateStage, collectInvoiceKeys, toMilliCft };

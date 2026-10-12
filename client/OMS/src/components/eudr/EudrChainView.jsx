@@ -44,7 +44,7 @@ export default function EudrChainView({ chain, onChange, onError, onBack }) {
   const rows = chain.shipment_rows || [];
   const excluded = chain.excluded || [];
   const verified = chain.stages.filter((stage) => stage.verified_at).length;
-  const missing = chain.stages.reduce((count, stage) => count + missingStageDocuments(stage).length, 0);
+  const missing = chain.stages.reduce((count, stage) => count + missingStageDocuments(stage, chain).length, 0);
   const stuffedMilli = chain.stuffed_cft == null ? null : Math.round(Number(chain.stuffed_cft) * 1000);
   const mismatch = cftMismatchText(chain.declared_milli_cft, stuffedMilli);
   const enteredMilli = declaredMilliCft(declared);
@@ -76,7 +76,7 @@ export default function EudrChainView({ chain, onChange, onError, onBack }) {
 
     {store && chain.stages.map((stage, index) => {
       const stageDocuments = documents.filter((document) => document.stageId === String(stage._id));
-      const missingDocuments = missingStageDocuments(stage);
+      const missingDocuments = missingStageDocuments(stage, chain);
       const isCurrent = String(stage._id) === chain.current_stage_id;
       return <section id={`eudr-stage-${stage._id}`} className="card om-card eudr-stage" key={stage._id} aria-label={`${STAGE_LABELS[stage.kind]} step ${index + 1}`}><div className="card-body"><div className="eudr-section-heading"><div><span className="eudr-eyebrow">Chain stage {index + 1}</span><h2>{STAGE_LABELS[stage.kind]}</h2></div><div className="eudr-header-actions"><span className={`eudr-status ${stage.verified_at ? "is-verified" : "is-pending"}`}>{stage.verified_at ? "Stage verified" : isCurrent ? "Pending review" : "Locked"}</span>{(isCurrent || stage.verified_at) && <button type="button" className="btn btn-sm btn-outline-secondary" disabled={Boolean(busy)} onClick={() => setEditingStageId(String(stage._id))}>Edit Details</button>}</div></div><div className="eudr-stage-layout"><StageMetadata stage={stage} chain={chain} /><div className="eudr-stage-documents"><div className="eudr-section-heading"><h3>Documents</h3><span>{stageDocuments.length} uploaded</span></div><DocumentGallery documents={stageDocuments} chainId={chain._id} store={store} onPreview={(document) => openPreview(document, documents)} />{missingDocuments.length > 0 && <p className="eudr-missing-documents"><strong>Not uploaded:</strong> {missingDocuments.map(([, label]) => label).join(" · ")}</p>}</div></div>{isCurrent && <footer className="eudr-stage-footer"><p className="small text-muted mb-0">Complete the details and required uploads before manual verification.</p><button type="button" className="btn btn-dark" disabled={Boolean(busy) || !canVerifyCft} onClick={() => verify(stage)}>{busy === String(stage._id) ? "Verifying…" : "Verify and continue"}</button></footer>}{actionError && isCurrent && <p className="text-danger mt-2" role="alert">{actionError}</p>}</div></section>;
     })}

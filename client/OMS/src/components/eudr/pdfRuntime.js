@@ -1,5 +1,5 @@
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/build/pdf.mjs";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?worker&url";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 const assets = import.meta.glob(["/node_modules/pdfjs-dist/cmaps/*.bcmap", "/node_modules/pdfjs-dist/standard_fonts/*.{pfb,ttf}", "/node_modules/pdfjs-dist/wasm/{openjpeg,jbig2,qcms_bg}.wasm", "/node_modules/pdfjs-dist/wasm/*_fallback.js"], { eager: true, query: "?url", import: "default" });
@@ -13,4 +13,4 @@ class BinaryDataFactory {
     return new Uint8Array(await response.arrayBuffer());
   }
 }
-export const openPdf = (url) => getDocument({ url, withCredentials: true, disableStream: true, disableAutoFetch: true, rangeChunkSize: 65536, isEvalSupported: false, useWorkerFetch: false, BinaryDataFactory });
+export const openPdf = (source) => getDocument({ ...(typeof source === "string" ? { url: source } : { data: source }), withCredentials: true, disableStream: true, disableAutoFetch: true, rangeChunkSize: 65536, isEvalSupported: false, useWorkerFetch: false, BinaryDataFactory });

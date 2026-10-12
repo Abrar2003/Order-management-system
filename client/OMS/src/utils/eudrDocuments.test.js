@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeChainDocuments, filterChainDocuments, missingStageDocuments, formatCft } from "./eudrDocuments.js";
+import { normalizeChainDocuments, filterChainDocuments, missingStageDocuments, formatCft, stageFields, stageDocuments, incomingInvoice, receiverMatchesVendor } from "./eudrDocuments.js";
 
 const fixture = () => ({
   stages: [
@@ -21,7 +21,7 @@ test("one shared document adapter includes only active attachments, in saved cha
   assert.deepEqual(documents.map((document) => document.documentId), ["invoice", "permit", "bilty", "receiver", "weight"]);
   assert.equal(documents[0].verificationStatus, "Stage verified");
   assert.equal(documents[1].previewKind, "image");
-  assert.equal(documents[4].previewKind, "other");
+  assert.equal(documents[4].previewKind, "office");
   assert.equal(JSON.stringify(chain), before);
 });
 
@@ -29,9 +29,29 @@ test("filters and search preserve order across repeated transport legs", () => {
   const documents = normalizeChainDocuments(fixture());
   assert.deepEqual(filterChainDocuments(documents, "transport", "").map((document) => document.documentId), ["bilty", "weight"]);
   assert.equal(filterChainDocuments(documents, "", "RECEIVED.PDF")[0].stageKind, "receiver");
-  assert.equal(filterChainDocuments(documents, "", "cutting invoice")[0].documentId, "invoice");
+  assert.equal(filterChainDocuments(documents, "", "sawmill sale invoice")[0].documentId, "invoice");
   assert.equal(filterChainDocuments(documents, "", "sawmill").length, 2);
   assert.equal(filterChainDocuments(documents, "transport", "sawmill").length, 0);
+});
+
+test("linked receivers show receipt only for final vendor and sale fields for intermediaries", () => {
+  const chain = fixture(); chain.vendor = { gst: "GST-V", pan: "PAN-V" };
+  const stage = { _id: "receiver", kind: "receiver", workflow_version: 2, incoming_invoice_stage_id: "mill", fields: { name: "Vendor", gst: "gst v", pan: "pan-v" }, documents: [] };
+  chain.stages.push(stage);
+  assert.equal(receiverMatchesVendor(stage.fields, chain.vendor), true);
+  assert.deepEqual(stageFields(stage, chain).map(([name]) => name), ["name", "gst", "pan", "received_cft"]);
+  assert.deepEqual(stageDocuments(stage, chain), []);
+  assert.equal(incomingInvoice(chain, stage).document._id, "invoice");
+  assert.equal(normalizeChainDocuments(chain).length, 5);
+  stage.fields.pan = "OTHER";
+  assert.ok(stageFields(stage, chain).some(([name]) => name === "sold_cft"));
+  assert.deepEqual(missingStageDocuments(stage, chain).map(([name]) => name), ["invoice", "buyer_gst", "buyer_pan"]);
+});
+
+test("common Office documents preview as PDFs while legacy attachments remain counted once", () => {
+  const chain = { stages: [{ _id: "s", kind: "sawmill", documents: ["doc", "docx", "xls", "xlsx", "csv", "txt", "pdf", "PNG", "JPEG", "webp", "exe"].map((ext) => ({ _id: ext, type: "license", name: `test.${ext}` })) }] };
+  assert.deepEqual(normalizeChainDocuments(chain).map((doc) => doc.previewKind), ["office", "office", "office", "office", "office", "office", "pdf", "image", "image", "image", "other"]);
+  assert.deepEqual(missingStageDocuments({ kind: "sawmill", documents: ["cutting_invoice", "license", "permission"].map((type) => ({ type })) }), []);
 });
 
 test("empty chains and one-file stages never invent document records", () => {

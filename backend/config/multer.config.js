@@ -154,6 +154,17 @@ const upload = multer({
   fileFilter: genericFileFilter,
 });
 
+const eudrUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 1, fileSize: GENERIC_UPLOAD_MAX_FILE_SIZE },
+  fileFilter: (_req, file, cb) => {
+    const expected = require("../services/eudrFiles.service").fileMime(file.originalname);
+    const mime = String(file.mimetype || "").toLowerCase();
+    const allowed = expected && [expected, "application/octet-stream", ...(/\.(?:csv|txt)$/i.test(file.originalname) ? ["text/plain", "text/csv", "application/csv"] : []), ...(/\.xls$/i.test(file.originalname) ? ["application/excel", "application/x-excel", "application/x-msexcel", "application/xls", "application/x-xls"] : [])].includes(mime);
+    cb(allowed ? null : new Error("Unsupported EUDR file type. Use PDF, PNG/JPEG/WebP, DOC/DOCX, XLS/XLSX, CSV or TXT."), Boolean(allowed));
+  },
+});
+
 const complaintFileFilter = (_req, file, cb) => {
   const mimeType = String(file?.mimetype || "").trim().toLowerCase();
   const extension = path.extname(String(file?.originalname || "")).toLowerCase();
@@ -395,6 +406,7 @@ const handleSampleUploadErrors = (err, _req, res, next) => {
 module.exports = upload;
 module.exports.safeSingle = (fieldName) =>
   applyGenericMulterMiddleware(upload.single(fieldName));
+module.exports.eudrSingle = (fieldName) => applyGenericMulterMiddleware(eudrUpload.single(fieldName));
 module.exports.safeFields = (fields) =>
   applyGenericMulterMiddleware(upload.fields(fields));
 module.exports.qcImageUpload = qcImageUpload;

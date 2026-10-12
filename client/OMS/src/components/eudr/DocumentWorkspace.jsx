@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { STAGE_FIELDS, STAGE_LABELS, filterChainDocuments, formatCft, formatDate, requestError } from "../../utils/eudrDocuments";
+import { stageFields, incomingInvoice, STAGE_LABELS, filterChainDocuments, formatCft, formatDate, requestError } from "../../utils/eudrDocuments";
 import { downloadChainDocument } from "./documentStore";
 import EudrDialog from "./EudrDialog";
 
@@ -30,11 +30,13 @@ function useElementSize(ref) {
 }
 
 export function StageMetadata({ stage, chain }) {
+  const incoming = incomingInvoice(chain, stage);
   return <div className="eudr-metadata">
-    <dl>{(STAGE_FIELDS[stage.kind] || []).map(([field, label, type]) => <div key={field}>
+    <dl>{stageFields(stage, chain).map(([field, label, type]) => <div key={field}>
       <dt>{label.replace(/ \([^)]*optional\)/, "")}</dt>
       <dd>{stage.fields?.[field] == null || stage.fields[field] === "" ? <span className="text-muted">Not provided</span> : type === "date" ? formatDate(stage.fields[field]) : type === "number" ? `${formatCft(stage.fields[field])} CFT` : stage.fields[field]}</dd>
     </div>)}</dl>
+    {incoming && <section className="border rounded p-3 mb-3"><strong>Incoming sale invoice (linked)</strong><dl><div><dt>Seller</dt><dd>{incoming.seller.fields.name}</dd></div><div><dt>Invoice number / date</dt><dd>{incoming.seller.fields.invoice_number} · {formatDate(incoming.seller.fields.invoice_date)}</dd></div><div><dt>Issuer GST / PAN</dt><dd>{incoming.seller.fields.gst} · {incoming.seller.fields.pan}</dd></div></dl><a href={`#eudr-stage-${incoming.seller._id}`}>{incoming.document?.name || "View the preceding sale"}</a><p className="small text-muted mb-0">Original evidence is stored once in the seller's stage.</p></section>}
     {stage.kind === "declaration" && <dl><div><dt>Container</dt><dd>{chain.container}</dd></div><div><dt>Shipping vendor</dt><dd>{chain.vendor?.name || "—"}</dd></div><div><dt>Declared timber</dt><dd>{formatCft(chain.declared_milli_cft / 1000)} CFT</dd></div><div><dt>Calculated stuffed timber</dt><dd>{formatCft(chain.stuffed_cft)} CFT</dd></div></dl>}
     <div className="eudr-verification-record"><strong>{stage.verified_at ? "Stage verification recorded" : "Awaiting manual review"}</strong>
       {stage.verified_at ? <><span>By {stage.verified_by_name || "User"}</span><span>{formatDate(stage.verified_at, true)}</span><span>Method: {stage.verification_method || "manual"}</span></> : <span>Viewing a document does not change its approval status.</span>}
@@ -64,7 +66,7 @@ export function DocumentPreviewCard({ document, chainId, store, onPreview }) {
   return <article ref={ref} className="eudr-document-card">
     <button type="button" className="eudr-thumbnail" onClick={() => onPreview(document)} aria-label={`Preview ${document.displayName}: ${document.originalFilename}`}>
       {preview ? <img src={preview} alt={`${document.previewKind === "pdf" ? "First page of" : "Uploaded document"} ${document.originalFilename}`} loading="lazy" /> : <span className="eudr-preview-placeholder">{document.previewKind === "other" ? `${document.format || "File"} preview unavailable. Download to inspect.` : failed ? "Preview could not be loaded" : <><span className="spinner-border spinner-border-sm" aria-hidden="true" /> Loading preview…</>}</span>}
-      <span className="eudr-format-tag">{document.format || "FILE"}{document.previewKind === "pdf" && " · Page 1"}</span>
+      <span className="eudr-format-tag">{document.format || "FILE"}{document.previewKind === "pdf" && " · Page 1"}{document.previewKind === "office" && " · Converted preview"}</span>
     </button>
     <div className="eudr-document-caption"><h4>{document.displayName}</h4><p title={document.originalFilename}>{document.originalFilename}</p><span className={`eudr-status ${document.stage.verified_at ? "is-verified" : "is-pending"}`}>{document.verificationStatus}</span>
       <div className="eudr-document-actions"><button type="button" className="btn btn-sm btn-dark" onClick={() => onPreview(document)}>Preview</button><button type="button" className="btn btn-sm btn-outline-secondary" disabled={downloading} onClick={download}>{downloading ? "Preparing…" : "Download"}</button>{failed && <button type="button" className="btn btn-link btn-sm" onClick={() => setRetry((value) => value + 1)}>Retry preview</button>}</div>
@@ -168,13 +170,13 @@ function DocumentContent({ document, store, fit, zoom }) {
     if (document.previewKind === "other") return;
     let active = true;
     const lease = store.acquire(document);
-    lease.promise.then((value) => { if (active) setResource(value); }).catch(() => { if (active) setError("This document could not be previewed. Try reopening it, or download the original."); });
+    lease.promise.then((value) => { if (active) setResource(value); }).catch((reason) => { if (active) setError(`This document could not be previewed: ${requestError(reason)}. Try reopening it, or download the original.`); });
     return () => { active = false; lease.release(); };
   }, [document, store]);
   if (document.previewKind === "other") return <div className="eudr-viewer-message">This {document.format || "file"} format has no built-in preview. Use Download to inspect the original.</div>;
   if (error) return <div className="eudr-viewer-message" role="alert">{error}</div>;
-  if (!resource) return <div className="eudr-viewer-message" role="status"><span className="spinner-border" aria-hidden="true" /> Loading document…</div>;
-  return resource.kind === "pdf" ? <PdfDocument pdf={resource.pdf} fit={fit} zoom={zoom} /> : <ImageDocument url={resource.url} name={document.originalFilename} fit={fit} zoom={zoom} />;
+  if (!resource) return <div className="eudr-viewer-message" role="status"><span className="spinner-border" aria-hidden="true" /> {document.previewKind === "office" ? "Preparing private converted preview…" : "Loading document…"}</div>;
+  return <>{document.previewKind === "office" && <p className="small text-muted px-3 py-2 mb-0">Converted preview · Formatting can differ from the original. Download the original for authoritative data and layout.</p>}{resource.kind === "pdf" ? <PdfDocument pdf={resource.pdf} fit={fit} zoom={zoom} /> : <ImageDocument url={resource.url} name={document.originalFilename} fit={fit} zoom={zoom} />}</>;
 }
 
 export function FullDocumentViewer({ chain, documents, initialId, store, onClose }) {

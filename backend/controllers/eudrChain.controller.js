@@ -1,12 +1,14 @@
-const crypto = require("crypto");
 const { Readable } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 const mongoose = require("mongoose");
 const EudrChain = require("../models/eudrChain.model");
+const Party = require("../models/eudrParty.model");
 const storage = require("../services/wasabiStorage.service");
+const { saveStageDirectory, evidenceMatches, reusableTypes } = require("../services/eudrDirectory.service");
+const { fileMime, sha256, assertUniqueFile } = require("../services/eudrFiles.service");
 const {
   text, key, fail, loadContainer, findGroup,
-  nextStageKind, externalInvalidation, documents, allowedFields, assertStageAvailable, assertDeclaredCft, assertFinalCft, validateStage, collectInvoiceKeys, toMilliCft,
+  nextStageKind, externalInvalidation, documents, allowedFields, isSeller, receiverFromSeller, assertReceiverLink, assertStageAvailable, assertDeclaredCft, assertFinalCft, validateStage, collectInvoiceKeys, toMilliCft,
 } = require("../services/eudrChain.service");
 
 const replyError = (res, error) => res.status(error?.code === 11000 || error?.name === "VersionError" ? 409 : error?.statusCode || 500).json({
@@ -67,6 +69,31 @@ const discardLaterStages = (chain, req, index, reason) => {
     chain.stages.splice(index + 1);
   }
 };
+const upgradeStage = (chain, req, stage, index, fields = stage.fields) => {
+  if (stage.kind === "receiver" && !stage.incoming_invoice_stage_id) {
+    const seller = chain.stages[index - 2];
+    const linked = receiverFromSeller(seller);
+    if (!seller.verified_at) throw fail("Reverify the preceding seller first", 409);
+    event(chain, req, "legacy_receiver_upgraded", stage, { stage: stage.toObject() });
+    stage.documents = stage.documents.filter((document) => document.type !== "invoice");
+    if (fields.invoice_number === stage.fields.invoice_number && fields.invoice_date === stage.fields.invoice_date) { delete fields.invoice_number; delete fields.invoice_date; }
+    stage.incoming_invoice_stage_id = linked.incoming_invoice_stage_id;
+    for (const field of ["name", "gst", "pan"]) fields[field] = linked.fields[field];
+    delete fields.issuer_name; delete fields.issuer_gst; delete fields.issuer_pan;
+    stage.markModified?.("fields");
+  }
+  stage.workflow_version = 2;
+  assertReceiverLink(chain, stage, fields);
+};
+const replaceDocument = (chain, req, stage, index, type, document) => {
+  const replaced = stage.documents.find((item) => item.type === type);
+  event(chain, req, "document_uploaded", stage, { type, name: document.name, replaced: replaced?.toObject?.() || replaced || null });
+  discardLaterStages(chain, req, index, "Earlier document replaced");
+  clearVerification(chain, req, index, "Document replaced");
+  stage.documents = stage.documents.filter((item) => item.type !== type);
+  stage.documents.push({ ...document, type });
+  chain.invoice_keys = collectInvoiceKeys(chain.stages);
+};
 
 exports.lookupContainer = async (req, res) => {
   try {
@@ -104,7 +131,7 @@ exports.create = async (req, res) => {
     if (!text(group.vendor.gst) || !text(group.vendor.pan)) throw fail("Vendor GST and PAN are required before starting EUDR");
     const declaredMilliCft = toMilliCft(declared);
     assertDeclaredCft(declaredMilliCft, group);
-    const chain = await EudrChain.create({ container, container_key: key(container), vendor: vendorId, declared_milli_cft: declaredMilliCft, created_by: actor(req) });
+    const chain = await EudrChain.create({ container, container_key: key(container), vendor: vendorId, declared_milli_cft: declaredMilliCft, created_by: actor(req), stages: [{ kind: "sawmill", workflow_version: 2 }] });
     return res.status(201).json({ data: details(chain, group, containerData) });
   } catch (error) { return replyError(res, error); }
 };
@@ -131,7 +158,8 @@ exports.updateDeclared = async (req, res) => {
     if (next !== chain.declared_milli_cft) {
       event(chain, req, "declared_cft_changed", null, { before: chain.declared_milli_cft / 1000, after: declared });
       chain.declared_milli_cft = next;
-      const index = chain.stages.findIndex((stage) => stage.kind === "declaration");
+      let index = chain.stages.findIndex((stage) => stage.workflow_version >= 2 && isSeller(stage, group.vendor) && toMilliCft(stage.fields?.sold_cft || 0) < next);
+      if (index < 0) index = chain.stages.findIndex((stage) => stage.kind === "declaration");
       if (index >= 0) clearVerification(chain, req, index, "Declared CFT changed");
       await chain.save();
     }
@@ -149,10 +177,18 @@ exports.saveStage = async (req, res) => {
     const input = req.body?.fields;
     if (!input || typeof input !== "object" || Array.isArray(input)) throw fail("Stage fields are required");
     for (const field of Object.keys(input)) if (!allowedFields[stage.kind].includes(field)) throw fail(`Unknown ${stage.kind} field: ${field}`);
-    for (const value of Object.values(input)) if (text(value).length > 500) throw fail("Stage field values must be 500 characters or fewer");
+    for (const value of Object.values(input)) {
+      if (value != null && !["string", "number"].includes(typeof value)) throw fail("Stage fields must be text or numbers");
+      if (text(value).length > 500) throw fail("Stage field values must be 500 characters or fewer");
+    }
     const fields = Object.fromEntries(Object.entries(input).map(([field, value]) => [field, text(value)]));
+    assertReceiverLink(chain, stage, fields);
     const before = JSON.stringify(stage.fields || {});
     if (before !== JSON.stringify(fields)) {
+      upgradeStage(chain, req, stage, index, fields);
+      if (stage.kind === "receiver" && !isSeller({ ...stage.toObject(), fields }, findGroup(containerData, chain.vendor)?.vendor)) {
+        for (const field of ["invoice_number", "invoice_date", "sold_to", "buyer_gst", "buyer_pan", "sold_cft"]) delete fields[field];
+      }
       event(chain, req, "stage_edited", stage, { before: stage.fields || {}, after: fields });
       discardLaterStages(chain, req, index, "Earlier stage edited");
       clearVerification(chain, req, index, "Stage edited");
@@ -160,6 +196,7 @@ exports.saveStage = async (req, res) => {
       chain.invoice_keys = collectInvoiceKeys(chain.stages);
       await chain.save();
     }
+    await saveStageDirectory(stage);
     return res.json({ data: details(chain, findGroup(containerData, chain.vendor), containerData) });
   } catch (error) { return replyError(res, error); }
 };
@@ -173,41 +210,69 @@ exports.upload = async (req, res) => {
     await refresh(chain, req, containerData);
     const { stage, index } = findStage(chain, req.params.stageId);
     const type = text(req.body?.type);
-    if (![...documents[stage.kind], ...(stage.kind === "transport" ? ["truck_registration"] : [])].includes(type)) throw fail("Unsupported document type");
-    const priorDocuments = chain.stages.flatMap((item) => item.documents);
-    for (const entry of chain.history) {
-      if (entry.event === "document_uploaded") priorDocuments.push(entry.detail?.replaced);
-      if (entry.event === "later_stages_superseded") priorDocuments.push(...(entry.detail?.stages || []).flatMap((item) => item.documents || []));
-    }
-    if (priorDocuments.some((document) => document && text(document.name).toLowerCase() === text(req.file.originalname).toLowerCase())) {
-      throw fail(`A file named ${req.file.originalname} was already uploaded in this chain.`, 409);
-    }
-    const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
+    if (stage.kind === "receiver" && !isSeller(stage, findGroup(containerData, chain.vendor)?.vendor)) throw fail("The final receiver uses the preceding seller's invoice and does not accept onward-sale uploads");
+    if (![...documents[stage.kind], ...(["sawmill", "receiver"].includes(stage.kind) ? ["buyer_gst", "buyer_pan"] : []), ...(stage.kind === "transport" ? ["truck_registration"] : [])].includes(type)) throw fail("Unsupported document type");
+    if (!fileMime(req.file.originalname)) throw fail("Unsupported EUDR file format");
     const fileHash = sha256(req.file.buffer);
-    for (const document of priorDocuments) {
-      if (!document) continue;
-      if (document.sha256 === fileHash) throw fail(`This file was already uploaded in this chain (${document.name}).`, 409);
-      if (!document.sha256 && document.key && (document.size == null || document.size === req.file.buffer.length)) {
-        const previous = await storage.getObjectBuffer(document.key);
-        if (sha256(previous.buffer) === fileHash) throw fail(`This file was already uploaded in this chain (${document.name}).`, 409);
-      }
-    }
+    await assertUniqueFile(chain, { name: req.file.originalname, size: req.file.size, sha256: fileHash });
+    upgradeStage(chain, req, stage, index);
     uploadedKey = storage.createStorageKey({ folder: `eudr/${chain._id}/${stage._id}`, originalName: req.file.originalname });
-    await storage.uploadBuffer({ buffer: req.file.buffer, key: uploadedKey, originalName: req.file.originalname, contentType: req.file.mimetype });
-    const replaced = stage.documents.find((document) => document.type === type);
-    event(chain, req, "document_uploaded", stage, { type, name: req.file.originalname, replaced: replaced?.toObject() || null });
-    discardLaterStages(chain, req, index, "Earlier document replaced");
-    clearVerification(chain, req, index, "Document replaced");
-    stage.documents = stage.documents.filter((document) => document.type !== type);
-    stage.documents.push({ type, key: uploadedKey, name: req.file.originalname, content_type: req.file.mimetype, size: req.file.size, sha256: fileHash });
-    chain.invoice_keys = collectInvoiceKeys(chain.stages);
+    await storage.uploadBuffer({ buffer: req.file.buffer, key: uploadedKey, originalName: req.file.originalname, contentType: fileMime(req.file.originalname) });
+    replaceDocument(chain, req, stage, index, type, { key: uploadedKey, name: req.file.originalname, content_type: fileMime(req.file.originalname), size: req.file.size, sha256: fileHash });
     await chain.save();
     uploadedKey = "";
+    await saveStageDirectory(stage);
     return res.json({ data: details(chain, findGroup(containerData, chain.vendor), containerData) });
   } catch (error) {
     if (uploadedKey) await storage.deleteObject(uploadedKey).catch(() => {});
     return replyError(res, error);
   }
+};
+
+exports.directory = async (req, res) => {
+  try {
+    const kind = text(req.query.kind);
+    if (!Object.hasOwn(reusableTypes, kind)) throw fail("Unsupported directory kind");
+    const query = { kind };
+    if (req.query.parent_key) query.parent_key = text(req.query.parent_key);
+    const search = text(req.query.search).slice(0, 100);
+    if (search) query.name = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const entries = await Party.find(query).sort({ name: 1 }).limit(50).lean();
+    return res.json({ data: entries.map(({ evidence, ...entry }) => ({ ...entry, evidence: (evidence || []).map(({ key, ...item }) => item) })) });
+  } catch (error) { return replyError(res, error); }
+};
+exports.directoryDetail = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.partyId)) throw fail("Saved details not found", 404);
+    const party = await Party.findById(req.params.partyId).lean();
+    if (!party) throw fail("Saved details not found", 404);
+    return res.json({ data: { ...party, evidence: (party.evidence || []).map(({ key, ...item }) => item) } });
+  } catch (error) { return replyError(res, error); }
+};
+exports.reuseEvidence = async (req, res) => {
+  try {
+    if (req.body?.confirmed !== true) throw fail("Confirm that this saved evidence is still valid");
+    if (!mongoose.isValidObjectId(req.body?.party_id) || !mongoose.isValidObjectId(req.body?.evidence_id)) throw fail("Saved details or evidence not found", 404);
+    const party = await Party.findById(req.body.party_id);
+    const evidence = party?.evidence.id(req.body.evidence_id);
+    if (!evidence || !reusableTypes[party.kind]?.includes(evidence.type)) throw fail("Saved evidence not found", 404);
+    const chain = await getChain(req);
+    const containerData = await loadContainer(chain.container);
+    await refresh(chain, req, containerData);
+    const { stage, index } = findStage(chain, req.params.stageId);
+    if (!evidenceMatches(party, stage, evidence.type)) throw fail("Saved evidence does not match this stage's identity", 409);
+    const source = await storage.getObjectBuffer(evidence.key);
+    const document = { ...evidence.toObject(), sha256: sha256(source.buffer), size: source.buffer.length };
+    delete document._id;
+    if (!fileMime(document.name)) throw fail("Unsupported EUDR evidence format");
+    await assertUniqueFile(chain, document);
+    upgradeStage(chain, req, stage, index);
+    replaceDocument(chain, req, stage, index, document.type, document);
+    event(chain, req, "saved_evidence_reused", stage, { party_id: String(party._id), type: document.type, name: document.name, validity_confirmed: true });
+    await chain.save();
+    await saveStageDirectory(stage);
+    return res.json({ data: details(chain, findGroup(containerData, chain.vendor), containerData) });
+  } catch (error) { return replyError(res, error); }
 };
 
 exports.documentUrl = async (req, res) => {
@@ -241,7 +306,8 @@ exports.documentContent = async (req, res) => {
     res.vary("Authorization");
     res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Type", ["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(document.content_type) ? document.content_type : "application/octet-stream");
+    const mime = fileMime(document.name);
+    res.setHeader("Content-Type", ["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(mime) ? mime : "application/octet-stream");
     res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(document.name)}`);
     for (const name of ["Content-Length", "Content-Range", "Accept-Ranges"]) {
       const value = upstream.headers.get(name);
@@ -252,6 +318,24 @@ exports.documentContent = async (req, res) => {
     if (!res.headersSent && !res.destroyed) return replyError(res, error);
     if (!res.destroyed) res.destroy();
   } finally { res.removeListener("close", cancel); }
+};
+
+exports.documentPreview = async (req, res) => {
+  try {
+    const chain = await getChain(req);
+    const document = chain.stages.id(req.params.stageId)?.documents.id(req.params.documentId);
+    if (!document) throw fail("Document not found", 404);
+    const mime = fileMime(document.name);
+    if (mime === "application/pdf" || mime?.startsWith("image/")) return exports.documentContent(req, res);
+    if (!mime) throw fail("This document format cannot be previewed", 415);
+    const buffer = await require("../services/eudrPreview.service").officePreview(document);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.vary("Cookie"); res.vary("Authorization");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.type("application/pdf");
+    res.setHeader("Content-Disposition", "inline; filename=preview.pdf");
+    return res.send(buffer);
+  } catch (error) { return replyError(res, error); }
 };
 
 exports.verify = async (req, res) => {
@@ -265,7 +349,10 @@ exports.verify = async (req, res) => {
     if (!group) throw fail("Vendor no longer has shipments in this container", 409);
     if (!text(group.vendor.gst) || !text(group.vendor.pan)) throw fail("Vendor GST and PAN are required");
     assertDeclaredCft(chain.declared_milli_cft, group);
-    validateStage(stage);
+    assertReceiverLink(chain, stage);
+    validateStage(stage, { vendor: group.vendor, declaredMilliCft: chain.declared_milli_cft });
+    const next = nextStageKind(stage, group.vendor);
+    const nextStage = next === "receiver" ? receiverFromSeller(chain.stages[index - 1]) : { kind: next, workflow_version: 2 };
     if (stage.kind === "declaration") {
       assertFinalCft(chain, group, containerData.unassigned);
     }
@@ -278,12 +365,11 @@ exports.verify = async (req, res) => {
     if (stage.kind === "receiver") stage.vendor_signature = group.vendor_signature;
     if (stage.kind === "declaration") stage.shipment_signature = group.shipment_signature;
     event(chain, req, "stage_verified", stage, { method: "manual" });
-    const next = nextStageKind(stage, group.vendor);
     if (next && chain.stages[index + 1]?.kind !== next) {
       discardLaterStages(chain, req, index, "Receiver match changed");
     }
     if (next && index === chain.stages.length - 1) {
-      chain.stages.push({ kind: next });
+      chain.stages.push(nextStage);
     }
     chain.invoice_keys = collectInvoiceKeys(chain.stages);
     await chain.save();
