@@ -24,12 +24,20 @@ const fullChain = () => ({
   history: Array.from({ length: 8 }, (_, index) => ({ _id: `event${index}`, event: "stage_verified", stage_id: "mill", actor_name: user.name, at: time, detail: { method: "manual", replaced: attachment("superseded", "cutting_invoice", "old.pdf") } })),
 });
 let chain = fullChain();
+let siblingChains = [];
+const allChains = () => [chain, ...siblingChains];
+const coverage = () => {
+  const allocated = allChains().reduce((sum, entry) => sum + (entry.contribution_milli_cft ?? entry.declared_milli_cft), 0);
+  const verified = allChains().filter((entry) => entry.complete).reduce((sum, entry) => sum + (entry.contribution_milli_cft ?? entry.declared_milli_cft), 0);
+  return { chain_count: allChains().length, allocated_cft: allocated / 1000, verified_cft: verified / 1000, remaining_cft: 17.6 - allocated / 1000, complete: allocated === 17600 && verified === allocated };
+};
 let pdf;
 let png;
 let jpeg;
 let webp;
 let downloads = 0;
 const writes = [];
+const savedBuyers = new Map();
 const contentRequests = [];
 // Reproduce production: unknown .mjs assets are served as octet-stream, not executable modules.
 const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".wasm": "application/wasm" };
@@ -77,9 +85,20 @@ const server = http.createServer((req, res) => {
         if (route.startsWith("/notifications")) return respond({ data: [], unreadCount: 0 });
         if (route === "/eudr/directory") {
           const kind = url.searchParams.get("kind");
+          if (kind === "buyer") return respond({ data: [...savedBuyers.values()] });
+          if (kind === "vendor") return respond({ data: [{ _id: chain.vendor._id, name: chain.vendor.name, fields: { sold_to: chain.vendor.name, buyer_gst: chain.vendor.gst, buyer_pan: chain.vendor.pan } }, { _id: "missing-tax", name: "Vendor missing PAN", fields: { sold_to: "Vendor missing PAN", buyer_gst: "GST-ONLY", buyer_pan: "" } }] });
           return respond({ data: kind === "sawmill" ? [{ _id: "saved-mill", name: "Saved mill", identity_key: "GST-MILL|PAN-MILL", fields: { name: "Saved mill", gst: "GST-MILL", pan: "PAN-MILL", permission_number: "P-SAVED", cutting_limit_cft: "2000" }, evidence: [{ _id: "saved-license", type: "license", name: "saved-license.pdf" }] }] : kind === "transporter" ? [{ _id: "saved-transporter", name: "Saved transporter", identity_key: "saved-transporter", fields: { transporter_name: "Saved transporter", gst: "GST-TRANSPORT" }, evidence: [] }] : [{ _id: "saved-vehicle", name: "RJ-SAVED / DL-SAVED", fields: { truck_number: "RJ-SAVED", truck_registration_number: "REG-SAVED", driver_license_number: "DL-SAVED" }, evidence: [] }] });
         }
-        if (route === "/eudr") return respond({ data: [{ _id: chain._id, container: chain.container, vendor: chain.vendor, declared_cft: 17.6, complete: chain.complete }] });
+        if (route === "/eudr/container") return respond({ container: chain.container, vendors: [{ vendor: chain.vendor, rows: chain.shipment_rows, excluded: chain.excluded, stuffed_cft: 17.6, coverage: coverage() }], unassigned: [], chains: allChains().map((entry) => ({ _id: entry._id, vendor_id: entry.vendor._id, declared_cft: 17.6, contribution_cft: (entry.contribution_milli_cft ?? entry.declared_milli_cft) / 1000, complete: entry.complete })) });
+        if (route === "/eudr") {
+          if (request.method() === "POST") {
+            const payload = JSON.parse(request.postData()); assert.equal(Number(payload.declared_cft), 17.6); assert.equal(Number(payload.contribution_cft), 7.6);
+            siblingChains.push(chain);
+            chain = { ...fullChain(), _id: "dddddddddddddddddddddddd", contribution_milli_cft: 7600, complete: false, current_stage_id: "mill", stages: [{ _id: "mill", kind: "sawmill", workflow_version: 2, fields: {}, documents: [] }] };
+            return respond({ data: { ...chain, coverage: coverage() } }, 201);
+          }
+          return respond({ data: allChains().map((entry) => ({ _id: entry._id, container: entry.container, vendor: entry.vendor, declared_cft: 17.6, contribution_cft: (entry.contribution_milli_cft ?? entry.declared_milli_cft) / 1000, complete: entry.complete })) });
+        }
         if (route.endsWith("/content") || route.endsWith("/preview")) {
           const id = route.split("/").at(-2); contentRequests.push(id);
           if (id === "missing") return respond({ message: "Document not found" }, 404);
@@ -92,12 +111,18 @@ const server = http.createServer((req, res) => {
           const stageId = route.split("/")[4];
           const stage = chain.stages.find((stage) => stage._id === stageId);
           if (request.method() !== "GET") writes.push({ method: request.method(), route });
-          if (request.method() === "PUT") stage.fields = JSON.parse(request.postData()).fields;
+          if (request.method() === "PUT") {
+            stage.fields = JSON.parse(request.postData()).fields;
+            if (stage.fields.buyer_type === "other" && stage.fields.sold_to && stage.fields.buyer_gst && stage.fields.buyer_pan) savedBuyers.set("saved-buyer", { _id: "saved-buyer", name: stage.fields.sold_to, fields: { sold_to: stage.fields.sold_to, buyer_gst: stage.fields.buyer_gst, buyer_pan: stage.fields.buyer_pan } });
+          }
           if (route.endsWith("/documents") && request.method() === "POST") stage.documents.push(attachment("new-weight", "weight_slip", "eudr-fixture.pdf"));
           if (route.endsWith("/reuse-evidence")) { assert.equal(JSON.parse(request.postData()).confirmed, true); stage.documents = stage.documents.filter((document) => document.type !== "license"); stage.documents.push(attachment("saved-license", "license", "saved-license.pdf")); }
           if (route.endsWith("/verify")) { stage.verified_at = time; stage.verified_by_name = user.name; chain.stages.push({ _id: "new-truck", kind: "transport", fields: {}, documents: [] }); chain.current_stage_id = "new-truck"; }
-          if (request.method() === "PATCH") chain.declared_milli_cft = Math.round(JSON.parse(request.postData()).declared_cft * 1000);
-          return respond({ data: chain });
+          if (request.method() === "PATCH") {
+            if (route.endsWith("/contribution")) { chain.contribution_milli_cft = Math.round(JSON.parse(request.postData()).contribution_cft * 1000); chain.complete = false; }
+            else chain.declared_milli_cft = Math.round(JSON.parse(request.postData()).declared_cft * 1000);
+          }
+          return respond({ data: { ...chain, coverage: coverage() } });
         }
         if (url.pathname.startsWith("/api/")) return respond({ data: [] });
         if (url.origin !== origin) return request.abort();
@@ -187,12 +212,34 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.$eval("#mill-name", (input) => input.value), "Saved mill");
     assert.equal(await page.$eval("#mill-permission_number", (input) => input.value), "P-SAVED");
     assert.equal(await page.$eval("#mill-invoice_number", (input) => input.value), "CUT001");
+    await page.waitForSelector(`#mill-sold-to-select option[value="${chain.vendor._id}"]`);
+    await page.select("#mill-sold-to-select", chain.vendor._id);
+    assert.equal(await page.$eval("#mill-sold_to", (input) => input.value), chain.vendor.name);
+    assert.equal(await page.$eval("#mill-buyer_gst", (input) => input.value), chain.vendor.gst);
+    assert.equal(await page.$eval("#mill-buyer_pan", (input) => input.value), chain.vendor.pan);
+    assert.equal(await page.$eval("#mill-buyer_gst", (input) => input.readOnly), true);
+    assert.equal(await page.$eval('#mill-sold-to-select option[value="missing-tax"]', (option) => option.disabled), true);
+    assert.equal(await page.$eval("#mill-sold_cft", (input) => input.value), "");
+    await page.$eval('input[name="mill-buyer-type"]:not(:checked)', (input) => input.click());
+    assert.equal(await page.$eval("#mill-buyer_gst", (input) => input.value), "");
+    assert.equal(await page.$eval("#mill-buyer_gst", (input) => input.readOnly), false);
+    await page.type("#mill-sold_to", "Saved timber trader"); await page.type("#mill-buyer_gst", "GST-TRADER"); await page.type("#mill-buyer_pan", "PAN-TRADER"); await page.type("#mill-sold_cft", "17.6");
     await click("Confirm validity and reuse", ".eudr-drawer");
     await page.waitForFunction(() => document.querySelector(".eudr-drawer")?.textContent.includes("Currently uploaded: saved-license.pdf"));
     await page.click("#mill-name", { clickCount: 3 }); await page.type("#mill-name", "Updated test sawmill");
     await click("Save step", ".eudr-drawer");
     await page.waitForFunction(() => !document.querySelector("#mill-name").disabled);
     assert.equal(chain.stages[0].fields.name, "Updated test sawmill");
+    await click("Close", ".eudr-drawer"); await click("Edit Details");
+    await page.waitForSelector('#mill-sold-to-select option[value="saved-buyer"]');
+    await page.click("#mill-sold_cft", { clickCount: 3 }); await page.keyboard.press("Backspace");
+    await page.select("#mill-sold-to-select", "saved-buyer");
+    assert.equal(await page.$eval("#mill-sold_to", (input) => input.value), "Saved timber trader");
+    assert.equal(await page.$eval("#mill-sold_cft", (input) => input.value), "");
+    assert.equal(await page.$eval("#mill-invoice_number", (input) => input.value), "CUT001");
+    await page.type("#mill-sold_cft", "17.6");
+    await page.$eval("#mill-sold_to", (input) => input.scrollIntoView({ block: "center" }));
+    await page.screenshot({ path: path.join(output, "eudr-sale-buyer-selection.png") });
     await click("Verify and continue", ".eudr-drawer");
     await page.waitForSelector("#eudr-stage-new-truck");
     assert.equal(await page.$(".eudr-drawer"), null);
@@ -218,6 +265,26 @@ const server = http.createServer((req, res) => {
     assert.ok(writes.some((write) => write.method === "PATCH"));
     assert.ok(writes.some((write) => write.route.endsWith("/verify")));
     assert.ok(writes.some((write) => write.route.endsWith("/documents")));
+
+    chain = fullChain(); chain.complete = false; chain.current_stage_id = "receiver"; chain.stages = chain.stages.slice(0, 3);
+    chain.stages[0].fields = { ...chain.stages[0].fields, sold_to: "Intermediate trader", buyer_gst: "GST-TRADER", buyer_pan: "PAN-TRADER", sold_cft: "17.6" };
+    Object.assign(chain.stages[2], { incoming_invoice_stage_id: "mill", workflow_version: 2, verified_at: null, fields: { name: "Intermediate trader", gst: "GST-TRADER", pan: "PAN-TRADER" }, documents: [] });
+    await open(); await page.$eval("#eudr-stage-receiver button", (button) => button.click());
+    await page.waitForSelector("#receiver-sold-to-select");
+    await page.$eval('input[name="receiver-buyer-type"]:not(:checked)', (input) => input.click());
+    await page.waitForSelector('#receiver-sold-to-select option[value="saved-buyer"]');
+    await page.select("#receiver-sold-to-select", "saved-buyer");
+    assert.equal(await page.$eval("#receiver-sold_to", (input) => input.value), "Saved timber trader");
+    assert.equal(await page.$eval("#receiver-buyer_gst", (input) => input.value), "GST-TRADER");
+    assert.equal(await page.$eval("#receiver-invoice_number", (input) => input.value), "");
+    assert.equal(await page.$eval("#receiver-sold_cft", (input) => input.value), "");
+    assert.equal(await page.$eval("#receiver-received_cft", (input) => input.value), "");
+    assert.equal(await page.$eval("#receiver-gst", (input) => input.readOnly), true);
+    await page.$eval('input[name="receiver-buyer-type"]:not(:checked)', (input) => input.click());
+    await page.waitForSelector(`#receiver-sold-to-select option[value="${chain.vendor._id}"]`);
+    await page.select("#receiver-sold-to-select", chain.vendor._id);
+    assert.equal(await page.$eval("#receiver-buyer_pan", (input) => input.value), chain.vendor.pan);
+    await click("Close", ".eudr-drawer");
 
     chain = fullChain(); chain.complete = false; chain.current_stage_id = "mill"; chain.stages = [{ _id: "mill", kind: "sawmill", fields: {}, documents: [] }];
     await open(); await click("View All Documents (0)");
@@ -255,6 +322,33 @@ const server = http.createServer((req, res) => {
     }
     await page.screenshot({ path: path.join(output, "eudr-formats-viewer.png") });
     await click("Close viewer"); await click("Close gallery");
+    chain = fullChain(); chain.contribution_milli_cft = 10000;
+    await page.goto(`${origin}/eudr`, { waitUntil: "networkidle0" });
+    await page.type("#eudr-container", chain.container); await click("Find shipments");
+    const vendorId = chain.vendor._id;
+    await page.waitForSelector(`#contribution-${vendorId}`);
+    assert.match(await page.$eval(`[aria-label="Timber chains for ${chain.vendor.name}"]`, (element) => element.textContent), /coverage incomplete.*Allocated: 10.000.*Verified: 10.000.*Unallocated: 7.600/);
+    await page.type(`#contribution-${vendorId}`, "7.601");
+    assert.equal(await page.$$eval("button", (buttons) => buttons.find((button) => button.textContent === "Start chain").disabled), true);
+    assert.match(await page.$eval(`[aria-label="Timber chains for ${chain.vendor.name}"]`, (element) => element.textContent), /Only 7.600 CFT/);
+    await page.click(`#contribution-${vendorId}`, { clickCount: 3 }); await page.keyboard.type("7.6");
+    await page.click(`#declared-${vendorId}`, { clickCount: 3 }); await page.keyboard.type("16");
+    assert.equal(await page.$$eval("button", (buttons) => buttons.find((button) => button.textContent === "Start chain").disabled), true);
+    await page.click(`#declared-${vendorId}`, { clickCount: 3 }); await page.keyboard.type("17.6");
+    await click("Start chain"); await page.waitForSelector(".eudr-report");
+    assert.match(await page.$eval('[aria-label="Chain CFT contribution"]', (element) => element.textContent), /contributes 7.600.*coverage incomplete.*2 chain\(s\).*Verified: 10.000/);
+    await click("Edit Details", "#eudr-stage-mill"); await page.waitForSelector("#mill-sold_cft");
+    assert.match(await page.$eval(".eudr-drawer", (element) => element.textContent), /cover at least 7.600 CFT contributed by this chain/);
+    await click("Close", ".eudr-drawer");
+    await click("Update chain contribution"); await page.waitForSelector("#eudr-contribution");
+    await page.click("#eudr-contribution", { clickCount: 3 }); await page.keyboard.type("7.601");
+    assert.equal(await page.$$eval(".eudr-small-dialog button", (buttons) => buttons.find((button) => button.textContent === "Update contribution").disabled), true);
+    await click("Close", ".eudr-small-dialog");
+    await click("Back to Containers"); await page.waitForFunction(() => [...document.querySelectorAll("button")].filter((button) => button.textContent === "Open chain").length === 2);
+    assert.equal(await page.$$eval("button", (buttons) => buttons.filter((button) => button.textContent === "Start chain").length), 0);
+    await page.screenshot({ path: path.join(output, "eudr-multiple-chains.png"), fullPage: true });
+    chain.complete = true;
+    await click("Find shipments"); await page.waitForFunction(() => document.querySelector('[aria-label^="Timber chains for"]')?.textContent.includes("Total timber coverage complete"));
     assert.deepEqual(errors, []);
     console.log("EUDR browser checks passed: read-only report, actual PDF/image previews, multipage controls, filtered navigation, authorized download requests, responsive gallery, editing/upload/verification, and empty/single-file states.");
     console.log(`Screenshots: ${output}`);

@@ -15,11 +15,12 @@ const { getShipmentTimberCft } = require("../controllers/order.controller");
 const EudrChain = require("../models/eudrChain.model");
 const eudrController = require("../controllers/eudrChain.controller");
 const storage = require("../services/wasabiStorage.service");
+const allocation = require("../services/eudrAllocation.service");
 
-test("invoice and container/vendor uniqueness are enforced by database indexes", () => {
+test("invoice uniqueness is retained while multiple chains can share a container/vendor", () => {
   const indexes = EudrChain.schema.indexes();
   assert.ok(indexes.some(([fields, options]) => fields.invoice_keys === 1 && options.unique));
-  assert.ok(indexes.some(([fields, options]) => fields.container_key === 1 && fields.vendor === 1 && options.unique));
+  assert.ok(indexes.some(([fields, options]) => fields.container_key === 1 && fields.vendor === 1 && !options.unique));
   assert.equal(EudrChain.schema.options.optimisticConcurrency, true);
 });
 
@@ -38,6 +39,7 @@ test("chain uploads reject duplicate filenames and content, including renamed an
     isModified: () => false, save: async () => {}, toObject: () => ({}),
   };
   t.mock.method(EudrChain, "findById", async () => chain);
+  t.mock.method(EudrChain, "find", () => ({ lean: async () => [chain] }));
   let uploads = 0;
   let downloads = 0;
   let deleted = 0;
@@ -191,8 +193,12 @@ test("a chain cannot start or change its declaration unless CFT matches the ship
   t.mock.method(Vendor, "find", () => query([{ _id: vendorId, name: "Vendor", gst: "GST", pan: "PAN" }]));
   t.mock.method(Item, "find", () => query([{ code: "I1", timber_cft: 1.25 }]));
   t.mock.method(EudrChain, "createIndexes", async () => {});
+  t.mock.method(allocation, "ensureIndexes", async () => {});
   let created = 0;
-  t.mock.method(EudrChain, "create", async () => { created += 1; return { _id: chainId, stages: [{ _id: "stage1", kind: "sawmill" }], toObject: () => ({ _id: chainId }) }; });
+  let saved = [];
+  t.mock.method(EudrChain.prototype, "save", async function () { created += 1; saved.push(this); return this; });
+  t.mock.method(EudrChain, "find", () => ({ lean: async () => saved }));
+  t.mock.method(allocation, "withAllocation", async (_container, _vendor, operation) => operation(saved, {}));
   const response = () => ({ status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
 
   for (const [declared, direction] of [[2, "below"], [3, "above"]]) {
@@ -208,7 +214,8 @@ test("a chain cannot start or change its declaration unless CFT matches the ship
   assert.equal(accepted.code, 201);
   assert.equal(created, 1);
 
-  const existing = { container: "C1", vendor: vendorId, declared_milli_cft: 2500, stages: [], history: [], isModified: () => false, save: async () => {}, toObject: () => ({}) };
+  const existing = { _id: chainId, container: "C1", container_key: "c1", vendor: vendorId, declared_milli_cft: 2500, stages: [], history: [], isModified: () => false, save: async () => {}, toObject: () => ({}) };
+  saved = [existing];
   t.mock.method(EudrChain, "findById", async () => existing);
   const changed = response();
   await eudrController.updateDeclared({ params: { id: chainId }, body: { declared_cft: 2 }, user: {} }, changed);

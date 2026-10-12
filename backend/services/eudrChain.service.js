@@ -102,9 +102,9 @@ const documents = {
 const saleFields = ["sold_to", "buyer_gst", "buyer_pan", "sold_cft"];
 const saleDocuments = ["buyer_gst", "buyer_pan"];
 const allowedFields = {
-  sawmill: [...required.sawmill, "cutting_limit_cft", ...saleFields],
+  sawmill: [...required.sawmill, "cutting_limit_cft", ...saleFields, "buyer_type", "buyer_vendor_id"],
   transport: [...required.transport, "truck_registration_number", "gst"],
-  receiver: [...required.receiver, ...saleFields],
+  receiver: [...required.receiver, ...saleFields, "buyer_type", "buyer_vendor_id"],
   declaration: [],
 };
 const assertStageAvailable = (stages, index) => {
@@ -122,12 +122,25 @@ const assertFinalCft = (chain, group, unassigned) => {
   assertDeclaredCft(chain.declared_milli_cft, group);
 };
 
+const contributionMilliCft = (chain) => chain.contribution_milli_cft ?? chain.declared_milli_cft;
+const chainVerified = (chain, group, unassigned = []) => Boolean(
+  group && !unassigned.length && chain.declared_milli_cft === group.stuffed_milli_cft &&
+  contributionMilliCft(chain) > 0 && contributionMilliCft(chain) <= group.stuffed_milli_cft &&
+  chain.stages?.length && chain.stages.at(-1).kind === "declaration" &&
+  chain.stages.every((stage) => stage.verified_at) && !externalInvalidation(chain.stages, group)
+);
+const chainCoverage = (chains, group, unassigned = []) => {
+  const allocated = chains.reduce((sum, chain) => sum + contributionMilliCft(chain), 0);
+  const verified = chains.filter((chain) => chainVerified(chain, group, unassigned)).reduce((sum, chain) => sum + contributionMilliCft(chain), 0);
+  return { chain_count: chains.length, allocated_cft: allocated / 1000, verified_cft: verified / 1000, remaining_cft: group ? (group.stuffed_milli_cft - allocated) / 1000 : null, complete: Boolean(group && group.stuffed_milli_cft > 0 && allocated === group.stuffed_milli_cft && verified === allocated && !unassigned.length) };
+};
+
 const isSeller = (stage, vendor) => stage.kind === "sawmill" || stage.kind === "receiver" && !receiverMatches(stage.fields || {}, vendor || {});
 const requiredDocuments = (stage, vendor) => stage.workflow_version >= 2
   ? stage.kind === "sawmill" ? [...documents.sawmill, ...saleDocuments]
     : stage.kind === "receiver" ? isSeller(stage, vendor) ? ["invoice", ...saleDocuments] : [] : documents[stage.kind]
   : documents[stage.kind];
-const validateStage = (stage, { vendor, declaredMilliCft } = {}) => {
+const validateStage = (stage, { vendor, declaredMilliCft, contributionMilliCft = declaredMilliCft } = {}) => {
   const fields = stage.fields || {};
   const modern = stage.workflow_version >= 2;
   const fieldsRequired = modern && stage.kind === "receiver" ? ["name", "gst", "pan", "received_cft", ...(isSeller(stage, vendor) ? ["invoice_number", "invoice_date", ...saleFields] : [])] : [...required[stage.kind], ...(modern && stage.kind === "sawmill" ? saleFields : [])];
@@ -135,7 +148,7 @@ const validateStage = (stage, { vendor, declaredMilliCft } = {}) => {
   if (modern && isSeller(stage, vendor)) {
     const sold = parseTimberCft(fields.sold_cft);
     if (!(sold > 0)) throw fail("Sold CFT must be positive");
-    if (declaredMilliCft != null && toMilliCft(sold) < declaredMilliCft) throw fail(`Sold CFT must cover at least ${(declaredMilliCft / 1000).toFixed(3)} declared CFT`);
+    if (contributionMilliCft != null && toMilliCft(sold) < contributionMilliCft) throw fail(`Sold CFT must cover at least ${(contributionMilliCft / 1000).toFixed(3)} CFT contributed by this chain`);
   }
   if (stage.kind === "receiver") parseTimberCft(fields.received_cft);
   if (stage.kind === "sawmill" && text(fields.cutting_limit_cft)) parseTimberCft(fields.cutting_limit_cft);
@@ -163,4 +176,4 @@ const assertReceiverLink = (chain, stage, fields = stage.fields) => {
   for (const field of ["name", "gst", "pan"]) if (text(fields[field]) !== text(expected[field])) throw fail("Receiver identity must match the preceding sale. Edit the seller to correct it.", 409);
 };
 
-module.exports = { text, key, fail, loadContainer, findGroup, receiverMatches, nextStageKind, externalInvalidation, required, documents, allowedFields, requiredDocuments, isSeller, receiverFromSeller, assertReceiverLink, assertStageAvailable, assertDeclaredCft, assertFinalCft, validateStage, collectInvoiceKeys, toMilliCft };
+module.exports = { text, key, fail, loadContainer, findGroup, receiverMatches, nextStageKind, externalInvalidation, required, documents, allowedFields, requiredDocuments, isSeller, receiverFromSeller, assertReceiverLink, assertStageAvailable, assertDeclaredCft, assertFinalCft, validateStage, collectInvoiceKeys, toMilliCft, contributionMilliCft, chainVerified, chainCoverage };

@@ -16,6 +16,7 @@ router.get("/", controller.list);
 router.post("/", controller.create);
 router.get("/:id", controller.get);
 router.patch("/:id/declared", controller.updateDeclared);
+router.patch("/:id/contribution", controller.updateContribution);
 router.put("/:id/stages/:stageId", controller.saveStage);
 router.post("/:id/stages/:stageId/documents", upload.eudrSingle("file"), controller.upload);
 router.post("/:id/stages/:stageId/reuse-evidence", controller.reuseEvidence);

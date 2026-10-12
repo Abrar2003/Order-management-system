@@ -5,6 +5,7 @@ const express = require("express");
 const User = require("../models/user.model");
 const EudrChain = require("../models/eudrChain.model");
 const Party = require("../models/eudrParty.model");
+const Vendor = require("../models/vendor.model");
 const storage = require("../services/wasabiStorage.service");
 const router = require("../routers/eudrChain.routes");
 const { signAccessToken } = require("../services/authToken.service");
@@ -41,6 +42,7 @@ test("document previews and downloads enforce roles and chain ownership without 
   assert.equal((await fetch(`${base}/content`)).status, 401);
   assert.equal((await fetch(`${base}/preview`)).status, 401);
   assert.equal((await fetch(`${base}/preview`, { headers: { Authorization: `Bearer ${signAccessToken(viewer)}` } })).status, 403);
+  assert.equal((await fetch(`http://127.0.0.1:${server.address().port}/eudr/${chain._id}/contribution`, { method: "PATCH", headers: { Authorization: `Bearer ${signAccessToken(viewer)}` } })).status, 403);
   assert.equal((await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${signAccessToken(viewer)}` } })).status, 403);
   assert.equal(calls.length, 0);
   const invalid = base.replace(String(chain.stages[0]._id), "cccccccccccccccccccccccc");
@@ -95,4 +97,13 @@ test("document previews and downloads enforce roles and chain ownership without 
   const detail = await fetch(`${directoryUrl.split("?")[0]}/${saved._id}`, { headers });
   assert.equal(detail.status, 200); assert.equal((await detail.json()).data.evidence[0].key, undefined);
   assert.equal((await fetch(directoryUrl, { headers: { Authorization: `Bearer ${signAccessToken(viewer)}` } })).status, 403);
+  const vendorUrl = directoryUrl.replace("kind=sawmill", "kind=vendor");
+  assert.equal((await fetch(vendorUrl)).status, 401);
+  assert.equal((await fetch(vendorUrl, { headers: { Authorization: `Bearer ${signAccessToken(viewer)}` } })).status, 403);
+  t.mock.method(Vendor, "find", (query) => {
+    assert.equal(query.deleted_at, null); assert.deepEqual(query.is_active, { $ne: false });
+    return { select: (fields) => { assert.equal(fields, "name gst pan"); return { sort: () => ({ limit: () => ({ lean: async () => [{ _id: saved._id, name: "Vendor", gst: "GST-V", pan: "PAN-V", email: "not-exposed" }] }) }) }; } };
+  });
+  const vendors = await fetch(vendorUrl, { headers }); assert.equal(vendors.status, 200);
+  const buyer = (await vendors.json()).data[0]; assert.deepEqual(buyer.fields, { sold_to: "Vendor", buyer_gst: "GST-V", buyer_pan: "PAN-V" }); assert.equal(buyer.email, undefined);
 });

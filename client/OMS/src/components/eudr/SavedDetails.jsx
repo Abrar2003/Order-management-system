@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import api from "../../api/axios";
 import { requestError } from "../../utils/eudrDocuments";
 
-function DirectorySelect({ kind, label, id = `saved-${kind}`, parentKey, disabled, onSelect }) {
+function DirectorySelect({ kind, label, id = `saved-${kind}`, selectedId, selectedLabel, parentKey, disabled, onSelect }) {
   const [search, setSearch] = useState("");
   const [entries, setEntries] = useState([]);
   const [error, setError] = useState("");
@@ -17,7 +17,15 @@ function DirectorySelect({ kind, label, id = `saved-${kind}`, parentKey, disable
     }, 200);
     return () => { clearTimeout(timer); abort.abort(); };
   }, [kind, search, parentKey]);
-  return <div className="mb-3"><label className="form-label" htmlFor={id}>{label}</label><input type="search" className="form-control mb-2" aria-label={`Search ${label}`} placeholder="Search saved names" value={search} disabled={disabled} onChange={(event) => setSearch(event.target.value)} /><select id={id} className="form-select" disabled={disabled} value={selected} onChange={(event) => { setSelected(event.target.value); onSelect(entries.find((entry) => entry._id === event.target.value) || null); }}><option value="">Enter new details or select saved details</option>{entries.map((entry) => <option key={entry._id} value={entry._id}>{entry.name}{entry.fields.gst ? ` · ${entry.fields.gst}` : ""}</option>)}</select>{error && <p role="alert" className="small text-danger">Saved details unavailable: {error}</p>}</div>;
+  return <div className="mb-3"><label className="form-label" htmlFor={id}>{label}</label><input type="search" className="form-control mb-2" aria-label={`Search ${label}`} placeholder="Search saved names" value={search} disabled={disabled} onChange={(event) => setSearch(event.target.value)} /><select id={id} className="form-select" disabled={disabled} value={selectedId ?? selected} onChange={(event) => { setSelected(event.target.value); onSelect(entries.find((entry) => entry._id === event.target.value) || null); }}><option value="">{kind === "vendor" ? "Select a vendor" : "Enter new details or select saved details"}</option>{selectedId && !entries.some((entry) => entry._id === selectedId) && <option value={selectedId}>{selectedLabel}</option>}{entries.map((entry) => <option key={entry._id} value={entry._id} disabled={kind === "vendor" && (!entry.fields.buyer_gst || !entry.fields.buyer_pan)}>{entry.name}{entry.fields.gst || entry.fields.buyer_gst ? ` · ${entry.fields.gst || entry.fields.buyer_gst}` : ""}{kind === "vendor" && (!entry.fields.buyer_gst || !entry.fields.buyer_pan) ? " · GST / PAN missing" : ""}</option>)}</select>{error && <p role="alert" className="small text-danger">Saved details unavailable: {error}</p>}</div>;
+}
+
+export function SaleBuyerDetails({ type, fields, stageId, disabled, onFill }) {
+  return <>
+    <fieldset className="mb-3" disabled={disabled}><legend className="h6">Buyer type</legend>{[["vendor", "Sold to vendor"], ["other", "Sold to other party"]].map(([value, label]) => <label className="form-check form-check-inline" key={value}><input type="radio" className="form-check-input" name={`${stageId}-buyer-type`} checked={type === value} onChange={() => onFill({ buyer_type: value, buyer_vendor_id: "", sold_to: "", buyer_gst: "", buyer_pan: "" })} />{label}</label>)}</fieldset>
+    <DirectorySelect key={type} kind={type === "vendor" ? "vendor" : "buyer"} id={`${stageId}-sold-to-select`} label={type === "vendor" ? "Select buyer vendor" : "Saved other party"} selectedId={type === "vendor" ? fields.buyer_vendor_id || "" : undefined} selectedLabel={fields.sold_to} disabled={disabled} onSelect={(entry) => onFill({ buyer_type: type, buyer_vendor_id: type === "vendor" ? entry?._id || "" : "", sold_to: "", buyer_gst: "", buyer_pan: "", ...entry?.fields })} />
+    <p className="small text-muted">{type === "vendor" ? "Buyer name, GST and PAN come from the selected vendor. Enter Sold CFT below. Vendors missing GST or PAN cannot be selected." : "Select a saved party or enter a new name, GST and PAN below. Complete party details are saved with this step and can be selected at any sale step in any chain."} Invoice numbers, quantities and evidence are not reused.</p>
+  </>;
 }
 
 export default function SavedDetails({ kind, disabled, onFill, onReuse }) {

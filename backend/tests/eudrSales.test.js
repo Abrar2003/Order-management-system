@@ -7,6 +7,7 @@ const { validateStage, requiredDocuments, receiverFromSeller, assertReceiverLink
 const { snapshots, saveStageDirectory, evidenceMatches } = require("../services/eudrDirectory.service");
 const storage = require("../services/wasabiStorage.service");
 const { sha256 } = require("../services/eudrFiles.service");
+const allocation = require("../services/eudrAllocation.service");
 const Order = require("../models/order.model");
 const Sample = require("../models/sample.model");
 const Item = require("../models/item.model");
@@ -25,10 +26,13 @@ const setup = (t, stages) => {
   t.mock.method(Item, "find", () => query([{ code: "I1", timber_cft: 1 }]));
   t.mock.method(Vendor, "find", () => query([vendor]));
   t.mock.method(EudrChain, "createIndexes", async () => {});
+  t.mock.method(allocation, "ensureIndexes", async () => {});
   t.mock.method(Party, "findOneAndUpdate", async () => ({}));
   const chain = new EudrChain({ container: "C1", container_key: "c1", vendor: vendor._id, declared_milli_cft: 10000, stages });
   t.mock.method(chain, "save", async () => chain);
   t.mock.method(EudrChain, "findById", async () => chain);
+  t.mock.method(EudrChain, "find", () => ({ lean: async () => [chain] }));
+  t.mock.method(allocation, "withAllocation", async (_container, _vendor, operation) => operation([chain], {}));
   const request = (stage, body = {}) => ({ params: { id: String(chain._id), stageId: String(stage._id) }, body, user: { _id: vendor._id, name: "Manager" } });
   return { chain, request };
 };
@@ -155,4 +159,125 @@ test("saved evidence requires confirmation and matching identity, and shares fil
   const duplicate = response(); await controller.reuseEvidence(request(chain.stages[0], { ...body, confirmed: true }), duplicate); assert.equal(duplicate.code, 409);
   party.fields = { ...party.fields, gst: "WRONG" };
   const wrong = response(); await controller.reuseEvidence(request(chain.stages[0], { ...body, confirmed: true }), wrong); assert.equal(wrong.code, 409); assert.match(wrong.body.message, /identity/);
+});
+
+test("vendor buyer selection uses server identity and keeps saved snapshots on later transaction edits", async (t) => {
+  const { chain, request } = setup(t, [mill()]); const stage = chain.stages[0];
+  let currentVendor = { ...vendor }; let reads = 0;
+  t.mock.method(Vendor, "findOne", (query) => {
+    reads += 1; assert.equal(query.deleted_at, null); assert.deepEqual(query.is_active, { $ne: false });
+    return { select: () => ({ lean: async () => currentVendor }) };
+  });
+  const selected = response(); await controller.saveStage(request(stage, { fields: { ...stage.fields, buyer_type: "vendor", buyer_vendor_id: vendor._id, sold_to: "FORGED", buyer_gst: "FORGED", buyer_pan: "FORGED" } }), selected);
+  assert.ok(selected.body.data, selected.body.message);
+  assert.equal(stage.fields.sold_to, vendor.name); assert.equal(stage.fields.buyer_gst, vendor.gst); assert.equal(stage.fields.buyer_pan, vendor.pan);
+  assert.equal(stage.fields.sold_cft, "10"); assert.ok(!snapshots(stage).some((entry) => entry.kind === "buyer"));
+  currentVendor = { ...vendor, name: "Renamed vendor", gst: "NEW-GST" };
+  const edited = response(); await controller.saveStage(request(stage, { fields: { ...stage.fields, sold_cft: "11" } }), edited);
+  assert.ok(edited.body.data, edited.body.message); assert.equal(reads, 1); assert.equal(stage.fields.buyer_gst, vendor.gst);
+  const reselected = response(); await controller.saveStage(request(stage, { fields: { ...stage.fields, sold_to: currentVendor.name, buyer_gst: currentVendor.gst } }), reselected);
+  assert.ok(reselected.body.data, reselected.body.message); assert.equal(reads, 2); assert.equal(stage.fields.buyer_gst, "NEW-GST");
+  currentVendor = { ...vendor, pan: "" };
+  const missingTax = response(); await controller.saveStage(request(stage, { fields: { ...stage.fields, buyer_gst: "changed" } }), missingTax); assert.equal(missingTax.code, 409);
+  currentVendor = null;
+  const unavailable = response(); await controller.saveStage(request(stage, { fields: { ...stage.fields, buyer_gst: "changed" } }), unavailable); assert.equal(unavailable.code, 409);
+  const invalid = response(); await controller.saveStage(request(stage, { fields: { ...stage.fields, buyer_vendor_id: "invalid" } }), invalid); assert.equal(invalid.code, 400);
+});
+
+test("other buyer identities persist from sawmill and onward sales without invoices, quantities or evidence", async (t) => {
+  const { chain, request } = setup(t, [mill()]); const stage = chain.stages[0]; const writes = [];
+  t.mock.method(Party, "findOneAndUpdate", async (filter, update) => { writes.push({ filter, update }); });
+  const fields = { ...stage.fields, buyer_type: "other", buyer_vendor_id: vendor._id, sold_to: "Timber trader", buyer_gst: "GST T", buyer_pan: "PAN-T" };
+  const saved = response(); await controller.saveStage(request(stage, { fields }), saved); assert.ok(saved.body.data, saved.body.message);
+  assert.equal(stage.fields.buyer_vendor_id, undefined);
+  const entry = writes.find(({ filter }) => filter.kind === "buyer");
+  assert.equal(entry.filter.identity_key, "GSTT|PANT");
+  assert.deepEqual(entry.update.$set.fields, { sold_to: "Timber trader", buyer_gst: "GST T", buyer_pan: "PAN-T" });
+  assert.equal(entry.update.$addToSet, undefined);
+  const before = JSON.stringify(stage.toObject());
+  const onward = { kind: "receiver", fields: { name: "Intermediate", gst: "I-GST", pan: "I-PAN", ...entry.update.$set.fields, sold_cft: "20", invoice_number: "NEW-SALE" }, documents: [] };
+  await saveStageDirectory(onward);
+  assert.equal(writes.at(-1).filter.identity_key, entry.filter.identity_key); assert.equal(JSON.stringify(stage.toObject()), before);
+  const incomplete = snapshots({ kind: "receiver", fields: { sold_to: "Incomplete", buyer_gst: "GST" } }); assert.deepEqual(incomplete, []);
+  const draft = response(); await controller.saveStage(request(stage, { fields: { ...stage.fields, buyer_type: "vendor", buyer_vendor_id: "", sold_to: "", buyer_gst: "", buyer_pan: "" } }), draft); assert.ok(draft.body.data, draft.body.message);
+});
+
+test("two smaller purchase chains verify independently and complete only their combined allocated CFT", async (t) => {
+  const { chain, request } = setup(t, [mill()]);
+  chain.contribution_milli_cft = 6000;
+  chain.stages[0].fields.sold_cft = "6";
+  const verified = response(); await controller.verify(request(chain.stages[0]), verified);
+  assert.ok(verified.body.data, verified.body.message);
+  assert.equal(verified.body.data.coverage.allocated_cft, 6);
+  assert.equal(verified.body.data.coverage.complete, false);
+  const group = await require("../services/eudrChain.service").loadContainer("C1");
+  const finalStages = [
+    { kind: "receiver", fields: { name: vendor.name, gst: vendor.gst, pan: vendor.pan }, verified_at: new Date(), vendor_signature: group.vendors[0].vendor_signature, documents: [] },
+    { kind: "declaration", documents: [evidence("declaration")], verified_at: null },
+  ];
+  chain.stages.push(...finalStages); chain.stages[1].verified_at = new Date();
+  const firstDone = response(); await controller.verify(request(chain.stages.at(-1)), firstDone);
+  assert.ok(firstDone.body.data, firstDone.body.message); assert.equal(firstDone.body.data.complete, true);
+  assert.equal(firstDone.body.data.coverage.verified_cft, 6); assert.equal(firstDone.body.data.coverage.complete, false);
+  const second = new EudrChain({ container: "C1", container_key: "c1", vendor: vendor._id, declared_milli_cft: 10000, contribution_milli_cft: 4000, stages: chain.stages.toObject() });
+  t.mock.method(second, "save", async () => second);
+  t.mock.method(EudrChain, "find", () => ({ lean: async () => [chain, second] }));
+  const loaded = response(); await controller.get(request(chain.stages[0]), loaded);
+  assert.equal(loaded.body.data.coverage.verified_cft, 10); assert.equal(loaded.body.data.coverage.complete, true);
+  second.stages[0].verified_at = null;
+  const edited = response(); await controller.get(request(chain.stages[0]), edited);
+  assert.equal(edited.body.data.coverage.complete, false); assert.equal(edited.body.data.coverage.verified_cft, 6);
+});
+
+test("create accepts a second smaller purchase but rejects excess and invalid contributions server-side", async (t) => {
+  const { chain } = setup(t, [mill()]); chain.contribution_milli_cft = 6000;
+  const chains = [chain];
+  t.mock.method(EudrChain.prototype, "save", async function () { chains.push(this); return this; });
+  t.mock.method(EudrChain, "find", () => ({ lean: async () => chains }));
+  t.mock.method(allocation, "withAllocation", async (_container, _vendor, operation) => operation(chains, {}));
+  const request = (contribution_cft) => ({ body: { container: "C1", vendor_id: vendor._id, declared_cft: "10", contribution_cft }, user: { _id: vendor._id } });
+  const accepted = response(); await controller.create(request("4"), accepted);
+  assert.equal(accepted.code, 201); assert.equal(chains.length, 2);
+  assert.equal(accepted.body.data.contribution_milli_cft, 4000); assert.equal(accepted.body.data.declared_milli_cft, 10000);
+  assert.equal(accepted.body.data.coverage.allocated_cft, 10); assert.equal(accepted.body.data.coverage.complete, false);
+  const excess = response(); await controller.create(request("0.001"), excess);
+  assert.equal(excess.code, 409); assert.equal(chains.length, 2);
+  for (const value of ["", "0", "-1", "1.0001", "bad"]) {
+    const invalid = response(); await controller.create(request(value), invalid); assert.equal(invalid.code, 400);
+  }
+  const otherVendorChain = new EudrChain({ container: "C1", vendor: "cccccccccccccccccccccccc", declared_milli_cft: 99000, contribution_milli_cft: 99000 });
+  t.mock.method(EudrChain, "find", () => ({ select: () => ({ lean: async () => [...chains, otherVendorChain] }) }));
+  const lookup = response(); await controller.lookupContainer({ query: { container: "C1" } }, lookup);
+  assert.equal(lookup.body.vendors[0].coverage.chain_count, 2); assert.equal(lookup.body.vendors[0].coverage.allocated_cft, 10);
+});
+
+test("contribution edits preserve documents/history, revoke this chain, and cannot over-allocate", async (t) => {
+  const { chain, request } = setup(t, [mill(), transport()]);
+  chain.stages.forEach((stage) => { stage.verified_at = new Date(); });
+  const beforeDocuments = JSON.stringify(chain.stages.map((stage) => stage.documents));
+  const lower = response(); await controller.updateContribution(request(chain.stages[0], { contribution_cft: "6" }), lower);
+  assert.ok(lower.body.data, lower.body.message); assert.equal(chain.contribution_milli_cft, 6000); assert.equal(chain.declared_milli_cft, 10000);
+  assert.ok(chain.stages.every((stage) => !stage.verified_at)); assert.equal(JSON.stringify(chain.stages.map((stage) => stage.documents)), beforeDocuments);
+  assert.ok(chain.history.some((entry) => entry.event === "contribution_cft_changed"));
+  const sibling = new EudrChain({ container: "C1", vendor: vendor._id, declared_milli_cft: 10000, contribution_milli_cft: 4000 });
+  t.mock.method(allocation, "withAllocation", async (_container, _vendor, operation) => operation([chain, sibling], {}));
+  const tooMuch = response(); await controller.updateContribution(request(chain.stages[0], { contribution_cft: "6.001" }), tooMuch);
+  assert.equal(tooMuch.code, 409); assert.equal(chain.contribution_milli_cft, 6000);
+  for (const contribution_cft of ["", "0", "-1", "1.0001", "bad"]) {
+    const invalid = response(); await controller.updateContribution(request(chain.stages[0], { contribution_cft }), invalid); assert.equal(invalid.code, 400);
+  }
+});
+
+test("a container declaration update synchronizes sibling totals without inflating explicit contributions", async (t) => {
+  const { chain, request } = setup(t, [mill()]); chain.contribution_milli_cft = 6000;
+  const sibling = new EudrChain({ container: "C1", vendor: vendor._id, declared_milli_cft: 10000, contribution_milli_cft: 4000, stages: [mill()] });
+  t.mock.method(sibling, "save", async () => sibling);
+  t.mock.method(allocation, "withAllocation", async (_container, _vendor, operation) => operation([chain, sibling], {}));
+  t.mock.method(EudrChain, "find", () => ({ lean: async () => [chain, sibling] }));
+  t.mock.method(Item, "find", () => ({ select: () => ({ lean: async () => [{ code: "I1", timber_cft: 1.2 }] }) }));
+  const updated = response(); await controller.updateDeclared(request(chain.stages[0], { declared_cft: "12" }), updated);
+  assert.ok(updated.body.data, updated.body.message);
+  assert.equal(chain.declared_milli_cft, 12000); assert.equal(sibling.declared_milli_cft, 12000);
+  assert.equal(chain.contribution_milli_cft, 6000); assert.equal(sibling.contribution_milli_cft, 4000);
+  assert.equal(updated.body.data.coverage.remaining_cft, 2); assert.equal(updated.body.data.coverage.complete, false);
 });

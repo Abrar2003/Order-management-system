@@ -112,6 +112,10 @@ EUDR Office previews additionally require Linux user namespaces, `/usr/bin/bwrap
 
 Verify conversions without MongoDB or Wasabi using `node backend/tests/eudrOffice.integration.js` from a development install. Windows uses generated trusted fixtures only; Linux exercises the sandbox. On a production install without the development-only PDF parser, set `EUDR_OFFICE_FIXTURE_OUTPUT` to a temporary output directory and inspect the six generated PDFs separately. Converted previews are private Wasabi objects under `eudr-previews/<content-hash>/v1.pdf`; original evidence and review history are never replaced by previews.
 
+EUDR multi-chain allocation changes require a transaction-capable MongoDB replica set or mongos; standalone databases return 503 without saving. On the first EUDR stage/allocation write after deployment, the backend builds the replacement container/vendor lookup index and removes only the obsolete two-field unique container/vendor index. The issuer/invoice unique index and all chain documents/history remain intact. Database credentials need collection/index management permissions for this upgrade. Existing chains without an explicit contribution retain their full declared CFT; reduce their contribution (which revokes that chain's verifications) before adding another purchase chain. The container/vendor declared total still matches its stuffed total; only each chain's allocated contribution, not its full invoice quantity, counts toward verified coverage.
+
+Run `node backend/tests/eudrAllocation.integration.js /path/to/mongod` to check the index upgrade, competing allocations, multiple empty drafts, invoice collisions and transaction rollback against an isolated local replica set. The test starts and removes its own temporary database; it never reads the production connection string.
+
 ### Frontend env
 
 ```bash

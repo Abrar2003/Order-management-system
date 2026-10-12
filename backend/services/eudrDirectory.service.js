@@ -5,11 +5,12 @@ const { normalizeIdentifier } = require("../helpers/timberCft");
 const pick = (fields, keys) => Object.fromEntries(keys.map((key) => [key, String(fields?.[key] || "").trim()]));
 const textKey = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 const identityKey = (fields) => fields.gst ? normalizeIdentifier(fields.gst) : textKey(fields.transporter_name);
-const reusableTypes = { sawmill: ["license", "permission"], transporter: [], vehicle: ["truck_registration", "driver_license"] };
+const reusableTypes = { sawmill: ["license", "permission"], transporter: [], vehicle: ["truck_registration", "driver_license"], buyer: [] };
 const snapshots = (stage) => {
   const f = stage.fields || {};
-  if (stage.kind === "sawmill" && f.name && f.gst && f.pan) return [{ kind: "sawmill", name: f.name, identity_key: `${normalizeIdentifier(f.gst)}|${normalizeIdentifier(f.pan)}`, fields: pick(f, ["name", "gst", "pan", "permission_number", "cutting_limit_cft"]) }];
-  if (stage.kind !== "transport" || !f.transporter_name) return [];
+  const buyers = ["sawmill", "receiver"].includes(stage.kind) && f.buyer_type !== "vendor" && f.sold_to && normalizeIdentifier(f.buyer_gst) && normalizeIdentifier(f.buyer_pan) ? [{ kind: "buyer", name: f.sold_to, identity_key: `${normalizeIdentifier(f.buyer_gst)}|${normalizeIdentifier(f.buyer_pan)}`, fields: pick(f, ["sold_to", "buyer_gst", "buyer_pan"]) }] : [];
+  if (stage.kind === "sawmill" && f.name && f.gst && f.pan) return [{ kind: "sawmill", name: f.name, identity_key: `${normalizeIdentifier(f.gst)}|${normalizeIdentifier(f.pan)}`, fields: pick(f, ["name", "gst", "pan", "permission_number", "cutting_limit_cft"]) }, ...buyers];
+  if (stage.kind !== "transport" || !f.transporter_name) return buyers;
   const parent = identityKey(f);
   return [
     { kind: "transporter", name: f.transporter_name, identity_key: parent, fields: pick(f, ["transporter_name", "gst"]) },

@@ -3,20 +3,22 @@ const { pipeline } = require("node:stream/promises");
 const mongoose = require("mongoose");
 const EudrChain = require("../models/eudrChain.model");
 const Party = require("../models/eudrParty.model");
+const Vendor = require("../models/vendor.model");
+const allocation = require("../services/eudrAllocation.service");
 const storage = require("../services/wasabiStorage.service");
 const { saveStageDirectory, evidenceMatches, reusableTypes } = require("../services/eudrDirectory.service");
 const { fileMime, sha256, assertUniqueFile } = require("../services/eudrFiles.service");
 const {
   text, key, fail, loadContainer, findGroup,
-  nextStageKind, externalInvalidation, documents, allowedFields, isSeller, receiverFromSeller, assertReceiverLink, assertStageAvailable, assertDeclaredCft, assertFinalCft, validateStage, collectInvoiceKeys, toMilliCft,
+  nextStageKind, externalInvalidation, documents, allowedFields, isSeller, receiverFromSeller, assertReceiverLink, assertStageAvailable, assertDeclaredCft, assertFinalCft, validateStage, collectInvoiceKeys, toMilliCft, contributionMilliCft, chainVerified, chainCoverage,
 } = require("../services/eudrChain.service");
 
 const replyError = (res, error) => res.status(error?.code === 11000 || error?.name === "VersionError" ? 409 : error?.statusCode || 500).json({
-  message: error?.code === 11000 ? "This container/vendor chain or issuer invoice number already exists" : error?.name === "VersionError" ? "Chain changed while saving. Refresh and try again." : error?.message || "EUDR request failed",
+  message: error?.code === 11000 ? "An issuer invoice number already exists, or an allocation changed concurrently. Refresh and try again." : error?.name === "VersionError" ? "Chain changed while saving. Refresh and try again." : error?.message || "EUDR request failed",
 });
 const actor = (req) => req.user?._id || req.user?.id;
 let indexReady;
-const ensureIndexes = () => { indexReady ||= EudrChain.createIndexes(); return indexReady; };
+const ensureIndexes = () => { indexReady ||= allocation.ensureIndexes().catch((error) => { indexReady = null; throw error; }); return indexReady; };
 const event = (chain, req, name, stage, detail = {}) => chain.history.push({ event: name, stage_id: stage ? String(stage._id) : "", actor: actor(req), actor_name: text(req.user?.name || req.user?.username), detail });
 const clearVerification = (chain, req, start, reason) => {
   for (let index = start; index < chain.stages.length; index += 1) {
@@ -38,15 +40,17 @@ const refresh = async (chain, req, containerData) => {
   if (chain.isModified()) await chain.save();
   return group;
 };
-const details = (chain, group, containerData) => ({
+const details = async (chain, group, containerData) => ({
   ...chain.toObject(),
   vendor: group?.vendor || null,
   stuffed_cft: group?.stuffed_cft ?? null,
   excluded: group?.excluded || [],
   shipment_rows: group?.rows || [],
   unassigned: containerData?.unassigned || [],
+  contribution_milli_cft: contributionMilliCft(chain),
+  coverage: chainCoverage(await EudrChain.find({ container_key: chain.container_key, vendor: chain.vendor }).lean(), group, containerData?.unassigned),
   current_stage_id: String(chain.stages.find((stage) => !stage.verified_at)?._id || ""),
-  complete: chain.stages.at(-1)?.kind === "declaration" && Boolean(chain.stages.at(-1)?.verified_at),
+  complete: chainVerified(chain, group, containerData?.unassigned),
 });
 const getChain = async (req) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw fail("Chain not found", 404);
@@ -98,8 +102,8 @@ const replaceDocument = (chain, req, stage, index, type, document) => {
 exports.lookupContainer = async (req, res) => {
   try {
     const data = await loadContainer(req.query.container);
-    const chains = await EudrChain.find({ container_key: key(req.query.container) }).select("vendor declared_milli_cft stages updatedAt").lean();
-    return res.json({ ...data, chains: chains.map((chain) => ({ _id: chain._id, vendor_id: String(chain.vendor), declared_cft: chain.declared_milli_cft / 1000, complete: chain.stages?.at(-1)?.kind === "declaration" && Boolean(chain.stages.at(-1)?.verified_at) })) });
+    const chains = await EudrChain.find({ container_key: key(req.query.container) }).select("vendor declared_milli_cft contribution_milli_cft stages updatedAt").lean();
+    return res.json({ ...data, vendors: data.vendors.map((group) => ({ ...group, coverage: chainCoverage(chains.filter((chain) => String(chain.vendor) === group.vendor._id), group, data.unassigned) })), chains: chains.map((chain) => ({ _id: chain._id, vendor_id: String(chain.vendor), declared_cft: chain.declared_milli_cft / 1000, contribution_cft: contributionMilliCft(chain) / 1000, complete: chainVerified(chain, findGroup(data, chain.vendor), data.unassigned) })) });
   } catch (error) { return replyError(res, error); }
 };
 
@@ -111,7 +115,7 @@ exports.list = async (req, res) => {
       if (!containers.has(chain.container_key)) containers.set(chain.container_key, loadContainer(chain.container));
       const containerData = await containers.get(chain.container_key);
       const group = await refresh(chain, req, containerData);
-      return { _id: chain._id, container: chain.container, vendor: group?.vendor || null, declared_cft: chain.declared_milli_cft / 1000, updatedAt: chain.updatedAt, complete: chain.stages.at(-1)?.kind === "declaration" && Boolean(chain.stages.at(-1)?.verified_at) };
+      return { _id: chain._id, container: chain.container, vendor: group?.vendor || null, declared_cft: chain.declared_milli_cft / 1000, contribution_cft: contributionMilliCft(chain) / 1000, updatedAt: chain.updatedAt, complete: chainVerified(chain, group, containerData.unassigned) };
     }));
     return res.json({ data });
   } catch (error) { return replyError(res, error); }
@@ -131,8 +135,16 @@ exports.create = async (req, res) => {
     if (!text(group.vendor.gst) || !text(group.vendor.pan)) throw fail("Vendor GST and PAN are required before starting EUDR");
     const declaredMilliCft = toMilliCft(declared);
     assertDeclaredCft(declaredMilliCft, group);
-    const chain = await EudrChain.create({ container, container_key: key(container), vendor: vendorId, declared_milli_cft: declaredMilliCft, created_by: actor(req), stages: [{ kind: "sawmill", workflow_version: 2 }] });
-    return res.status(201).json({ data: details(chain, group, containerData) });
+    const contribution = req.body.contribution_cft == null ? declared : Number(req.body.contribution_cft);
+    if (!Number.isFinite(contribution) || contribution <= 0 || Math.abs(contribution * 1000 - Math.round(contribution * 1000)) > 1e-7) throw fail("Chain contribution must be positive with at most three decimals");
+    const chain = await allocation.withAllocation(container, vendorId, async (chains, session) => {
+      allocation.assertAllocation(chains, toMilliCft(contribution), group.stuffed_milli_cft);
+      const created = new EudrChain({ container, container_key: key(container), vendor: vendorId, declared_milli_cft: declaredMilliCft, contribution_milli_cft: toMilliCft(contribution), created_by: actor(req), stages: [{ kind: "sawmill", workflow_version: 2 }] });
+      event(created, req, "chain_created", null, { contribution_cft: contribution, declared_cft: declared });
+      await created.save({ session });
+      return created;
+    });
+    return res.status(201).json({ data: await details(chain, group, containerData) });
   } catch (error) { return replyError(res, error); }
 };
 
@@ -141,13 +153,14 @@ exports.get = async (req, res) => {
     const chain = await getChain(req);
     const containerData = await loadContainer(chain.container);
     const group = await refresh(chain, req, containerData);
-    return res.json({ data: details(chain, group, containerData) });
+    return res.json({ data: await details(chain, group, containerData) });
   } catch (error) { return replyError(res, error); }
 };
 
 exports.updateDeclared = async (req, res) => {
   try {
-    const chain = await getChain(req);
+    await ensureIndexes();
+    let chain = await getChain(req);
     const declared = Number(req.body?.declared_cft);
     if (!text(req.body?.declared_cft) || !Number.isFinite(declared) || declared <= 0 || Math.abs(declared * 1000 - Math.round(declared * 1000)) > 1e-7) throw fail("Declared CFT must be positive with at most three decimals");
     const next = toMilliCft(declared);
@@ -155,15 +168,48 @@ exports.updateDeclared = async (req, res) => {
     const group = findGroup(containerData, chain.vendor);
     if (!group) throw fail("Vendor no longer has shipments in this container", 409);
     assertDeclaredCft(next, group);
-    if (next !== chain.declared_milli_cft) {
-      event(chain, req, "declared_cft_changed", null, { before: chain.declared_milli_cft / 1000, after: declared });
-      chain.declared_milli_cft = next;
-      let index = chain.stages.findIndex((stage) => stage.workflow_version >= 2 && isSeller(stage, group.vendor) && toMilliCft(stage.fields?.sold_cft || 0) < next);
-      if (index < 0) index = chain.stages.findIndex((stage) => stage.kind === "declaration");
-      if (index >= 0) clearVerification(chain, req, index, "Declared CFT changed");
-      await chain.save();
-    }
-    return res.json({ data: details(chain, group, containerData) });
+    chain = await allocation.withAllocation(chain.container, chain.vendor, async (chains, session) => {
+      const current = chains.find((entry) => String(entry._id) === String(chain._id));
+      if (!current) throw fail("Chain not found", 404);
+      for (const entry of chains) {
+        if (next === entry.declared_milli_cft) continue;
+        event(entry, req, "declared_cft_changed", null, { before: entry.declared_milli_cft / 1000, after: declared });
+        if (entry.contribution_milli_cft == null) entry.contribution_milli_cft = chains.length === 1 ? next : entry.declared_milli_cft;
+        entry.declared_milli_cft = next;
+        let index = entry.stages.findIndex((stage) => stage.workflow_version >= 2 && isSeller(stage, group.vendor) && toMilliCft(stage.fields?.sold_cft || 0) < contributionMilliCft(entry));
+        if (index < 0) index = entry.stages.findIndex((stage) => stage.kind === "declaration");
+        if (index >= 0) clearVerification(entry, req, index, "Container/vendor declared CFT changed");
+        await entry.save({ session });
+      }
+      return current;
+    });
+    return res.json({ data: await details(chain, group, containerData) });
+  } catch (error) { return replyError(res, error); }
+};
+
+exports.updateContribution = async (req, res) => {
+  try {
+    await ensureIndexes();
+    let chain = await getChain(req);
+    const value = Number(req.body?.contribution_cft);
+    if (!Number.isFinite(value) || value <= 0 || Math.abs(value * 1000 - Math.round(value * 1000)) > 1e-7) throw fail("Chain contribution must be positive with at most three decimals");
+    const next = toMilliCft(value);
+    const containerData = await loadContainer(chain.container);
+    const group = findGroup(containerData, chain.vendor);
+    if (!group) throw fail("Vendor no longer has shipments in this container", 409);
+    chain = await allocation.withAllocation(chain.container, chain.vendor, async (chains, session) => {
+      const entry = chains.find((item) => String(item._id) === String(chain._id));
+      if (!entry) throw fail("Chain not found", 404);
+      allocation.assertAllocation(chains, next, group.stuffed_milli_cft, entry._id);
+      if (next !== contributionMilliCft(entry)) {
+        event(entry, req, "contribution_cft_changed", null, { before: contributionMilliCft(entry) / 1000, after: value });
+        entry.contribution_milli_cft = next;
+        clearVerification(entry, req, 0, "Chain CFT contribution changed");
+        await entry.save({ session });
+      }
+      return entry;
+    });
+    return res.json({ data: await details(chain, group, containerData) });
   } catch (error) { return replyError(res, error); }
 };
 
@@ -183,11 +229,23 @@ exports.saveStage = async (req, res) => {
     }
     const fields = Object.fromEntries(Object.entries(input).map(([field, value]) => [field, text(value)]));
     assertReceiverLink(chain, stage, fields);
+    if (fields.buyer_type && !["vendor", "other"].includes(fields.buyer_type)) throw fail("Select sold to vendor or other party");
+    if (fields.buyer_type === "other") delete fields.buyer_vendor_id;
+    if (fields.buyer_type === "vendor" && (fields.buyer_vendor_id || ["sold_to", "buyer_gst", "buyer_pan"].some((field) => fields[field]))) {
+      if (!mongoose.isValidObjectId(fields.buyer_vendor_id)) throw fail("Select a vendor for Sold To");
+      const unchangedBuyer = stage.fields?.buyer_type === "vendor" && fields.buyer_vendor_id === stage.fields.buyer_vendor_id && ["sold_to", "buyer_gst", "buyer_pan"].every((field) => fields[field] === stage.fields[field]);
+      if (!unchangedBuyer) {
+        const buyer = await Vendor.findOne({ _id: fields.buyer_vendor_id, deleted_at: null, is_active: { $ne: false } }).select("name gst pan").lean();
+        if (!buyer) throw fail("Selected vendor is no longer available", 409);
+        if (!text(buyer.gst) || !text(buyer.pan)) throw fail("Add GST and PAN to this vendor before selecting it for Sold To", 409);
+        Object.assign(fields, { sold_to: text(buyer.name), buyer_gst: text(buyer.gst), buyer_pan: text(buyer.pan) });
+      }
+    }
     const before = JSON.stringify(stage.fields || {});
     if (before !== JSON.stringify(fields)) {
       upgradeStage(chain, req, stage, index, fields);
       if (stage.kind === "receiver" && !isSeller({ ...stage.toObject(), fields }, findGroup(containerData, chain.vendor)?.vendor)) {
-        for (const field of ["invoice_number", "invoice_date", "sold_to", "buyer_gst", "buyer_pan", "sold_cft"]) delete fields[field];
+        for (const field of ["invoice_number", "invoice_date", "sold_to", "buyer_gst", "buyer_pan", "sold_cft", "buyer_type", "buyer_vendor_id"]) delete fields[field];
       }
       event(chain, req, "stage_edited", stage, { before: stage.fields || {}, after: fields });
       discardLaterStages(chain, req, index, "Earlier stage edited");
@@ -197,7 +255,7 @@ exports.saveStage = async (req, res) => {
       await chain.save();
     }
     await saveStageDirectory(stage);
-    return res.json({ data: details(chain, findGroup(containerData, chain.vendor), containerData) });
+    return res.json({ data: await details(chain, findGroup(containerData, chain.vendor), containerData) });
   } catch (error) { return replyError(res, error); }
 };
 
@@ -222,7 +280,7 @@ exports.upload = async (req, res) => {
     await chain.save();
     uploadedKey = "";
     await saveStageDirectory(stage);
-    return res.json({ data: details(chain, findGroup(containerData, chain.vendor), containerData) });
+    return res.json({ data: await details(chain, findGroup(containerData, chain.vendor), containerData) });
   } catch (error) {
     if (uploadedKey) await storage.deleteObject(uploadedKey).catch(() => {});
     return replyError(res, error);
@@ -232,11 +290,15 @@ exports.upload = async (req, res) => {
 exports.directory = async (req, res) => {
   try {
     const kind = text(req.query.kind);
-    if (!Object.hasOwn(reusableTypes, kind)) throw fail("Unsupported directory kind");
-    const query = { kind };
+    if (kind !== "vendor" && !Object.hasOwn(reusableTypes, kind)) throw fail("Unsupported directory kind");
+    const query = kind === "vendor" ? { deleted_at: null, is_active: { $ne: false } } : { kind };
     if (req.query.parent_key) query.parent_key = text(req.query.parent_key);
     const search = text(req.query.search).slice(0, 100);
     if (search) query.name = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    if (kind === "vendor") {
+      const vendors = await Vendor.find(query).select("name gst pan").sort({ name: 1 }).limit(50).lean();
+      return res.json({ data: vendors.map((vendor) => ({ _id: vendor._id, kind, name: vendor.name, fields: { sold_to: vendor.name, buyer_gst: vendor.gst || "", buyer_pan: vendor.pan || "" }, evidence: [] })) });
+    }
     const entries = await Party.find(query).sort({ name: 1 }).limit(50).lean();
     return res.json({ data: entries.map(({ evidence, ...entry }) => ({ ...entry, evidence: (evidence || []).map(({ key, ...item }) => item) })) });
   } catch (error) { return replyError(res, error); }
@@ -271,7 +333,7 @@ exports.reuseEvidence = async (req, res) => {
     event(chain, req, "saved_evidence_reused", stage, { party_id: String(party._id), type: document.type, name: document.name, validity_confirmed: true });
     await chain.save();
     await saveStageDirectory(stage);
-    return res.json({ data: details(chain, findGroup(containerData, chain.vendor), containerData) });
+    return res.json({ data: await details(chain, findGroup(containerData, chain.vendor), containerData) });
   } catch (error) { return replyError(res, error); }
 };
 
@@ -350,11 +412,14 @@ exports.verify = async (req, res) => {
     if (!text(group.vendor.gst) || !text(group.vendor.pan)) throw fail("Vendor GST and PAN are required");
     assertDeclaredCft(chain.declared_milli_cft, group);
     assertReceiverLink(chain, stage);
-    validateStage(stage, { vendor: group.vendor, declaredMilliCft: chain.declared_milli_cft });
+    allocation.assertAllocation([], contributionMilliCft(chain), group.stuffed_milli_cft);
+    validateStage(stage, { vendor: group.vendor, contributionMilliCft: contributionMilliCft(chain) });
     const next = nextStageKind(stage, group.vendor);
     const nextStage = next === "receiver" ? receiverFromSeller(chain.stages[index - 1]) : { kind: next, workflow_version: 2 };
     if (stage.kind === "declaration") {
       assertFinalCft(chain, group, containerData.unassigned);
+      const siblings = await EudrChain.find({ container_key: chain.container_key, vendor: chain.vendor }).lean();
+      allocation.assertAllocation(siblings, contributionMilliCft(chain), group.stuffed_milli_cft, chain._id);
     }
     chain.invoice_keys = collectInvoiceKeys(chain.stages);
     stage.verified_at = new Date();
@@ -373,6 +438,6 @@ exports.verify = async (req, res) => {
     }
     chain.invoice_keys = collectInvoiceKeys(chain.stages);
     await chain.save();
-    return res.json({ data: details(chain, group, containerData) });
+    return res.json({ data: await details(chain, group, containerData) });
   } catch (error) { return replyError(res, error); }
 };

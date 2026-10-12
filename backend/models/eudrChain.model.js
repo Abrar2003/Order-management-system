@@ -28,8 +28,9 @@ const schema = new mongoose.Schema({
   container_key: { type: String, required: true },
   vendor: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", required: true },
   declared_milli_cft: { type: Number, required: true, min: 0 },
+  contribution_milli_cft: { type: Number, min: 1, default: null },
   stages: { type: [stageSchema], default: () => [{ kind: "sawmill" }] },
-  invoice_keys: { type: [String], default: [] },
+  invoice_keys: { type: [String], default: undefined },
   history: [{
     event: String,
     stage_id: String,
@@ -41,7 +42,12 @@ const schema = new mongoose.Schema({
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
 }, { timestamps: true, optimisticConcurrency: true });
 
-schema.index({ container_key: 1, vendor: 1 }, { unique: true });
+schema.pre("validate", function () {
+  // Sparse unique indexes skip absent fields, but not empty arrays shared by multiple drafts.
+  if (this.invoice_keys?.length === 0) this.invoice_keys = undefined;
+});
+
+schema.index({ container_key: 1, vendor: 1, createdAt: 1 });
 schema.index({ invoice_keys: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.models.EudrChain || mongoose.model("EudrChain", schema, "eudr_chains");
