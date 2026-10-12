@@ -155,8 +155,8 @@ test("transport requires all evidence and conditional truck registration", () =>
 test("sawmill verification requires permission evidence as well as invoice and license", () => {
   const stage = {
     kind: "sawmill",
-    fields: { name: "Mill", gst: "GST", pan: "PAN", permission_number: "P-1", invoice_number: "I-1", invoice_date: "2026-05-01" },
-    documents: ["cutting_invoice", "license"].map((type) => ({ type })),
+    fields: { name: "Mill", gst: "GST", pan: "PAN", permission_number: "P-1", forest_latitude: "26", forest_longitude: "73", invoice_number: "I-1", invoice_date: "2026-05-01" },
+    documents: ["cutting_invoice", "license", "forest_image"].map((type) => ({ type })),
   };
   assert.throws(() => validateStage(stage), /permission document is required/);
   stage.documents.push({ type: "permission" });

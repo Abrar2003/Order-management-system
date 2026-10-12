@@ -15,8 +15,8 @@ const Vendor = require("../models/vendor.model");
 
 const vendor = { _id: "aaaaaaaaaaaaaaaaaaaaaaaa", name: "Shipping vendor", gst: "GST-V", pan: "PAN-V" };
 const context = { vendor, declaredMilliCft: 10000 };
-const evidence = (type, name = `${type}.pdf`) => ({ type, key: `private/${name}`, name, content_type: "application/pdf" });
-const mill = () => ({ kind: "sawmill", workflow_version: 2, fields: { name: "Mill", gst: "GST-M", pan: "PAN-M", permission_number: "P1", invoice_number: "SALE-1", invoice_date: "2026-10-12", sold_to: vendor.name, buyer_gst: vendor.gst, buyer_pan: vendor.pan, sold_cft: "10" }, documents: ["cutting_invoice", "license", "permission", "buyer_gst", "buyer_pan"].map((type) => evidence(type)) });
+const evidence = (type, name = `${type}.${type === "forest_image" ? "png" : "pdf"}`) => ({ type, key: `private/${name}`, name, content_type: type === "forest_image" ? "image/png" : "application/pdf" });
+const mill = () => ({ kind: "sawmill", workflow_version: 2, fields: { name: "Mill", gst: "GST-M", pan: "PAN-M", permission_number: "P1", forest_latitude: "26.238947", forest_longitude: "73.024309", invoice_number: "SALE-1", invoice_date: "2026-10-12", sold_to: vendor.name, buyer_gst: vendor.gst, buyer_pan: vendor.pan, sold_cft: "10" }, documents: ["cutting_invoice", "license", "permission", "forest_image", "buyer_gst", "buyer_pan"].map((type) => evidence(type)) });
 const transport = () => ({ kind: "transport", workflow_version: 2, fields: { transporter_name: "Transport", truck_number: "RJ-001", driver_license_number: "DL-001", billty_number: "B1", ewaybill_number: "EW1" }, documents: ["weight_slip", "billty", "driver_license", "ewaybill"].map((type) => evidence(type)) });
 const response = () => ({ status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
 const setup = (t, stages) => {
@@ -46,6 +46,54 @@ test("sale verification requires buyer tax files and positive three-decimal CFT 
   stage.fields.sold_cft = "11.001"; assert.doesNotThrow(() => validateStage(stage, context));
   stage.documents = stage.documents.filter((doc) => doc.type !== "buyer_pan");
   assert.throws(() => validateStage(stage, context), /buyer pan document/);
+});
+
+test("forest coordinates and image are mandatory before the sawmill can open transport", async (t) => {
+  const { chain, request } = setup(t, [mill()]); const stage = chain.stages[0];
+  for (const [field, values] of [["forest_latitude", ["", "91", "-90.000001", "NaN", "26 north", "0x10"]], ["forest_longitude", ["", "180.000001", "-181", "Infinity", "bad"]]]) {
+    const original = stage.fields[field];
+    for (const value of values) {
+      stage.fields = { ...stage.fields, [field]: value };
+      const res = response(); await controller.verify(request(stage), res);
+      assert.equal(res.code, 400); assert.match(res.body.message, new RegExp(field.replace(/_/g, " ")));
+      assert.equal(chain.stages.length, 1); assert.equal(stage.verified_at, null);
+    }
+    stage.fields = { ...stage.fields, [field]: original };
+  }
+  const forest = stage.documents.find((document) => document.type === "forest_image").toObject();
+  stage.documents = stage.documents.filter((document) => document.type !== "forest_image");
+  const missing = response(); await controller.verify(request(stage), missing);
+  assert.equal(missing.code, 400); assert.match(missing.body.message, /forest image document is required/);
+  stage.documents.push(forest);
+  for (const [latitude, longitude] of [["0", "0"], ["-90", "-180"], ["90", "180"], ["-26.1234567", "73.1234567"]]) {
+    stage.fields = { ...stage.fields, forest_latitude: latitude, forest_longitude: longitude };
+    assert.doesNotThrow(() => validateStage(stage, context));
+  }
+  const accepted = response(); await controller.verify(request(stage), accepted);
+  assert.ok(accepted.body.data, accepted.body.message); assert.equal(chain.stages[1].kind, "transport");
+  const edited = response(); await controller.saveStage(request(stage, { fields: { ...stage.fields, forest_longitude: "74" } }), edited);
+  assert.ok(edited.body.data, edited.body.message); assert.equal(chain.stages.length, 1); assert.equal(stage.verified_at, null);
+  assert.ok(chain.history.some((entry) => entry.event === "verification_invalidated"));
+});
+
+test("forest uploads accept actual images, reject disguised/non-image files, and retain duplicate checks", async (t) => {
+  const { chain, request } = setup(t, [mill()]); const stage = chain.stages[0];
+  stage.documents = stage.documents.filter((document) => document.type !== "forest_image");
+  for (const document of stage.documents) document.sha256 = sha256(Buffer.from(document.type));
+  let uploads = 0;
+  t.mock.method(storage, "createStorageKey", () => "private/forest");
+  t.mock.method(storage, "uploadBuffer", async () => { uploads += 1; });
+  const upload = async (buffer, name) => {
+    const res = response(); await controller.upload({ ...request(stage, { type: "forest_image" }), file: { buffer, originalname: name, size: buffer.length } }, res); return res;
+  };
+  const image = await require("sharp")({ create: { width: 2, height: 2, channels: 3, background: "green" } }).png().toBuffer();
+  for (const [bytes, name] of [[Buffer.from("%PDF-1.7"), "forest.pdf"], [Buffer.from("not a picture"), "forest.png"], [image, "forest.jpg"]]) {
+    const rejected = await upload(bytes, name); assert.equal(rejected.code, 400); assert.match(rejected.body.message, /valid PNG, JPEG or WebP/);
+  }
+  assert.equal(uploads, 0);
+  const accepted = await upload(image, "forest.png"); assert.ok(accepted.body.data, accepted.body.message); assert.equal(uploads, 1);
+  assert.equal(stage.documents.find((document) => document.type === "forest_image").content_type, "image/png");
+  const duplicate = await upload(image, "other-forest.png"); assert.equal(duplicate.code, 409); assert.equal(uploads, 1);
 });
 
 test("direct sale creates a locked receiver from buyer and references one invoice only", async (t) => {

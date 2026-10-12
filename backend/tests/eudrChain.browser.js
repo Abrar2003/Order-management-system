@@ -339,7 +339,14 @@ const server = http.createServer((req, res) => {
     assert.match(await page.$eval('[aria-label="Chain CFT contribution"]', (element) => element.textContent), /contributes 7.600.*coverage incomplete.*2 chain\(s\).*Verified: 10.000/);
     await click("Edit Details", "#eudr-stage-mill"); await page.waitForSelector("#mill-sold_cft");
     assert.match(await page.$eval(".eudr-drawer", (element) => element.textContent), /cover at least 7.600 CFT contributed by this chain/);
+    assert.equal(await page.$eval("#mill-forest_latitude", (input) => input.required && input.min === "-90" && input.max === "90" && input.step === "any"), true);
+    assert.equal(await page.$eval("#mill-forest_longitude", (input) => input.required && input.min === "-180" && input.max === "180"), true);
+    assert.equal(await page.$eval("#mill-forest_image", (input) => input.required && input.accept === ".png,.jpg,.jpeg,.webp"), true);
+    await page.type("#mill-forest_latitude", "-26.238947"); await page.type("#mill-forest_longitude", "73.024309");
+    await click("Save step", ".eudr-drawer");
+    await page.waitForFunction(() => document.querySelector("#eudr-stage-mill .eudr-metadata")?.textContent.includes("-26.238947°"));
     await click("Close", ".eudr-drawer");
+    assert.match(await page.$eval("#eudr-stage-mill .eudr-metadata", (element) => element.textContent), /73.024309°/);
     await click("Update chain contribution"); await page.waitForSelector("#eudr-contribution");
     await page.click("#eudr-contribution", { clickCount: 3 }); await page.keyboard.type("7.601");
     assert.equal(await page.$$eval(".eudr-small-dialog button", (buttons) => buttons.find((button) => button.textContent === "Update contribution").disabled), true);

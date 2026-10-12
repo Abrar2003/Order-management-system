@@ -47,7 +47,7 @@ test("legacy chains retain full contributions and stale signatures never contrib
 });
 
 test("sale quantities only need to cover their chain contribution, including intermediate sales", () => {
-  const stage = { kind: "sawmill", workflow_version: 2, fields: { name: "Mill", gst: "G", pan: "P", permission_number: "1", invoice_number: "1", invoice_date: "2026-10-12", sold_to: "Buyer", buyer_gst: "G2", buyer_pan: "P2", sold_cft: "10" }, documents: ["cutting_invoice", "license", "permission", "buyer_gst", "buyer_pan"].map((type) => ({ type })) };
+  const stage = { kind: "sawmill", workflow_version: 2, fields: { name: "Mill", gst: "G", pan: "P", permission_number: "1", forest_latitude: "26", forest_longitude: "73", invoice_number: "1", invoice_date: "2026-10-12", sold_to: "Buyer", buyer_gst: "G2", buyer_pan: "P2", sold_cft: "10" }, documents: ["cutting_invoice", "license", "permission", "forest_image", "buyer_gst", "buyer_pan"].map((type) => ({ type })) };
   const context = { declaredMilliCft: 17600, contributionMilliCft: 10000, vendor: { gst: "V", pan: "V" } };
   assert.doesNotThrow(() => validateStage(stage, context));
   stage.fields.sold_cft = "9.999";

@@ -51,7 +51,18 @@ test("linked receivers show receipt only for final vendor and sale fields for in
 test("common Office documents preview as PDFs while legacy attachments remain counted once", () => {
   const chain = { stages: [{ _id: "s", kind: "sawmill", documents: ["doc", "docx", "xls", "xlsx", "csv", "txt", "pdf", "PNG", "JPEG", "webp", "exe"].map((ext) => ({ _id: ext, type: "license", name: `test.${ext}` })) }] };
   assert.deepEqual(normalizeChainDocuments(chain).map((doc) => doc.previewKind), ["office", "office", "office", "office", "office", "office", "pdf", "image", "image", "image", "other"]);
-  assert.deepEqual(missingStageDocuments({ kind: "sawmill", documents: ["cutting_invoice", "license", "permission"].map((type) => ({ type })) }), []);
+  assert.deepEqual(missingStageDocuments({ kind: "sawmill", documents: ["cutting_invoice", "license", "permission"].map((type) => ({ type })) }).map(([type]) => type), ["forest_image"]);
+});
+
+test("forest fields and image belong only to the first step and use the existing image gallery", () => {
+  const stage = { _id: "mill", kind: "sawmill", workflow_version: 2, fields: {}, documents: [{ _id: "forest", type: "forest_image", name: "forest.png", content_type: "image/png" }] };
+  const chain = { vendor: { gst: "V", pan: "V" }, stages: [stage] };
+  assert.deepEqual(stageFields(stage, chain).filter(([, , type]) => type === "coordinate").map(([field]) => field), ["forest_latitude", "forest_longitude"]);
+  const receiver = { kind: "receiver", incoming_invoice_stage_id: "mill", fields: { gst: "OTHER", pan: "OTHER" } };
+  assert.ok(!stageFields(receiver, chain).some(([field]) => field.startsWith("forest_")));
+  assert.ok(stageFields(receiver, chain).some(([field]) => field === "sold_cft"));
+  const document = normalizeChainDocuments(chain)[0]; assert.equal(document.previewKind, "image"); assert.equal(document.displayName, "Forest image (required)");
+  assert.ok(!missingStageDocuments(stage, chain).some(([type]) => type === "forest_image"));
 });
 
 test("empty chains and one-file stages never invent document records", () => {

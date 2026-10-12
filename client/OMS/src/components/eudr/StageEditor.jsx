@@ -56,7 +56,7 @@ export default function StageEditor({ chain, stage, canVerifyCft, onChange, onEr
   });
   const renderField = ([name, label, type = "text"]) => <div className="col-12 col-sm-6" key={name}>
     <label className="form-label" htmlFor={`${stage._id}-${name}`}>{label}</label>
-    <input id={`${stage._id}-${name}`} type={type} min={type === "number" ? "0" : undefined} step={type === "number" ? "0.001" : undefined} className="form-control" value={fields[name] ?? ""} onChange={(event) => setFields((previous) => ({ ...previous, [name]: event.target.value }))} readOnly={Boolean(incoming) && ["name", "gst", "pan"].includes(name) || buyerType === "vendor" && ["sold_to", "buyer_gst", "buyer_pan"].includes(name)} disabled={!canEdit || busy} />
+    <input id={`${stage._id}-${name}`} type={type === "coordinate" ? "number" : type} min={type === "coordinate" ? name === "forest_latitude" ? -90 : -180 : type === "number" ? "0" : undefined} max={type === "coordinate" ? name === "forest_latitude" ? 90 : 180 : undefined} step={type === "coordinate" ? "any" : type === "number" ? "0.001" : undefined} required={type === "coordinate"} className="form-control" value={fields[name] ?? ""} onChange={(event) => setFields((previous) => ({ ...previous, [name]: event.target.value }))} readOnly={Boolean(incoming) && ["name", "gst", "pan"].includes(name) || buyerType === "vendor" && ["sold_to", "buyer_gst", "buyer_pan"].includes(name)} disabled={!canEdit || busy} />
   </div>;
   return <EudrDialog titleId="eudr-edit-title" className="eudr-drawer" onClose={() => { if (!busy) onClose(); }}>
     <header className="eudr-dialog-header"><div><span className="eudr-eyebrow">Edit stage details</span><h2 id="eudr-edit-title">{STAGE_LABELS[stage.kind]}</h2></div><button type="button" className="btn btn-outline-secondary" disabled={busy} onClick={onClose}>Close</button></header>
@@ -77,7 +77,7 @@ export default function StageEditor({ chain, stage, canVerifyCft, onChange, onEr
         return <div className="eudr-upload-row" key={type}>
           <label className="form-label" htmlFor={`${stage._id}-${type}`}>{label}{type === "truck_registration" && " (required when number entered)"}</label>
           {document && <p className="small mb-2">Currently uploaded: <strong>{document.name}</strong></p>}
-          <input id={`${stage._id}-${type}`} type="file" accept={EUDR_FILE_ACCEPT} className="form-control" disabled={!canEdit || busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(type, file); }} />
+          <input id={`${stage._id}-${type}`} type="file" accept={type === "forest_image" ? ".png,.jpg,.jpeg,.webp" : EUDR_FILE_ACCEPT} required={type === "forest_image" && !document} className="form-control" disabled={!canEdit || busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(type, file); }} />
           {selected?.status === "uploading" && <div className="small mt-1" role="status">Uploading {selected.file.name}…</div>}
           {selected?.status === "uploaded" && <div className="small text-success mt-1" role="status">Uploaded {selected.file.name}</div>}
           {selected?.status === "failed" && <div className="small text-danger mt-1" role="alert">Upload failed: {selected.error} <button type="button" className="btn btn-link btn-sm p-0" disabled={busy} onClick={() => upload(type, selected.file)}>Retry upload</button></div>}

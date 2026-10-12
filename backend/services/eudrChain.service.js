@@ -88,13 +88,13 @@ const externalInvalidation = (stages, group) => {
 };
 
 const required = {
-  sawmill: ["name", "gst", "pan", "permission_number", "invoice_number", "invoice_date"],
+  sawmill: ["name", "gst", "pan", "permission_number", "invoice_number", "invoice_date", "forest_latitude", "forest_longitude"],
   transport: ["transporter_name", "truck_number", "driver_license_number", "ewaybill_number", "billty_number"],
   receiver: ["name", "gst", "pan", "received_cft", "invoice_number", "invoice_date", "issuer_name", "issuer_gst", "issuer_pan"],
   declaration: [],
 };
 const documents = {
-  sawmill: ["cutting_invoice", "license", "permission"],
+  sawmill: ["cutting_invoice", "license", "permission", "forest_image"],
   transport: ["weight_slip", "billty", "driver_license", "ewaybill"],
   receiver: ["invoice"],
   declaration: ["declaration"],
@@ -145,6 +145,12 @@ const validateStage = (stage, { vendor, declaredMilliCft, contributionMilliCft =
   const modern = stage.workflow_version >= 2;
   const fieldsRequired = modern && stage.kind === "receiver" ? ["name", "gst", "pan", "received_cft", ...(isSeller(stage, vendor) ? ["invoice_number", "invoice_date", ...saleFields] : [])] : [...required[stage.kind], ...(modern && stage.kind === "sawmill" ? saleFields : [])];
   for (const field of fieldsRequired) if (!text(fields[field])) throw fail(`${field.replace(/_/g, " ")} is required`);
+  if (stage.kind === "sawmill") {
+    for (const [field, limit] of [["forest_latitude", 90], ["forest_longitude", 180]]) {
+      const value = Number(fields[field]);
+      if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text(fields[field])) || !Number.isFinite(value) || Math.abs(value) > limit) throw fail(`${field.replace(/_/g, " ")} must be a decimal between -${limit} and ${limit}`);
+    }
+  }
   if (modern && isSeller(stage, vendor)) {
     const sold = parseTimberCft(fields.sold_cft);
     if (!(sold > 0)) throw fail("Sold CFT must be positive");

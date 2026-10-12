@@ -7,7 +7,7 @@ const Vendor = require("../models/vendor.model");
 const allocation = require("../services/eudrAllocation.service");
 const storage = require("../services/wasabiStorage.service");
 const { saveStageDirectory, evidenceMatches, reusableTypes } = require("../services/eudrDirectory.service");
-const { fileMime, sha256, assertUniqueFile } = require("../services/eudrFiles.service");
+const { fileMime, sha256, assertUniqueFile, assertForestImage } = require("../services/eudrFiles.service");
 const {
   text, key, fail, loadContainer, findGroup,
   nextStageKind, externalInvalidation, documents, allowedFields, isSeller, receiverFromSeller, assertReceiverLink, assertStageAvailable, assertDeclaredCft, assertFinalCft, validateStage, collectInvoiceKeys, toMilliCft, contributionMilliCft, chainVerified, chainCoverage,
@@ -271,6 +271,7 @@ exports.upload = async (req, res) => {
     if (stage.kind === "receiver" && !isSeller(stage, findGroup(containerData, chain.vendor)?.vendor)) throw fail("The final receiver uses the preceding seller's invoice and does not accept onward-sale uploads");
     if (![...documents[stage.kind], ...(["sawmill", "receiver"].includes(stage.kind) ? ["buyer_gst", "buyer_pan"] : []), ...(stage.kind === "transport" ? ["truck_registration"] : [])].includes(type)) throw fail("Unsupported document type");
     if (!fileMime(req.file.originalname)) throw fail("Unsupported EUDR file format");
+    if (type === "forest_image") await assertForestImage(req.file);
     const fileHash = sha256(req.file.buffer);
     await assertUniqueFile(chain, { name: req.file.originalname, size: req.file.size, sha256: fileHash });
     upgradeStage(chain, req, stage, index);

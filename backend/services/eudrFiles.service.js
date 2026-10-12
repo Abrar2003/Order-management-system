@@ -7,6 +7,14 @@ const types = {
   ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".csv": "text/csv", ".txt": "text/plain",
 };
 const fileMime = (name) => types[path.extname(String(name)).toLowerCase()];
+const assertForestImage = async (file) => {
+  try {
+    const metadata = await require("sharp")(file.buffer).metadata();
+    if (!metadata.width || !metadata.height || !["png", "jpeg", "webp"].includes(metadata.format) || fileMime(file.originalname) !== `image/${metadata.format}`) throw new Error("Invalid image format");
+  } catch {
+    throw Object.assign(new Error("Forest image must be a valid PNG, JPEG or WebP image"), { statusCode: 400 });
+  }
+};
 const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
 const priorDocuments = (chain) => [
   ...chain.stages.flatMap((stage) => stage.documents || []),
@@ -20,4 +28,4 @@ const assertUniqueFile = async (chain, file) => {
     if (hash === file.sha256) throw Object.assign(new Error(`This file was already uploaded in this chain (${document.name}).`), { statusCode: 409 });
   }
 };
-module.exports = { fileMime, sha256, assertUniqueFile };
+module.exports = { fileMime, sha256, assertUniqueFile, assertForestImage };

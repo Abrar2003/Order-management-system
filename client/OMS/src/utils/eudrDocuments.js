@@ -1,12 +1,12 @@
 export const STAGE_LABELS = { sawmill: "Ara / Sawmill", transport: "Transport", receiver: "Receiver", declaration: "Declaration" };
 export const STAGE_FIELDS = {
-  sawmill: [["name", "Ara / sawmill name"], ["gst", "GST"], ["pan", "PAN"], ["permission_number", "Permission number"], ["cutting_limit_cft", "Cutting limit (CFT, optional)", "number"], ["invoice_number", "Sawmill Sale Invoice number"], ["invoice_date", "Sawmill Sale Invoice date", "date"], ["sold_to", "Sold To"], ["buyer_gst", "Buyer GST"], ["buyer_pan", "Buyer PAN"], ["sold_cft", "Sold CFT", "number"]],
+  sawmill: [["name", "Ara / sawmill name"], ["gst", "GST"], ["pan", "PAN"], ["permission_number", "Permission number"], ["forest_latitude", "Forest latitude (required)", "coordinate"], ["forest_longitude", "Forest longitude (required)", "coordinate"], ["cutting_limit_cft", "Cutting limit (CFT, optional)", "number"], ["invoice_number", "Sawmill Sale Invoice number"], ["invoice_date", "Sawmill Sale Invoice date", "date"], ["sold_to", "Sold To"], ["buyer_gst", "Buyer GST"], ["buyer_pan", "Buyer PAN"], ["sold_cft", "Sold CFT", "number"]],
   transport: [["transporter_name", "Transporter name"], ["truck_number", "Truck number"], ["truck_registration_number", "Truck registration number (optional)"], ["driver_license_number", "Driver licence number"], ["ewaybill_number", "E-way bill number"], ["gst", "Transporter GST (optional)"], ["billty_number", "Billty number"]],
   receiver: [["name", "Receiver name"], ["gst", "Receiver GST"], ["pan", "Receiver PAN"], ["received_cft", "Received CFT", "number"], ["invoice_number", "Invoice number"], ["invoice_date", "Invoice date", "date"], ["issuer_name", "Invoice issuer name"], ["issuer_gst", "Invoice issuer GST"], ["issuer_pan", "Invoice issuer PAN"]],
   declaration: [],
 };
 export const STAGE_DOCUMENTS = {
-  sawmill: [["cutting_invoice", "Sawmill Sale Invoice"], ["license", "Sawmill license"], ["permission", "Sawmill permission / permit"], ["buyer_gst", "Buyer GST certificate"], ["buyer_pan", "Buyer PAN evidence"]],
+  sawmill: [["cutting_invoice", "Sawmill Sale Invoice"], ["license", "Sawmill license"], ["permission", "Sawmill permission / permit"], ["forest_image", "Forest image (required)"], ["buyer_gst", "Buyer GST certificate"], ["buyer_pan", "Buyer PAN evidence"]],
   transport: [["weight_slip", "Weight slip"], ["billty", "Bilty / transport receipt"], ["driver_license", "Driver licence"], ["ewaybill", "E-way bill"], ["truck_registration", "Truck registration"]],
   receiver: [["invoice", "Sale invoice"], ["buyer_gst", "Buyer GST certificate"], ["buyer_pan", "Buyer PAN evidence"]],
   declaration: [["declaration", "Declaration"]],
@@ -17,7 +17,7 @@ export const receiverMatchesVendor = (fields, vendor) => Boolean(vendor?.gst && 
 export const stageFields = (stage, chain, editing = false) => {
   if (stage.kind !== "receiver" || (!stage.incoming_invoice_stage_id && !editing)) return STAGE_FIELDS[stage.kind] || [];
   const identity = STAGE_FIELDS.receiver.slice(0, 4);
-  return receiverMatchesVendor(stage.fields, chain?.vendor) ? identity : [...identity, ["invoice_number", "Onward Sale Invoice number"], ["invoice_date", "Onward Sale Invoice date", "date"], ...STAGE_FIELDS.sawmill.slice(7)];
+  return receiverMatchesVendor(stage.fields, chain?.vendor) ? identity : [...identity, ["invoice_number", "Onward Sale Invoice number"], ["invoice_date", "Onward Sale Invoice date", "date"], ...STAGE_FIELDS.sawmill.filter(([name]) => ["sold_to", "buyer_gst", "buyer_pan", "sold_cft"].includes(name))];
 };
 export const stageDocuments = (stage, chain, editing = false) => {
   const definitions = STAGE_DOCUMENTS[stage.kind] || [];
