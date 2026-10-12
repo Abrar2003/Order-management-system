@@ -23,7 +23,7 @@ test("invoice and container/vendor uniqueness are enforced by database indexes",
   assert.equal(EudrChain.schema.options.optimisticConcurrency, true);
 });
 
-test("chain uploads reject duplicate content, including renamed and superseded files", async (t) => {
+test("chain uploads reject duplicate filenames and content, including renamed and superseded files", async (t) => {
   const vendorId = "aaaaaaaaaaaaaaaaaaaaaaaa";
   const chainId = "bbbbbbbbbbbbbbbbbbbbbbbb";
   const query = (rows) => ({ select: () => ({ lean: async () => rows }) });
@@ -70,6 +70,11 @@ test("chain uploads reject duplicate content, including renamed and superseded f
   await eudrController.upload(request(original), historical);
   assert.equal(historical.code, 409);
   assert.equal(uploads, 0);
+  const historicalName = response();
+  await eudrController.upload(request(Buffer.from("different bytes"), "ORIGINAL.PDF"), historicalName);
+  assert.equal(historicalName.code, 409);
+  assert.match(historicalName.body.message, /named ORIGINAL\.PDF/);
+  assert.equal(uploads, 0);
 
   chain.history = [{ event: "document_uploaded", detail: { replaced: { key: "old", name: "original.pdf", size: original.length, sha256: originalHash } } }];
   const replaced = response();
@@ -80,8 +85,15 @@ test("chain uploads reject duplicate content, including renamed and superseded f
   chain.history = [];
   chain.stages[0].documents = [{ type: "license", key: "old", name: "original.pdf", size: original.length, sha256: originalHash }];
   const different = Buffer.from("different bytes");
+  const sameName = response();
+  await eudrController.upload(request(different, "ORIGINAL.PDF"), sameName);
+  assert.equal(sameName.code, 409);
+  assert.match(sameName.body.message, /named ORIGINAL\.PDF/);
+  assert.equal(uploads, 0);
+  assert.equal(downloads, 1);
+
   const accepted = response();
-  await eudrController.upload(request(different, "original.pdf"), accepted);
+  await eudrController.upload(request(different, "different.pdf"), accepted);
   assert.ok(accepted.body.data);
   assert.equal(uploads, 1);
   assert.equal(chain.stages[0].documents.find((document) => document.type === "permission").sha256, crypto.createHash("sha256").update(different).digest("hex"));

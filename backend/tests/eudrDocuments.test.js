@@ -1,0 +1,68 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const http = require("node:http");
+const express = require("express");
+const User = require("../models/user.model");
+const EudrChain = require("../models/eudrChain.model");
+const storage = require("../services/wasabiStorage.service");
+const router = require("../routers/eudrChain.routes");
+const { signAccessToken } = require("../services/authToken.service");
+
+test("document previews and downloads enforce roles and chain ownership without altering review records", async (t) => {
+  const previousSecret = process.env.JWT_SECRET;
+  process.env.JWT_SECRET = "eudr-document-test-secret";
+  t.after(() => { if (previousSecret === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = previousSecret; });
+  const manager = { _id: "aaaaaaaaaaaaaaaaaaaaaaaa", role: "manager", name: "Reviewer" };
+  const viewer = { _id: "bbbbbbbbbbbbbbbbbbbbbbbb", role: "viewer", name: "Viewer" };
+  t.mock.method(User, "findById", (id) => ({ select: () => ({ populate: () => ({ lean: async () => String(id) === manager._id ? manager : viewer }) }) }));
+  const chain = new EudrChain({ container: "C1", container_key: "c1", vendor: manager._id, declared_milli_cft: 1000, stages: [{ kind: "sawmill", verified_at: new Date(), documents: [{ type: "license", key: "private/license", name: "license.pdf", content_type: "application/pdf" }] }], history: [{ event: "stage_verified", actor_name: "Reviewer" }] });
+  t.mock.method(EudrChain, "findById", async (id) => String(id) === String(chain._id) ? chain : null);
+  const before = JSON.stringify(chain.toObject());
+  const bytes = Buffer.from("%PDF-1.7 private test document");
+  const ranges = [];
+  let missing = false;
+  const source = http.createServer((req, res) => {
+    if (missing) { res.writeHead(404); return res.end(); }
+    ranges.push(req.headers.range || "");
+    res.setHeader("Accept-Ranges", "bytes");
+    if (req.headers.range) { res.writeHead(206, { "Content-Length": 4, "Content-Range": `bytes 0-3/${bytes.length}` }); return res.end(bytes.subarray(0, 4)); }
+    res.writeHead(200, { "Content-Length": bytes.length }); res.end(bytes);
+  });
+  await new Promise((resolve) => source.listen(0, "127.0.0.1", resolve));
+  const calls = [];
+  t.mock.method(storage, "getSignedObjectUrl", async (key, options) => { calls.push({ key, options }); return `http://127.0.0.1:${source.address().port}/file`; });
+  const app = express(); app.use("/eudr", router);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  t.after(() => { server.closeAllConnections(); source.closeAllConnections(); server.close(); source.close(); });
+  const base = `http://127.0.0.1:${server.address().port}/eudr/${chain._id}/stages/${chain.stages[0]._id}/documents/${chain.stages[0].documents[0]._id}`;
+  const headers = { Authorization: `Bearer ${signAccessToken(manager)}` };
+  assert.equal((await fetch(`${base}/content`)).status, 401);
+  assert.equal((await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${signAccessToken(viewer)}` } })).status, 403);
+  assert.equal(calls.length, 0);
+  const invalid = base.replace(String(chain.stages[0]._id), "cccccccccccccccccccccccc");
+  assert.equal((await fetch(`${invalid}/content`, { headers })).status, 404);
+  assert.equal((await fetch(`${invalid}/url`, { headers })).status, 404);
+  assert.equal((await fetch(`${base.replace(String(chain._id), "dddddddddddddddddddddddd")}/content`, { headers })).status, 404);
+  assert.equal(calls.length, 0);
+
+  const preview = await fetch(`${base}/content`, { headers });
+  assert.equal(preview.status, 200);
+  assert.equal(preview.headers.get("cache-control"), "private, no-store");
+  assert.match(preview.headers.get("access-control-expose-headers"), /Accept-Ranges/);
+  assert.equal(preview.headers.get("content-type"), "application/pdf");
+  assert.deepEqual(Buffer.from(await preview.arrayBuffer()), bytes);
+  const partial = await fetch(`${base}/content`, { headers: { ...headers, Range: "bytes=0-3" } });
+  assert.equal(partial.status, 206);
+  assert.equal(partial.headers.get("content-range"), `bytes 0-3/${bytes.length}`);
+  assert.equal(await partial.text(), "%PDF");
+  assert.deepEqual(ranges, ["", "bytes=0-3"]);
+  const download = await fetch(`${base}/url?download=1`, { headers });
+  assert.equal(download.status, 200);
+  assert.equal(calls.at(-1).options.download, true);
+  assert.equal(calls.at(-1).options.expiresIn, 300);
+  assert.equal(calls.at(-1).key, "private/license");
+  missing = true;
+  assert.equal((await fetch(`${base}/content`, { headers })).status, 404);
+  assert.equal(JSON.stringify(chain.toObject()), before);
+});

@@ -111,7 +111,7 @@ const corsOptions = {
     return callback(new Error("Not allowed by CORS"));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
+  allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key", "Range"],
   credentials: isTruthy(process.env.CORS_ALLOW_CREDENTIALS),
 };
 

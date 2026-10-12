@@ -1,4 +1,6 @@
 const crypto = require("crypto");
+const { Readable } = require("node:stream");
+const { pipeline } = require("node:stream/promises");
 const mongoose = require("mongoose");
 const EudrChain = require("../models/eudrChain.model");
 const storage = require("../services/wasabiStorage.service");
@@ -172,13 +174,16 @@ exports.upload = async (req, res) => {
     const { stage, index } = findStage(chain, req.params.stageId);
     const type = text(req.body?.type);
     if (![...documents[stage.kind], ...(stage.kind === "transport" ? ["truck_registration"] : [])].includes(type)) throw fail("Unsupported document type");
-    const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
-    const fileHash = sha256(req.file.buffer);
     const priorDocuments = chain.stages.flatMap((item) => item.documents);
     for (const entry of chain.history) {
       if (entry.event === "document_uploaded") priorDocuments.push(entry.detail?.replaced);
       if (entry.event === "later_stages_superseded") priorDocuments.push(...(entry.detail?.stages || []).flatMap((item) => item.documents || []));
     }
+    if (priorDocuments.some((document) => document && text(document.name).toLowerCase() === text(req.file.originalname).toLowerCase())) {
+      throw fail(`A file named ${req.file.originalname} was already uploaded in this chain.`, 409);
+    }
+    const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
+    const fileHash = sha256(req.file.buffer);
     for (const document of priorDocuments) {
       if (!document) continue;
       if (document.sha256 === fileHash) throw fail(`This file was already uploaded in this chain (${document.name}).`, 409);
@@ -211,9 +216,42 @@ exports.documentUrl = async (req, res) => {
     const stage = chain.stages.id(req.params.stageId);
     const document = stage?.documents.id(req.params.documentId);
     if (!document) throw fail("Document not found", 404);
-    const url = await storage.getSignedObjectUrl(document.key, { expiresIn: 300, filename: document.name });
+    const url = await storage.getSignedObjectUrl(document.key, { expiresIn: 300, filename: document.name, download: req.query?.download === "1" });
     return res.json({ url });
   } catch (error) { return replyError(res, error); }
+};
+
+exports.documentContent = async (req, res) => {
+  const abort = new AbortController();
+  const cancel = () => abort.abort();
+  res.once("close", cancel);
+  try {
+    const chain = await getChain(req);
+    const document = chain.stages.id(req.params.stageId)?.documents.id(req.params.documentId);
+    if (!document) throw fail("Document not found", 404);
+    const url = await storage.getSignedObjectUrl(document.key, { expiresIn: 300 });
+    const upstream = await fetch(url, { headers: req.headers.range ? { Range: req.headers.range } : {}, signal: abort.signal });
+    if (!upstream.ok) {
+      await upstream.body?.cancel();
+      throw fail("Document could not be loaded", upstream.status === 404 ? 404 : upstream.status === 416 ? 416 : 502);
+    }
+    res.status(upstream.status);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.vary("Cookie");
+    res.vary("Authorization");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Type", ["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(document.content_type) ? document.content_type : "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(document.name)}`);
+    for (const name of ["Content-Length", "Content-Range", "Accept-Ranges"]) {
+      const value = upstream.headers.get(name);
+      if (value) res.setHeader(name, value);
+    }
+    await pipeline(Readable.fromWeb(upstream.body), res);
+  } catch (error) {
+    if (!res.headersSent && !res.destroyed) return replyError(res, error);
+    if (!res.destroyed) res.destroy();
+  } finally { res.removeListener("close", cancel); }
 };
 
 exports.verify = async (req, res) => {
