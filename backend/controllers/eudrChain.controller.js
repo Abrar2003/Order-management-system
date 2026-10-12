@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const mongoose = require("mongoose");
 const EudrChain = require("../models/eudrChain.model");
 const storage = require("../services/wasabiStorage.service");
@@ -6,8 +7,8 @@ const {
   nextStageKind, externalInvalidation, documents, allowedFields, assertStageAvailable, assertDeclaredCft, assertFinalCft, validateStage, collectInvoiceKeys, toMilliCft,
 } = require("../services/eudrChain.service");
 
-const replyError = (res, error) => res.status(error?.code === 11000 ? 409 : error?.statusCode || 500).json({
-  message: error?.code === 11000 ? "This container/vendor chain or issuer invoice number already exists" : error?.message || "EUDR request failed",
+const replyError = (res, error) => res.status(error?.code === 11000 || error?.name === "VersionError" ? 409 : error?.statusCode || 500).json({
+  message: error?.code === 11000 ? "This container/vendor chain or issuer invoice number already exists" : error?.name === "VersionError" ? "Chain changed while saving. Refresh and try again." : error?.message || "EUDR request failed",
 });
 const actor = (req) => req.user?._id || req.user?.id;
 let indexReady;
@@ -171,6 +172,21 @@ exports.upload = async (req, res) => {
     const { stage, index } = findStage(chain, req.params.stageId);
     const type = text(req.body?.type);
     if (![...documents[stage.kind], ...(stage.kind === "transport" ? ["truck_registration"] : [])].includes(type)) throw fail("Unsupported document type");
+    const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
+    const fileHash = sha256(req.file.buffer);
+    const priorDocuments = chain.stages.flatMap((item) => item.documents);
+    for (const entry of chain.history) {
+      if (entry.event === "document_uploaded") priorDocuments.push(entry.detail?.replaced);
+      if (entry.event === "later_stages_superseded") priorDocuments.push(...(entry.detail?.stages || []).flatMap((item) => item.documents || []));
+    }
+    for (const document of priorDocuments) {
+      if (!document) continue;
+      if (document.sha256 === fileHash) throw fail(`This file was already uploaded in this chain (${document.name}).`, 409);
+      if (!document.sha256 && document.key && (document.size == null || document.size === req.file.buffer.length)) {
+        const previous = await storage.getObjectBuffer(document.key);
+        if (sha256(previous.buffer) === fileHash) throw fail(`This file was already uploaded in this chain (${document.name}).`, 409);
+      }
+    }
     uploadedKey = storage.createStorageKey({ folder: `eudr/${chain._id}/${stage._id}`, originalName: req.file.originalname });
     await storage.uploadBuffer({ buffer: req.file.buffer, key: uploadedKey, originalName: req.file.originalname, contentType: req.file.mimetype });
     const replaced = stage.documents.find((document) => document.type === type);
@@ -178,7 +194,7 @@ exports.upload = async (req, res) => {
     discardLaterStages(chain, req, index, "Earlier document replaced");
     clearVerification(chain, req, index, "Document replaced");
     stage.documents = stage.documents.filter((document) => document.type !== type);
-    stage.documents.push({ type, key: uploadedKey, name: req.file.originalname, content_type: req.file.mimetype, size: req.file.size });
+    stage.documents.push({ type, key: uploadedKey, name: req.file.originalname, content_type: req.file.mimetype, size: req.file.size, sha256: fileHash });
     chain.invoice_keys = collectInvoiceKeys(chain.stages);
     await chain.save();
     uploadedKey = "";

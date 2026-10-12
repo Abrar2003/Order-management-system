@@ -9,6 +9,7 @@ const stageSchema = new mongoose.Schema({
     name: { type: String, required: true },
     content_type: String,
     size: Number,
+    sha256: String,
     uploaded_at: { type: Date, default: Date.now },
   }],
   verified_at: { type: Date, default: null },
@@ -36,7 +37,7 @@ const schema = new mongoose.Schema({
     detail: mongoose.Schema.Types.Mixed,
   }],
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
-}, { timestamps: true });
+}, { timestamps: true, optimisticConcurrency: true });
 
 schema.index({ container_key: 1, vendor: 1 }, { unique: true });
 schema.index({ invoice_keys: 1 }, { unique: true, sparse: true });

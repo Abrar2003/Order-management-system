@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const {
   parseTimberCft, shipmentMilliCft, financialYear, invoiceKey,
 } = require("../helpers/timberCft");
@@ -13,11 +14,84 @@ const Item = require("../models/item.model");
 const { getShipmentTimberCft } = require("../controllers/order.controller");
 const EudrChain = require("../models/eudrChain.model");
 const eudrController = require("../controllers/eudrChain.controller");
+const storage = require("../services/wasabiStorage.service");
 
 test("invoice and container/vendor uniqueness are enforced by database indexes", () => {
   const indexes = EudrChain.schema.indexes();
   assert.ok(indexes.some(([fields, options]) => fields.invoice_keys === 1 && options.unique));
   assert.ok(indexes.some(([fields, options]) => fields.container_key === 1 && fields.vendor === 1 && options.unique));
+  assert.equal(EudrChain.schema.options.optimisticConcurrency, true);
+});
+
+test("chain uploads reject duplicate content, including renamed and superseded files", async (t) => {
+  const vendorId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+  const chainId = "bbbbbbbbbbbbbbbbbbbbbbbb";
+  const query = (rows) => ({ select: () => ({ lean: async () => rows }) });
+  t.mock.method(Order, "find", () => query([{ _id: "o1", vendor: { vendor_id: vendorId }, item: { item_code: "I1" }, shipment: [{ _id: "s1", container: "C1", quantity: 1 }] }]));
+  t.mock.method(Sample, "find", () => query([]));
+  t.mock.method(Vendor, "find", () => query([{ _id: vendorId, name: "Vendor", gst: "GST", pan: "PAN" }]));
+  t.mock.method(Item, "find", () => query([{ code: "I1", timber_cft: 1 }]));
+  const original = Buffer.from("same file bytes");
+  const originalHash = crypto.createHash("sha256").update(original).digest("hex");
+  const chain = {
+    _id: chainId, container: "C1", vendor: vendorId, stages: [{ _id: "stage1", kind: "sawmill", documents: [{ type: "license", key: "old", name: "original.pdf", size: original.length, sha256: originalHash }] }], history: [],
+    isModified: () => false, save: async () => {}, toObject: () => ({}),
+  };
+  t.mock.method(EudrChain, "findById", async () => chain);
+  let uploads = 0;
+  let downloads = 0;
+  let deleted = 0;
+  let conflict = false;
+  t.mock.method(storage, "createStorageKey", () => "new");
+  t.mock.method(storage, "uploadBuffer", async () => { uploads += 1; });
+  t.mock.method(storage, "getObjectBuffer", async () => { downloads += 1; return { buffer: original }; });
+  t.mock.method(storage, "deleteObject", async () => { deleted += 1; });
+  chain.save = async () => { if (conflict) throw Object.assign(new Error("stale"), { name: "VersionError" }); };
+  const request = (buffer, name = "renamed.pdf") => ({ params: { id: chainId, stageId: "stage1" }, body: { type: "permission" }, file: { buffer, originalname: name, mimetype: "application/pdf", size: buffer.length }, user: {} });
+  const response = () => ({ status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
+
+  const current = response();
+  await eudrController.upload(request(original), current);
+  assert.equal(current.code, 409);
+  assert.match(current.body.message, /already uploaded/);
+  assert.equal(uploads, 0);
+  assert.equal(downloads, 0);
+
+  delete chain.stages[0].documents[0].sha256;
+  const legacy = response();
+  await eudrController.upload(request(original), legacy);
+  assert.equal(legacy.code, 409);
+  assert.equal(downloads, 1);
+  assert.equal(uploads, 0);
+
+  chain.history = [{ event: "later_stages_superseded", detail: { stages: [{ documents: [{ key: "old", name: "original.pdf", size: original.length, sha256: originalHash }] }] } }];
+  chain.stages[0].documents = [];
+  const historical = response();
+  await eudrController.upload(request(original), historical);
+  assert.equal(historical.code, 409);
+  assert.equal(uploads, 0);
+
+  chain.history = [{ event: "document_uploaded", detail: { replaced: { key: "old", name: "original.pdf", size: original.length, sha256: originalHash } } }];
+  const replaced = response();
+  await eudrController.upload(request(original), replaced);
+  assert.equal(replaced.code, 409);
+  assert.equal(uploads, 0);
+
+  chain.history = [];
+  chain.stages[0].documents = [{ type: "license", key: "old", name: "original.pdf", size: original.length, sha256: originalHash }];
+  const different = Buffer.from("different bytes");
+  const accepted = response();
+  await eudrController.upload(request(different, "original.pdf"), accepted);
+  assert.ok(accepted.body.data);
+  assert.equal(uploads, 1);
+  assert.equal(chain.stages[0].documents.find((document) => document.type === "permission").sha256, crypto.createHash("sha256").update(different).digest("hex"));
+
+  chain.stages[0].documents = [];
+  conflict = true;
+  const stale = response();
+  await eudrController.upload(request(different), stale);
+  assert.equal(stale.code, 409);
+  assert.equal(deleted, 1);
 });
 
 test("three-decimal timber CFT is optional and rounded per shipment line", () => {
