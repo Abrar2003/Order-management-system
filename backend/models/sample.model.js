@@ -195,6 +195,7 @@ const sampleSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    timber_cft: { type: Number, default: null, min: 0 },
     converted_item: {
       item: {
         type: mongoose.Schema.Types.ObjectId,

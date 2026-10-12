@@ -17,6 +17,8 @@ const vendorSchema = new mongoose.Schema({
   address: {
     type: String,
   },
+  gst: { type: String, trim: true, uppercase: true, default: "" },
+  pan: { type: String, trim: true, uppercase: true, default: "" },
   country: {
     type: String,
     trim: true,

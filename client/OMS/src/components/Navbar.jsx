@@ -77,6 +77,7 @@ const Navbar = () => {
   const normalizedRole = normalizeUserRole(role);
   const { hasPermission, isAdmin, role: permissionRole } = usePermissions();
   const isVendorAdmin = isStrictAdminRole(permissionRole || role) || isAdmin;
+  const canAccessEudr = ["admin", "super_admin", "manager"].includes(normalizeUserRole(permissionRole || role));
 
   const navigate = useNavigate();
   const navShellRef = useRef(null);
@@ -431,12 +432,14 @@ const Navbar = () => {
       items.push(routeMenuItem("bulk-shipping", "Bulk Shipping", "/container"));
     }
 
+    if (canAccessEudr) items.push(routeMenuItem("eudr", "EUDR Timber Management", "/eudr"));
+
     if (canManageLabels) {
       items.push(actionMenuItem("allocate-labels", "Allocate Labels", "allocate-labels"));
     }
 
     return items;
-  }, [canManageLabels, canViewSamples, hasPermission, isQcOnlyRole, isViewer]);
+  }, [canAccessEudr, canManageLabels, canViewSamples, hasPermission, isQcOnlyRole, isViewer]);
 
   const uploadOrdersMenuItems = useMemo(() => {
     if (!canManageOrders || isQcOnlyRole) return [];

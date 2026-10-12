@@ -15,6 +15,15 @@ The read-only OMS Assistant uses the versioned Knowledge Base to select canonica
 
 ## Local Development
 
+After installing dependencies in `backend/`, `client/OMS/`, and the project root, start both services from the project root:
+
+```bash
+npm install
+npm run dev
+```
+
+This runs the backend and frontend development servers together. Use `Ctrl+C` to stop both.
+
 ### Backend
 
 ```bash

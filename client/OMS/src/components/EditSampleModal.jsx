@@ -83,6 +83,7 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
     code: String(sample?.code ?? ""),
     name: String(sample?.name ?? ""),
     description: String(sample?.description ?? ""),
+    timber_cft: sample?.timber_cft == null ? "" : String(sample.timber_cft),
     brand: String(sample?.brand ?? ""),
     vendor: normalizeTextOptions(
       Array.isArray(sample?.vendor) ? sample.vendor : [sample?.vendor],
@@ -397,6 +398,7 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
       payload.box_mode = form.box_mode;
       payload.cbm = cbm;
     }
+    payload.timber_cft = form.timber_cft;
 
     if (!window.confirm(buildConfirmationMessage(payload))) {
       return;
@@ -503,6 +505,10 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
                   />
                 </div>
               )}
+              <div className="col-md-3">
+                <label className="form-label">Timber CFT per sample (optional)</label>
+                <input type="number" min="0" step="0.001" className="form-control" value={form.timber_cft} onChange={(event) => setForm((prev) => ({ ...prev, timber_cft: event.target.value }))} />
+              </div>
             </div>
 
             {hasEditableSizeData && (

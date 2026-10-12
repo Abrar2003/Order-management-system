@@ -46,6 +46,7 @@ const {
   getContainersDb,
   updateContainer,
   getShipmentsDb,
+  getShipmentTimberCft,
   exportShipmentsDb,
   checkShipmentRows,
   getDelayedPoReport,
@@ -290,6 +291,8 @@ router.get(
   cacheRoute("orders", SHORT_CACHE_TTL),
   getShipmentsDb,
 );
+
+router.get("/shipments/timber-cft/:itemCode", authenticate, requirePermission("orders", "edit"), getShipmentTimberCft);
 
 router.patch(
   "/shipments/check",

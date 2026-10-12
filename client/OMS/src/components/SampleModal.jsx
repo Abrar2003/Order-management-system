@@ -38,6 +38,7 @@ const createInitialSampleForm = () => ({
   description: "",
   brand: "",
   vendor: "",
+  timber_cft: "",
   item_count: "1",
   box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
   box_count: "1",
@@ -366,6 +367,7 @@ const SampleModal = ({
       description: String(sampleForm.description || "").trim(),
       brand: String(sampleForm.brand || "").trim(),
       vendor: getOptionText(sampleForm.vendor),
+      timber_cft: sampleForm.timber_cft,
       box_mode: sampleForm.box_mode,
       item_sizes: itemSizesPayload.value,
       box_sizes: boxSizesPayload.value,
@@ -649,6 +651,10 @@ const SampleModal = ({
                       disabled={saving}
                     />
                   </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Timber CFT per sample (optional)</label>
+                    <input type="number" min="0" step="0.001" className="form-control" value={sampleForm.timber_cft} onChange={(event) => handleSampleFieldChange("timber_cft", event.target.value)} disabled={saving} />
+                  </div>
                 </div>
 
                 <div className="row g-3">
@@ -719,6 +725,11 @@ const SampleModal = ({
                     onChange={(event) => setShipmentQuantity(event.target.value)}
                     disabled={saving}
                   />
+                </div>
+                <div className="col-12">
+                  {((shippingMode === "existing" ? selectedSample?.timber_cft : sampleForm.timber_cft) == null || String(shippingMode === "existing" ? selectedSample?.timber_cft : sampleForm.timber_cft).trim() === "")
+                    ? <span className="text-warning">Timber_CFT is missing; this sample will be excluded from EUDR stuffed CFT.</span>
+                    : <span>Stuffed timber CFT: {(Math.round(Number(shippingMode === "existing" ? selectedSample.timber_cft : sampleForm.timber_cft) * 1000 * Number(shipmentQuantity || 0)) / 1000).toFixed(3)}</span>}
                 </div>
 
                 {!usesExternalShippingContext && (

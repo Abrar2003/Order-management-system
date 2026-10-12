@@ -312,6 +312,7 @@ const buildInitialForm = (item = {}, options = {}) => {
 
   return {
     country_of_origin: resolvedCountryOfOrigin,
+    timber_cft: item?.timber_cft == null ? "" : String(item.timber_cft),
     barcode_exempted: item?.barcode_exempted === true,
     kd: Boolean(item?.kd),
     mounting_file_needed: Boolean(item?.mounting_file_needed),
@@ -797,6 +798,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         pis_box_mode: form.pis_box_mode,
         pis_item_sizes: pisItemPayload.value,
         pis_box_sizes: pisBoxPayload.value,
+        timber_cft: form.timber_cft,
       };
       payload.country_of_origin = toText(form.country_of_origin);
       if (masterBarcode || allowMissingRequiredFields) {
@@ -926,6 +928,19 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="col-md-4">
+                <label className="form-label" htmlFor="pis-timber-cft">Timber CFT per item (optional)</label>
+                <input
+                  id="pis-timber-cft"
+                  type="number"
+                  min="0"
+                  step="0.001"
+                  className="form-control"
+                  value={form.timber_cft}
+                  onChange={(event) => updateField("timber_cft", event.target.value)}
+                  disabled={saving}
+                />
               </div>
               <div className="col-md-4">
                 <label className="form-label">K/D</label>

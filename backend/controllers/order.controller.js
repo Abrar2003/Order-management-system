@@ -6,6 +6,7 @@ const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
 const Item = require("../models/item.model");
 const Sample = require("../models/sample.model");
+const { shipmentMilliCft } = require("../helpers/timberCft");
 const UploadLog = require("../models/uploadLog.model");
 const {
   buildManualOrderRows,
@@ -3559,6 +3560,10 @@ const resolveShipmentSortConfig = ({
     stuffed_cbm: "shipment_cbm",
     shipmentcbm: "shipment_cbm",
     shipment_cbm: "shipment_cbm",
+    stuffedcft: "shipment_cft",
+    stuffed_cft: "shipment_cft",
+    shipmentcft: "shipment_cft",
+    shipment_cft: "shipment_cft",
     quantity: "quantity",
     pending: "pending",
     orderquantity: "order_quantity",
@@ -3576,6 +3581,7 @@ const resolveShipmentSortConfig = ({
     "container",
     "invoice_number",
     "shipment_cbm",
+    "shipment_cft",
     "quantity",
     "pending",
   ]);
@@ -3655,6 +3661,9 @@ const resolveSampleShipmentCbmSummary = (sample = {}, quantity = 0) => {
     source: "sample",
   };
 };
+
+const resolveShipmentCft = (perUnitCft, quantity) =>
+  perUnitCft == null ? null : shipmentMilliCft(perUnitCft, quantity) / 1000;
 
 const inspectionHasBoxMeasurements = (inspection = {}) =>
   (Array.isArray(inspection?.inspected_box_sizes)
@@ -3775,6 +3784,10 @@ const mapOrdersToShipmentRows = (orders = []) =>
           inspectedBoxSizes: order?.shipmentInspection?.inspected_box_sizes,
           inspectedBoxMode: order?.shipmentInspection?.inspected_box_mode,
         }),
+        shipment_cft: resolveShipmentCft(
+          order?.itemDoc?.timber_cft,
+          Number.isFinite(parsedShipmentQuantity) ? parsedShipmentQuantity : 0,
+        ),
       };
     });
   });
@@ -3884,6 +3897,7 @@ const mapSamplesToShipmentRows = (samples = []) =>
         shipment_checked: Boolean(entry?.checked?.checked),
         shipment_checked_by: entry?.checked?.checked_by || null,
         shipment_cbm: cbmSummary.shipment_cbm,
+        shipment_cft: resolveShipmentCft(sample?.timber_cft, quantity),
       };
     });
   });
@@ -3932,6 +3946,8 @@ const getShipmentSortValue = (row, sortBy) => {
       return normalizeShipmentInvoiceNumber(row?.invoice_number);
     case "shipment_cbm":
       return toShipmentNumber(row?.shipment_cbm);
+    case "shipment_cft":
+      return toShipmentNumber(row?.shipment_cft);
     case "quantity":
       return toShipmentNumber(row?.quantity);
     case "pending":
@@ -3993,7 +4009,7 @@ const getShipmentDataset = async ({
     ),
   )
     .select(
-      "code name description brand vendor cbm box_sizes box_mode shipment createdAt updatedAt",
+      "code name description brand vendor cbm timber_cft box_sizes box_mode shipment createdAt updatedAt",
     )
     .sort({ updatedAt: -1, code: 1 })
     .lean();
@@ -4017,6 +4033,7 @@ const getShipmentDataset = async ({
           .select(
             [
               "code",
+              "timber_cft",
               "cbm",
               "inspected_item_sizes",
               "inspected_item_LBH",
@@ -4157,6 +4174,7 @@ const getShipmentDataset = async ({
       if (row?.status === "Partial Shipped") acc.partialShipped += 1;
       if (row?.status === "Shipped") acc.shipped += 1;
       acc.totalStuffedCbm += Number(row?.shipment_cbm || 0);
+      if (row?.shipment_cft != null) acc.totalStuffedMilliCft += Math.round(row.shipment_cft * 1000);
       return acc;
     },
     {
@@ -4167,9 +4185,12 @@ const getShipmentDataset = async ({
       partialShipped: 0,
       shipped: 0,
       totalStuffedCbm: 0,
+      totalStuffedMilliCft: 0,
     },
   );
   summary.totalStuffedCbm = toRoundedCbmValue(summary.totalStuffedCbm);
+  summary.totalStuffedCft = summary.totalStuffedMilliCft / 1000;
+  delete summary.totalStuffedMilliCft;
 
   const statusScopedRows =
     statusFilter && ORDER_STATUS_SEQUENCE.includes(statusFilter)
@@ -4181,6 +4202,13 @@ const getShipmentDataset = async ({
       0,
     ),
   );
+  summary.filteredStuffedCft = statusScopedRows.reduce(
+    (sum, row) => sum + (row?.shipment_cft == null ? 0 : Math.round(row.shipment_cft * 1000)),
+    0,
+  ) / 1000;
+  summary.missingTimberCftLines = statusScopedRows.filter(
+    (row) => row?.shipment_id && Number(row?.quantity) > 0 && row?.shipment_cft == null,
+  ).length;
 
   const sortedRows = [...statusScopedRows].sort((a, b) => {
     const primaryComparison = compareShipmentValues(
@@ -10403,6 +10431,17 @@ exports.exportShippingPending = async (req, res) => {
   }
 };
 
+exports.getShipmentTimberCft = async (req, res) => {
+  try {
+    const code = String(req.params.itemCode || "").trim();
+    if (!code) return res.status(400).json({ message: "Item code is required" });
+    const item = await Item.findOne({ code: { $regex: `^${escapeRegex(code)}$`, $options: "i" } }).select("timber_cft").lean();
+    return res.json({ timber_cft: item?.timber_cft ?? null });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to fetch Timber_CFT" });
+  }
+};
+
 exports.getShipmentsDb = async (req, res) => {
   try {
     const brand = req.query.brand;
@@ -10694,6 +10733,7 @@ exports.exportShipmentsDb = async (req, res) => {
       { key: "invoice_number", header: "Invoice Number" },
       { key: "quantity", header: "Shipment Quantity" },
       { key: "shipment_cbm", header: "Stuffed CBM" },
+      { key: "shipment_cft", header: "Stuffed CFT" },
       { key: "pending", header: "Pending" },
       { key: "remaining_remarks", header: "Remarks" },
     ];
@@ -10713,6 +10753,7 @@ exports.exportShipmentsDb = async (req, res) => {
       invoice_number: normalizeShipmentInvoiceNumber(row?.invoice_number),
       quantity: Number(row?.quantity || 0),
       shipment_cbm: Number(row?.shipment_cbm || 0),
+      shipment_cft: !row?.shipment_id ? "" : row?.shipment_cft == null ? "Missing" : row.shipment_cft,
       pending: Number(row?.pending || 0),
       remaining_remarks: String(row?.remaining_remarks || "").trim(),
     }));

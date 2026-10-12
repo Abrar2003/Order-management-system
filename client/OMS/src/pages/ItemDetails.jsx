@@ -1120,6 +1120,7 @@ const ItemDetails = () => {
                   <div className="inspection-report-summary-line mb-3">
                     <span><strong>Item Code:</strong> {toDisplay(item?.code, resolvedItemCode)}</span>
                     <span><strong>Description:</strong> {toDisplay(item?.description || item?.name)}</span>
+                    <span><strong>Timber CFT per item:</strong> {item?.timber_cft == null ? "Not set" : Number(item.timber_cft).toFixed(3)}</span>
                     <span><strong>Vendor:</strong> {getVendors(item)}</span>
                   </div>
                   <div className="inspection-report-summary-block">

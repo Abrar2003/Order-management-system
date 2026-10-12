@@ -3,6 +3,7 @@ const masterWorkflowController = require("./masterWorkflow.controller");
 const { buildItemMatch, applyItemDataAccess } = require("../helpers/itemQuery");
 const { parseSizeEntriesPayload, ITEM_SIZE_REMARK_OPTIONS } = require("../helpers/sizeEntryPayload");
 const Item = require("../models/item.model");
+const { parseTimberCft } = require("../helpers/timberCft");
 const Brand = require("../models/brand.model");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
@@ -1492,6 +1493,7 @@ const PRODUCT_DATABASE_TABLE_V1_COMPLETION_FALLBACK_FIELDS = Object.freeze([
 ]);
 const ITEM_DETAILS_SELECT = [
   "code",
+  "timber_cft",
   "name",
   "description",
   "brand",
@@ -4975,6 +4977,7 @@ exports.getItemOrderPresence = async (req, res) => {
 exports.createItem = async (req, res) => {
   try {
     const payload = req.body && typeof req.body === "object" ? req.body : {};
+    if (hasOwn(payload, "timber_cft")) throw createHttpError(400, "Timber_CFT must be set through the PIS update");
     const productTypeContext = await resolveItemProductTypeContext(payload);
     const importedCommonFields = productTypeContext.commonFields || {};
     const code = normalizeTextField(
@@ -5212,6 +5215,7 @@ exports.updateItem = async (req, res) => {
     }
     const lockedFields = [
       "code",
+      "timber_cft",
       "brand_name",
       "brands",
       "vendors",
@@ -5849,6 +5853,9 @@ exports.updateItemPis = async (req, res) => {
     if (hasOwn(payload, "country_of_origin")) {
       const nextCountryOfOrigin = normalizeTextField(payload.country_of_origin);
       setPisPath("country_of_origin", nextCountryOfOrigin);
+    }
+    if (hasOwn(payload, "timber_cft")) {
+      setPisPath("timber_cft", parseTimberCft(payload.timber_cft));
     }
     if (hasOwn(payload, "kd")) {
       setPisPath("kd", toBooleanValue(payload.kd, "kd"));

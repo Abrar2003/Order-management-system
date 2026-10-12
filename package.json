@@ -1,0 +1,10 @@
+{
+  "name": "oms",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail --names backend,client \"npm --prefix backend run dev\" \"npm --prefix client/OMS run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

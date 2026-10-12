@@ -391,6 +391,7 @@ const itemSchema = new mongoose.Schema(
     },
     name: { type: String, default: "", trim: true },
     description: { type: String, default: "", trim: true },
+    timber_cft: { type: Number, default: null, min: 0 },
     brand: { type: String, default: "", trim: true },
     brand_name: { type: String, default: "", trim: true },
     brands: { type: [String], default: [] },

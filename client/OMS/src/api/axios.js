@@ -69,7 +69,12 @@ export const normalizeApiVendorRefs = (value, key = "") => {
 
   if (!isPlainObject(value)) return value;
 
-  if (VENDOR_SINGLE_KEYS.has(key)) {
+  if (
+    VENDOR_SINGLE_KEYS.has(key) &&
+    isVendorRefObject(value) &&
+    !Object.prototype.hasOwnProperty.call(value, "gst") &&
+    !Object.prototype.hasOwnProperty.call(value, "pan")
+  ) {
     const displayName = getVendorDisplayName(value);
     if (displayName) return displayName;
   }

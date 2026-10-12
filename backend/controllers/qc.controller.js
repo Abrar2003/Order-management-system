@@ -4825,8 +4825,16 @@ exports.getQCList = async (req, res) => {
       ]).allowDiskUse(true),
     ]);
 
-    const data = (result?.[0]?.data || []).map((entry) => ({
+    const rawData = result?.[0]?.data || [];
+    const timberCftByCode = new Map();
+    if (req.query.include_timber_cft === "1") {
+      const codes = [...new Set(rawData.map((entry) => String(entry?.item?.item_code || entry?.order?.item?.item_code || "").trim()).filter(Boolean))];
+      const timberItems = await Item.find({ code: { $in: codes } }).select("code timber_cft").lean();
+      timberItems.forEach((item) => timberCftByCode.set(String(item.code).trim().toLowerCase(), item.timber_cft ?? null));
+    }
+    const data = rawData.map((entry) => ({
       ...entry,
+      ...(req.query.include_timber_cft === "1" ? { item: { ...entry.item, timber_cft: timberCftByCode.get(String(entry?.item?.item_code || entry?.order?.item?.item_code || "").trim().toLowerCase()) ?? null } } : {}),
       order: entry?.order
         ? {
             ...entry.order,

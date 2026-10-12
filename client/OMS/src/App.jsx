@@ -36,6 +36,7 @@ const Shipments = lazy(() => import("./pages/Shipments"));
 const Container = lazy(() => import("./pages/Container"));
 const Samples = lazy(() => import("./pages/Samples"));
 const Containers = lazy(() => import("./pages/Containers"));
+const EudrTimber = lazy(() => import("./pages/EudrTimber"));
 const ShippedSamples = lazy(() => import("./pages/ShippedSamples"));
 const Items = lazy(() => import("./pages/Items"));
 const ItemMasters = lazy(() => import("./pages/ItemMasters"));
@@ -553,6 +554,8 @@ const App = () => {
               </ProtectedRoute>
             }
           />
+
+          <Route path="/eudr" element={<ProtectedRoute allowViewer={false}><EudrTimber /></ProtectedRoute>} />
 
           <Route
             path="/samples"

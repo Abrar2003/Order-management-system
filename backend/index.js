@@ -38,6 +38,7 @@ const securityRouter = require("./routers/security.routes");
 const omsChatRouter = require("./routers/omsChat.routes");
 const employeeReportRouter = require("./routers/employeeReport.routes");
 const testsRouter = require("./routers/tests.routes");
+const eudrChainRouter = require("./routers/eudrChain.routes");
 const { ensureDropTestTemplate } = require("./controllers/tests.controller");
 const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
@@ -159,6 +160,7 @@ app.use("/api/security", securityRouter);
 app.use("/oms-chat", omsChatRouter);
 app.use("/api/oms-chat", omsChatRouter);
 app.use("/tests", testsRouter);
+app.use("/eudr", eudrChainRouter);
 app.use("/api/tests", testsRouter);
 
 app.get("/", (req, res) => {

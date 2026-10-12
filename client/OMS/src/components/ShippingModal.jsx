@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import {
   getTodayDDMMYYYY,
@@ -24,6 +24,8 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [timberCft, setTimberCft] = useState(null);
+  const [timberCftLoading, setTimberCftLoading] = useState(true);
   const {
     inspectors,
     inspectorById,
@@ -42,6 +44,20 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
 
   const orderQuantity = Number(order?.quantity || 0);
   const remainingQuantity = Math.max(0, orderQuantity - shippedAlready);
+  useEffect(() => {
+    const code = String(order?.item?.item_code || "").trim();
+    let cancelled = false;
+    if (!code) { setTimberCftLoading(false); return undefined; }
+    setTimberCftLoading(true);
+    axios.get(`/orders/shipments/timber-cft/${encodeURIComponent(code)}`)
+      .then((response) => {
+        if (cancelled) return;
+        setTimberCft(response?.data?.timber_cft ?? null);
+      })
+      .catch(() => { if (!cancelled) setTimberCft(null); })
+      .finally(() => { if (!cancelled) setTimberCftLoading(false); });
+    return () => { cancelled = true; };
+  }, [order?.item?.item_code]);
 
   const handleSubmit = async () => {
     setError("");
@@ -220,6 +236,11 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
               />
+            </div>
+            <div className={timberCft == null ? "alert alert-warning mb-0" : "alert alert-info mb-0"}>
+              {timberCftLoading ? "Loading timber CFT…" : timberCft == null
+                ? "Timber_CFT is missing or unavailable; this line will be excluded from EUDR stuffed CFT."
+                : `Stuffed timber CFT: ${(Math.round(Number(timberCft) * 1000 * Number(shipmentQuantity || 0)) / 1000).toFixed(3)}`}
             </div>
 
             {inspectorError && <div className="alert alert-warning mb-0">{inspectorError}</div>}

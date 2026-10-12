@@ -171,6 +171,11 @@ const buildItemUpdateAuditSnapshot = (item = {}) => {
   const fields = {
     [AUDIT_SCOPES.PIS]: [
       {
+        key: "timber_cft",
+        label: "Timber CFT per item",
+        value: item?.timber_cft == null ? "Not Set" : String(item.timber_cft),
+      },
+      {
         key: "country_of_origin",
         label: "Country of Origin",
         value: formatText(item?.country_of_origin),

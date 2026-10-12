@@ -33,6 +33,9 @@ const EMPTY_SUMMARY = {
   shipped: 0,
   totalStuffedCbm: 0,
   filteredStuffedCbm: 0,
+  totalStuffedCft: 0,
+  filteredStuffedCft: 0,
+  missingTimberCftLines: 0,
 };
 
 const DEFAULT_LIMIT = 20;
@@ -80,6 +83,7 @@ const parseSortBy = (value) => {
     "container",
     "invoice_number",
     "shipment_cbm",
+    "shipment_cft",
     "quantity",
     "pending",
   ]);
@@ -857,6 +861,12 @@ const Shipments = () => {
                 summary.filteredStuffedCbm ?? summary.totalStuffedCbm,
               )}
             </span>
+            <span className="om-summary-chip">
+              Total Stuffed CFT: {Number(summary.filteredStuffedCft ?? summary.totalStuffedCft ?? 0).toFixed(3)}
+              {summary.missingTimberCftLines > 0 && (
+                <span className="text-danger"> ({summary.missingTimberCftLines} line(s) missing Timber CFT)</span>
+              )}
+            </span>
           </div>
         </div>
 
@@ -999,6 +1009,14 @@ const Shipments = () => {
                           onClick={() => handleSortColumn("shipment_cbm", "desc")}
                         />
                       </th>
+                      <th className="shipments-col-qty">
+                        <SortHeaderButton
+                          label="Stuffed CFT"
+                          isActive={sortBy === "shipment_cft"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("shipment_cft", "desc")}
+                        />
+                      </th>
                       <th className="shipments-col-pending">
                         <SortHeaderButton
                           label="Pending"
@@ -1031,7 +1049,7 @@ const Shipments = () => {
                         <td
                           colSpan={
                             (canCheckShipments ? 1 : 0) +
-                            (canFinalizeShipping ? 14 : 13) +
+                            (canFinalizeShipping ? 15 : 14) +
                             (canEditShipments ? 1 : 0)
                           }
                           className="text-center py-4"
@@ -1102,6 +1120,7 @@ const Shipments = () => {
                         <td className="shipments-col-invoice">{row?.invoice_number || "N/A"}</td>
                         <td className="shipments-col-qty">{row?.quantity ?? "N/A"}</td>
                         <td className="shipments-col-qty">{formatCbm(row?.shipment_cbm)}</td>
+                        <td className="shipments-col-qty">{row?.shipment_id ? (row?.shipment_cft == null ? <span className="text-danger">Missing</span> : Number(row.shipment_cft).toFixed(3)) : "—"}</td>
                         <td className="shipments-col-pending">{row?.pending ?? "N/A"}</td>
                         <td className="shipments-col-remarks">{row?.remaining_remarks || "N/A"}</td>
                         {canFinalizeShipping && (

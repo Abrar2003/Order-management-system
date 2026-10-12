@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const path = require("path");
 
 const Sample = require("../models/sample.model");
+const { parseTimberCft } = require("../helpers/timberCft");
 const Item = require("../models/item.model");
 const {
   BOX_PACKAGING_MODES,
@@ -730,6 +731,7 @@ exports.createSample = async (req, res) => {
       box_sizes: normalizeBoxSizeEntries(parseJsonBodyField(payload.box_sizes, "box_sizes"), boxMode),
       box_mode: boxMode,
       cbm: Math.max(0, toSafeNumber(payload.cbm, 0)),
+      timber_cft: parseTimberCft(payload.timber_cft),
       shipment: payload.shipment !== undefined
         ? normalizeShipmentEntries(parseJsonBodyField(payload.shipment, "shipment"), actor)
         : [],
@@ -803,6 +805,7 @@ exports.updateSample = async (req, res) => {
       sample.box_sizes = normalizeBoxSizeEntries(parseJsonBodyField(payload.box_sizes, "box_sizes"), sample.box_mode);
     }
     if (payload.cbm !== undefined) sample.cbm = Math.max(0, toSafeNumber(payload.cbm, 0));
+    if (payload.timber_cft !== undefined) sample.timber_cft = parseTimberCft(payload.timber_cft);
     if (payload.shipment !== undefined) {
       sample.shipment = normalizeShipmentEntries(parseJsonBodyField(payload.shipment, "shipment"), actor);
     }
@@ -1097,6 +1100,7 @@ exports.convertToItem = async (req, res) => {
 
     // Create the Item
     const item = new Item({
+      timber_cft: sample.timber_cft,
       code: normalizedCode,
       name: normalizedName,
       description: normalizedDescription,

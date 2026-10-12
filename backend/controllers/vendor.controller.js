@@ -152,6 +152,8 @@ const serializeVendor = (vendor = {}, allowedBrandNames = null) => ({
   phone: normalizeText(vendor.phone),
   country: normalizeText(vendor.country),
   address: normalizeText(vendor.address),
+  gst: normalizeText(vendor.gst),
+  pan: normalizeText(vendor.pan),
   vendor_code: normalizeVendorCodeEntries(vendor.vendor_code).filter((entry) =>
     !allowedBrandNames || allowedBrandNames.has(entry.brand.toLowerCase()),
   ),
@@ -401,6 +403,8 @@ const createVendor = async (req, res) => {
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
     const address = normalizeText(req.body?.address);
+    const gst = normalizeText(req.body?.gst).toUpperCase();
+    const pan = normalizeText(req.body?.pan).toUpperCase();
     const vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code, req.user);
     const contact_person = normalizeContactPersons(req.body?.contact_person);
     const is_active = req.body?.is_active !== false;
@@ -440,6 +444,8 @@ const createVendor = async (req, res) => {
       phone,
       country,
       address,
+      gst,
+      pan,
       vendor_code,
       contact_person,
       is_active,
@@ -474,6 +480,8 @@ const updateVendor = async (req, res) => {
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
     const address = normalizeText(req.body?.address);
+    const gst = normalizeText(req.body?.gst).toUpperCase();
+    const pan = normalizeText(req.body?.pan).toUpperCase();
     let vendor_code = await normalizeVendorCodesForSave(req.body?.vendor_code, req.user);
     const contact_person = normalizeContactPersons(req.body?.contact_person);
     const is_active = req.body?.is_active !== false;
@@ -549,6 +557,8 @@ const updateVendor = async (req, res) => {
     existingVendor.phone = phone;
     existingVendor.country = country;
     existingVendor.address = address;
+    if (req.body?.gst !== undefined) existingVendor.gst = gst;
+    if (req.body?.pan !== undefined) existingVendor.pan = pan;
     existingVendor.vendor_code = vendor_code;
     existingVendor.contact_person = contact_person;
     existingVendor.is_active = is_active;

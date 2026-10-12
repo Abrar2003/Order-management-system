@@ -241,6 +241,8 @@ const VendorDetails = () => {
       email: vendor.email || "",
       phone: vendor.phone || "",
       country: vendor.country || "",
+      gst: vendor.gst || "",
+      pan: vendor.pan || "",
       address: vendor.address || "",
       is_active: vendor.is_active !== false,
       contact_person:
@@ -357,6 +359,8 @@ const VendorDetails = () => {
         email: editForm.email.trim(),
         phone: editForm.phone.trim(),
         country: editForm.country.trim() || undefined,
+        gst: editForm.gst.trim().toUpperCase(),
+        pan: editForm.pan.trim().toUpperCase(),
         address: editForm.address.trim() || undefined,
         vendor_code: vendorCodePayload,
         contact_person: contactPersonPayload,
@@ -743,6 +747,16 @@ const VendorDetails = () => {
                       </select>
                     </div>
 
+                    <div className="col-md-6 d-flex align-items-end">
+                      <div className="w-100">
+                        <label className="form-label fw-semibold">GST (required for EUDR)</label>
+                        <input name="gst" className="form-control" value={editForm.gst} onChange={handleEditChange} />
+                      </div>
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label fw-semibold">PAN (required for EUDR)</label>
+                      <input name="pan" className="form-control" value={editForm.pan} onChange={handleEditChange} />
+                    </div>
                     <div className="col-md-6 d-flex align-items-end">
                       <div className="form-check mb-2">
                         <input

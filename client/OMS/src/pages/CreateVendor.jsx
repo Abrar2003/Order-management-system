@@ -23,6 +23,8 @@ const initialForm = {
   email: "",
   phone: "",
   country: "",
+  gst: "",
+  pan: "",
   address: "",
   vendor_code: [{ ...emptyVendorCode }],
   contact_person: [{ name: "", email: "", phone: "", type: "merchant" }],
@@ -236,6 +238,8 @@ const CreateVendor = () => {
         email: form.email.trim(),
         phone: form.phone.trim(),
         country: form.country.trim() || undefined,
+        gst: form.gst.trim().toUpperCase(),
+        pan: form.pan.trim().toUpperCase(),
         address: form.address.trim() || undefined,
         vendor_code: vendorCodePayload,
         contact_person: contactPersonPayload,
@@ -350,6 +354,13 @@ const CreateVendor = () => {
                   ))}
                 </select>
               </div>
+
+              {[["gst", "GST"], ["pan", "PAN"]].map(([name, label]) => (
+                <div className="col-md-6" key={name}>
+                  <label className="form-label">{label} (required for EUDR)</label>
+                  <input name={name} value={form[name]} onChange={handleChange} className="form-control" />
+                </div>
+              ))}
 
               <div className="col-12">
                 <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">

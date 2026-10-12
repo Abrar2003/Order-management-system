@@ -137,6 +137,7 @@ const Container = () => {
             page,
             limit: 100,
             sort: "-request_date",
+            include_timber_cft: "1",
           },
         });
 
@@ -181,6 +182,7 @@ const Container = () => {
           orderDocumentId,
           orderId: qc?.order_meta?.order_id || order?.order_id || "N/A",
           itemCode: qc?.item?.item_code || order?.item?.item_code || "N/A",
+          timberCft: qc?.item?.timber_cft ?? null,
           itemDescription:
             qc?.item?.description || order?.item?.description || "N/A",
           orderQuantity,
@@ -422,6 +424,11 @@ const Container = () => {
         .filter((row) => Number.isFinite(row.quantity) && row.quantity > 0),
     [filteredRows],
   );
+  const selectedTimberMilliCft = useMemo(
+    () => selectedRows.reduce((sum, row) => row.timberCft == null ? sum : sum + Math.round(Number(row.timberCft) * 1000 * row.quantity), 0),
+    [selectedRows],
+  );
+  const selectedMissingTimberCft = selectedRows.filter((row) => row.timberCft == null).length;
 
   const handleBulkFinalize = async () => {
     setError("");
@@ -703,7 +710,9 @@ const Container = () => {
                   Selected: {selectedRows.length}
                 </span>
               )}
+              {!isViewOnly && <span className="om-summary-chip">Selected stuffed CFT: {(selectedTimberMilliCft / 1000).toFixed(3)}</span>}
             </div>
+            {!isViewOnly && selectedMissingTimberCft > 0 && <div className="alert alert-warning py-2">{selectedMissingTimberCft} selected line(s) have no Timber_CFT and are excluded from this preview.</div>}
 
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
