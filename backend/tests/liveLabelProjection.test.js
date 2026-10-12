@@ -53,6 +53,7 @@ test('live replace mirrors ownership changes and an idempotent transaction', asy
     'migration.legacy_history_id': 'history-1',
   });
   assert.equal(transactionWrites[0].update.$set.action, 'replace');
+  assert.equal(transactionWrites[0].update.$set.migration.legacy_key, 'id:history-1');
   assert.deepEqual(transactionWrites[0].options, { upsert: true });
 });
 

@@ -721,6 +721,7 @@ exports.allocateLabels = async (req, res) => {
               migrated_at: history.recorded_at,
               legacy_inspector: inspector._id,
               legacy_history_id: history._id,
+              legacy_key: `id:${history._id}`,
             },
           }], { session });
         });

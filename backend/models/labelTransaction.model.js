@@ -89,7 +89,7 @@ labelTransactionSchema.index(
     unique: true,
     partialFilterExpression: {
       "migration.legacy_inspector": { $type: "objectId" },
-      "migration.legacy_key": { $type: "string" },
+      "migration.legacy_key": { $gt: "" },
     },
   },
 );

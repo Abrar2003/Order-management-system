@@ -33,6 +33,7 @@
     "upload:logistics-ean:folder": "node scripts/uploadLogisticsEanToMongo.js",
     "upload:logistics-ean:mongo": "node scripts/uploadLogisticsEanToMongo.js",
     "import:rectify-items": "node scripts/importRectifyItems.js",
+    "repair:label-transaction-index": "node scripts/repairLabelTransactionLegacyKeyIndex.js",
     "test": "node --test tests/*.test.js",
     "test:pdf": "node --test tests/pdfArchitecture.test.js tests/pdfRenderer.test.js",
     "serve": "npm run dev"

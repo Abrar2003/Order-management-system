@@ -64,6 +64,10 @@ test("LabelTransaction preserves legacy actions and migration idempotency", asyn
     ([fields]) => fields["migration.legacy_key"] === 1,
   );
   assert.equal(keyIndex?.[1]?.unique, true);
+  assert.deepEqual(keyIndex?.[1]?.partialFilterExpression, {
+    "migration.legacy_inspector": { $type: "objectId" },
+    "migration.legacy_key": { $gt: "" },
+  });
 });
 
 test("LabelUsage is one document per Inspection and reuses embedded vendors", async () => {

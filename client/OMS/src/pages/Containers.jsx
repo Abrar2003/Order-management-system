@@ -11,7 +11,7 @@ import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { getUserFromToken } from "../auth/auth.service";
-import { hasShipmentEditRole, normalizeUserRole } from "../auth/permissions";
+import { hasShipmentEditRole } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import "../App.css";
 
@@ -60,14 +60,11 @@ const Containers = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "containers-list");
   const user = getUserFromToken();
-  const { hasPermission, role } = usePermissions();
+  const { hasPermission } = usePermissions();
   const canUpdateContainers =
     hasPermission("containers", "edit") ||
     hasPermission("shipments", "edit") ||
     hasShipmentEditRole(user?.role);
-  const canRecordTimberUsage =
-    ["admin", "super_admin", "manager"].includes(normalizeUserRole(role || user?.role)) &&
-    hasPermission("eudr_timber", "create");
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -629,13 +626,13 @@ const Containers = () => {
                           onClick={() => handleSortColumn("totalCbm", "desc")}
                         />
                       </th>
-                      {(canUpdateContainers || canRecordTimberUsage) && <th>Action</th>}
+                      {canUpdateContainers && <th>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 ? (
                       <tr>
-                        <td colSpan={canUpdateContainers || canRecordTimberUsage ? "10" : "9"} className="text-center py-4">
+                        <td colSpan={canUpdateContainers ? "10" : "9"} className="text-center py-4">
                           No containers found
                         </td>
                       </tr>
@@ -660,19 +657,9 @@ const Containers = () => {
                           </td>
                           <td>{row.item_count ?? 0}</td>
                           <td>{(Number(row.total_cbm) ?? 0).toFixed(2)}</td>
-                          {(canUpdateContainers || canRecordTimberUsage) && (
+                          {canUpdateContainers && (
                             <td>
-                              {canRecordTimberUsage && <button
-                                type="button"
-                                className="btn btn-outline-secondary btn-sm me-2"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  navigate(`/eudr/timber-inventory?container=${encodeURIComponent(row.container)}`);
-                                }}
-                              >
-                                Record Timber Usage
-                              </button>}
-                              {canUpdateContainers && <button
+                              <button
                                 type="button"
                                 className="btn btn-outline-primary btn-sm"
                                 onClick={(event) => {
@@ -681,7 +668,7 @@ const Containers = () => {
                                 }}
                               >
                                 Update Container
-                              </button>}
+                              </button>
                             </td>
                           )}
                         </tr>

@@ -229,6 +229,7 @@ class LiveLabelProjectionService {
             migrated_at: now,
             legacy_inspector: inspectorId,
             legacy_history_id: historyId,
+            legacy_key: `id:${historyId}`,
           },
         },
       },
