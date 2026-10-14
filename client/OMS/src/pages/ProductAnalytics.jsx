@@ -86,7 +86,7 @@ const ProductAnalytics = () => {
       </div>
       <ReportInfoBanner
         description="Evaluates historical item performance based on order quantities, inspection times, rejection rates, and shipping times."
-        dataShown="Item codes, PO counts, order/passed quantities, average inspection duration, average rejection rate, and average shipping lead times."
+        dataShown="Item codes, PO counts, order/passed/shipped quantities, average inspection duration, average rejection rate, and average shipping lead times."
         howItWorks="Compiles analytical metrics grouped by item code. Filterable by search text, brand, and vendor. Rows expand to show PO-level details."
       />
       <div className="card om-card mb-3"><div className="card-body"><form className="row g-2 align-items-end" onSubmit={applyFilters}>

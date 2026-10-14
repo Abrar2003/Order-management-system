@@ -6656,6 +6656,27 @@ small,
   min-height: 2.75rem;
 }
 
+.table-responsive.product-analytics-scroll {
+  overflow-x: auto;
+}
+
+.product-analytics-table,
+.product-analytics-detail-table {
+  min-width: 1200px;
+  table-layout: auto;
+}
+
+.product-analytics-table td,
+.product-analytics-detail-table td {
+  white-space: nowrap !important;
+}
+
+.product-analytics-table th,
+.product-analytics-detail-table th {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
 .product-analytics-parent-row {
   cursor: pointer;
 }
