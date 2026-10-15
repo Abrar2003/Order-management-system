@@ -3374,7 +3374,7 @@ const UpdateQcModal = ({
       try {
         setSaving(true);
         await pauseDraftSaves();
-        await uploadRejectionEvidence();
+        const rejectionUploadIntentId = await uploadRejectionEvidence();
         const requestKey = inspectionSaveRequestKeyRef.current || (
           globalThis.crypto?.randomUUID?.()
           || `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -3384,6 +3384,7 @@ const UpdateQcModal = ({
           records: [
             {
               _id: inspectionRecord._id,
+              image_upload_intent_id: rejectionUploadIntentId || undefined,
               requested_date: requestedDateIso,
               inspection_date: lastInspectedDateIso,
               inspector: selectedInspectorId,
@@ -3554,7 +3555,7 @@ const UpdateQcModal = ({
       try {
         setSaving(true);
         await pauseDraftSaves();
-        await uploadRejectionEvidence();
+        const rejectionUploadIntentId = await uploadRejectionEvidence();
         const requestKey = inspectionSaveRequestKeyRef.current || (
           globalThis.crypto?.randomUUID?.()
           || `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -3564,6 +3565,7 @@ const UpdateQcModal = ({
           records: [
             {
               _id: rewriteTargetRecord._id,
+              image_upload_intent_id: rejectionUploadIntentId || undefined,
               requested_date: requestedDateIso,
               inspection_date: lastInspectedDateIso,
               inspector: selectedInspectorId,
