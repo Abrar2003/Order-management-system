@@ -327,6 +327,10 @@ InspectionSchema.pre("validate", function validateInspectionQuantities() {
   }
 });
 
+InspectionSchema.pre("save", async function guardLabels() {
+  await require('../services/labels/labelIntegrity.service').guardInspectionLabels(this);
+});
+
 // Fast QC details page (history)
 InspectionSchema.index({ qc: 1, createdAt: -1 });
 

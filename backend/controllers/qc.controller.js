@@ -11240,7 +11240,7 @@ exports.lookupInspectionTransferTarget = async (req, res) => {
   }
 };
 
-exports.transferInspectionRecord = async (req, res) => {
+const transferInspectionRecord = async (req, res) => {
   try {
     const qcId = String(req.params.id || "").trim();
     const recordId = String(req.params.recordId || "").trim();
@@ -11677,12 +11677,17 @@ exports.transferInspectionRecord = async (req, res) => {
       },
     });
   } catch (err) {
+    if (err?.name === 'VersionError' || err?.hasErrorLabel?.('TransientTransactionError') || Number(err?.code) === 112 || Number(err?.code) === 11000 || isTransactionUnsupportedError(err)) throw err;
     console.error("Transfer Inspection Record Error:", err);
     return res.status(400).json({
       message: err?.message || "Failed to transfer inspection record",
     });
   }
 };
+
+exports.transferInspectionRecord = async (req, res) => runTransactionalController({
+  connection: mongoose.connection, handler: transferInspectionRecord, req, res,
+});
 
 exports.getDailyReport = async (req, res) => {
   try {
@@ -14548,6 +14553,23 @@ const editInspectionRecords = async (req, res) => {
         }
 
         nextLabelRanges = hasLabelRangesField ? normalizedRanges : [];
+      }
+      if (nextLabelsAdded.length > 0 && (
+        passed !== Number(record.passed)
+        || nextLabelsAdded.join(',') !== normalizeLabels(record.labels_added).join(',')
+        || effectiveInspectedBoxSizes.length !== (record.inspected_box_sizes || []).length
+        || parsedInspectedBoxMode !== detectBoxPackagingMode(record.inspected_box_mode, record.inspected_box_sizes)
+      )) {
+        const requirement = {
+          totalPassed: passed,
+          boxSizesCount: effectiveInspectedBoxSizes.length,
+          boxMode: parsedInspectedBoxMode,
+          boxSizes: effectiveInspectedBoxSizes,
+          actualCount: nextLabelsAdded.length,
+        };
+        if (nextLabelsAdded.length !== getQcLabelRequirement(requirement).requiredCount) {
+          throw new Error(buildQcLabelRequirementMessage(requirement));
+        }
       }
       const parseOptionalBooleanField = (value, fallback = false) => {
         if (value === undefined) return fallback;

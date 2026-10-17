@@ -1,8 +1,8 @@
 const Inspector = require("../models/inspector.model");
 const User = require("../models/user.model");
 const Inspection = require("../models/inspection.model");
-const LabelTransaction = require("../models/labelTransaction.model");
 const mongoose = require("mongoose");
+const { runTransactionalController } = require("../helpers/transactionalController");
 const { getVendorName } = require("../helpers/vendorRef");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const labelStorageService = require("../services/labels/labelStorage.service");
@@ -100,22 +100,15 @@ const appendLabelAllocationHistory = (inspector, details = {}) => {
   inspector.label_allocation_history.push(history);
 };
 
-const mirrorLatestLegacyLabelChange = async (inspector, operation) => {
+const mirrorLatestLegacyLabelChange = async (inspector) => {
   const history = Array.isArray(inspector?.label_allocation_history)
     ? inspector.label_allocation_history.at(-1)
     : null;
   if (!history) return;
 
-  await labelStorageService.mirrorLegacyWrite(inspector._id, operation, {
-    payload: {
-      labels: normalizeInspectorLabels(history.labels),
-      previous_labels: normalizeInspectorLabels(history.previous_labels),
-      next_labels: normalizeInspectorLabels(history.next_labels),
-    },
-    modernWrite: () => liveLabelProjection.mirrorInspectorChange({
-      inspectorId: inspector._id,
-      history,
-    }),
+  await liveLabelProjection.mirrorInspectorChange({
+    inspectorId: inspector._id,
+    history,
   });
 };
 
@@ -578,7 +571,7 @@ exports.getInspectorById = async (req, res) => {
  * Allocate QC labels to an inspector
  * Only accessible to Manager and Admin
  */
-exports.allocateLabels = async (req, res) => {
+const allocateLabels = async (req, res) => {
   try {
     const { labels: normalizedLabels, error } = parseRequestedInspectorLabels(
       req.body?.labels,
@@ -697,40 +690,13 @@ exports.allocateLabels = async (req, res) => {
       }
     };
 
-    const storageState = await labelStorageService.getState(inspector._id);
-    if (["dual", "modern"].includes(storageState.write_mode)) {
-      const session = await mongoose.startSession();
-      try {
-        await session.withTransaction(async () => {
-          await liveLabelProjection.claimAllocation({
-            inspectorId: inspector._id,
-            labels: newLabels,
-            session,
-            now: history.recorded_at,
-          });
-          await writeLegacyAllocation(session);
-          await LabelTransaction.create([{
-            inspector: inspector._id,
-            action: "allocate",
-            labels: newLabels,
-            actor: history.actor,
-            recorded_at: history.recorded_at,
-            migration: {
-              migrated: false,
-              source: "live_atomic_allocation",
-              migrated_at: history.recorded_at,
-              legacy_inspector: inspector._id,
-              legacy_history_id: history._id,
-              legacy_key: `id:${history._id}`,
-            },
-          }], { session });
-        });
-      } finally {
-        await session.endSession();
-      }
-    } else {
-      await writeLegacyAllocation();
-    }
+    await liveLabelProjection.claimAllocation({
+      inspectorId: inspector._id,
+      labels: newLabels,
+      now: history.recorded_at,
+    });
+    await writeLegacyAllocation();
+    await liveLabelProjection.upsertTransaction(inspector._id, history, history.recorded_at);
 
     res.json({
       message: `${newLabels.length} label(s) allocated successfully`,
@@ -738,6 +704,7 @@ exports.allocateLabels = async (req, res) => {
       total_allocated_labels: nextLabels,
     });
   } catch (err) {
+    if (err?.name === "VersionError" || err?.hasErrorLabel?.("TransientTransactionError") || Number(err?.code) === 112 || Number(err?.code) === 11000) throw err;
     res.status(
       err?.code === "LABEL_CLAIM_CONFLICT" || err?.code === 11000 ? 409 : 400,
     )
@@ -750,7 +717,7 @@ exports.allocateLabels = async (req, res) => {
  * Transfer unused QC labels between inspectors
  * Only accessible to Manager and Admin
  */
-exports.transferLabels = async (req, res) => {
+const transferLabels = async (req, res) => {
   try {
     const {
       from_inspector_id: fromInspectorId,
@@ -952,20 +919,11 @@ exports.transferLabels = async (req, res) => {
       },
     ];
     await Inspector.bulkWrite(updates, { ordered: true });
-    await labelStorageService.mirrorLegacyWrite(sourceInspector._id, 'transfer', {
-      payload: {
-        labels: normalizedLabels,
-        source_inspector: sourceInspector._id,
-        target_inspector: targetInspector._id,
-        source_history_id: sourceHistory._id,
-        target_history_id: targetHistory._id,
-      },
-      modernWrite: () => liveLabelProjection.mirrorTransfer({
-        sourceInspectorId: sourceInspector._id,
-        targetInspectorId: targetInspector._id,
-        sourceHistory,
-        targetHistory,
-      }),
+    await liveLabelProjection.mirrorTransfer({
+      sourceInspectorId: sourceInspector._id,
+      targetInspectorId: targetInspector._id,
+      sourceHistory,
+      targetHistory,
     });
 
     return res.json({
@@ -974,6 +932,7 @@ exports.transferLabels = async (req, res) => {
       data: { from_inspector: sourceInspector._id, to_inspector: targetInspector._id },
     });
   } catch (err) {
+    if (err?.name === "VersionError" || err?.hasErrorLabel?.("TransientTransactionError") || Number(err?.code) === 112 || Number(err?.code) === 11000) throw err;
     return res.status(400).json({ message: err.message });
   }
 };
@@ -983,7 +942,7 @@ exports.transferLabels = async (req, res) => {
  * Permanently reject unused QC labels for an inspector
  * Only accessible to Manager and Admin
  */
-exports.rejectLabels = async (req, res) => {
+const rejectLabels = async (req, res) => {
   try {
     const { labels: normalizedLabels, error } = parseRequestedInspectorLabels(
       req.body?.labels,
@@ -1059,7 +1018,7 @@ exports.rejectLabels = async (req, res) => {
     });
 
     await inspector.save();
-    await mirrorLatestLegacyLabelChange(inspector, "reject");
+    await mirrorLatestLegacyLabelChange(inspector);
     await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     return res.json({
@@ -1068,6 +1027,7 @@ exports.rejectLabels = async (req, res) => {
       data: inspector,
     });
   } catch (err) {
+    if (err?.name === "VersionError" || err?.hasErrorLabel?.("TransientTransactionError") || Number(err?.code) === 112 || Number(err?.code) === 11000) throw err;
     return res.status(400).json({ message: err.message });
   }
 };
@@ -1077,7 +1037,7 @@ exports.rejectLabels = async (req, res) => {
  * Replace all allocated labels for an inspector
  * Only accessible to Manager and Admin
  */
-exports.replaceLabels = async (req, res) => {
+const replaceLabels = async (req, res) => {
   try {
     const { labels: normalizedLabels, error } = parseRequestedInspectorLabels(
       req.body?.labels,
@@ -1156,7 +1116,7 @@ exports.replaceLabels = async (req, res) => {
     });
 
     await inspector.save();
-    await mirrorLatestLegacyLabelChange(inspector, "replace");
+    await mirrorLatestLegacyLabelChange(inspector);
     await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     res.json({
@@ -1166,6 +1126,7 @@ exports.replaceLabels = async (req, res) => {
       new_labels: inspector.alloted_labels,
     });
   } catch (err) {
+    if (err?.name === "VersionError" || err?.hasErrorLabel?.("TransientTransactionError") || Number(err?.code) === 112 || Number(err?.code) === 11000) throw err;
     res.status(400).json({ message: err.message });
   }
 };
@@ -1175,7 +1136,7 @@ exports.replaceLabels = async (req, res) => {
  * Remove specific labels from an inspector
  * Only accessible to Manager and Admin
  */
-exports.removeLabels = async (req, res) => {
+const removeLabels = async (req, res) => {
   try {
     const { labels } = req.body;
 
@@ -1219,7 +1180,7 @@ exports.removeLabels = async (req, res) => {
     });
 
     await inspector.save();
-    await mirrorLatestLegacyLabelChange(inspector, "remove");
+    await mirrorLatestLegacyLabelChange(inspector);
     await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
 
     res.json({
@@ -1229,6 +1190,7 @@ exports.removeLabels = async (req, res) => {
       remaining_labels: inspector.alloted_labels,
     });
   } catch (err) {
+    if (err?.name === "VersionError" || err?.hasErrorLabel?.("TransientTransactionError") || Number(err?.code) === 112 || Number(err?.code) === 11000) throw err;
     res.status(400).json({ message: err.message });
   }
 };
@@ -1307,3 +1269,9 @@ exports.getLabelUsageStats = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+for (const handler of [allocateLabels, transferLabels, rejectLabels, replaceLabels, removeLabels]) {
+  exports[handler.name] = async (req, res) => runTransactionalController({
+    connection: mongoose.connection, handler, req, res,
+  });
+}

@@ -19,6 +19,11 @@ const labelSchema = new mongoose.Schema(
       default: null,
     },
     usage: {
+      inspection_record: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'inspections',
+        default: null,
+      },
       inspector: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "inspectors",

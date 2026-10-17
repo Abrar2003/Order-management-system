@@ -125,6 +125,16 @@ const runTransactionalController = async ({
         if (await onDuplicateKey({ error, req, res })) return;
       }
 
+      if (error?.code === 'LABEL_CLAIM_CONFLICT') {
+        return res.status(409).json({ message: error.message, code: error.code });
+      }
+      if (Number(error?.code) === 11000 && error?.keyPattern?.number === 1) {
+        return res.status(409).json({
+          message: 'A label is already allocated or used. Refresh and try again.',
+          code: 'LABEL_CLAIM_CONFLICT',
+        });
+      }
+
       if (isTransactionUnsupportedError(error)) {
         connection.$supportsTransactions = false;
         console.error(

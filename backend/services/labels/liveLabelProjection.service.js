@@ -73,6 +73,7 @@ class LiveLabelProjectionService {
           owner_inspector: { $in: [null, inspectorId] },
           rejected_by_inspector: null,
           'usage.inspector': null,
+          'usage.inspection_record': null,
           'usage.inspectors.0': { $exists: false },
           allocation_state: { $ne: 'conflicted' },
         },
@@ -254,7 +255,14 @@ class LiveLabelProjectionService {
       labels.forEach((number) => {
         operations.push({
           updateOne: {
-            filter: { number },
+            filter: {
+              number,
+              owner_inspector: { $in: [null, inspectorId] },
+              'usage.inspection_record': null,
+              'usage.inspector': null,
+              'usage.inspectors.0': { $exists: false },
+              allocation_state: { $ne: 'conflicted' },
+            },
             update: {
               $set: {
                 owner_inspector: null,
@@ -268,30 +276,31 @@ class LiveLabelProjectionService {
         });
       });
     } else {
-      difference(nextLabels, previousLabels).forEach((number) => {
-        operations.push({
-          updateOne: {
-            filter: { number },
-            update: {
-              $set: { owner_inspector: inspectorId },
-              $setOnInsert: { number, allocation_state: 'active' },
-            },
-            upsert: true,
-          },
-        });
-      });
+      const added = difference(nextLabels, previousLabels);
+      if (added.length) await this.claimAllocation({ inspectorId, labels: added, now });
       difference(previousLabels, nextLabels).forEach((number) => {
         operations.push({
           updateOne: {
-            filter: { number, owner_inspector: inspectorId },
+            filter: {
+              number, owner_inspector: inspectorId,
+              'usage.inspection_record': null,
+              'usage.inspector': null,
+              'usage.inspectors.0': { $exists: false },
+            },
             update: { $set: { owner_inspector: null } },
           },
         });
       });
     }
 
-    // ponytail: idempotent upserts allow sync-failure replay; use a Mongo transaction if modern-only writes need atomicity.
-    if (operations.length > 0) await this.Label.bulkWrite(operations, { ordered: true });
+    if (operations.length > 0) {
+      const result = await this.Label.bulkWrite(operations, { ordered: true });
+      if (Number(result?.matchedCount || 0) + Number(result?.upsertedCount || 0) !== operations.length) {
+        const error = new Error('Labels changed or were used while updating allocation. Refresh and try again.');
+        error.code = 'LABEL_CLAIM_CONFLICT';
+        throw error;
+      }
+    }
 
     await this.upsertTransaction(inspectorId, history, now);
   }
@@ -307,9 +316,15 @@ class LiveLabelProjectionService {
       throw new Error('Source, target, and labels are required for a live transfer mirror');
     }
 
-    // ponytail: one conditional update makes replay safe; use a Mongo transaction for modern-only transfer authority.
     const result = await this.Label.updateMany(
-      { number: { $in: labels }, owner_inspector: sourceInspectorId },
+      {
+        number: { $in: labels }, owner_inspector: sourceInspectorId,
+        allocation_state: { $ne: 'conflicted' },
+        rejected_by_inspector: null,
+        'usage.inspection_record': null,
+        'usage.inspector': null,
+        'usage.inspectors.0': { $exists: false },
+      },
       { $set: { owner_inspector: targetInspectorId } },
     );
     if (Number(result?.matchedCount) !== labels.length) {

@@ -15,6 +15,7 @@ const createProjector = () => {
       LabelModel: {
         async bulkWrite(operations, options) {
           labelWrites.push({ operations, options });
+          return { matchedCount: operations.length, upsertedCount: 0 };
         },
       },
       LabelTransactionModel: {
@@ -41,13 +42,16 @@ test('live replace mirrors ownership changes and an idempotent transaction', asy
     },
   });
 
-  assert.equal(labelWrites.length, 1);
-  assert.deepEqual(labelWrites[0].operations.map((entry) => entry.updateOne.filter), [
-    { number: 3 },
-    { number: 1, owner_inspector: 'inspector-1' },
-  ]);
+  assert.equal(labelWrites.length, 2);
+  assert.equal(labelWrites[0].operations[0].updateOne.filter.number, 3);
+  assert.equal(labelWrites[0].operations[0].updateOne.filter['usage.inspection_record'], null);
+  assert.deepEqual(labelWrites[1].operations[0].updateOne.filter, {
+    number: 1, owner_inspector: 'inspector-1',
+    'usage.inspection_record': null, 'usage.inspector': null,
+    'usage.inspectors.0': { $exists: false },
+  });
   assert.equal(labelWrites[0].operations[0].updateOne.update.$set.owner_inspector, 'inspector-1');
-  assert.equal(labelWrites[0].operations[1].updateOne.update.$set.owner_inspector, null);
+  assert.equal(labelWrites[1].operations[0].updateOne.update.$set.owner_inspector, null);
   assert.deepEqual(transactionWrites[0].filter, {
     'migration.legacy_inspector': 'inspector-1',
     'migration.legacy_history_id': 'history-1',
@@ -99,7 +103,12 @@ test('live transfer changes owner only when every serial still belongs to the so
   });
 
   assert.deepEqual(transferWrites, [{
-    filter: { number: { $in: [1, 2] }, owner_inspector: 'source' },
+    filter: {
+      number: { $in: [1, 2] }, owner_inspector: 'source',
+      allocation_state: { $ne: 'conflicted' }, rejected_by_inspector: null,
+      'usage.inspection_record': null, 'usage.inspector': null,
+      'usage.inspectors.0': { $exists: false },
+    },
     update: { $set: { owner_inspector: 'target' } },
   }]);
   assert.equal(transactionWrites.length, 2);
@@ -243,6 +252,7 @@ test('atomic allocation claims only currently available labels in the caller ses
       owner_inspector: { $in: [null, 'inspector-1'] },
       rejected_by_inspector: null,
       'usage.inspector': null,
+      'usage.inspection_record': null,
       'usage.inspectors.0': { $exists: false },
       allocation_state: { $ne: 'conflicted' },
     },
@@ -251,6 +261,7 @@ test('atomic allocation claims only currently available labels in the caller ses
       owner_inspector: { $in: [null, 'inspector-1'] },
       rejected_by_inspector: null,
       'usage.inspector': null,
+      'usage.inspection_record': null,
       'usage.inspectors.0': { $exists: false },
       allocation_state: { $ne: 'conflicted' },
     },
