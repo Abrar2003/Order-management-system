@@ -8,6 +8,7 @@ const {
   securityLog,
 } = require("../middlewares/securityActivityLogger");
 const reportsController = require("../controllers/reports.controller");
+const { getDailyShipmentReport } = require("../controllers/order.controller");
 const vendorPerformanceReportController = require("../controllers/vendorPerformanceReport.controller");
 const {
   getPdfRendererStatus,
@@ -60,6 +61,14 @@ router.get(
   requirePermission("reports", "view"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   reportsController.getVendorWiseQaDetailed,
+);
+
+router.get(
+  "/daily-shipments",
+  auth,
+  requirePermission("reports", "view"),
+  cacheRoute("reports", MEDIUM_CACHE_TTL),
+  getDailyShipmentReport,
 );
 
 router.get(

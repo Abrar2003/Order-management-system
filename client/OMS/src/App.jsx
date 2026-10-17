@@ -61,6 +61,7 @@ const CommonErrorsReport = lazy(() => import("./pages/CommonErrorsReport"));
 const PoStatusReport = lazy(() => import("./pages/PoStatusReport"));
 const PendingPoReport = lazy(() => import("./pages/PendingPoReport"));
 const ProductAnalytics = lazy(() => import("./pages/ProductAnalytics"));
+const DailyShipmentReport = lazy(() => import("./pages/DailyShipmentReport"));
 const QcReportMismatch = lazy(() => import("./pages/QcReportMismatch"));
 const InspectedItemsReport = lazy(() => import("./pages/InspectedItemsReport"));
 const Claims = lazy(() => import("./pages/Claims"));
@@ -380,6 +381,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <ShippingPending />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/daily-shipments"
+            element={
+              <ProtectedRoute permissionModule="reports">
+                <DailyShipmentReport />
               </ProtectedRoute>
             }
           />

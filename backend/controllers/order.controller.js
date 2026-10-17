@@ -64,6 +64,7 @@ const {
 const {
   buildPackedGoodsDataset,
 } = require("../services/packedGoods.service");
+const { buildDailyShipmentReport } = require("../services/dailyShipmentReport.service");
 const {
   applyDataAccessMatch,
   assertBrandVendorAssociations,
@@ -10439,6 +10440,31 @@ exports.getShipmentTimberCft = async (req, res) => {
     return res.json({ timber_cft: item?.timber_cft ?? null });
   } catch (error) {
     return res.status(500).json({ message: "Failed to fetch Timber_CFT" });
+  }
+};
+
+exports.getDailyShipmentReport = async (req, res) => {
+  try {
+    const stuffingDate = parseDateOnly(req.query.stuffing_date);
+    if (!stuffingDate) return res.status(400).json({ message: "A valid stuffing date is required" });
+    // shortcut: group the existing shipment dataset in memory; move grouping to MongoDB if shipment history makes this slow.
+    const shipmentData = await getShipmentDataset({
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      fromDate: formatDateOnlyDDMMYYYY(stuffingDate),
+      toDate: formatDateOnlyDDMMYYYY(stuffingDate),
+      user: req.user,
+    });
+    const orderIds = [...new Set(shipmentData.rows.filter((row) => row.line_type !== "sample" && row.shipment_id).map((row) => row.order_id))];
+    const orders = orderIds.length ? await Order.find(applyDataAccessMatch({
+      ...ACTIVE_ORDER_MATCH,
+      order_id: { $in: orderIds },
+    }, req.user)).select("order_id brand vendor quantity shipment").lean() : [];
+    const report = buildDailyShipmentReport({ rows: shipmentData.rows, orders, query: req.query });
+    return res.json({ ...report, filters: { brands: shipmentData.filters.brands, vendors: shipmentData.filters.vendors } });
+  } catch (error) {
+    console.error("Daily Shipment Report Error:", error);
+    return res.status(500).json({ message: "Failed to load daily shipment report" });
   }
 };
 

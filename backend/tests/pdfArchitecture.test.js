@@ -25,6 +25,7 @@ test("all browser report exports use the centralized PDF client", () => {
   const expectedFiles = [
     "components/UpcomingEtdExportModal.jsx",
     "pages/DailyReport.jsx",
+    "pages/DailyShipmentReport.jsx",
     "pages/DelayedPoReports.jsx",
     "components/MasterWorkflowPage.jsx",
     "pages/PackedGoods.jsx",
@@ -97,6 +98,11 @@ test("permission-protected PDF routes delegate to the central renderer", () => {
 test("shipping pending PDFs are permitted by the central renderer", () => {
   const { PDF_REPORT_KEYS } = require("../controllers/pdf.controller");
   assert.equal(PDF_REPORT_KEYS.has("shipping-pending"), true);
+});
+
+test("daily shipment PDFs are permitted by the central renderer", () => {
+  const { PDF_REPORT_KEYS } = require("../controllers/pdf.controller");
+  assert.equal(PDF_REPORT_KEYS.has("daily-shipment-report"), true);
 });
 
 test("PDF renderer prefers Puppeteer's installed browser to a system browser", () => {
