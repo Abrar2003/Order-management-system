@@ -333,6 +333,7 @@ InspectionSchema.pre("save", async function guardLabels() {
 
 // Fast QC details page (history)
 InspectionSchema.index({ qc: 1, createdAt: -1 });
+InspectionSchema.index({ labels_added: 1 });
 
 // Inspector performance analytics
 InspectionSchema.index({ inspector: 1, createdAt: -1 });
