@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import api from "../api/axios";
 import { usePermissions } from "../auth/PermissionContext";
-import { getRemainingTasks } from "../utils/loginTaskPopup";
+import { getUserFromToken } from "../auth/auth.service";
+import { getRemainingTasks, getTaskPopupSlot, TASK_POPUP_LOGIN_KEY } from "../utils/loginTaskPopup";
 
 const ACKNOWLEDGEMENT_DELAY_SECONDS = 3;
 const LOGIN_PATHS = new Set(["/signin", "/choose-brand-scope"]);
@@ -11,33 +12,54 @@ const formatCount = new Intl.NumberFormat("en-IN");
 const LoginTaskPopup = () => {
   const { pathname } = useLocation();
   const { loading } = usePermissions();
-  const loadedForSession = useRef(false);
   const [tasks, setTasks] = useState([]);
   const [open, setOpen] = useState(false);
   const [seconds, setSeconds] = useState(ACKNOWLEDGEMENT_DELAY_SECONDS);
 
   useEffect(() => {
     if (LOGIN_PATHS.has(pathname)) {
-      loadedForSession.current = false;
       setOpen(false);
       return undefined;
     }
-    if (loading || loadedForSession.current) return undefined;
+    if (loading) return undefined;
 
     let active = true;
-    loadedForSession.current = true;
-    api.get("/employee-report/me").then((response) => {
-      const remaining = getRemainingTasks(response?.data?.tasks);
-      if (!active) return;
-      setTasks(remaining);
-      setSeconds(ACKNOWLEDGEMENT_DELAY_SECONDS);
-      setOpen(remaining.length > 0);
-    }).catch(() => {});
+    let fetching = false;
+    const checkReminder = async () => {
+      const userId = getUserFromToken()?.id;
+      if (!userId || open || fetching) return;
+      // shortcut: History is browser-local; persist server-side if devices must share it.
+      const storageKey = `oms:task-popup:last-slot:${userId}`;
+      try {
+        const isLogin = sessionStorage.getItem(TASK_POPUP_LOGIN_KEY) === userId;
+        const slot = getTaskPopupSlot();
+        if (!isLogin && (!slot || localStorage.getItem(storageKey) === slot)) return;
+        fetching = true;
+        const response = await api.get("/employee-report/me");
+        if (!active || getUserFromToken()?.id !== userId) return;
+        if (!isLogin && getTaskPopupSlot() !== slot) return;
+        // A login reminder also covers the current scheduled slot.
+        if (!isLogin && localStorage.getItem(storageKey) === slot) return;
+        if (slot) localStorage.setItem(storageKey, slot);
+        sessionStorage.removeItem(TASK_POPUP_LOGIN_KEY);
+        const remaining = getRemainingTasks(response?.data?.tasks);
+        setTasks(remaining);
+        setSeconds(ACKNOWLEDGEMENT_DELAY_SECONDS);
+        setOpen(remaining.length > 0);
+      } catch {
+        // Skip unavailable reports or storage and retry on the next check.
+      } finally {
+        fetching = false;
+      }
+    };
+    checkReminder();
+    const timer = window.setInterval(checkReminder, 60_000);
 
     return () => {
       active = false;
+      window.clearInterval(timer);
     };
-  }, [loading, pathname]);
+  }, [loading, pathname, open]);
 
   useEffect(() => {
     if (!open || seconds === 0) return undefined;
