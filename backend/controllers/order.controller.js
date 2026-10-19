@@ -9824,6 +9824,8 @@ exports.exportDelayedPoReport = async (req, res) => {
     const columns = [
       { key: "order_id", header: "PO" },
       { key: "item_code", header: "Item Code" },
+      { key: "brand", header: "Brand" },
+      { key: "vendor", header: "Vendor" },
       { key: "status", header: "Status" },
       { key: "order_date", header: "Order Date" },
       { key: "etd", header: "ETD" },
@@ -9851,6 +9853,8 @@ exports.exportDelayedPoReport = async (req, res) => {
     const exportRows = dataset.rows.map((row) => ({
       order_id: String(row?.order_id || "").trim(),
       item_code: String(row?.item_code || "").trim(),
+      brand: String(row?.brand || "").trim(),
+      vendor: normalizeLooseString(row?.vendor),
       status: row.status,
       order_date: formatDateDDMMYYYY(row?.order_date, ""),
       etd: formatDateDDMMYYYY(

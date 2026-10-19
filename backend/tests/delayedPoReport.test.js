@@ -308,12 +308,12 @@ test("delayed PO XLS exports the requested item columns and applied filters", as
   const workbook = XLSX.read(res.file, { type: "buffer" });
   assert.deepEqual(workbook.SheetNames, ["Item Details"]);
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets["Item Details"], { header: 1 });
-  const headers = ["PO", "Item Code", "Status", "Order Date", "ETD", "Order Quantity", "Pending", "Shipped", "Packed"];
+  const headers = ["PO", "Item Code", "Brand", "Vendor", "Status", "Order Date", "ETD", "Order Quantity", "Pending", "Shipped", "Packed"];
   assert.deepEqual(rows, [
     headers,
-    ["PO-EXPORT", "001", "Pending", "01/02/2030", "08/03/2030", 10, 10, 0, 0],
-    ["PO-EXPORT", "002", "Partial Shipped", "01/02/2030", "08/03/2030", 10, 0, 3, 7],
-    ["PO-EXPORT", "003", "Shipped", "01/02/2030", "08/03/2030", 10, 0, 10, 0],
+    ["PO-EXPORT", "001", "Brand A", "Vendor A", "Pending", "01/02/2030", "08/03/2030", 10, 10, 0, 0],
+    ["PO-EXPORT", "002", "Brand A", "Vendor A", "Partial Shipped", "01/02/2030", "08/03/2030", 10, 0, 3, 7],
+    ["PO-EXPORT", "003", "Brand A", "Vendor A", "Shipped", "01/02/2030", "08/03/2030", 10, 0, 10, 0],
   ]);
 
   const emptyRes = response();
