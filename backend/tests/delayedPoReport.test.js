@@ -324,3 +324,33 @@ test("delayed PO XLS exports the requested item columns and applied filters", as
   const emptySheet = XLSX.read(emptyRes.file, { type: "buffer" }).Sheets["Item Details"];
   assert.deepEqual(XLSX.utils.sheet_to_json(emptySheet, { header: 1 }), [headers]);
 });
+
+test("delayed PO exports exclude completely shipped POs in both report types", async (t) => {
+  const order = {
+    brand: "Brand A",
+    vendor: "Vendor A",
+    quantity: 10,
+    ETD: "2030-03-01",
+    qc_record: { quantities: {} },
+  };
+  t.mock.method(Order, "find", () => asQuery([
+    { ...order, order_id: "FULLY-SHIPPED", item: { item_code: "001" }, shipment: [{ quantity: 10 }] },
+    { ...order, order_id: "FULLY-SHIPPED", item: { item_code: "002" }, shipment: [{ quantity: 10 }] },
+    { ...order, order_id: "OVER-SHIPPED", item: { item_code: "003" }, shipment: [{ quantity: 12 }] },
+    { ...order, order_id: "PARTLY-SHIPPED", item: { item_code: "004" }, shipment: [{ quantity: 10 }] },
+    { ...order, order_id: "PARTLY-SHIPPED", item: { item_code: "005" }, shipment: [] },
+  ]));
+
+  for (const reportType of ["detailed", "summary"]) {
+    const res = response();
+    await exportDelayedPoReport({
+      query: { from_date: "2030-03-10", report_type: reportType },
+      user: { role: "admin" },
+    }, res);
+    assert.equal(res.statusCode, 200);
+    const workbook = XLSX.read(res.file, { type: "buffer" });
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+    assert.deepEqual(rows.map((row) => row.PO),
+      reportType === "detailed" ? ["PARTLY-SHIPPED", "PARTLY-SHIPPED"] : ["PARTLY-SHIPPED"]);
+  }
+});
