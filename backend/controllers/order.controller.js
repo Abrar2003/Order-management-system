@@ -8401,6 +8401,7 @@ const buildReformedDelayedPoReportDataset = async ({
       shipped_quantity: Number(progress?.shipped_quantity || 0),
       passed_quantity: Number(progress?.inspected_unshipped_quantity || 0),
       pending_quantity: Number(progress?.pending_inspection_quantity || 0),
+      status: progress.status,
     });
   });
 
@@ -9823,15 +9824,13 @@ exports.exportDelayedPoReport = async (req, res) => {
     const columns = [
       { key: "order_id", header: "PO" },
       { key: "item_code", header: "Item Code" },
-      { key: "brand", header: "Brand" },
-      { key: "vendor", header: "Vendor" },
+      { key: "status", header: "Status" },
       { key: "order_date", header: "Order Date" },
-      { key: "etd", header: "Effective ETD" },
-      { key: "delay_days", header: "Delay (Days)" },
+      { key: "etd", header: "ETD" },
       { key: "order_quantity", header: "Order Quantity" },
-      { key: "shipped_quantity", header: "Shipped Quantity" },
-      { key: "passed_quantity", header: "Passed Quantity" },
-      { key: "pending_quantity", header: "Pending Quantity" },
+      { key: "pending_quantity", header: "Pending" },
+      { key: "shipped_quantity", header: "Shipped" },
+      { key: "passed_quantity", header: "Packed" },
     ];
     const summaryColumns = [
       { key: "order_id", header: "PO" },
@@ -9852,14 +9851,12 @@ exports.exportDelayedPoReport = async (req, res) => {
     const exportRows = dataset.rows.map((row) => ({
       order_id: String(row?.order_id || "").trim(),
       item_code: String(row?.item_code || "").trim(),
-      brand: String(row?.brand || "").trim(),
-      vendor: normalizeLooseString(row?.vendor),
+      status: row.status,
       order_date: formatDateDDMMYYYY(row?.order_date, ""),
       etd: formatDateDDMMYYYY(
         row?.po_effective_etd || row?.effective_etd || row?.etd,
         "",
       ),
-      delay_days: Number(row?.delay_days || 0),
       order_quantity: Number(row?.order_quantity || 0),
       shipped_quantity: Number(row?.shipped_quantity || 0),
       passed_quantity: Number(row?.passed_quantity || 0),

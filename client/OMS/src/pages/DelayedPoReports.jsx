@@ -478,16 +478,16 @@ const DelayedPoReports = () => {
     setSortOrder(next.sortOrder);
     setPage(1);
   };
-  const handleExportSpreadsheet = async (reportType) => {
+  const handleExportSpreadsheet = async (reportType, filters = {
+    brand: exportBrand,
+    vendor: exportVendor,
+    po: appliedFilters.po,
+    fromDate: exportFromDate,
+  }) => {
     try {
       setExportingFormat("xls");
       const response = await exportDelayedPoReport({
-        ...buildApiParams({
-          brand: exportBrand,
-          vendor: exportVendor,
-          po: appliedFilters.po,
-          fromDate: exportFromDate,
-        }),
+        ...buildApiParams(filters),
         report_type: reportType,
       });
       downloadBlob(response);
@@ -577,6 +577,14 @@ const DelayedPoReports = () => {
             </p>
           </div>
           <div className="d-flex flex-column align-items-end gap-2">
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-sm"
+              onClick={() => handleExportSpreadsheet("detailed", appliedFilters)}
+              disabled={loading || exportingFormat !== ""}
+            >
+              {exportingFormat === "xls" ? "Exporting..." : "Export XLS"}
+            </button>
             <button
               type="button"
               className="btn btn-outline-primary btn-sm"

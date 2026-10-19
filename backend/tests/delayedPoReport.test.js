@@ -265,3 +265,62 @@ test("date-selected exports use the same effective ETD calculations", async (t) 
   assert.equal(upcomingRows[0]["Effective ETD"], "08/03/2030");
   assert.equal(upcomingRows[0]["Days Until ETD"], 5);
 });
+
+test("delayed PO XLS exports the requested item columns and applied filters", async (t) => {
+  const order = {
+    order_id: "PO-EXPORT",
+    brand: "Brand A",
+    vendor: "Vendor A",
+    quantity: 10,
+    order_date: "2030-02-01",
+    ETD: "2030-03-01",
+    revised_ETD: "2030-03-08",
+    shipment: [],
+    qc_record: { quantities: {} },
+  };
+  t.mock.method(Order, "find", () => asQuery([
+    { ...order, _id: "pending", item: { item_code: "001" } },
+    {
+      ...order, _id: "partial", item: { item_code: "002" },
+      shipment: [{ quantity: 3 }],
+      qc_record: { quantities: { qc_passed: 10 } },
+    },
+    {
+      ...order, _id: "shipped", item: { item_code: "003" },
+      shipment: [{ quantity: 10 }],
+      qc_record: { quantities: { qc_passed: 10 } },
+    },
+    { ...order, _id: "brand", brand: "Brand B", item: { item_code: "OTHER-BRAND" } },
+    { ...order, _id: "vendor", vendor: "Vendor B", item: { item_code: "OTHER-VENDOR" } },
+    { ...order, _id: "po", order_id: "OTHER-PO", item: { item_code: "OTHER-PO" } },
+  ]));
+
+  const res = response();
+  const query = {
+    brand: "Brand A", vendor: "Vendor A", order_id: "PO-EXPORT",
+    from_date: "2030-03-10", report_type: "detailed",
+  };
+  await exportDelayedPoReport({ query, user: { role: "admin" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["Content-Type"], "application/vnd.ms-excel");
+  assert.match(res.headers["Content-Disposition"], /delayed-po-detailed-report-.*\.xls/);
+  const workbook = XLSX.read(res.file, { type: "buffer" });
+  assert.deepEqual(workbook.SheetNames, ["Item Details"]);
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets["Item Details"], { header: 1 });
+  const headers = ["PO", "Item Code", "Status", "Order Date", "ETD", "Order Quantity", "Pending", "Shipped", "Packed"];
+  assert.deepEqual(rows, [
+    headers,
+    ["PO-EXPORT", "001", "Pending", "01/02/2030", "08/03/2030", 10, 10, 0, 0],
+    ["PO-EXPORT", "002", "Partial Shipped", "01/02/2030", "08/03/2030", 10, 0, 3, 7],
+    ["PO-EXPORT", "003", "Shipped", "01/02/2030", "08/03/2030", 10, 0, 10, 0],
+  ]);
+
+  const emptyRes = response();
+  await exportDelayedPoReport({
+    query: { ...query, order_id: "NO-MATCH" }, user: { role: "admin" },
+  }, emptyRes);
+  assert.equal(emptyRes.statusCode, 200);
+  const emptySheet = XLSX.read(emptyRes.file, { type: "buffer" }).Sheets["Item Details"];
+  assert.deepEqual(XLSX.utils.sheet_to_json(emptySheet, { header: 1 }), [headers]);
+});
