@@ -2,6 +2,7 @@ const EudrChain = require("../models/eudrChain.model");
 const Allocation = require("../models/eudrAllocation.model");
 const { fail, key, contributionMilliCft } = require("./eudrChain.service");
 const { isTransactionUnsupportedError } = require("../helpers/transactionalController");
+const { addMilliCft } = require("../helpers/timberCft");
 
 const ensureIndexes = async () => {
   await EudrChain.createIndexes();
@@ -19,6 +20,11 @@ const withAllocation = async (container, vendor, operation) => {
   if (EudrChain.db.$supportsTransactions === false) throw fail("EUDR allocation changes require MongoDB transaction support", 503);
   try {
     return await EudrChain.db.transaction(async (session) => {
+      if (process.env.EUDR_CANONICAL_INVOICES === "true") {
+        const { State } = require("../models/eudrInventory.model");
+        const state = await State.findOneAndUpdate({ _id: "global", registry_ready: true }, { $inc: { revision: 1 } }, { session });
+        if (!state) throw fail("Prepare the canonical invoice registry before EUDR changes", 503);
+      }
       await Allocation.findOneAndUpdate({ _id: `${key(container)}|${vendor}` }, { $inc: { revision: 1 } }, { upsert: true, session });
       const chains = await EudrChain.find({ container_key: key(container), vendor }).session(session);
       return operation(chains, session);
@@ -30,8 +36,8 @@ const withAllocation = async (container, vendor, operation) => {
 };
 
 const assertAllocation = (chains, contribution, stuffed, exceptId) => {
-  const allocated = chains.filter((chain) => String(chain._id) !== String(exceptId || "")).reduce((sum, chain) => sum + contributionMilliCft(chain), 0);
-  if (allocated + contribution > stuffed) throw fail(`Chain contribution exceeds the available ${((stuffed - allocated) / 1000).toFixed(3)} CFT. Reduce another chain's contribution first.`, 409);
+  const allocated = chains.filter((chain) => String(chain._id) !== String(exceptId || "")).reduce((sum, chain) => addMilliCft(sum,contributionMilliCft(chain)), 0);
+  if (addMilliCft(allocated,contribution) > stuffed) throw fail(`Chain contribution exceeds the available ${((stuffed - allocated) / 1000).toFixed(3)} CFT. Reduce another chain's contribution first.`, 409);
 };
 
 module.exports = { ensureIndexes, withAllocation, assertAllocation };

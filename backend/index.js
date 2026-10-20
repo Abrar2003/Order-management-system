@@ -160,6 +160,7 @@ app.use("/api/security", securityRouter);
 app.use("/oms-chat", omsChatRouter);
 app.use("/api/oms-chat", omsChatRouter);
 app.use("/tests", testsRouter);
+require('./integrations/eudrPlugin.cjs').mount(app, {mongoose:require('mongoose'),express:require('express'),auth:require('./middlewares/auth.middleware')});
 app.use("/eudr", eudrChainRouter);
 app.use("/api/tests", testsRouter);
 

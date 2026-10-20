@@ -9,6 +9,7 @@ export default function StageEditor({ chain, stage, canVerifyCft, onChange, onEr
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [selectedUploads, setSelectedUploads] = useState({});
+  const [registeredInvoice,setRegisteredInvoice]=useState(null);
   useEffect(() => setFields(stage.fields || {}), [stage]);
   const isCurrent = String(stage._id) === chain.current_stage_id;
   const canEdit = isCurrent || Boolean(stage.verified_at);
@@ -44,6 +45,7 @@ export default function StageEditor({ chain, stage, canVerifyCft, onChange, onEr
       setSelectedUploads((previous) => ({ ...previous, [type]: { file, status: "uploaded" } }));
       onChange(response.data.data);
     } catch (error) {
+      if(error.response?.data?.code==="DOCUMENT_REUSE_AVAILABLE")setRegisteredInvoice(error.response.data.details.invoice_id);
       setSelectedUploads((previous) => ({ ...previous, [type]: { file, status: "failed", error: requestError(error) } }));
       reportError(error);
     } finally { setBusy(false); }
@@ -53,6 +55,11 @@ export default function StageEditor({ chain, stage, canVerifyCft, onChange, onEr
     await api.put(`/eudr/${chain._id}/stages/${stage._id}`, { fields });
     const response = await api.post(`/eudr/${chain._id}/stages/${stage._id}/reuse-evidence`, { party_id: partyId, evidence_id: evidenceId, confirmed: true });
     onChange(response.data.data);
+  });
+  const reuseInvoice=()=>run(async()=>{
+    await api.put(`/eudr/${chain._id}/stages/${stage._id}`,{fields});
+    const response=await api.post(`/eudr/${chain._id}/stages/${stage._id}/reuse-invoice`,{invoice_id:registeredInvoice,confirmed:true});
+    onChange(response.data.data);setRegisteredInvoice(null);setMessage("");
   });
   const renderField = ([name, label, type = "text"]) => <div className="col-12 col-sm-6" key={name}>
     <label className="form-label" htmlFor={`${stage._id}-${name}`}>{label}</label>
@@ -70,6 +77,7 @@ export default function StageEditor({ chain, stage, canVerifyCft, onChange, onEr
       {stage.kind === "receiver" && <p className="small text-muted mt-3">Received CFT differences between legs do not block verification. Receiver GST and PAN must both match the shipping vendor to end the chain.</p>}
       {fieldDefinitions.some(([name]) => name === "sold_cft") && <section className="border rounded p-3 mt-4"><h3 className="h5">Sold to details</h3><SaleBuyerDetails type={buyerType} fields={fields} stageId={stage._id} disabled={!canEdit || busy} onFill={(saved) => setFields((previous) => ({ ...previous, ...saved }))} /><div className="row g-3">{fieldDefinitions.filter(([name]) => saleFieldNames.includes(name)).map(renderField)}</div><p className="small text-muted mt-3 mb-0">Sold CFT must be positive and cover at least {((chain.contribution_milli_cft ?? chain.declared_milli_cft) / 1000).toFixed(3)} CFT contributed by this chain. A larger sale invoice is allowed. Buyer GST and PAN evidence are mandatory.</p></section>}
       <h3 className="h5 mt-4">Documents</h3>
+      {registeredInvoice&&<div className="alert alert-info">The selected file is already registered. Confirm its invoice identity matches this sale.<button type="button" className="btn btn-sm btn-outline-dark ms-2" disabled={busy} onClick={reuseInvoice}>Link registered invoice evidence</button></div>}
       {!documentDefinitions.length && <p className="small text-muted">The incoming sale invoice is linked from the preceding seller. No duplicate upload is needed.</p>}
       {documentDefinitions.filter(([type]) => type !== "truck_registration" || fields.truck_registration_number || stage.documents.some((document) => document.type === type)).map(([type, label]) => {
         const document = stage.documents.find((entry) => entry.type === type);

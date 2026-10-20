@@ -1,0 +1,14 @@
+import { useEffect, useId, useState } from "react";
+import api from "../../api/axios";
+export default function TimberMetadataFields({value,onChange,disabled=false}) {
+  const [species,setSpecies]=useState(null),key=useId();
+  useEffect(()=>{let live=true;api.get("/eudr/capabilities").then(async r=>{if(r.data.data.review_layer){const list=await api.get("/eudr/species");if(live)setSpecies(list.data.data.species);}}).catch(()=>{});return()=>{live=false;};},[]);
+  if(!species)return null;
+  const rows=value.species_composition||[],total=rows.reduce((sum,r)=>sum+(Number(r.share_bp)||0),0);
+  const update=(i,patch)=>onChange({species_composition:rows.map((r,j)=>j===i?{...r,...patch}:r)});
+  return <fieldset className="col-12 border rounded p-3 my-2" disabled={disabled}><legend className="float-none w-auto fs-6">Timber species and HS code</legend>
+    <label htmlFor={`${key}-hs`} className="form-label">HS code</label><input id={`${key}-hs`} className="form-control mb-2" value={value.hs_code||""} onChange={e=>onChange({hs_code:e.target.value})} placeholder="9403 60" pattern="[0-9]+([ .][0-9]+)*" />
+    {rows.map((row,i)=><div key={i} className="row g-2 align-items-end mb-2"><div className="col"><label htmlFor={`${key}-species-${i}`} className="form-label">Species</label><select id={`${key}-species-${i}`} className="form-select" required value={String(row.species?._id||row.species||"")} onChange={e=>update(i,{species:e.target.value})} ref={node=>{if(i===0)node?.setCustomValidity(total===10000?"":"Species percentages must total exactly 100%");}}><option value="">Choose species</option>{species.filter(s=>s.active||s._id===row.species).map(s=><option key={s._id} value={s._id}>{s.name} · {s.scientific_name}{!s.active?" (inactive)":""}</option>)}</select></div><div className="col-3"><label htmlFor={`${key}-share-${i}`} className="form-label">Share %</label><input id={`${key}-share-${i}`} className="form-control" type="number" min="0.01" max="100" step="0.01" required value={row.percentage??Number(row.share_bp||0)/100} onChange={e=>update(i,{percentage:e.target.value,share_bp:Math.round(Number(e.target.value)*100)})} /></div><div className="col-auto"><button className="btn btn-outline-secondary" type="button" disabled={rows.length===1} onClick={()=>onChange({species_composition:rows.filter((_,j)=>j!==i)})}>Remove</button></div></div>)}
+    <button type="button" className="btn btn-sm btn-outline-dark" onClick={()=>onChange({species_composition:[...rows,{species:"",share_bp:rows.length?0:10000}]})}>Add species</button><span role="status" className={`ms-2 ${total===10000?"text-success":"text-warning"}`}>{rows.length?`${(total/100).toFixed(2)}% · ${total===10000?"sums to 100%":"must total 100%"}`:"Species not recorded"}</span><p className="small text-muted mt-2 mb-0">Shares split the recorded timber CFT per unit. Net mass uses the existing item measurement weights in kg.</p>
+  </fieldset>;
+}

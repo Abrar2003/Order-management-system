@@ -196,6 +196,7 @@ const sampleSchema = new mongoose.Schema(
       min: 0,
     },
     timber_cft: { type: Number, default: null, min: 0 },
+    ...require("../helpers/timberSpecies").metadataFields(mongoose),
     converted_item: {
       item: {
         type: mongoose.Schema.Types.ObjectId,
@@ -247,4 +248,5 @@ sampleSchema.pre("validate", function backfillLegacyShipmentInvoices() {
   });
 });
 
-module.exports = mongoose.model("samples", sampleSchema);
+sampleSchema.add({eudr_review_fence:{type:Number,select:false}});
+module.exports = require("../services/eudrSourceWrites.service").install(mongoose.model("samples", sampleSchema));

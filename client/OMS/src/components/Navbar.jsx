@@ -157,6 +157,7 @@ const Navbar = () => {
   const handleNavigate = useCallback(
     (path) => {
       closeAllMenus();
+      if (path === "/eudr" || path === "/eudr-tool/") { window.location.assign("/eudr-tool/"); return; }
       navigate(path);
     },
     [closeAllMenus, navigate],
@@ -433,7 +434,7 @@ const Navbar = () => {
       items.push(routeMenuItem("bulk-shipping", "Bulk Shipping", "/container"));
     }
 
-    if (canAccessEudr) items.push(routeMenuItem("eudr", "EUDR Timber Management", "/eudr"));
+    if (canAccessEudr) items.push(routeMenuItem("eudr", "EUDR Verification", "/eudr-tool/"));
 
     if (canManageLabels) {
       items.push(actionMenuItem("allocate-labels", "Allocate Labels", "allocate-labels"));

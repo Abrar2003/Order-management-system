@@ -4,7 +4,7 @@ const Inspection = require("../models/inspection.model");
 const Item = require("../models/item.model");
 const { parseDateOnly, toDateOnlyIso } = require("../helpers/dateOnly");
 const { deriveOrderProgress } = require("../helpers/orderStatus");
-const { isQualifyingPackedInspection } = require("../helpers/inspectionPassedQuantity");
+const { isQualifyingPackedInspection, buildEffectivePassedQuantityByInspectionId } = require("../helpers/inspectionPassedQuantity");
 const { getVendorName, normalizeVendorDisplayList } = require("../helpers/vendorRef");
 const {
   resolveOrderRowCbmSummary,
@@ -162,15 +162,13 @@ const fetchPackedGoodsPeriodOrders = async ({
 
 const fetchPackedGoodsHistoryInspections = async ({
   qcIds,
-  toDate,
   InspectionModel = Inspection,
   maxTimeMS,
 } = {}) => {
   if (!qcIds.length) return [];
-  const query = InspectionModel.find(inspectionMatch(
-    { $lte: toDate },
-    { qc: { $in: qcIds } },
-  ))
+  const query = InspectionModel.find({
+    qc: { $in: qcIds }, passed: { $gt: 0 }, status: { $nin: NON_PACKED_INSPECTION_STATUSES },
+  })
     .select("_id qc inspector inspection_date requested_date request_history_id status passed vendor_requested goods_not_ready createdAt")
     .sort({ inspection_date: 1, _id: 1 });
   return withMaxTime(query, maxTimeMS).lean();
@@ -318,12 +316,13 @@ const buildPackedGoodsPeriodDataset = async ({
   const historyWithQc = history
     .map((inspection) => ({ ...inspection, qc: qcById.get(idString(inspection?.qc)) || null }))
     .filter((inspection) => inspection.qc);
+  const effectivePassed = buildEffectivePassedQuantityByInspectionId(historyWithQc);
   const quantitiesByQcId = new Map();
   for (const inspection of historyWithQc) {
     const qcId = idString(inspection?.qc);
     const inspectionDate = toDateOnlyIso(inspection?.inspection_date);
-    if (!inspectionDate) continue;
-    const packedQuantity = Math.max(0, Number(inspection?.passed || 0));
+    if (!inspectionDate || inspectionDate > period.to_date) continue;
+    const packedQuantity = effectivePassed.get(idString(inspection)) || 0;
     if (packedQuantity <= 0) continue;
     const entry = quantitiesByQcId.get(qcId) || { previous: 0, period: 0 };
     if (inspectionDate < period.from_date) entry.previous += packedQuantity;

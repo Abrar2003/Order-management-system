@@ -1,3 +1,4 @@
+import TimberMetadataFields from "./eudr/TimberMetadataFields";
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
@@ -38,7 +39,7 @@ const createInitialSampleForm = () => ({
   description: "",
   brand: "",
   vendor: "",
-  timber_cft: "",
+  timber_cft: "",hs_code:"",species_composition:[],
   item_count: "1",
   box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
   box_count: "1",
@@ -367,7 +368,7 @@ const SampleModal = ({
       description: String(sampleForm.description || "").trim(),
       brand: String(sampleForm.brand || "").trim(),
       vendor: getOptionText(sampleForm.vendor),
-      timber_cft: sampleForm.timber_cft,
+      timber_cft: sampleForm.timber_cft,hs_code:sampleForm.hs_code,...(sampleForm.species_composition?.length?{species_composition:sampleForm.species_composition}:{}),
       box_mode: sampleForm.box_mode,
       item_sizes: itemSizesPayload.value,
       box_sizes: boxSizesPayload.value,
@@ -657,6 +658,7 @@ const SampleModal = ({
                   </div>
                 </div>
 
+                <TimberMetadataFields value={sampleForm} onChange={patch=>setSampleForm(prev=>({...prev,...patch}))} disabled={saving}/>
                 <div className="row g-3">
                   <div className="col-12">
                     <h6 className="mb-0">Measurements</h6>

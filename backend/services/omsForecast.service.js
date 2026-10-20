@@ -1,3 +1,4 @@
+const { buildInspectionPassedStages } = require("../helpers/inspectionPassedQuantity");
 const dateParser = require("../helpers/dateparsser");
 const { deriveOrderProgress } = require("../helpers/orderStatus");
 const {
@@ -652,12 +653,12 @@ const buildHistoricalInspectionPipeline = () => [
   },
   { $lookup: { from: "qcs", localField: "qc_record", foreignField: "_id", as: "qc" } },
   { $unwind: "$qc" },
-  { $lookup: { from: "inspections", localField: "qc.inspection_record", foreignField: "_id", as: "inspection" } },
+  { $lookup: { from: "inspections", localField: "qc.inspection_record", foreignField: "_id", pipeline: buildInspectionPassedStages(), as: "inspection" } },
   { $unwind: "$inspection" },
   {
     $match: {
       "inspection.status": { $regex: "^Inspection Done$", $options: "i" },
-      "inspection.passed": { $gt: 0 },
+      "inspection.effective_passed": { $gt: 0 },
     },
   },
   { $lookup: { from: "items", localField: "item.item_code", foreignField: "code", as: "item_doc" } },
@@ -673,7 +674,7 @@ const buildHistoricalInspectionPipeline = () => [
       order_date: 1,
       inspection_date: "$inspection.inspection_date",
       inspection_status: "$inspection.status",
-      passed: "$inspection.passed",
+      passed: "$inspection.effective_passed",
       order_status: "$status",
       shipped_quantity: { $sum: "$shipment.quantity" },
     },

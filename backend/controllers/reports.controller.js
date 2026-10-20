@@ -1,3 +1,4 @@
+const { buildInspectionPassedStages } = require("../helpers/inspectionPassedQuantity");
 const mongoose = require("mongoose");
 const XLSX = require("xlsx");
 
@@ -1460,6 +1461,7 @@ const buildDateNormalizationStages = ({ reportRange, inspectorObjectId = null } 
   {
     $match: buildInitialInspectionMatch({ reportRange, inspectorObjectId }),
   },
+  ...buildInspectionPassedStages(),
   {
     $addFields: {
       inspection_date_recency_value: inspectionDateToDateExpression,
@@ -1643,7 +1645,7 @@ const buildQcReportMismatchPipeline = ({
           $round: [buildNumericExpression("$checked"), 3],
         },
         passed: {
-          $round: [buildNumericExpression("$passed"), 3],
+          $round: [buildNumericExpression("$effective_passed"), 3],
         },
         pending_after: {
           $round: [buildNumericExpression("$pending_after"), 3],
@@ -1800,7 +1802,7 @@ exports.getVendorWiseQaSummary = async (req, res) => {
             ...buildItemLookupStages(),
             {
               $addFields: {
-                passed_quantity_value: buildNumericExpression("$passed"),
+                passed_quantity_value: buildNumericExpression("$effective_passed"),
               },
             },
             {
@@ -1966,7 +1968,7 @@ exports.getVendorWiseQaDetailed = async (req, res) => {
                   $round: [buildNumericExpression("$vendor_requested"), 3],
                 },
                 passed_quantity: {
-                  $round: [buildNumericExpression("$passed"), 3],
+                  $round: [buildNumericExpression("$effective_passed"), 3],
                 },
                 item_cbm: {
                   $round: ["$item_cbm_per_unit", 3],
@@ -1976,7 +1978,7 @@ exports.getVendorWiseQaDetailed = async (req, res) => {
                     {
                       $multiply: [
                         "$item_cbm_per_unit",
-                        buildNumericExpression("$passed"),
+                        buildNumericExpression("$effective_passed"),
                       ],
                     },
                     3,

@@ -202,7 +202,7 @@ test("separates shipped quantity from remaining packed quantity", async () => {
   );
 });
 
-test("keeps QC AQL aggregation separate and excludes non-packed inspection visits", async () => {
+test("uses AQL request approval and excludes non-packed inspection visits", async () => {
   const requestHistory = [{ _id: "request-1", quantity_requested: 10, request_type: "AQL" }];
   const order = makeOrder({ qcId: "qc-aql", requestType: "AQL", requestHistory });
   const history = [
@@ -226,10 +226,10 @@ test("keeps QC AQL aggregation separate and excludes non-packed inspection visit
   assert.deepEqual(excluded.map(isQualifyingPackedInspection), [false, false, false, false]);
 
   const dataset = await buildDataset({ selected: [history[1], ...excluded], history, orders: [order] });
-  assert.equal(dataset.rows[0].period_packed_quantity, 1);
+  assert.equal(dataset.rows[0].period_packed_quantity, 10);
 });
 
-test("sums all qualifying passed visits into 18 previous, 1 period, and 19 total", async () => {
+test("counts repeated AQL visits once using the latest passing request snapshot", async () => {
   const requestHistory = [{ _id: "request-1", quantity_requested: 20, request_type: "AQL" }];
   const order = makeOrder({ qcId: "qc-19", quantity: 20, requestType: "AQL", requestHistory });
   const history = [
@@ -248,8 +248,35 @@ test("sums all qualifying passed visits into 18 previous, 1 period, and 19 total
       period: dataset.rows[0].period_packed_quantity,
       total: dataset.rows[0].total_packed_quantity,
     },
-    { previous: 18, period: 1, total: 19 },
+    { previous: 0, period: 1, total: 1 },
   );
+});
+
+test("separate AQL requests approve only their own batches across periods", async () => {
+  const order = makeOrder({ qcId: "qc-batches", quantity: 600, requestType: "AQL", requestHistory: [
+    { _id: "first", request_type: "AQL", quantity_requested: 300 },
+    { _id: "second", request_type: "AQL", quantity_requested: 300 },
+  ] });
+  const history = [
+    makeInspection({ id: "batch-one", qcId: "qc-batches", date: "2026-08-24", passed: 1, requestHistoryId: "first", vendorRequested: 300 }),
+    makeInspection({ id: "batch-two", qcId: "qc-batches", date: "2026-08-28", passed: 1, requestHistoryId: "second", vendorRequested: 300 }),
+  ];
+  const dataset = await buildDataset({ selected: [history[1]], history, orders: [order] });
+  assert.equal(dataset.rows[0].previously_packed_quantity, 300);
+  assert.equal(dataset.rows[0].period_packed_quantity, 300);
+  assert.equal(dataset.rows[0].total_packed_quantity, 600);
+});
+
+test("AQL ownership is resolved before the period filter", async () => {
+  const order = makeOrder({ qcId: "qc-future", quantity: 300, requestType: "AQL", requestHistory: [
+    { _id: "request", request_type: "AQL", quantity_requested: 300 },
+  ] });
+  const history = [
+    makeInspection({ id: "period", qcId: "qc-future", date: "2026-08-28", passed: 1, requestHistoryId: "request", vendorRequested: 300 }),
+    makeInspection({ id: "later", qcId: "qc-future", date: "2026-09-02", passed: 1, requestHistoryId: "request", vendorRequested: 300 }),
+  ];
+  const dataset = await buildDataset({ selected: [history[0]], history, orders: [order] });
+  assert.deepEqual(dataset.rows, []);
 });
 
 test("keeps PO and item rows distinct, applies combined server filters, and batches all lookups", async () => {

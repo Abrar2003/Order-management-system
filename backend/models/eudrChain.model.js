@@ -31,6 +31,13 @@ const schema = new mongoose.Schema({
   contribution_milli_cft: { type: Number, min: 1, default: null },
   stages: { type: [stageSchema], default: () => [{ kind: "sawmill" }] },
   invoice_keys: { type: [String], default: undefined },
+  canonical_invoices: [{ type: mongoose.Schema.Types.ObjectId, ref: "EudrInvoice" }],
+  inventory_backed: { type: Boolean, default: false },
+  inventory_status: { type: String, enum: ["LEGACY", "RESERVED", "COMMITTED", "ON_HOLD"], default: "LEGACY" },
+  inventory_commitment: { type: mongoose.Schema.Types.ObjectId, ref: "EudrTimberCommitment" },
+  inventory_revision: Number,
+  declaration_lines:{type:[{shipment_ref:{source:String,source_id:String,shipment_id:String},item_or_sample_code:String,qty:Number,declared_cft_per_unit_milli:Number,species_shares:[{species:{type:mongoose.Schema.Types.ObjectId,ref:"EudrSpecies"},share_bp:Number}]}],default:undefined},
+  europe_reported_at:Date,europe_report_submission:{type:mongoose.Schema.Types.ObjectId,ref:"EudrReportSubmission"},review_signature:String,
   history: [{
     event: String,
     stage_id: String,
@@ -48,6 +55,7 @@ schema.pre("validate", function () {
 });
 
 schema.index({ container_key: 1, vendor: 1, createdAt: 1 });
-schema.index({ invoice_keys: 1 }, { unique: true, sparse: true });
+// The migration removes this exact index only after permanent invoice ownership is populated.
+if (process.env.EUDR_CANONICAL_INVOICES !== "true") schema.index({ invoice_keys: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.models.EudrChain || mongoose.model("EudrChain", schema, "eudr_chains");

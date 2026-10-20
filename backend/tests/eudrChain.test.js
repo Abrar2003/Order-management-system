@@ -1,4 +1,8 @@
 const test = require("node:test");
+// These mocks cover the legacy contract; feature-on transactions use the isolated review integration suite.
+const inheritedReviewFlag=process.env.EUDR_REVIEW_LAYER;
+test.before(()=>{process.env.EUDR_REVIEW_LAYER="false";});
+test.after(()=>{if(inheritedReviewFlag===undefined)delete process.env.EUDR_REVIEW_LAYER;else process.env.EUDR_REVIEW_LAYER=inheritedReviewFlag;});
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const {
@@ -35,7 +39,7 @@ test("chain uploads reject duplicate filenames and content, including renamed an
   const original = Buffer.from("same file bytes");
   const originalHash = crypto.createHash("sha256").update(original).digest("hex");
   const chain = {
-    _id: chainId, container: "C1", vendor: vendorId, stages: [{ _id: "stage1", kind: "sawmill", documents: [{ type: "license", key: "old", name: "original.pdf", size: original.length, sha256: originalHash }] }], history: [],
+    _id: chainId, container: "C1", vendor: vendorId, declared_milli_cft: 1000, contribution_milli_cft: 1000, stages: [{ _id: "stage1", kind: "sawmill", documents: [{ type: "license", key: "old", name: "original.pdf", size: original.length, sha256: originalHash }] }], history: [],
     isModified: () => false, save: async () => {}, toObject: () => ({}),
   };
   t.mock.method(EudrChain, "findById", async () => chain);

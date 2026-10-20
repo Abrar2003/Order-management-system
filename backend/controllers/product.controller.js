@@ -1,3 +1,4 @@
+const { calculateQcAggregateMetrics } = require("../helpers/inspectionPassedQuantity");
 const Order = require("../models/order.model");
 const {
   applyDataAccessMatch,
@@ -84,10 +85,7 @@ const processOrderAnalyticsRow = (order = {}) => {
       toUtcDateOnly(getInspectionDateValue(left)) - toUtcDateOnly(getInspectionDateValue(right)),
     );
   const orderQuantity = Math.max(0, toFiniteNumber(order.quantity, 0));
-  const passedQuantity = inspections.reduce(
-    (sum, inspection) => sum + Math.max(0, toFiniteNumber(inspection?.passed, 0)),
-    0,
-  );
+  const passedQuantity = calculateQcAggregateMetrics(order.qc || {}, inspections).totalEffectivePassed;
   const rejectedQuantity = inspections.reduce(
     (sum, inspection) => sum + Math.max(0, toFiniteNumber(inspection?.rejected, 0)),
     0,
@@ -314,11 +312,18 @@ exports.getProductAnalytics = async (req, res) => {
           itemCode: "$item.item_code",
           itemName: "$item.description",
           quantity: 1,
+          qc: { _id: "$qc._id", request_type: "$qc.request_type", request_history: "$qc.request_history" },
           inspections: {
             $map: {
               input: "$inspections",
               as: "insp",
               in: {
+                _id: "$$insp._id",
+                request_history_id: "$$insp.request_history_id",
+                requested_date: "$$insp.requested_date",
+                inspector: "$$insp.inspector",
+                vendor_requested: "$$insp.vendor_requested",
+                status: "$$insp.status",
                 passed: "$$insp.passed",
                 rejected: "$$insp.rejected",
                 inspection_date: "$$insp.inspection_date",

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { updateBrandScope } from "../auth/auth.service";
+import { eudrContinuation } from '../utils/eudrContinuation';
 import "../App.css";
 
 const BRAND_SCOPE_OPTIONS = [
@@ -52,7 +53,9 @@ const BrandScopeChoice = () => {
     setError("");
     try {
       await updateBrandScope(nextScope);
-      navigate("/", { replace: true });
+      const resume = eudrContinuation(window.location.search, import.meta.env.VITE_EUDR_PUBLIC_URL || 'https://oms.ghouse-sourcing.com/eudr-tool/');
+      if (resume) window.location.assign(resume);
+      else navigate('/', { replace: true });
     } catch (submitError) {
       console.error(submitError);
       setError(

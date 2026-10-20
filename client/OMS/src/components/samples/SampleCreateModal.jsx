@@ -1,3 +1,4 @@
+import TimberMetadataFields from "../eudr/TimberMetadataFields";
 import { useMemo, useState } from "react";
 import MeasuredSizeSection from "../MeasuredSizeSection";
 import useBrandOptions from "../../hooks/useBrandOptions";
@@ -20,6 +21,7 @@ import { getOptionText, normalizeTextOptions } from "../../utils/optionText";
 
 const initialForm = (sample = null) => ({
   code: String(sample?.code || ""),
+  timber_cft:sample?.timber_cft??"",hs_code:sample?.hs_code||"",species_composition:sample?.species_composition||[],
   name: String(sample?.name || ""),
   description: String(sample?.description || ""),
   brand: String(sample?.brand || ""),
@@ -194,7 +196,7 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
       item_sizes: itemPayload.value,
       box_sizes: boxPayload.value,
       box_mode: form.box_mode,
-      cbm,
+      cbm,timber_cft:form.timber_cft,hs_code:form.hs_code,...(form.species_composition?.length?{species_composition:form.species_composition}:{}),
     };
   };
 
@@ -265,6 +267,8 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
                 <label className="form-label">Vendor</label>
                 <input className="form-control" value={form.vendor} onChange={(e) => setField("vendor", e.target.value)} placeholder="Optional" />
               </div>
+              <TimberMetadataFields value={form} onChange={patch=>setForm(prev=>({...prev,...patch}))} disabled={saving}/>
+              <label className="form-label col-md-4">Timber CFT per sample<input type="number" min="0" step="0.001" className="form-control" value={form.timber_cft} onChange={e=>setField("timber_cft",e.target.value)}/></label>
               <div className="col-md-6">
                 <label className="form-label">Description</label>
                 <textarea className="form-control" rows="2" value={form.description} onChange={(e) => setField("description", e.target.value)} />

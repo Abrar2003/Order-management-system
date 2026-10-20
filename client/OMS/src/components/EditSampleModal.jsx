@@ -1,3 +1,4 @@
+import TimberMetadataFields from "./eudr/TimberMetadataFields";
 import { useMemo, useState } from "react";
 import api from "../api/axios";
 import {
@@ -84,6 +85,7 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
     name: String(sample?.name ?? ""),
     description: String(sample?.description ?? ""),
     timber_cft: sample?.timber_cft == null ? "" : String(sample.timber_cft),
+    hs_code:sample?.hs_code||"",species_composition:sample?.species_composition||[],
     brand: String(sample?.brand ?? ""),
     vendor: normalizeTextOptions(
       Array.isArray(sample?.vendor) ? sample.vendor : [sample?.vendor],
@@ -398,7 +400,7 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
       payload.box_mode = form.box_mode;
       payload.cbm = cbm;
     }
-    payload.timber_cft = form.timber_cft;
+    payload.timber_cft = form.timber_cft;payload.hs_code=form.hs_code;if(form.species_composition?.length)payload.species_composition=form.species_composition;
 
     if (!window.confirm(buildConfirmationMessage(payload))) {
       return;
@@ -509,6 +511,7 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
                 <label className="form-label">Timber CFT per sample (optional)</label>
                 <input type="number" min="0" step="0.001" className="form-control" value={form.timber_cft} onChange={(event) => setForm((prev) => ({ ...prev, timber_cft: event.target.value }))} />
               </div>
+              <TimberMetadataFields value={form} onChange={patch=>setForm(prev=>({...prev,...patch}))}/>
             </div>
 
             {hasEditableSizeData && (

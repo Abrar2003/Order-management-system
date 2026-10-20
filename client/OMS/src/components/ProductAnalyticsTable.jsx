@@ -17,7 +17,7 @@ const HEADER_FORMULAS = {
   poCount: ["PO Count", "Formula: PO Count = count of POs grouped under the same item code.", "Expand the item row to view each PO included in this count."],
   itemCode: ["Item Code", "Direct value from the linked order item: order.item.item_code.", "This column is an identifier, so there is no derived formula."],
   orderQuantity: ["Order Qty", "Formula: Order Qty = order.quantity.", "This is taken directly from the order quantity stored on the order row."],
-  passedQuantity: ["Passed", "Formula: Passed = sum of passed quantities from all linked inspections.", "Calculation: inspections.reduce((sum, inspection) => sum + inspection.passed, 0)."],
+  passedQuantity: ["Passed", "Formula: Passed = sample passes for normal requests plus the full requested quantity for each passing AQL request, counted once.", "Calculation: use AQL-approved request quantities for AQL inspections; keep actual sample quantities for normal inspections."],
   shippedQuantity: ["Shipped Qty", "Sum of shipment quantities for each PO, capped at its order quantity.", "The item total sums the shipped quantities of its POs."],
   inspectionTimeDays: ["Inspection Time (days)", "PO formula: last inspection date - first inspection date.", "A PO with one inspection is counted as 1 day; a PO with none shows N/A.", "The subtext is the total number of inspections across the item's POs."],
   rejectionPercent: ["Average Rejection (%)", "PO rejection % = summed manually entered rejected quantity / order quantity x 100.", "Average Rejection (%) = average of the PO rejection percentages for this item."],

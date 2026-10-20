@@ -1,3 +1,4 @@
+const reviewLayer=require("../services/eudrReview.service");
 const { Readable } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 const mongoose = require("mongoose");
@@ -6,6 +7,8 @@ const Party = require("../models/eudrParty.model");
 const Vendor = require("../models/vendor.model");
 const allocation = require("../services/eudrAllocation.service");
 const storage = require("../services/wasabiStorage.service");
+const inventory = require("../services/eudrInventory.service");
+const inventoryMigration = require("../services/eudrInventoryMigration.service");
 const { saveStageDirectory, evidenceMatches, reusableTypes } = require("../services/eudrDirectory.service");
 const { fileMime, sha256, assertUniqueFile, assertForestImage } = require("../services/eudrFiles.service");
 const {
@@ -14,6 +17,8 @@ const {
 } = require("../services/eudrChain.service");
 
 const replyError = (res, error) => res.status(error?.code === 11000 || error?.name === "VersionError" ? 409 : error?.statusCode || 500).json({
+  code: typeof error?.code === "string" ? error.code : error?.code === 11000 ? "IDENTITY_CONFLICT" : error?.name === "VersionError" ? "CONCURRENT_MODIFICATION" : "EUDR_REQUEST_FAILED",
+  ...(error?.details ? { details: inventory.publicRecord(error.details) } : {}),
   message: error?.code === 11000 ? "An issuer invoice number already exists, or an allocation changed concurrently. Refresh and try again." : error?.name === "VersionError" ? "Chain changed while saving. Refresh and try again." : error?.message || "EUDR request failed",
 });
 const actor = (req) => req.user?._id || req.user?.id;
@@ -42,6 +47,8 @@ const refresh = async (chain, req, containerData) => {
 };
 const details = async (chain, group, containerData) => ({
   ...chain.toObject(),
+  ...(reviewLayer.enabled()?{review:await reviewLayer.reviewGroup(chain.container_key,String(chain.vendor))}:{}),
+  ...(chain.inventory_backed && chain.inventory_commitment ? await inventory.chainProjection(chain) : {}),
   vendor: group?.vendor || null,
   stuffed_cft: group?.stuffed_cft ?? null,
   excluded: group?.excluded || [],
@@ -102,8 +109,10 @@ const replaceDocument = (chain, req, stage, index, type, document) => {
 exports.lookupContainer = async (req, res) => {
   try {
     const data = await loadContainer(req.query.container);
-    const chains = await EudrChain.find({ container_key: key(req.query.container) }).select("vendor declared_milli_cft contribution_milli_cft stages updatedAt").lean();
-    return res.json({ ...data, vendors: data.vendors.map((group) => ({ ...group, coverage: chainCoverage(chains.filter((chain) => String(chain.vendor) === group.vendor._id), group, data.unassigned) })), chains: chains.map((chain) => ({ _id: chain._id, vendor_id: String(chain.vendor), declared_cft: chain.declared_milli_cft / 1000, contribution_cft: contributionMilliCft(chain) / 1000, complete: chainVerified(chain, findGroup(data, chain.vendor), data.unassigned) })) });
+    const chains = await EudrChain.find({ container_key: key(req.query.container) }).select("vendor declared_milli_cft contribution_milli_cft stages updatedAt inventory_backed inventory_status").lean();
+    const payload={ ...data, vendors: data.vendors.map((group) => ({ ...group, coverage: chainCoverage(chains.filter((chain) => String(chain.vendor) === group.vendor._id), group, data.unassigned) })), chains: chains.map((chain) => ({ _id: chain._id, vendor_id: String(chain.vendor), declared_cft: chain.declared_milli_cft / 1000, contribution_cft: contributionMilliCft(chain) / 1000, complete: chainVerified(chain, findGroup(data, chain.vendor), data.unassigned) })) };
+    if(reviewLayer.enabled()){for(const group of payload.vendors){group.review=await reviewLayer.reviewGroup(data.container.toLowerCase(),group.vendor._id);group.report_status=group.review.report_status;}if(req.query.status)payload.vendors=payload.vendors.filter(g=>g.review.status[0]===req.query.status);}
+    return res.json(payload);
   } catch (error) { return replyError(res, error); }
 };
 
@@ -117,7 +126,8 @@ exports.list = async (req, res) => {
       const group = await refresh(chain, req, containerData);
       return { _id: chain._id, container: chain.container, vendor: group?.vendor || null, declared_cft: chain.declared_milli_cft / 1000, contribution_cft: contributionMilliCft(chain) / 1000, updatedAt: chain.updatedAt, complete: chainVerified(chain, group, containerData.unassigned) };
     }));
-    return res.json({ data });
+    if(reviewLayer.enabled()){const cache=new Map();for(const entry of data){const k=`${entry.container.toLowerCase()}|${entry.vendor?._id}`;if(entry.vendor){if(!cache.has(k))cache.set(k,reviewLayer.reviewGroup(entry.container.toLowerCase(),entry.vendor._id));entry.review=await cache.get(k);entry.report_status=entry.review.report_status;}}}
+    return res.json({ data:reviewLayer.enabled()&&req.query.status?data.filter(r=>r.review?.status[0]===req.query.status):data });
   } catch (error) { return replyError(res, error); }
 };
 
@@ -139,7 +149,7 @@ exports.create = async (req, res) => {
     if (!Number.isFinite(contribution) || contribution <= 0 || Math.abs(contribution * 1000 - Math.round(contribution * 1000)) > 1e-7) throw fail("Chain contribution must be positive with at most three decimals");
     const chain = await allocation.withAllocation(container, vendorId, async (chains, session) => {
       allocation.assertAllocation(chains, toMilliCft(contribution), group.stuffed_milli_cft);
-      const created = new EudrChain({ container, container_key: key(container), vendor: vendorId, declared_milli_cft: declaredMilliCft, contribution_milli_cft: toMilliCft(contribution), created_by: actor(req), stages: [{ kind: "sawmill", workflow_version: 2 }] });
+      const created = new EudrChain({ container, container_key: key(container), vendor: vendorId, declared_milli_cft: declaredMilliCft, contribution_milli_cft: toMilliCft(contribution), created_by: actor(req), inventory_backed: process.env.EUDR_INVENTORY_REQUIRED === "true", inventory_status: process.env.EUDR_INVENTORY_REQUIRED === "true" ? "ON_HOLD" : "LEGACY", stages: [{ kind: "sawmill", workflow_version: 2 }] });
       event(created, req, "chain_created", null, { contribution_cft: contribution, declared_cft: declared });
       await created.save({ session });
       return created;
@@ -200,6 +210,7 @@ exports.updateContribution = async (req, res) => {
     chain = await allocation.withAllocation(chain.container, chain.vendor, async (chains, session) => {
       const entry = chains.find((item) => String(item._id) === String(chain._id));
       if (!entry) throw fail("Chain not found", 404);
+      if (entry.inventory_backed && await inventory.M.Commitment.exists({ chain: entry._id, status: { $in: [...inventory.Q.ACTIVE] } }).session(session)) throw fail("Release the active inventory reservation before changing its contribution", 409);
       allocation.assertAllocation(chains, next, group.stuffed_milli_cft, entry._id);
       if (next !== contributionMilliCft(entry)) {
         event(entry, req, "contribution_cft_changed", null, { before: contributionMilliCft(entry) / 1000, after: value });
@@ -252,7 +263,7 @@ exports.saveStage = async (req, res) => {
       clearVerification(chain, req, index, "Stage edited");
       stage.fields = fields;
       chain.invoice_keys = collectInvoiceKeys(chain.stages);
-      await chain.save();
+      await inventoryMigration.saveChain(chain, req.user);
     }
     await saveStageDirectory(stage);
     return res.json({ data: await details(chain, findGroup(containerData, chain.vendor), containerData) });
@@ -273,12 +284,17 @@ exports.upload = async (req, res) => {
     if (!fileMime(req.file.originalname)) throw fail("Unsupported EUDR file format");
     if (type === "forest_image") await assertForestImage(req.file);
     const fileHash = sha256(req.file.buffer);
+    if(process.env.EUDR_CANONICAL_INVOICES==="true"&&["cutting_invoice","invoice"].includes(type)){
+      const registered=await inventory.M.Document.findOne({sha256:fileHash}).lean();
+      const invoice=registered&&await inventory.M.Invoice.findOne({$or:[{documents:registered._id},{invoice_documents:registered._id}]}).select("_id").lean();
+      if(invoice)throw inventory.Q.error("DOCUMENT_REUSE_AVAILABLE","This registered invoice file can be linked without uploading another copy",{invoice_id:invoice._id,document_id:registered._id});
+    }
     await assertUniqueFile(chain, { name: req.file.originalname, size: req.file.size, sha256: fileHash });
     upgradeStage(chain, req, stage, index);
     uploadedKey = storage.createStorageKey({ folder: `eudr/${chain._id}/${stage._id}`, originalName: req.file.originalname });
     await storage.uploadBuffer({ buffer: req.file.buffer, key: uploadedKey, originalName: req.file.originalname, contentType: fileMime(req.file.originalname) });
     replaceDocument(chain, req, stage, index, type, { key: uploadedKey, name: req.file.originalname, content_type: fileMime(req.file.originalname), size: req.file.size, sha256: fileHash });
-    await chain.save();
+    await inventoryMigration.saveChain(chain, req.user);
     uploadedKey = "";
     await saveStageDirectory(stage);
     return res.json({ data: await details(chain, findGroup(containerData, chain.vendor), containerData) });
@@ -291,7 +307,7 @@ exports.upload = async (req, res) => {
 exports.directory = async (req, res) => {
   try {
     const kind = text(req.query.kind);
-    if (kind !== "vendor" && !Object.hasOwn(reusableTypes, kind)) throw fail("Unsupported directory kind");
+    if (kind !== "vendor" && !(kind==="generator"&&reviewLayer.enabled()) && !Object.hasOwn(reusableTypes, kind)) throw fail("Unsupported directory kind");
     const query = kind === "vendor" ? { deleted_at: null, is_active: { $ne: false } } : { kind };
     if (req.query.parent_key) query.parent_key = text(req.query.parent_key);
     const search = text(req.query.search).slice(0, 100);
@@ -303,6 +319,28 @@ exports.directory = async (req, res) => {
     const entries = await Party.find(query).sort({ name: 1 }).limit(50).lean();
     return res.json({ data: entries.map(({ evidence, ...entry }) => ({ ...entry, evidence: (evidence || []).map(({ key, ...item }) => item) })) });
   } catch (error) { return replyError(res, error); }
+};
+
+exports.reuseInvoice = async (req,res) => {
+  try {
+    if(process.env.EUDR_CANONICAL_INVOICES!=="true")throw fail("Canonical invoice linking is not enabled",503);
+    if(req.body?.confirmed!==true)throw fail("Confirm this is the same canonical invoice");
+    const chain=await getChain(req),containerData=await loadContainer(chain.container);
+    await refresh(chain,req,containerData);
+    const {stage,index}=findStage(chain,req.params.stageId);
+    if(!["sawmill","receiver"].includes(stage.kind)||!isSeller(stage,findGroup(containerData,chain.vendor)?.vendor))throw fail("Select a seller invoice stage");
+    upgradeStage(chain,req,stage,index);
+    const invoice=await inventory.M.Invoice.findById(inventory.objectId(req.body.invoice_id));
+    const item=inventoryMigration.extract({stages:[stage]}).invoices[0];
+    if(!invoice||!item||invoice.identity_key!==item.identity||invoice.issuer!==item.issuer||invoice.buyer!==item.buyer||invoice.total_milli!==item.quantity||invoice.lines.length!==1)throw inventory.Q.error("INVOICE_IDENTITY_CONFLICT","Invoice issuer, buyer, date, quantity and single line must match this stage; use Inventory for multi-line allocations");
+    const document=await inventory.M.Document.findOne({_id:{$in:invoice.documents},purpose:"invoice"});
+    if(!document)throw fail("Canonical invoice evidence is missing",409);
+    const data=document.toObject();delete data._id;
+    replaceDocument(chain,req,stage,index,stage.kind==="sawmill"?"cutting_invoice":"invoice",data);
+    event(chain,req,"canonical_invoice_reused",stage,{invoice_id:invoice._id,document_id:document._id});
+    await inventoryMigration.saveChain(chain,req.user);
+    return res.json({data:await details(chain,findGroup(containerData,chain.vendor),containerData)});
+  } catch(error){return replyError(res,error);}
 };
 exports.directoryDetail = async (req, res) => {
   try {
@@ -332,7 +370,7 @@ exports.reuseEvidence = async (req, res) => {
     upgradeStage(chain, req, stage, index);
     replaceDocument(chain, req, stage, index, document.type, document);
     event(chain, req, "saved_evidence_reused", stage, { party_id: String(party._id), type: document.type, name: document.name, validity_confirmed: true });
-    await chain.save();
+    await inventoryMigration.saveChain(chain, req.user);
     await saveStageDirectory(stage);
     return res.json({ data: await details(chain, findGroup(containerData, chain.vendor), containerData) });
   } catch (error) { return replyError(res, error); }
@@ -340,10 +378,9 @@ exports.reuseEvidence = async (req, res) => {
 
 exports.documentUrl = async (req, res) => {
   try {
-    const chain = await getChain(req);
-    const stage = chain.stages.id(req.params.stageId);
-    const document = stage?.documents.id(req.params.documentId);
+    const document = req.inventoryDocument || (await getChain(req)).stages.id(req.params.stageId)?.documents.id(req.params.documentId);
     if (!document) throw fail("Document not found", 404);
+    if (require('../services/eudrLocalDemo.service').documentPath(document.key)) return res.json({ url: `${req.protocol}://${req.get('host')}${req.originalUrl.replace(/\/url(?:\?.*)?$/, '/content')}` });
     const url = await storage.getSignedObjectUrl(document.key, { expiresIn: 300, filename: document.name, download: req.query?.download === "1" });
     return res.json({ url });
   } catch (error) { return replyError(res, error); }
@@ -354,9 +391,16 @@ exports.documentContent = async (req, res) => {
   const cancel = () => abort.abort();
   res.once("close", cancel);
   try {
-    const chain = await getChain(req);
-    const document = chain.stages.id(req.params.stageId)?.documents.id(req.params.documentId);
+    const document = req.inventoryDocument || (await getChain(req)).stages.id(req.params.stageId)?.documents.id(req.params.documentId);
     if (!document) throw fail("Document not found", 404);
+    const localDemoPath = require('../services/eudrLocalDemo.service').documentPath(document.key);
+    if (localDemoPath) {
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.vary('Cookie'); res.vary('Authorization');
+      res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(document.name)}`);
+      return res.sendFile(localDemoPath, error => { if (error && !res.headersSent) replyError(res, error); });
+    }
     const url = await storage.getSignedObjectUrl(document.key, { expiresIn: 300 });
     const upstream = await fetch(url, { headers: req.headers.range ? { Range: req.headers.range } : {}, signal: abort.signal });
     if (!upstream.ok) {
@@ -385,8 +429,7 @@ exports.documentContent = async (req, res) => {
 
 exports.documentPreview = async (req, res) => {
   try {
-    const chain = await getChain(req);
-    const document = chain.stages.id(req.params.stageId)?.documents.id(req.params.documentId);
+    const document = req.inventoryDocument || (await getChain(req)).stages.id(req.params.stageId)?.documents.id(req.params.documentId);
     if (!document) throw fail("Document not found", 404);
     const mime = fileMime(document.name);
     if (mime === "application/pdf" || mime?.startsWith("image/")) return exports.documentContent(req, res);
@@ -408,6 +451,19 @@ exports.verify = async (req, res) => {
     const containerData = await loadContainer(chain.container);
     const group = await refresh(chain, req, containerData);
     const { stage, index } = findStage(chain, req.params.stageId);
+    if (stage.kind === "declaration" && chain.inventory_backed) {
+      const updated = await inventory.clearance(chain._id, req.user, async (locked, currentGroup, currentData) => {
+        const currentStage = locked.stages.id(req.params.stageId);
+        if (!currentStage || currentStage.verified_at) throw fail("Declaration changed; refresh before verifying", 409);
+        assertStageAvailable(locked.stages, locked.stages.indexOf(currentStage));
+        validateStage(currentStage, { vendor: currentGroup.vendor });
+        assertFinalCft(locked, currentGroup, currentData.unassigned);
+        currentStage.workflow_version = 3; currentStage.verified_at = new Date(); currentStage.verified_by = actor(req); currentStage.verified_by_name = text(req.user?.name); currentStage.verification_result = "verified"; currentStage.shipment_signature = currentGroup.inventory_shipment_signature; currentStage.vendor_signature = currentGroup.vendor_signature;
+        event(locked, req, "stage_verified", currentStage, { method: "manual", inventory: true });
+      });
+      return res.json({ data: await details(updated, group, containerData) });
+    }
+    if (stage.kind === "declaration" && await inventory.ledgerEnforced()) throw fail("Reserve documentary inventory before final declaration", 409);
     if (stage.verified_at) throw fail("This stage is already verified", 409);
     if (!group) throw fail("Vendor no longer has shipments in this container", 409);
     if (!text(group.vendor.gst) || !text(group.vendor.pan)) throw fail("Vendor GST and PAN are required");
@@ -438,7 +494,7 @@ exports.verify = async (req, res) => {
       chain.stages.push(nextStage);
     }
     chain.invoice_keys = collectInvoiceKeys(chain.stages);
-    await chain.save();
+    await inventoryMigration.saveChain(chain, req.user);
     return res.json({ data: await details(chain, group, containerData) });
   } catch (error) { return replyError(res, error); }
 };

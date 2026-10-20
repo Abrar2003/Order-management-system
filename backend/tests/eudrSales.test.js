@@ -1,4 +1,8 @@
 const test = require("node:test");
+// These mocks cover the legacy contract; feature-on transactions use the isolated review integration suite.
+const inheritedReviewFlag=process.env.EUDR_REVIEW_LAYER;
+test.before(()=>{process.env.EUDR_REVIEW_LAYER="false";});
+test.after(()=>{if(inheritedReviewFlag===undefined)delete process.env.EUDR_REVIEW_LAYER;else process.env.EUDR_REVIEW_LAYER=inheritedReviewFlag;});
 const assert = require("node:assert/strict");
 const EudrChain = require("../models/eudrChain.model");
 const Party = require("../models/eudrParty.model");
@@ -20,6 +24,7 @@ const mill = () => ({ kind: "sawmill", workflow_version: 2, fields: { name: "Mil
 const transport = () => ({ kind: "transport", workflow_version: 2, fields: { transporter_name: "Transport", truck_number: "RJ-001", driver_license_number: "DL-001", billty_number: "B1", ewaybill_number: "EW1" }, documents: ["weight_slip", "billty", "driver_license", "ewaybill"].map((type) => evidence(type)) });
 const response = () => ({ status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
 const setup = (t, stages) => {
+  t.mock.method(require("../services/eudrInventory.service"),"ledgerEnforced",async()=>false);
   const query = (rows) => ({ select: () => ({ lean: async () => rows }) });
   t.mock.method(Order, "find", () => query([{ _id: "o", vendor: { vendor_id: vendor._id }, item: { item_code: "I1" }, shipment: [{ _id: "s", container: "C1", quantity: 10 }] }]));
   t.mock.method(Sample, "find", () => query([]));

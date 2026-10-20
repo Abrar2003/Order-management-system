@@ -1868,6 +1868,8 @@ const QcDetails = () => {
         offeredQty: record?.vendor_offered ?? 0,
         inspectedQty: record?.checked ?? 0,
         passedQty: record?.passed ?? 0,
+        requestType: record?.request_type || linkedRequest?.request_type || qc?.request_type || "FULL",
+        aqlPassedQty: record?.aql_passed ?? 0,
         rejectedQty: record?.rejected ?? 0,
         cbmTotal: cbmValue,
         pendingAfter: record?.pending_after ?? 0,
@@ -1879,7 +1881,9 @@ const QcDetails = () => {
     return [ ...inspectionRows].sort(
       (a, b) => (b.sortTime || 0) - (a.sortTime || 0),
     );
-  }, [qc?.request_history, qc?.inspection_record]);
+  }, [qc?.request_history, qc?.inspection_record, qc?.request_type]);
+
+  const showAqlPassed = requestInspectionTimeline.some((row) => row.requestType === "AQL");
 
   const handleTimelineSortColumn = useCallback(
     (column, defaultDirection = "asc") => {
@@ -1908,6 +1912,7 @@ const QcDetails = () => {
           if (column === "offered") return Number(row?.offeredQty || 0);
           if (column === "inspected") return Number(row?.inspectedQty || 0);
           if (column === "passed") return Number(row?.passedQty || 0);
+          if (column === "aqlPassed") return row.requestType === "AQL" ? Number(row.aqlPassedQty) : -1;
           if (column === "rejected") return Number(row?.rejectedQty || 0);
           if (column === "cbm") return row?.cbmTotal;
           if (column === "pending") return Number(row?.pendingAfter || 0);
@@ -3298,7 +3303,7 @@ const QcDetails = () => {
           <div className="card-body d-grid gap-4">
             <section>
               <h3 className="h6 mb-3 qc-details-section-title">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${getOptionText(qc?.order?.vendor || qc?.order_meta?.vendor) || "N/A"} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
-              <h3 className="h6 mb-3 qc-details-section-title">{`Status: ${derivedOrderStatus} | Inspector: ${qc?.inspector?.name}`}</h3>
+              <h3 className="h6 mb-3 qc-details-section-title">{`Status: ${derivedOrderStatus} | Inspector: ${qc?.inspector?.name}${qc.request_type === "AQL" ? " | AQL" : ""}`}</h3>
               <div className="qc-order-inline-grid">
                 <InfoBox compact label="Item Code" value={qc.item.item_code} />
                 <InfoBox
@@ -3653,6 +3658,10 @@ const QcDetails = () => {
                             onClick={() => handleTimelineSortColumn("passed", "desc")}
                           />
                         </th>
+                        {showAqlPassed && <th className="qc-record-aql-passed">
+                          <SortHeaderButton label="AQL passed" isActive={timelineSortBy === "aqlPassed"}
+                            direction={timelineSortOrder} onClick={() => handleTimelineSortColumn("aqlPassed", "desc")} />
+                        </th>}
                         <th>
                           <SortHeaderButton
                             label="Rejected"
@@ -3677,8 +3686,8 @@ const QcDetails = () => {
                             onClick={() => handleTimelineSortColumn("pending", "desc")}
                           />
                         </th>
-                        <th>Status</th>
-                        <th>
+                        <th className="qc-record-status">Status</th>
+                        <th className="qc-record-remarks">
                           <SortHeaderButton
                             label="Remarks"
                             isActive={timelineSortBy === "remarks"}
@@ -3692,18 +3701,21 @@ const QcDetails = () => {
                     <tbody>
                       {sortedRequestInspectionTimeline.map((row) => (
                         <tr key={row.key}>
-                          <td>{formatDateDDMMYYYY(row.requestDate)}</td>
-                          <td>{formatDateDDMMYYYY(row.inspectionDate)}</td>
-                          <td>{row.inspectorName}</td>
-                          <td>{row.requestedQty}</td>
-                          <td>{row.offeredQty}</td>
-                          <td>{row.inspectedQty}</td>
-                          <td>{row.passedQty}</td>
-                          <td>{row.rejectedQty}</td>
-                          <td>{row.cbmTotal}</td>
-                          <td>{row.pendingAfter}</td>
-                          <td>{formatInspectionStatusLabel(row.status)}</td>
-                          <td>{row.remarks}</td>
+                          <td data-label="Request Date">{formatDateDDMMYYYY(row.requestDate)}</td>
+                          <td data-label="Inspection Date">{formatDateDDMMYYYY(row.inspectionDate)}</td>
+                          <td data-label="Inspector">{row.inspectorName}</td>
+                          <td data-label="Requested">{row.requestedQty}</td>
+                          <td data-label="Offered">{row.offeredQty}</td>
+                          <td data-label="Inspected">{row.inspectedQty}</td>
+                          <td data-label="Passed">{row.passedQty}</td>
+                          {showAqlPassed && <td data-label="AQL passed">{row.requestType === "AQL" ? row.aqlPassedQty : "—"}</td>}
+                          <td data-label="Rejected">{row.rejectedQty}</td>
+                          <td data-label="CBM">{row.cbmTotal}</td>
+                          <td data-label="Pending">{row.pendingAfter}</td>
+                          <td className="qc-record-status" data-label="Status"><span>{formatInspectionStatusLabel(row.status)}
+                            {row.requestType === "AQL" && <span className="badge text-bg-info ms-1">AQL</span>}
+                          </span></td>
+                          <td className="qc-record-remarks" data-label="Remarks">{row.remarks}</td>
                           {showInspectionActions && (
                             <td className="text-center">
                               {row.rowType === "Inspection" && row.recordId ? (

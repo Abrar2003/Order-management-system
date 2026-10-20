@@ -1,14 +1,17 @@
 const crypto = require("crypto");
+const timberSpecies=require("../helpers/timberSpecies");
+const reviewMetadata=(record,sample=false)=>timberSpecies.enabled()?{hs_code:record?.hs_code||"",species_composition:record?.species_composition?.map(r=>({species:String(r.species),share_bp:r.share_bp}))||[],timber_cft_history:record?.timber_cft_history||[],net_weight_kg_per_unit:record?timberSpecies.netWeight(record,sample):null,description:record?.description||record?.name||record?.code||""}:{};
 const Order = require("../models/order.model");
 const Sample = require("../models/sample.model");
 const Item = require("../models/item.model");
 const Vendor = require("../models/vendor.model");
 const { getVendorId, getVendorName } = require("../helpers/vendorRef");
-const { invoiceKey, normalizeIdentifier, parseTimberCft, shipmentMilliCft, toMilliCft } = require("../helpers/timberCft");
+const { invoiceKey, normalizeIdentifier, parseTimberCft, shipmentMilliCft, toMilliCft, addMilliCft } = require("../helpers/timberCft");
 
 const text = (value) => String(value ?? "").trim();
 const key = (value) => text(value).toLowerCase();
 const hash = (value) => crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const shipmentDate = value => value && !Number.isNaN(new Date(value).getTime()) ? new Date(value).toISOString().slice(0,10) : null;
 const fail = (message, statusCode = 400) => Object.assign(new Error(message), { statusCode });
 
 const resolveVendor = (raw, vendors) => {
@@ -19,22 +22,22 @@ const resolveVendor = (raw, vendors) => {
   return matches.length === 1 ? matches[0] : null;
 };
 
-const loadContainer = async (container) => {
+const loadContainer = async (container, session) => {
+  const read=query=>session?query.session(session):query;
   const containerKey = key(container);
   if (!containerKey) throw fail("Container is required");
   const exact = new RegExp(`^${text(container).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
-  const [orders, samples] = await Promise.all([
-    Order.find({ "shipment.container": exact }).select("vendor item.item_code order_id shipment").lean(),
-    Sample.find({ "shipment.container": exact }).select("vendor code shipment timber_cft").lean(),
-  ]);
+  const orderQuery=read(Order.find({ "shipment.container": exact }).select("vendor item.item_code order_id shipment")).lean();
+  const sampleQuery=read(Sample.find({ "shipment.container": exact }).select(timberSpecies.enabled()?"vendor code name description shipment timber_cft hs_code species_composition timber_cft_history item_sizes":"vendor code shipment timber_cft")).lean();
+  const [orders,samples]=session?[await orderQuery,await sampleQuery]:await Promise.all([orderQuery,sampleQuery]);
   const refs = [...orders.map((order) => order.vendor), ...samples.flatMap((sample) => Array.isArray(sample.vendor) ? sample.vendor : sample.vendor ? [sample.vendor] : [])];
   const ids = [...new Set(refs.map(getVendorId).filter(Boolean))];
   const names = [...new Set(refs.map(getVendorName).filter(Boolean))];
   const vendors = ids.length || names.length
-    ? await Vendor.find({ deleted_at: { $exists: false }, $or: [{ _id: { $in: ids } }, ...names.map((name) => ({ name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") }))] }).select("name gst pan").lean()
+    ? await read(Vendor.find({ deleted_at: { $exists: false }, $or: [{ _id: { $in: ids } }, ...names.map((name) => ({ name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") }))] }).select(timberSpecies.enabled()?"name gst pan gst_snapshot":"name gst pan")).lean()
     : [];
   const codes = [...new Set(orders.map((order) => text(order?.item?.item_code)).filter(Boolean))];
-  const items = await Item.find({ code: { $in: codes } }).select("code timber_cft").lean();
+  const items = await read(Item.find({ code: { $in: codes } }).select(timberSpecies.enabled()?"code name description timber_cft hs_code species_composition timber_cft_history pis_item_sizes":"code timber_cft")).lean();
   const itemByCode = new Map(items.map((item) => [key(item.code), item]));
   const groups = new Map();
   const unassigned = [];
@@ -45,7 +48,7 @@ const loadContainer = async (container) => {
     const group = groups.get(vendorId);
     group.rows.push(row);
     if (row.timber_cft == null) group.excluded.push(row);
-    else group.stuffed_milli_cft += row.line_milli_cft;
+    else group.stuffed_milli_cft = addMilliCft(group.stuffed_milli_cft,row.line_milli_cft);
   };
   for (const order of orders) {
     const vendor = resolveVendor(order.vendor, vendors);
@@ -53,7 +56,7 @@ const loadContainer = async (container) => {
     for (const shipment of order.shipment || []) {
       if (key(shipment.container) !== containerKey || Number(shipment.quantity) <= 0) continue;
       const timberCft = item?.timber_cft ?? null;
-      add(vendor, { source: "order", source_id: String(order._id), shipment_id: String(shipment._id), order_id: text(order.order_id), invoice_number: text(shipment.invoice_number), code: text(order?.item?.item_code), quantity: Number(shipment.quantity), timber_cft: timberCft, line_milli_cft: timberCft == null ? null : shipmentMilliCft(timberCft, shipment.quantity) });
+      add(vendor, { source: "order", source_id: String(order._id), shipment_id: String(shipment._id), order_id: text(order.order_id), invoice_number: text(shipment.invoice_number), stuffing_date: shipmentDate(shipment.stuffing_date), code: text(order?.item?.item_code), quantity: Number(shipment.quantity), timber_cft: timberCft, ...reviewMetadata(item), line_milli_cft: timberCft == null ? null : shipmentMilliCft(timberCft, shipment.quantity) });
     }
   }
   for (const sample of samples) {
@@ -62,15 +65,16 @@ const loadContainer = async (container) => {
     for (const shipment of sample.shipment || []) {
       if (key(shipment.container) !== containerKey || Number(shipment.quantity) <= 0) continue;
       const timberCft = sample.timber_cft ?? null;
-      add(vendor, { source: "sample", source_id: String(sample._id), shipment_id: String(shipment._id), order_id: "Sample", invoice_number: text(shipment.invoice_number), code: text(sample.code), quantity: Number(shipment.quantity), timber_cft: timberCft, line_milli_cft: timberCft == null ? null : shipmentMilliCft(timberCft, shipment.quantity) });
+      add(vendor, { source: "sample", source_id: String(sample._id), shipment_id: String(shipment._id), order_id: "Sample", invoice_number: text(shipment.invoice_number), stuffing_date: shipmentDate(shipment.stuffing_date), code: text(sample.code), quantity: Number(shipment.quantity), timber_cft: timberCft, ...reviewMetadata(sample,true), line_milli_cft: timberCft == null ? null : shipmentMilliCft(timberCft, shipment.quantity) });
     }
   }
   const result = [...groups.values()].map((group) => ({
     ...group,
-    vendor: { _id: String(group.vendor._id), name: group.vendor.name, gst: group.vendor.gst || "", pan: group.vendor.pan || "" },
+    vendor: { _id: String(group.vendor._id), name: group.vendor.name, gst: group.vendor.gst || "", pan: group.vendor.pan || "",...(timberSpecies.enabled()?{gst_snapshot:group.vendor.gst_snapshot}: {}) },
     stuffed_cft: group.stuffed_milli_cft / 1000,
     shipment_signature: hash(group.rows.map((row) => [row.source, row.source_id, row.shipment_id, row.order_id, row.invoice_number, row.code, row.quantity, row.timber_cft]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))),
     vendor_signature: hash([normalizeIdentifier(group.vendor.gst), normalizeIdentifier(group.vendor.pan)]),
+    inventory_shipment_signature: hash(group.rows.map(row=>[row.source,row.source_id,row.shipment_id,row.quantity,row.timber_cft,row.stuffing_date,...(timberSpecies.enabled()?[row.hs_code,row.species_composition,row.net_weight_kg_per_unit]:[])]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))),
   }));
   return { container: text(container), vendors: result, unassigned };
 };
@@ -83,7 +87,8 @@ const externalInvalidation = (stages, group) => {
   const finalReceiver = stages.findIndex((stage, index) => stage.kind === "receiver" && stages[index + 1]?.kind === "declaration");
   if (finalReceiver >= 0 && stages[finalReceiver].verified_at && stages[finalReceiver].vendor_signature !== group.vendor_signature) return { index: finalReceiver, reason: "Vendor GST/PAN changed" };
   const declaration = stages.findIndex((stage) => stage.kind === "declaration");
-  if (declaration >= 0 && stages[declaration].verified_at && stages[declaration].shipment_signature !== group.shipment_signature) return { index: declaration, reason: "Stuffed shipment or Timber_CFT changed" };
+  if (declaration >= 0 && stages[declaration].workflow_version >= 3 && stages[declaration].verified_at && stages[declaration].vendor_signature !== group.vendor_signature) return { index: declaration, reason: "Inventory shipping vendor GST/PAN changed" };
+  if (declaration >= 0 && stages[declaration].verified_at && stages[declaration].shipment_signature !== (stages[declaration].workflow_version >= 3 ? group.inventory_shipment_signature || group.shipment_signature : group.shipment_signature)) return { index: declaration, reason: stages[declaration].workflow_version >= 3 ? "Stuffed shipment, date or Timber_CFT changed" : "Stuffed shipment or Timber_CFT changed" };
   return null;
 };
 
@@ -119,20 +124,23 @@ const assertDeclaredCft = (declaredMilliCft, group) => {
 };
 const assertFinalCft = (chain, group, unassigned) => {
   if (unassigned.length) throw fail("Unassigned shipments must be resolved before final declaration", 409);
+  if ((chain.inventory_backed || process.env.EUDR_INVENTORY_REQUIRED === "true") && group.excluded?.length) throw fail("Missing Timber_CFT must be resolved before inventory-backed final declaration", 409);
   assertDeclaredCft(chain.declared_milli_cft, group);
 };
 
 const contributionMilliCft = (chain) => chain.contribution_milli_cft ?? chain.declared_milli_cft;
 const chainVerified = (chain, group, unassigned = []) => Boolean(
   group && !unassigned.length && chain.declared_milli_cft === group.stuffed_milli_cft &&
+  (!chain.inventory_backed || chain.inventory_status === "COMMITTED" && !group.excluded?.length) &&
   contributionMilliCft(chain) > 0 && contributionMilliCft(chain) <= group.stuffed_milli_cft &&
   chain.stages?.length && chain.stages.at(-1).kind === "declaration" &&
   chain.stages.every((stage) => stage.verified_at) && !externalInvalidation(chain.stages, group)
 );
 const chainCoverage = (chains, group, unassigned = []) => {
-  const allocated = chains.reduce((sum, chain) => sum + contributionMilliCft(chain), 0);
-  const verified = chains.filter((chain) => chainVerified(chain, group, unassigned)).reduce((sum, chain) => sum + contributionMilliCft(chain), 0);
-  return { chain_count: chains.length, allocated_cft: allocated / 1000, verified_cft: verified / 1000, remaining_cft: group ? (group.stuffed_milli_cft - allocated) / 1000 : null, complete: Boolean(group && group.stuffed_milli_cft > 0 && allocated === group.stuffed_milli_cft && verified === allocated && !unassigned.length) };
+  const allocated = chains.reduce((sum, chain) => addMilliCft(sum,contributionMilliCft(chain)), 0);
+  const verified = chains.filter((chain) => chainVerified(chain, group, unassigned)).reduce((sum, chain) => addMilliCft(sum,contributionMilliCft(chain)), 0);
+  const inventory=chains.some(c=>c.inventory_backed),legacy=chains.filter(c=>!c.inventory_backed).reduce((total,c)=>addMilliCft(total,contributionMilliCft(c)),0);
+  return { chain_count: chains.length, allocated_cft: allocated / 1000, verified_cft: verified / 1000, remaining_cft: group ? (group.stuffed_milli_cft - allocated) / 1000 : null, complete: Boolean(group && group.stuffed_milli_cft > 0 && allocated === group.stuffed_milli_cft && verified === allocated && !unassigned.length&&(!inventory||!legacy)),...(inventory?{legacy_review_required_cft:legacy/1000}: {}) };
 };
 
 const isSeller = (stage, vendor) => stage.kind === "sawmill" || stage.kind === "receiver" && !receiverMatches(stage.fields || {}, vendor || {});

@@ -1494,6 +1494,7 @@ const PRODUCT_DATABASE_TABLE_V1_COMPLETION_FALLBACK_FIELDS = Object.freeze([
 const ITEM_DETAILS_SELECT = [
   "code",
   "timber_cft",
+  "hs_code", "species_composition", "timber_cft_history",
   "name",
   "description",
   "brand",
@@ -5216,6 +5217,7 @@ exports.updateItem = async (req, res) => {
     const lockedFields = [
       "code",
       "timber_cft",
+  "hs_code", "species_composition", "timber_cft_history",
       "brand_name",
       "brands",
       "vendors",
@@ -5857,6 +5859,7 @@ exports.updateItemPis = async (req, res) => {
     if (hasOwn(payload, "timber_cft")) {
       setPisPath("timber_cft", parseTimberCft(payload.timber_cft));
     }
+    await require("../services/eudrMetadata.service").applyMetadata(item,payload,req.user,beforeItemSnapshot.timber_cft);
     if (hasOwn(payload, "kd")) {
       setPisPath("kd", toBooleanValue(payload.kd, "kd"));
     }
@@ -5948,7 +5951,7 @@ exports.updateItemPis = async (req, res) => {
         admin_override_required_fields: adminOverrideRequiredFields
       }
     });
-    await item.save();
+    await require("../services/eudrMetadata.service").save(item,req.user,beforeItemSnapshot);
     const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
     await createPisUpdateLog({
       reqUser: req.user,

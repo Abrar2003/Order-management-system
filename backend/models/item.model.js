@@ -392,6 +392,7 @@ const itemSchema = new mongoose.Schema(
     name: { type: String, default: "", trim: true },
     description: { type: String, default: "", trim: true },
     timber_cft: { type: Number, default: null, min: 0 },
+    ...require("../helpers/timberSpecies").metadataFields(mongoose),
     brand: { type: String, default: "", trim: true },
     brand_name: { type: String, default: "", trim: true },
     brands: { type: [String], default: [] },
@@ -919,4 +920,5 @@ Item.SIZE_ENTRY_LIMIT = BOX_SIZE_ENTRY_LIMIT;
 Item.ITEM_SIZE_ENTRY_LIMIT = ITEM_SIZE_ENTRY_LIMIT;
 Item.BOX_SIZE_ENTRY_LIMIT = BOX_SIZE_ENTRY_LIMIT;
 
-module.exports = Item;
+itemSchema.add({eudr_review_fence:{type:Number,select:false}});
+module.exports = require("../services/eudrSourceWrites.service").install(Item);

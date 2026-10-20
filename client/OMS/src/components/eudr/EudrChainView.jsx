@@ -1,3 +1,4 @@
+import ReviewPanel from "./ReviewPanel";
 import { useEffect, useMemo, useState } from "react";
 import api from "../../api/axios";
 import { STAGE_LABELS, STAGE_FIELDS, normalizeChainDocuments, missingStageDocuments, formatCft, formatDate, declaredMilliCft, cftMismatchText, requestError } from "../../utils/eudrDocuments";
@@ -5,6 +6,8 @@ import { createDocumentStore } from "./documentStore";
 import { StageMetadata, DocumentGallery, AllDocumentsGallery, FullDocumentViewer } from "./DocumentWorkspace";
 import StageEditor from "./StageEditor";
 import EudrDialog from "./EudrDialog";
+import { ContainerInventoryAllocation } from "./InventoryEditor";
+import { LineageGraph } from "./InventoryCommon";
 import "./eudr.css";
 
 const ACTION_LABELS = { stage_edited: "Stage details updated", document_uploaded: "Document uploaded", stage_verified: "Stage manually verified", verification_invalidated: "Verification revoked", later_stages_superseded: "Later stages superseded", declared_cft_changed: "Declared timber updated", contribution_cft_changed: "Chain contribution updated" };
@@ -53,7 +56,7 @@ export default function EudrChainView({ chain, onChange, onError, onBack }) {
   const mismatch = cftMismatchText(chain.declared_milli_cft, stuffedMilli);
   const enteredMilli = declaredMilliCft(declared);
   const enteredMismatch = cftMismatchText(enteredMilli, stuffedMilli);
-  const canVerifyCft = stuffedMilli != null && !mismatch && contributionMilli > 0 && contributionMilli <= stuffedMilli;
+  const canVerifyCft = stuffedMilli != null && !mismatch && contributionMilli > 0 && contributionMilli <= stuffedMilli && !chain.review?.final_blockers?.length;
   const coverage = chain.coverage;
   const enteredContribution = declaredMilliCft(contribution);
   const available = coverage && stuffedMilli != null ? stuffedMilli - Math.round(coverage.allocated_cft * 1000) + contributionMilli : stuffedMilli;
@@ -81,6 +84,9 @@ export default function EudrChainView({ chain, onChange, onError, onBack }) {
 
     <div className="eudr-summary-grid"><section><span>Declared timber CFT</span><strong>{formatCft(chain.declared_milli_cft / 1000)}</strong><button type="button" className="btn btn-link btn-sm p-0" onClick={() => { setActionError(""); setDeclaredOpen(true); }}>Update declaration amount</button></section><section><span>Calculated stuffed CFT</span><strong>{formatCft(chain.stuffed_cft)}</strong><small className={mismatch ? "text-danger" : "text-success"}>{stuffedMilli == null ? "Shipment total unavailable" : mismatch ? "Does not match declaration" : "Matches declared amount"}</small></section><section><span>Calculation coverage</span><strong>{rows.length - excluded.length}/{rows.length} <small>lines included</small></strong><small className={excluded.length ? "text-warning" : "text-muted"}>{excluded.length ? `${excluded.length} missing Timber_CFT · partial total` : rows.length ? "All shipment lines have Timber_CFT" : "No shipment lines available"}</small></section><section><span>Stage verification</span><strong>{verified}/{chain.stages.length} <small>saved stages</small></strong><small>{missing ? `${missing} required document(s) not uploaded` : chain.complete ? "Final manual review recorded" : "Awaiting manual review"}</small></section></div>
     <p className="eudr-evidence-note">These records document timber traceability and manual review. Administrative verification does not establish EUDR compliance.</p>
+    {chain.review&&<ReviewPanel chain={chain} onChange={onChange}/>}
+    <ContainerInventoryAllocation chain={chain} onChange={onChange} />
+    {chain.inventory_network && <section className="card om-card card-body mb-3"><h2 className="h5">Inherited supply chain</h2><LineageGraph network={chain.inventory_network} /></section>}
     <section className="card om-card card-body mb-3" aria-label="Chain CFT contribution"><div className="d-flex flex-wrap justify-content-between gap-3"><div><h2 className="h5">This chain contributes {formatCft(contributionMilli / 1000)} CFT</h2><p className="small mb-0">The declared and stuffed totals above cover this container/vendor, not each individual purchase. Sale quantities must cover this chain's contribution.</p></div><button type="button" className="btn btn-outline-secondary" disabled={Boolean(busy)} onClick={() => { setActionError(""); setContributionOpen(true); }}>Update chain contribution</button></div>{coverage && <div className={`alert ${coverage.complete ? "alert-success" : "alert-warning"} mt-3 mb-0`} role="status"><strong>{coverage.complete ? "Total timber coverage complete" : "Total timber coverage incomplete"}</strong> · {coverage.chain_count} chain(s) · Allocated: {formatCft(coverage.allocated_cft)} CFT · Verified: {formatCft(coverage.verified_cft)} / {formatCft(chain.stuffed_cft)} CFT · Unallocated: {formatCft(coverage.remaining_cft)} CFT{!coverage.complete && <p className="small mb-0 mt-1">A verified chain alone does not complete the container/vendor. All contributions together must exactly cover the stuffed total and be verified.</p>}</div>}</section>
     {mismatch && <div className="alert alert-danger" role="alert">{mismatch}</div>}
     {excluded.length > 0 && <div className="alert alert-warning" role="status"><strong>Partial CFT total:</strong> {excluded.length} shipment line(s) have no Timber_CFT and are excluded. This can understate the true stuffed CFT.<ul className="mb-0 mt-1">{excluded.map((row) => <li key={`${row.source}-${row.shipment_id}`}>{row.source} {row.code} — quantity {row.quantity}</li>)}</ul></div>}

@@ -191,6 +191,7 @@ const InspectionSchema = new mongoose.Schema(
 
     checked: wholePieceQuantity("checked"),
     passed: wholePieceQuantity("passed"),
+    aql_passed: { type: Number, min: 0, default: null },
     rejected: wholePieceQuantity("rejected"),
 
     // store the "pending after visit" for easy history display
@@ -329,6 +330,18 @@ InspectionSchema.pre("validate", function validateInspectionQuantities() {
 
 InspectionSchema.pre("save", async function guardLabels() {
   await require('../services/labels/labelIntegrity.service').guardInspectionLabels(this);
+});
+
+InspectionSchema.pre("save", async function syncAqlPassed() {
+  if (!this.isNew && !["qc", "request_history_id", "requested_date", "inspector", "vendor_requested", "passed", "aql_passed"].some((field) => this.isModified(field))) return;
+  let qc = this.$locals.qcDoc;
+  if (!qc) {
+    const query = require("./qc.model").findById(this.qc).select("request_type request_history");
+    if (this.$session()) query.session(this.$session());
+    qc = await query.lean();
+  }
+  const { getInspectionPassedFields } = require("../helpers/inspectionPassedQuantity");
+  this.aql_passed = getInspectionPassedFields(this, qc || {}).aql_passed;
 });
 
 // Fast QC details page (history)

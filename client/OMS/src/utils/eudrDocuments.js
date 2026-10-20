@@ -53,7 +53,11 @@ export const cftMismatchText = (declaredMilli, stuffedMilli) => {
 };
 
 // Only stage attachments are current; audit snapshots must never enter either gallery.
-export const normalizeChainDocuments = (chain) => (chain.stages || []).flatMap((stage, stageIndex) => (stage.documents || []).map((document) => {
+export const normalizeChainDocuments = (chain) => {
+  const canonical = chain.inventory_documents || [];
+  const canonicalHashes = new Set(canonical.map(d => d.sha256).filter(Boolean));
+  const stages = [...(chain.stages || []), ...(canonical.length ? [{ _id: "inventory", kind: "inventory", fields: {}, documents: canonical }] : [])];
+  return stages.flatMap((stage, stageIndex) => (stage.documents || []).filter(d => stage.kind === "inventory" || !d.sha256 || !canonicalHashes.has(d.sha256)).map((document) => {
   const extension = String(document.name || "").split(".").pop().toLowerCase();
   const mimeType = document.content_type || "";
   return {
@@ -63,8 +67,10 @@ export const normalizeChainDocuments = (chain) => (chain.stages || []).flatMap((
     originalFilename: document.name, mimeType, format: extension.toUpperCase(), uploadedAt: document.uploaded_at,
     previewKind: mimeType === "application/pdf" || extension === "pdf" ? "pdf" : ["jpg", "jpeg", "png", "webp"].includes(extension) ? "image" : ["doc", "docx", "xls", "xlsx", "csv", "txt"].includes(extension) ? "office" : "other",
     verificationStatus: stage.verified_at ? "Stage verified" : "Stage pending review",
+    ...(stage.kind === "inventory" ? { inventoryDocumentId: String(document._id), inventoryContexts: document.contexts || [], contextLabel: document.contexts?.[0]?.label || "Shared inventory evidence", stageName: "Shared inventory evidence", displayName: document.purpose?.replaceAll("_", " ") || document.name, verificationStatus: "Review owning evidence revision" } : {}),
   };
-}));
+  }));
+};
 
 export const filterChainDocuments = (documents, stageKind, search) => {
   const query = String(search || "").trim().toLowerCase();

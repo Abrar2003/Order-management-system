@@ -30,6 +30,7 @@ function useElementSize(ref) {
 }
 
 export function StageMetadata({ stage, chain }) {
+  if(stage.kind==="inventory")return <p className="small">This private file is shared documentary evidence. Review its owning records and evidence revisions; viewing it does not approve them.</p>;
   const incoming = incomingInvoice(chain, stage);
   return <div className="eudr-metadata">
     <dl>{stageFields(stage, chain).map(([field, label, type]) => <div key={field}>
@@ -95,6 +96,7 @@ export function AllDocumentsGallery({ chain, documents, store, onPreview, onClos
         if (!group.length) return null;
         return <section className="eudr-document-group" key={stage._id}><div className="eudr-section-heading"><h3>{index + 1}. {STAGE_LABELS[stage.kind]}</h3><span>{group.length} document{group.length === 1 ? "" : "s"}</span></div><DocumentGallery documents={group} chainId={chain._id} store={store} onPreview={(document) => onPreview(document, filtered)} /></section>;
       })}
+      {[...new Set(filtered.filter(d=>d.inventoryDocumentId).map(d=>d.contextLabel))].map(label=><section className="eudr-document-group" key={label}><div className="eudr-section-heading"><h3>{label}</h3></div><DocumentGallery documents={filtered.filter(d=>d.inventoryDocumentId&&d.contextLabel===label)} chainId={chain._id} store={store} onPreview={document=>onPreview(document,filtered)} /></section>)}
     </div>
   </EudrDialog>;
 }
@@ -200,6 +202,11 @@ export function FullDocumentViewer({ chain, documents, initialId, store, onClose
     <header className="eudr-dialog-header"><div><span className="eudr-eyebrow">{document.stageIndex + 1}. {document.stageName} · Document {index + 1} of {documents.length}</span><h2 id="eudr-viewer-title">{document.displayName}</h2><p>{document.originalFilename}</p></div><button type="button" className="btn btn-outline-secondary" onClick={onClose}>Close viewer</button></header>
     <div className="eudr-viewer-toolbar"><div className="eudr-toolbar-group"><button type="button" className="btn btn-sm btn-outline-secondary" disabled={index === 0} onClick={() => navigate(-1)}>Previous document</button><button type="button" className="btn btn-sm btn-outline-secondary" disabled={index === documents.length - 1} onClick={() => navigate(1)}>Next document</button></div><div className="eudr-toolbar-group"><button type="button" className="btn btn-sm btn-outline-secondary" aria-label="Zoom out" disabled={zoom <= 0.25} onClick={() => setZoom((value) => Math.max(0.25, value - 0.25))}>−</button><output aria-label="Zoom level">{Math.round(zoom * 100)}%</output><button type="button" className="btn btn-sm btn-outline-secondary" aria-label="Zoom in" disabled={zoom >= 3} onClick={() => setZoom((value) => Math.min(3, value + 0.25))}>+</button><button type="button" className={`btn btn-sm ${fit === "page" ? "btn-dark" : "btn-outline-secondary"}`} onClick={() => { setFit("page"); setZoom(1); }}>Fit page</button><button type="button" className={`btn btn-sm ${fit === "width" ? "btn-dark" : "btn-outline-secondary"}`} onClick={() => { setFit("width"); setZoom(1); }}>Fit width</button></div><button type="button" className="btn btn-sm btn-dark" disabled={downloading} onClick={download}>{downloading ? "Preparing…" : "Download"}</button></div>
     {error && <div className="alert alert-danger m-2" role="alert">{error}</div>}
-    <div className="eudr-viewer-layout"><div className="eudr-viewer-preview"><DocumentContent key={document.id} document={document} store={store} fit={fit} zoom={zoom} /></div><aside className="eudr-viewer-metadata"><span className="eudr-eyebrow">Compare with saved information</span><h3>{document.stageName}</h3><StageMetadata stage={document.stage} chain={chain} />{document.uploadedAt && <p className="small text-muted mt-3">Uploaded {formatDate(document.uploadedAt, true)}</p>}</aside></div>
+    <div className="eudr-viewer-layout"><div className="eudr-viewer-preview"><DocumentContent key={document.id} document={document} store={store} fit={fit} zoom={zoom} /></div>
+      <aside className="eudr-viewer-metadata"><span className="eudr-eyebrow">Compare with saved information</span><h3>{document.stageName}</h3><StageMetadata stage={document.stage} chain={chain} />
+        {document.inventoryContexts?.map(c=><section key={c.resource+":"+c.id} className="mb-3"><strong>{c.label}</strong><p className="small">Evidence revision {c.revision} · Documentary review {c.verification} · Origin review {c.origin_status}</p></section>)}
+        {document.uploadedAt && <p className="small text-muted mt-3">Uploaded {formatDate(document.uploadedAt, true)}</p>}
+      </aside>
+    </div>
   </EudrDialog>;
 }

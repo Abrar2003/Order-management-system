@@ -114,3 +114,15 @@
 @media (max-width: 575px) { .eudr-document-grid, .eudr-stage .eudr-document-grid { grid-template-columns: 1fr; } .eudr-summary-grid { gap: .65rem; } .eudr-summary-grid > section { padding: .85rem; } .eudr-summary-grid strong { font-size: 1.3rem; } .eudr-progress { grid-template-columns: 1fr; } .eudr-thumbnail { aspect-ratio: 4 / 3; } .eudr-document-search { max-width: none; } .eudr-header-actions { width: 100%; } .eudr-report-header .eudr-header-actions .btn { flex: 1; } .eudr-stage .card-body { padding: 1rem; } }
 @media (prefers-reduced-motion: reduce) { .eudr-document-card { transition: none; } }
 @media (max-width: 767px) { .eudr-progress > *::after { display: none; } }
+.eudr-review-workspace .table-responsive > .table,
+.eudr-review-panel .table-responsive > .table {
+  min-width: 680px;
+  table-layout: auto;
+}
+.eudr-review-workspace .table-responsive th,
+.eudr-review-workspace .table-responsive td,
+.eudr-review-panel .table-responsive th,
+.eudr-review-panel .table-responsive td {
+  word-break: normal;
+  overflow-wrap: normal;
+}

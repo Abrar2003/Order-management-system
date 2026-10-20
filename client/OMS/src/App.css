@@ -7961,17 +7961,8 @@ small,
     border-bottom: 0;
   }
 
-  .qc-details-record-table td:nth-child(1)::before { content: "Request Date"; }
-  .qc-details-record-table td:nth-child(2)::before { content: "Inspection Date"; }
-  .qc-details-record-table td:nth-child(3)::before { content: "Inspector"; }
-  .qc-details-record-table td:nth-child(4)::before { content: "Requested"; }
-  .qc-details-record-table td:nth-child(5)::before { content: "Offered"; }
-  .qc-details-record-table td:nth-child(6)::before { content: "Inspected"; }
-  .qc-details-record-table td:nth-child(7)::before { content: "Passed"; }
-  .qc-details-record-table td:nth-child(8)::before { content: "CBM"; }
-  .qc-details-record-table td:nth-child(9)::before { content: "Pending"; }
-  .qc-details-record-table td:nth-child(10)::before { content: "Remarks"; }
-  .qc-details-record-table td:nth-child(11)::before { content: "Action"; }
+
+  .qc-details-record-table td::before { content: attr(data-label); }
 
   .qc-details-shipping-table td:nth-child(1)::before { content: "Stuffing Date"; }
   .qc-details-shipping-table td:nth-child(2)::before { content: "Container"; }
@@ -9366,17 +9357,6 @@ button.om-item-order-presence-label {
   .qc-list-table td:nth-child(10)::before { content: "Inspector"; }
   .qc-list-table td:nth-child(11)::before { content: "Actions"; }
 
-  .qc-details-record-table td:nth-child(1)::before { content: "Request Date"; }
-  .qc-details-record-table td:nth-child(2)::before { content: "Inspection Date"; }
-  .qc-details-record-table td:nth-child(3)::before { content: "Inspector"; }
-  .qc-details-record-table td:nth-child(4)::before { content: "Requested"; }
-  .qc-details-record-table td:nth-child(5)::before { content: "Offered"; }
-  .qc-details-record-table td:nth-child(6)::before { content: "Inspected"; }
-  .qc-details-record-table td:nth-child(7)::before { content: "Passed"; }
-  .qc-details-record-table td:nth-child(8)::before { content: "CBM"; }
-  .qc-details-record-table td:nth-child(9)::before { content: "Pending"; }
-  .qc-details-record-table td:nth-child(10)::before { content: "Remarks"; }
-  .qc-details-record-table td:nth-child(11)::before { content: "Action"; }
 
   .qc-details-shipping-table td:nth-child(1)::before { content: "Stuffing Date"; }
   .qc-details-shipping-table td:nth-child(2)::before { content: "Container"; }
@@ -10420,6 +10400,15 @@ button.om-item-order-presence-label {
     table-layout: fixed;
   }
 
+  .qc-details-record-table th.qc-record-aql-passed {
+    width: 6rem;
+  }
+
+  .qc-details-record-table th.qc-record-aql-passed .om-sort-header > span:first-child {
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
   .qc-details-record-table th:nth-child(1),
   .qc-details-record-table td:nth-child(1),
   .qc-details-record-table th:nth-child(2),
@@ -10432,18 +10421,18 @@ button.om-item-order-presence-label {
     width: 8.5rem;
   }
 
-  .qc-details-record-table th:nth-child(10),
-  .qc-details-record-table td:nth-child(10) {
+  .qc-details-record-table th.qc-record-status,
+  .qc-details-record-table td.qc-record-status {
     width: 8rem;
   }
 
-  .qc-details-record-table th:nth-child(11),
-  .qc-details-record-table td:nth-child(11) {
+  .qc-details-record-table th.qc-record-remarks,
+  .qc-details-record-table td.qc-record-remarks {
     width: 10.5rem;
     min-width: 10.5rem;
   }
 
-  .qc-details-record-table td:nth-child(11) {
+  .qc-details-record-table td.qc-record-remarks {
     padding-inline: 0.65rem;
   }
 
@@ -10556,14 +10545,14 @@ button.om-item-order-presence-label {
     white-space: normal;
   }
 
-  .qc-details-record-table th:nth-child(10),
-  .qc-details-record-table td:nth-child(10) {
+  .qc-details-record-table th.qc-record-status,
+  .qc-details-record-table td.qc-record-status {
     width: 9rem !important;
     white-space: normal;
   }
 
-  .qc-details-record-table th:nth-child(11),
-  .qc-details-record-table td:nth-child(11) {
+  .qc-details-record-table th.qc-record-remarks,
+  .qc-details-record-table td.qc-record-remarks {
     width: 11rem !important;
     min-width: 11rem !important;
   }

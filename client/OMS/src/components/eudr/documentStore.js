@@ -1,6 +1,8 @@
 import api from "../../api/axios";
 
-export const documentEndpoint = (chainId, document, action) => `/eudr/${chainId}/stages/${document.stageId}/documents/${document.documentId}/${action}`;
+export const documentEndpoint = (chainId, document, action) => document.inventoryDocumentId
+  ? `/eudr/inventory/documents/${document.inventoryDocumentId}/${action}`
+  : `/eudr/${chainId}/stages/${document.stageId}/documents/${document.documentId}/${action}`;
 
 export function createDocumentStore(chainId) {
   const resources = new Map();

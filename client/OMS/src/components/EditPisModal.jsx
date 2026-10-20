@@ -1,3 +1,4 @@
+import TimberMetadataFields from "./eudr/TimberMetadataFields";
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import useFormDraft from "../hooks/useFormDraft";
@@ -313,6 +314,7 @@ const buildInitialForm = (item = {}, options = {}) => {
   return {
     country_of_origin: resolvedCountryOfOrigin,
     timber_cft: item?.timber_cft == null ? "" : String(item.timber_cft),
+    hs_code:item?.hs_code||"",species_composition:item?.species_composition||[],
     barcode_exempted: item?.barcode_exempted === true,
     kd: Boolean(item?.kd),
     mounting_file_needed: Boolean(item?.mounting_file_needed),
@@ -798,7 +800,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         pis_box_mode: form.pis_box_mode,
         pis_item_sizes: pisItemPayload.value,
         pis_box_sizes: pisBoxPayload.value,
-        timber_cft: form.timber_cft,
+        timber_cft: form.timber_cft, hs_code:form.hs_code,...(form.species_composition?.length?{species_composition:form.species_composition}:{}),
       };
       payload.country_of_origin = toText(form.country_of_origin);
       if (masterBarcode || allowMissingRequiredFields) {
@@ -942,6 +944,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                   disabled={saving}
                 />
               </div>
+              <TimberMetadataFields value={form} onChange={patch=>Object.entries(patch).forEach(([key,value])=>updateField(key,value))} disabled={saving}/>
               <div className="col-md-4">
                 <label className="form-label">K/D</label>
                 <div className="btn-group w-100" role="group" aria-label="K/D">

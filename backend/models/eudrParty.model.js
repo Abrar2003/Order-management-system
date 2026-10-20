@@ -1,7 +1,8 @@
 const mongoose = require("mongoose");
 
 const schema = new mongoose.Schema({
-  kind: { type: String, enum: ["sawmill", "transporter", "vehicle", "buyer"], required: true },
+  kind: { type: String, enum: ["sawmill", "transporter", "vehicle", "buyer", "generator"], required: true },
+  role:{type:String,enum:["Generator","Trader","Transporter","Sawmill","Exporter"]},gst_snapshot:mongoose.Schema.Types.Mixed,revision:{type:Number,default:1},
   identity_key: { type: String, required: true },
   name: { type: String, required: true },
   parent_key: String,

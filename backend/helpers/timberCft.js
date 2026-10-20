@@ -3,7 +3,7 @@ const normalizeIdentifier = (value) => String(value ?? "").toUpperCase().replace
 const parseTimberCft = (value) => {
   if (value === undefined || value === null || String(value).trim() === "") return null;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0 || Math.abs(Math.round(parsed * 1000) - parsed * 1000) > 1e-7) {
+  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isSafeInteger(Math.round(parsed * 1000)) || Math.abs(Math.round(parsed * 1000) - parsed * 1000) > 1e-7) {
     const error = new Error("Timber_CFT must be a non-negative number with at most three decimals");
     error.statusCode = 400;
     throw error;
@@ -11,8 +11,13 @@ const parseTimberCft = (value) => {
   return parsed;
 };
 
-const toMilliCft = (value) => Math.round(Number(value) * 1000);
-const shipmentMilliCft = (perUnit, quantity) => Math.round(toMilliCft(perUnit) * Number(quantity));
+const safeMilli = value => {
+  if (!Number.isSafeInteger(value) || value < 0) throw Object.assign(new Error("Timber quantity exceeds safe milli-CFT arithmetic"), { statusCode: 400 });
+  return value;
+};
+const toMilliCft = (value) => safeMilli(Math.round(Number(value) * 1000));
+const shipmentMilliCft = (perUnit, quantity) => safeMilli(Math.round(toMilliCft(perUnit) * Number(quantity)));
+const addMilliCft = (a,b) => safeMilli(a+b);
 
 const financialYear = (dateValue) => {
   const value = String(dateValue || "");
@@ -36,4 +41,4 @@ const invoiceKey = ({ issuer_gst, invoice_number, invoice_date }) => {
   return `${gst}|${financialYear(invoice_date)}|${number}`;
 };
 
-module.exports = { normalizeIdentifier, parseTimberCft, toMilliCft, shipmentMilliCft, financialYear, invoiceKey };
+module.exports = { normalizeIdentifier, parseTimberCft, toMilliCft, shipmentMilliCft, financialYear, invoiceKey, addMilliCft };

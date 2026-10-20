@@ -1101,6 +1101,7 @@ const QCPage = () => {
                     </tr>
                   ) : (
                     qcList.map((qc) => {
+                      const hasAqlRequests = qc.request_type === "AQL" || qc.request_history?.some((request) => request.request_type === "AQL");
                       const pendingAlignmentInfo = getPendingAlignmentInfo(qc);
                       const hasAlignTarget =
                         Boolean(String(qc?.order?._id || "").trim()) &&
@@ -1147,8 +1148,9 @@ const QCPage = () => {
                           </td> */}
                           <td>
                             {renderInspectionStatus(qc)}
+                            {qc.request_type === "AQL" && <span className="badge text-bg-info ms-1">AQL</span>}
                           </td>
-                          <td>{toSafeNumber(qc?.last_inspection?.passed) ?? 0}</td>
+                          <td>{toSafeNumber(hasAqlRequests ? qc?.quantities?.qc_passed : qc?.last_inspection?.passed) ?? 0}</td>
                           <td>
                             <span
                               className={[

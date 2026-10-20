@@ -941,12 +941,16 @@ const InspectionReport = () => {
         offeredQty: Number(record?.vendor_offered ?? 0),
         inspectedQty: Number(record?.checked ?? 0),
         passedQty: Number(record?.passed ?? 0),
+        requestType: record?.request_type || "FULL",
+        aqlPassedQty: Number(record?.aql_passed ?? 0),
         pendingAfter: Number(record?.pending_after ?? 0),
         remarks: toDisplayValue(record?.remarks, "None"),
         sortTime: getInspectionRecordSortTime(record),
       }))
       .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0));
   }, [qc?.request_date, reportInspectionRecords]);
+
+  const showAqlPassed = inspectionRows.some((row) => row.requestType === "AQL");
 
   const latestInspectionRecord = useMemo(() => {
     const sourceRows = reportInspectionRecords;
@@ -1114,6 +1118,7 @@ const InspectionReport = () => {
           if (column === "offered") return Number(row?.offeredQty || 0);
           if (column === "inspected") return Number(row?.inspectedQty || 0);
           if (column === "passed") return Number(row?.passedQty || 0);
+          if (column === "aqlPassed") return row.requestType === "AQL" ? row.aqlPassedQty : -1;
           if (column === "pending") return Number(row?.pendingAfter || 0);
           return "";
         },
@@ -2136,6 +2141,10 @@ const InspectionReport = () => {
                             onClick={() => handleInspectionSortColumn("passed", "desc")}
                           />
                         </th>
+                        {showAqlPassed && <th>
+                          <SortHeaderButton label="AQL passed" isActive={inspectionSortBy === "aqlPassed"}
+                            direction={inspectionSortOrder} onClick={() => handleInspectionSortColumn("aqlPassed", "desc")} />
+                        </th>}
                         <th>
                           <SortHeaderButton
                             label="Pending"
@@ -2156,6 +2165,7 @@ const InspectionReport = () => {
                           <td>{row.offeredQty}</td>
                           <td>{row.inspectedQty}</td>
                           <td>{row.passedQty}</td>
+                          {showAqlPassed && <td>{row.requestType === "AQL" ? row.aqlPassedQty : "—"}</td>}
                           <td>{row.pendingAfter}</td>
                         </tr>
                       ))}

@@ -52,11 +52,22 @@ const {
   parseDateOnly,
   toDateOnlyIso,
 } = require("../helpers/dateOnly");
-const { buildApprovedGoodsQuantityByInspectionId } = require("../helpers/inspectionPassedQuantity");
+const {
+  applyInspectionRecordPendingAfter,
+  buildApprovedGoodsQuantityByInspectionId,
+  buildInspectionPassedStages,
+  buildEffectivePassedQuantityByInspectionId,
+  calculateQcAggregateMetrics,
+  getEffectiveRequestPassedQuantity,
+  getInspectionPassedFields,
+  normalizeQcRequestType,
+  resolveInspectionRequestGroupKey,
+} = require("../helpers/inspectionPassedQuantity");
 const {
   isLabelExemptUser,
   parseUserIdList,
 } = require("../helpers/labelExemptUsers");
+const { loadInspectionPassedHistory } = require("../services/inspectionPassedQuantity.service");
 const labelStorageService = require("../services/labels/labelStorage.service");
 const liveLabelProjection = require("../services/labels/liveLabelProjection.service");
 const {
@@ -482,212 +493,6 @@ const buildActiveOrderLookupStage = (asField = "order", user = null) => ({
     as: asField,
   },
 });
-const normalizeQcRequestType = (value) => {
-  const normalized = String(value || "")
-    .trim()
-    .toUpperCase();
-  if (normalized === QC_REQUEST_TYPES.AQL) return QC_REQUEST_TYPES.AQL;
-  return QC_REQUEST_TYPES.FULL;
-};
-const getEffectiveRequestPassedQuantity = ({
-  requestType = "",
-  samplePassed = 0,
-  requestedQuantity = 0,
-}) => {
-  const safeSamplePassed = toNonNegativeNumber(samplePassed, 0);
-  if (normalizeQcRequestType(requestType) !== QC_REQUEST_TYPES.AQL) {
-    return safeSamplePassed;
-  }
-
-  return safeSamplePassed > 0
-    ? toNonNegativeNumber(requestedQuantity, 0)
-    : 0;
-};
-
-const resolveInspectionRequestGroupKey = (record = {}, fallbackKey = "") => {
-  const requestHistoryId = String(record?.request_history_id || "").trim();
-  if (requestHistoryId) return `request:${requestHistoryId}`;
-
-  const requestedDateKey = toISODateString(
-    record?.requested_date || record?.inspection_date || record?.createdAt,
-  );
-  const inspectorId = String(
-    record?.inspector?._id || record?.inspector || "",
-  ).trim();
-  if (requestedDateKey && inspectorId) {
-    return `date:${requestedDateKey}:inspector:${inspectorId}`;
-  }
-  if (requestedDateKey) {
-    return `date:${requestedDateKey}`;
-  }
-
-  const recordId = String(record?._id || "").trim();
-  if (recordId) return `record:${recordId}`;
-  return fallbackKey || "record:unknown";
-};
-
-const calculateQcAggregateMetrics = (qcDoc, inspectionRecords = []) => {
-  const safeInspectionRecords = Array.isArray(inspectionRecords)
-    ? inspectionRecords.filter(
-        (record) =>
-          normalizeInspectionStatus(record?.status) !==
-          normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED),
-      )
-    : [];
-  const requestHistoryQuantityById = new Map(
-    (Array.isArray(qcDoc?.request_history) ? qcDoc.request_history : [])
-      .map((entry) => [
-        String(entry?._id || "").trim(),
-        toNonNegativeNumber(entry?.quantity_requested, 0),
-      ])
-      .filter(([requestHistoryId]) => requestHistoryId),
-  );
-  const requestType = normalizeQcRequestType(qcDoc?.request_type);
-  const fallbackRequestedQuantity = resolveRequestedQuantityFromQc(qcDoc);
-  const requestGroupMetrics = new Map();
-
-  const totalChecked = safeInspectionRecords.reduce(
-    (sum, record) => sum + toNonNegativeNumber(record?.checked, 0),
-    0,
-  );
-  const totalVendorOffered = safeInspectionRecords.reduce(
-    (sum, record) => sum + toNonNegativeNumber(record?.vendor_offered, 0),
-    0,
-  );
-  const totalSamplePassed = safeInspectionRecords.reduce(
-    (sum, record) => sum + toNonNegativeNumber(record?.passed, 0),
-    0,
-  );
-  const totalRejected = safeInspectionRecords.reduce(
-    (sum, record) => sum + toNonNegativeNumber(record?.rejected, 0),
-    0,
-  );
-
-  safeInspectionRecords.forEach((record, index) => {
-    const requestGroupKey = resolveInspectionRequestGroupKey(
-      record,
-      `fallback:${index}`,
-    );
-    const requestHistoryId = String(record?.request_history_id || "").trim();
-    const recordRequestedQuantity = toNonNegativeNumber(
-      record?.vendor_requested,
-      0,
-    );
-    const historyRequestedQuantity = requestHistoryId
-      ? toNonNegativeNumber(requestHistoryQuantityById.get(requestHistoryId), 0)
-      : 0;
-    const requestMetrics = requestGroupMetrics.get(requestGroupKey) || {
-      requestedQuantity: 0,
-      samplePassed: 0,
-    };
-
-    requestMetrics.requestedQuantity = Math.max(
-      requestMetrics.requestedQuantity,
-      recordRequestedQuantity,
-      historyRequestedQuantity,
-    );
-    requestMetrics.samplePassed += toNonNegativeNumber(record?.passed, 0);
-    requestGroupMetrics.set(requestGroupKey, requestMetrics);
-  });
-
-  const totalEffectivePassed = Array.from(requestGroupMetrics.values()).reduce(
-    (sum, requestMetrics) =>
-      sum +
-      getEffectiveRequestPassedQuantity({
-        requestType,
-        samplePassed: requestMetrics.samplePassed,
-        requestedQuantity:
-          requestMetrics.requestedQuantity > 0
-            ? requestMetrics.requestedQuantity
-            : fallbackRequestedQuantity,
-      }),
-    0,
-  );
-
-  return {
-    totalChecked,
-    totalVendorOffered,
-    totalSamplePassed,
-    totalRejected,
-    totalEffectivePassed,
-  };
-};
-
-const applyInspectionRecordPendingAfter = (qcDoc, inspectionRecords = []) => {
-  const records = Array.isArray(inspectionRecords)
-    ? inspectionRecords.filter(
-        (record) =>
-          normalizeInspectionStatus(record?.status) !==
-          normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED),
-      )
-    : [];
-  if (records.length === 0) return;
-
-  const requestHistoryQuantityById = new Map(
-    (Array.isArray(qcDoc?.request_history) ? qcDoc.request_history : [])
-      .map((entry) => [
-        String(entry?._id || "").trim(),
-        toNonNegativeNumber(entry?.quantity_requested, 0),
-      ])
-      .filter(([requestHistoryId]) => requestHistoryId),
-  );
-  const requestType = normalizeQcRequestType(qcDoc?.request_type);
-  const fallbackRequestedQuantity = resolveRequestedQuantityFromQc(qcDoc);
-  const clientDemandQty = toNonNegativeNumber(qcDoc?.quantities?.client_demand, 0);
-  const requestGroupMetrics = new Map();
-
-  const sortedRecords = [...records].sort((left, right) => {
-    const leftTime = Math.max(
-      toSortableTimestamp(left?.inspection_date),
-      toSortableTimestamp(left?.createdAt),
-    );
-    const rightTime = Math.max(
-      toSortableTimestamp(right?.inspection_date),
-      toSortableTimestamp(right?.createdAt),
-    );
-    if (leftTime !== rightTime) return leftTime - rightTime;
-    return String(left?._id || "").localeCompare(String(right?._id || ""));
-  });
-
-  sortedRecords.forEach((record, index) => {
-    const requestGroupKey = resolveInspectionRequestGroupKey(
-      record,
-      `fallback:${index}`,
-    );
-    const requestHistoryId = String(record?.request_history_id || "").trim();
-    const recordRequestedQuantity = toNonNegativeNumber(record?.vendor_requested, 0);
-    const historyRequestedQuantity = requestHistoryId
-      ? toNonNegativeNumber(requestHistoryQuantityById.get(requestHistoryId), 0)
-      : 0;
-    const requestMetrics = requestGroupMetrics.get(requestGroupKey) || {
-      requestedQuantity: 0,
-      samplePassed: 0,
-    };
-
-    requestMetrics.requestedQuantity = Math.max(
-      requestMetrics.requestedQuantity,
-      recordRequestedQuantity,
-      historyRequestedQuantity,
-    );
-    requestMetrics.samplePassed += toNonNegativeNumber(record?.passed, 0);
-    requestGroupMetrics.set(requestGroupKey, requestMetrics);
-
-    const effectivePassedThroughRecord = Array.from(requestGroupMetrics.values()).reduce(
-      (sum, metrics) =>
-        sum +
-        getEffectiveRequestPassedQuantity({
-          requestType,
-          samplePassed: metrics.samplePassed,
-          requestedQuantity:
-            metrics.requestedQuantity > 0 ? metrics.requestedQuantity : fallbackRequestedQuantity,
-        }),
-      0,
-    );
-
-    record.pending_after = Math.max(0, clientDemandQty - effectivePassedThroughRecord);
-  });
-};
-
 const getQcLabelRequirement = ({
   totalPassed = 0,
   boxSizesCount = 0,
@@ -3368,7 +3173,7 @@ const upsertInspectionRecordForRequest = async ({
   const inspectionBarcodeSnapshot = buildInspectionBarcodeSnapshotFromQc(qcDoc);
 
   if (!inspectionRecord) {
-    inspectionRecord = await Inspection.create({
+    inspectionRecord = new Inspection({
       qc: qcDoc._id,
       inspector: resolvedInspectorId,
       inspection_date: resolvedInspectionDate,
@@ -3407,6 +3212,9 @@ const upsertInspectionRecordForRequest = async ({
       createdBy,
       updated_by: buildAuditActor(auditUser),
     });
+
+    inspectionRecord.$locals.qcDoc = qcDoc;
+    await inspectionRecord.save();
 
     qcDoc.inspection_record = qcDoc.inspection_record || [];
     if (
@@ -3518,6 +3326,7 @@ const upsertInspectionRecordForRequest = async ({
   }
   inspectionRecord.updated_by = buildAuditActor(auditUser);
 
+  inspectionRecord.$locals.qcDoc = qcDoc;
   await inspectionRecord.save();
 
   qcDoc.inspection_record = qcDoc.inspection_record || [];
@@ -8518,8 +8327,9 @@ exports.getInspectorReports = async (req, res) => {
         reportRange.to_date_iso,
       );
     });
-    const approvedQuantityByInspectionId =
-      buildApprovedGoodsQuantityByInspectionId(reportInspections);
+    const visitsWithQc = await loadInspectionPassedHistory(reportInspections);
+    const approvedQuantityByInspectionId = buildApprovedGoodsQuantityByInspectionId(visitsWithQc);
+    const effectiveQuantityByInspectionId = buildEffectivePassedQuantityByInspectionId(visitsWithQc);
     const inspections = selectedInspector
       ? reportInspections.filter(
           (entry) =>
@@ -8581,7 +8391,7 @@ exports.getInspectorReports = async (req, res) => {
     for (const inspection of inspections) {
       const requestedQty = toNonNegativeNumber(inspection?.vendor_requested, 0);
       const inspectedQty = toNonNegativeNumber(inspection?.checked, 0);
-      const passedQty = toNonNegativeNumber(inspection?.passed, 0);
+      const passedQty = effectiveQuantityByInspectionId.get(String(inspection._id)) || 0;
       const itemCodeKey = normalizeItemCodeKey(inspection?.qc?.item?.item_code || "");
       const itemDoc = itemDocByCodeKey.get(itemCodeKey) || null;
       const cbmPerUnit = resolveItemReportCbmPerUnit(itemDoc, inspection);
@@ -9639,6 +9449,7 @@ exports.getDailyOrderSummary = async (req, res) => {
     }
 
     const dailyRows = await Inspection.aggregate([
+      ...buildInspectionPassedStages(),
       {
         $addFields: {
           inspection_date_value: {
@@ -9668,13 +9479,17 @@ exports.getDailyOrderSummary = async (req, res) => {
           inspection_date: { $first: "$inspection_date" },
           status: { $first: "$status" },
           requested_quantity: { $first: "$vendor_requested" },
-          passed_quantity: { $first: "$passed" },
+          aql_passed_quantity: { $sum: { $cond: [{ $eq: ["$request_type", "AQL"] }, "$effective_passed", 0] } },
+          normal_passed_quantities: { $push: { $cond: [{ $eq: ["$request_type", "AQL"] }, null, "$effective_passed"] } },
           open_quantity: { $first: "$pending_after" },
           goods_not_ready: { $first: "$goods_not_ready" },
           remarks: { $first: "$remarks" },
           inspector_id: { $first: "$inspector" },
         },
       },
+      { $set: { passed_quantity: { $add: ["$aql_passed_quantity", { $ifNull: [
+        { $arrayElemAt: [{ $filter: { input: "$normal_passed_quantities", as: "quantity", cond: { $ne: ["$$quantity", null] } } }, 0] }, 0,
+      ] }] } } },
       {
         $lookup: {
           from: QC.collection.name,
@@ -12065,6 +11880,8 @@ exports.getDailyReport = async (req, res) => {
         .lean()
       : [];
 
+    const dailyPassedHistory = await loadInspectionPassedHistory([...alignedRequestInspections, ...inspections]);
+    const dailyPassedQuantities = buildEffectivePassedQuantityByInspectionId(dailyPassedHistory);
     const alignedRequestInspectionsByQcId = new Map();
     for (const inspection of alignedRequestInspections) {
       if (!isInspectionVisibleForReportDate(inspection)) {
@@ -12249,7 +12066,7 @@ exports.getDailyReport = async (req, res) => {
             inspector: toInspectorSummary(requestEntry?.inspector),
             quantity_requested: Number(requestEntry?.quantity_requested || 0),
             quantity_inspected: inspectedQty,
-            quantity_passed: Number(latestInspection?.passed || 0),
+            quantity_passed: dailyPassedQuantities.get(String(latestInspection?._id)) || 0,
             quantity_pending: Number(
               latestInspection?.pending_after ?? qc?.quantities?.pending ?? 0,
             ),
@@ -12322,7 +12139,7 @@ exports.getDailyReport = async (req, res) => {
         item_code: qcRecord?.item?.item_code || "N/A",
         description: qcRecord?.item?.description || "N/A",
         inspected_quantity: inspectedQty,
-        passed_quantity: Number(inspection?.passed || 0),
+        passed_quantity: dailyPassedQuantities.get(String(inspection?._id)) || 0,
         vendor_requested: Number(inspection?.vendor_requested || 0),
         vendor_offered: Number(inspection?.vendor_offered || 0),
         pending_after: Number(inspection?.pending_after || 0),
@@ -13832,7 +13649,7 @@ exports.getQCById = async (req, res) => {
           : qcData?.rejected_image || null,
         labels: sortedLabels,
         request_history: sortedRequestHistory,
-        inspection_record: signedInspectionRecords,
+        inspection_record: signedInspectionRecords.map((record) => ({ ...record, ...getInspectionPassedFields(record, qcData) })),
       },
     });
   } catch (err) {
@@ -15251,7 +15068,7 @@ exports.syncInspectionStatuses = async (req, res) => {
         ],
       })
         .select(
-          "qc status inspector checked passed rejected vendor_offered vendor_requested labels_added label_ranges goods_not_ready requested_date inspection_date request_history_id remarks createdAt updatedAt",
+          "qc status inspector checked passed rejected aql_passed vendor_offered vendor_requested labels_added label_ranges goods_not_ready requested_date inspection_date request_history_id remarks createdAt updatedAt",
         )
         .populate({
           path: "qc",
@@ -15283,13 +15100,15 @@ exports.syncInspectionStatuses = async (req, res) => {
           explicitStatus: inspection?.status,
         });
 
-        if (String(inspection?.status || "") !== nextStatus) {
+        const { aql_passed } = getInspectionPassedFields(inspection);
+        if (String(inspection?.status || "") !== nextStatus || inspection.aql_passed !== aql_passed) {
           bulkOps.push({
             updateOne: {
               filter: { _id: inspection._id },
               update: {
                 $set: {
                   status: nextStatus,
+                  aql_passed,
                   updated_by: buildAuditActor(req.user, "Daily Report Sync"),
                 },
               },
@@ -15563,9 +15382,9 @@ exports.syncInspectionStatuses = async (req, res) => {
 
     const inspections = await Inspection.find({})
       .select(
-        "qc status checked passed rejected vendor_offered labels_added label_ranges goods_not_ready",
+        "qc status checked passed rejected vendor_requested vendor_offered requested_date request_history_id inspector aql_passed labels_added label_ranges goods_not_ready",
       )
-      .populate("qc", "request_type")
+      .populate("qc", "request_type request_history")
       .lean();
 
     const bulkOps = [];
@@ -15582,13 +15401,15 @@ exports.syncInspectionStatuses = async (req, res) => {
         requestType: inspection?.qc?.request_type,
       });
 
-      if (String(inspection?.status || "") !== nextStatus) {
+      const { aql_passed } = getInspectionPassedFields(inspection);
+      if (String(inspection?.status || "") !== nextStatus || inspection.aql_passed !== aql_passed) {
         bulkOps.push({
           updateOne: {
             filter: { _id: inspection._id },
             update: {
               $set: {
                 status: nextStatus,
+                aql_passed,
                 updated_by: buildAuditActor(req.user, "System Sync"),
               },
             },

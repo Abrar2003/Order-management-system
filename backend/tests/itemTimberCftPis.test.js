@@ -1,4 +1,8 @@
 const test = require("node:test");
+// These mocks cover the legacy contract; feature-on transactions use the isolated review integration suite.
+const inheritedReviewFlag=process.env.EUDR_REVIEW_LAYER;
+test.before(()=>{process.env.EUDR_REVIEW_LAYER="false";});
+test.after(()=>{if(inheritedReviewFlag===undefined)delete process.env.EUDR_REVIEW_LAYER;else process.env.EUDR_REVIEW_LAYER=inheritedReviewFlag;});
 const assert = require("node:assert/strict");
 const Item = require("../models/item.model");
 const PisUpdateLog = require("../models/pisUpdateLog.model");

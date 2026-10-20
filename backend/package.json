@@ -35,6 +35,12 @@
     "import:rectify-items": "node scripts/importRectifyItems.js",
     "repair:label-transaction-index": "node scripts/repairLabelTransactionLegacyKeyIndex.js",
     "test": "node --test tests/*.test.js",
+    "test:eudr-review": "node --test tests/eudrReview.test.js tests/eudrStageSupport.gate.test.js",
+    "test:eudr-review:integration": "node --test tests/eudrReview.integration.js",
+    "test:eudr-review:browser": "node tests/eudrReview.browser.js",
+    "test:eudr-inventory": "node --test tests/eudrQuantity.test.js tests/eudrInventory.test.js",
+    "test:eudr-inventory:integration": "node --test tests/eudrInventory.integration.js",
+    "migrate:eudr-inventory": "node scripts/eudrInventoryMigration.js",
     "test:pdf": "node --test tests/pdfArchitecture.test.js tests/pdfRenderer.test.js",
     "serve": "npm run dev"
   },
