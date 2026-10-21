@@ -749,12 +749,12 @@ const VendorDetails = () => {
 
                     <div className="col-md-6 d-flex align-items-end">
                       <div className="w-100">
-                        <label className="form-label fw-semibold">GST (required for EUDR)</label>
+                        <label className="form-label fw-semibold">GST</label>
                         <input name="gst" className="form-control" value={editForm.gst} onChange={handleEditChange} />
                       </div>
                     </div>
                     <div className="col-md-6">
-                      <label className="form-label fw-semibold">PAN (required for EUDR)</label>
+                      <label className="form-label fw-semibold">PAN</label>
                       <input name="pan" className="form-control" value={editForm.pan} onChange={handleEditChange} />
                     </div>
                     <div className="col-md-6 d-flex align-items-end">

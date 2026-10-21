@@ -248,5 +248,4 @@ sampleSchema.pre("validate", function backfillLegacyShipmentInvoices() {
   });
 });
 
-sampleSchema.add({eudr_review_fence:{type:Number,select:false}});
-module.exports = require("../services/eudrSourceWrites.service").install(mongoose.model("samples", sampleSchema));
+module.exports = mongoose.model("samples", sampleSchema);

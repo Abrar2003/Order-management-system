@@ -1,8 +1,4 @@
 const test = require("node:test");
-// These mocks cover the legacy contract; feature-on transactions use the isolated review integration suite.
-const inheritedReviewFlag=process.env.EUDR_REVIEW_LAYER;
-test.before(()=>{process.env.EUDR_REVIEW_LAYER="false";});
-test.after(()=>{if(inheritedReviewFlag===undefined)delete process.env.EUDR_REVIEW_LAYER;else process.env.EUDR_REVIEW_LAYER=inheritedReviewFlag;});
 const assert = require("node:assert/strict");
 const Item = require("../models/item.model");
 const PisUpdateLog = require("../models/pisUpdateLog.model");
@@ -48,4 +44,16 @@ test("general item endpoints cannot change Timber_CFT", async (t) => {
   await createItem({ body: { timber_cft: 1 }, user: { role: "admin" } }, created);
   assert.equal(created.code, 400);
   assert.match(created.body.message, /PIS update/);
+});
+
+test("PIS saves HS metadata on its own without a legacy ledger", async (t) => {
+  const item = new Item({ _id: itemId, code: "TEST-HS", barcode_exempted: true, timber_cft: 2 });
+  t.mock.method(Item, "findOne", async () => item);
+  t.mock.method(item, "save", async () => item);
+  t.mock.method(PisUpdateLog, "create", async () => {});
+  const res = response();
+  await updateItemPis({ params: { id: itemId }, body: { hs_code: "9403 60" }, user: { role: "admin" } }, res);
+  assert.equal(res.code, 200);
+  assert.equal(item.hs_code, "940360");
+  assert.equal(item.timber_cft, 2);
 });

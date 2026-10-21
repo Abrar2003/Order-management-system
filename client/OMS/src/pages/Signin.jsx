@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { signin } from "../auth/auth.service";
 import { useNavigate } from "react-router-dom";
-import { eudrContinuation } from '../utils/eudrContinuation';
 import "../App.css";
 
 const clearSigninOverlays = () => {
@@ -59,10 +58,7 @@ const SignIn = () => {
         window.setTimeout(clearSigninOverlays, delay),
       );
 
-      const resume = eudrContinuation(window.location.search, import.meta.env.VITE_EUDR_PUBLIC_URL || 'https://oms.ghouse-sourcing.com/eudr-tool/');
-      if (res.user.requires_brand_scope_choice) navigate('/choose-brand-scope' + (resume ? '?continue=eudr' : ''), { replace: true });
-      else if (resume) window.location.assign(resume);
-      else navigate('/', { replace: true });
+      navigate(res.user.requires_brand_scope_choice ? "/choose-brand-scope" : "/", { replace: true });
       window.setTimeout(() => {
         cleanupTimers.forEach((timerId) => window.clearTimeout(timerId));
       }, 2000);

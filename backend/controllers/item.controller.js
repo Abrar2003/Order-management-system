@@ -5859,7 +5859,8 @@ exports.updateItemPis = async (req, res) => {
     if (hasOwn(payload, "timber_cft")) {
       setPisPath("timber_cft", parseTimberCft(payload.timber_cft));
     }
-    await require("../services/eudrMetadata.service").applyMetadata(item,payload,req.user,beforeItemSnapshot.timber_cft);
+    await require("../helpers/timberSpecies").applyMetadata(item,payload,req.user,beforeItemSnapshot.timber_cft);
+    if (hasOwn(payload, "hs_code") || hasOwn(payload, "species_composition")) pisFieldsTouched = true;
     if (hasOwn(payload, "kd")) {
       setPisPath("kd", toBooleanValue(payload.kd, "kd"));
     }
@@ -5951,7 +5952,7 @@ exports.updateItemPis = async (req, res) => {
         admin_override_required_fields: adminOverrideRequiredFields
       }
     });
-    await require("../services/eudrMetadata.service").save(item,req.user,beforeItemSnapshot);
+    await item.save();
     const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
     await createPisUpdateLog({
       reqUser: req.user,

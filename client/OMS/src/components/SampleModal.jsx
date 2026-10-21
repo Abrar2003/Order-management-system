@@ -1,4 +1,3 @@
-import TimberMetadataFields from "./eudr/TimberMetadataFields";
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
@@ -658,7 +657,6 @@ const SampleModal = ({
                   </div>
                 </div>
 
-                <TimberMetadataFields value={sampleForm} onChange={patch=>setSampleForm(prev=>({...prev,...patch}))} disabled={saving}/>
                 <div className="row g-3">
                   <div className="col-12">
                     <h6 className="mb-0">Measurements</h6>
@@ -730,7 +728,7 @@ const SampleModal = ({
                 </div>
                 <div className="col-12">
                   {((shippingMode === "existing" ? selectedSample?.timber_cft : sampleForm.timber_cft) == null || String(shippingMode === "existing" ? selectedSample?.timber_cft : sampleForm.timber_cft).trim() === "")
-                    ? <span className="text-warning">Timber_CFT is missing; this sample will be excluded from EUDR stuffed CFT.</span>
+                    ? <span className="text-warning">Timber CFT is missing; stuffed timber volume cannot be calculated.</span>
                     : <span>Stuffed timber CFT: {(Math.round(Number(shippingMode === "existing" ? selectedSample.timber_cft : sampleForm.timber_cft) * 1000 * Number(shipmentQuantity || 0)) / 1000).toFixed(3)}</span>}
                 </div>
 

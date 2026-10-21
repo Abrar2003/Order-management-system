@@ -1,4 +1,3 @@
-import TimberMetadataFields from "./eudr/TimberMetadataFields";
 import { useMemo, useState } from "react";
 import api from "../api/axios";
 import {
@@ -511,7 +510,6 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
                 <label className="form-label">Timber CFT per sample (optional)</label>
                 <input type="number" min="0" step="0.001" className="form-control" value={form.timber_cft} onChange={(event) => setForm((prev) => ({ ...prev, timber_cft: event.target.value }))} />
               </div>
-              <TimberMetadataFields value={form} onChange={patch=>setForm(prev=>({...prev,...patch}))}/>
             </div>
 
             {hasEditableSizeData && (

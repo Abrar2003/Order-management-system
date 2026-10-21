@@ -72,6 +72,4 @@ const vendorSchema = new mongoose.Schema({
   },
 });
 
-vendorSchema.add({eudr_review_fence:{type:Number,select:false},gst_snapshot:mongoose.Schema.Types.Mixed});
-module.exports =
-  require("../services/eudrSourceWrites.service").install(mongoose.models.Vendor || mongoose.model("Vendor", vendorSchema, "vendors"));
+module.exports = mongoose.models.Vendor || mongoose.model("Vendor", vendorSchema, "vendors");

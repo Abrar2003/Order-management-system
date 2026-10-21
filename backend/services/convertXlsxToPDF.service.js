@@ -171,15 +171,7 @@ const getLibreOfficeBinaryCandidates = () => [...new Set(
     .filter(Boolean),
 )];
 
-const sandboxCommand = async (binaryPath, args, workDir) => {
-  if (process.platform !== "linux") throw createConversionError("Private Office previews require the Linux conversion sandbox", { statusCode: 503 });
-  const mounts = [];
-  for (const dir of ["/usr", "/bin", "/lib", "/lib64", "/etc/fonts", "/etc/libreoffice", "/var/cache/fontconfig"]) {
-    if (await fs.stat(dir).catch(() => null)) mounts.push("--ro-bind", dir, dir);
-  }
-  return { command: "/usr/bin/prlimit", args: ["--as=2147483648", "--cpu=60", "--nofile=256", "--fsize=52428800", "--", "/usr/bin/bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--clearenv", ...mounts, "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--bind", workDir, workDir, "--setenv", "HOME", workDir, "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "LANG", "C.UTF-8", "--setenv", "SAL_USE_VCLPLUGIN", "svp", "--chdir", workDir, "--", binaryPath, ...args] };
-};
-const runLibreOfficeConversion = async (args, { timeoutMs, sandboxDir } = {}) => {
+const runLibreOfficeConversion = async (args, { timeoutMs } = {}) => {
   const attemptedCommands = [];
   const binaryCandidates = getLibreOfficeBinaryCandidates();
 
@@ -187,16 +179,13 @@ const runLibreOfficeConversion = async (args, { timeoutMs, sandboxDir } = {}) =>
     attemptedCommands.push(binaryPath);
 
     try {
-      const invocation = sandboxDir ? await sandboxCommand(binaryPath, args, sandboxDir) : { command: binaryPath, args };
-      await execFileAsync(invocation.command, invocation.args, {
+      await execFileAsync(binaryPath, args, {
         timeout: timeoutMs,
         maxBuffer: MAX_EXEC_BUFFER,
-        ...(sandboxDir ? { env: { PATH: "/usr/bin:/bin" } } : {}),
       });
 
       return binaryPath;
     } catch (error) {
-      if (sandboxDir) throw createConversionError(error?.killed || error?.signal ? "Office preview timed out. Download the original or try a smaller file." : "Office preview conversion is unavailable or this file is corrupt/password-protected. Ask an admin to check LibreOffice and the sandbox.", { statusCode: error?.statusCode || 503, code: "OFFICE_PREVIEW_FAILED" });
       if (error?.code === "ENOENT") {
         continue;
       }
@@ -406,34 +395,4 @@ async function convertExcelToPdf(inputOrOptions = {}) {
   }
 }
 
-async function convertOfficeToPdf({ buffer, originalName, runOffice = runLibreOfficeConversion, timeoutMs = 60000 }) {
-  const { fileMime } = require("./eudrFiles.service");
-  const extension = path.extname(String(originalName)).toLowerCase();
-  if (![".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt"].includes(extension) || !fileMime(originalName) || !Buffer.isBuffer(buffer) || !buffer.length || buffer.length > 50 * 1024 * 1024) throw createConversionError("Unsupported or oversized Office document", { statusCode: 400 });
-  if ([".docx", ".xlsx"].includes(extension)) {
-    try {
-      const zip = new (require("adm-zip"))(buffer);
-      if (zip.getEntries().some((entry) => /vbaProject|macros\/|externalLinks\/|embeddings\//i.test(entry.entryName))) throw new Error("Active content is not allowed");
-    } catch { throw createConversionError("This Office document is invalid or contains active content. Upload a non-macro document or PDF.", { statusCode: 400 }); }
-  }
-  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "eudr-preview-"));
-  try {
-    const profileDir = path.join(workDir, "profile");
-    const outputDir = path.join(workDir, "output");
-    await fs.mkdir(path.join(profileDir, "user"), { recursive: true });
-    await fs.mkdir(outputDir);
-    await fs.writeFile(path.join(profileDir, "user", "registrymodifications.xcu"), '<?xml version="1.0"?><oor:items xmlns:oor="http://openoffice.org/2001/registry"><item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop><prop oor:name="DisableActiveContent" oor:op="fuse"><value>true</value></prop><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop><prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>true</value></prop></item><item oor:path="/org.openoffice.Office.Calc/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>1</value></prop></item><item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>2</value></prop><prop oor:name="Field" oor:op="fuse"><value>false</value></prop></item></oor:items>');
-    const input = path.join(workDir, `document${extension}`);
-    await fs.writeFile(input, buffer);
-    // Calc's single-page-per-sheet export includes sheets even when saved print areas would hide cells.
-    const filter = [".xls", ".xlsx", ".csv"].includes(extension) ? 'pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}' : "pdf:writer_pdf_Export";
-    await runOffice(["--headless", "--nologo", "--nodefault", "--nofirststartwizard", `-env:UserInstallation=${pathToFileURL(profileDir).href}`, "--convert-to", filter, "--outdir", outputDir, input], { timeoutMs, sandboxDir: workDir });
-    const output = await readPdfOutput(outputDir, "document.pdf").catch(() => { throw createConversionError("No preview was created. This file may be corrupt, encrypted or password-protected. Download the original or upload a PDF.", { statusCode: 422 }); });
-    if (output.pdfStats.size > 50 * 1024 * 1024) throw createConversionError("Converted preview is too large", { statusCode: 413 });
-    const result = await fs.readFile(output.pdfPath);
-    if (result.subarray(0, 5).toString() !== "%PDF-") throw createConversionError("Office preview could not be rendered", { statusCode: 422 });
-    return result;
-  } finally { await fs.rm(workDir, { recursive: true, force: true }); }
-}
-
-module.exports = { convertExcelToPdf, convertOfficeToPdf, runLibreOfficeConversion, sandboxCommand };
+module.exports = { convertExcelToPdf };
