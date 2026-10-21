@@ -1,4 +1,3 @@
-import TimberMetadataFields from "./eudr/TimberMetadataFields";
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import useFormDraft from "../hooks/useFormDraft";
@@ -944,7 +943,6 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                   disabled={saving}
                 />
               </div>
-              <TimberMetadataFields value={form} onChange={patch=>Object.entries(patch).forEach(([key,value])=>updateField(key,value))} disabled={saving}/>
               <div className="col-md-4">
                 <label className="form-label">K/D</label>
                 <div className="btn-group w-100" role="group" aria-label="K/D">

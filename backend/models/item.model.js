@@ -920,5 +920,4 @@ Item.SIZE_ENTRY_LIMIT = BOX_SIZE_ENTRY_LIMIT;
 Item.ITEM_SIZE_ENTRY_LIMIT = ITEM_SIZE_ENTRY_LIMIT;
 Item.BOX_SIZE_ENTRY_LIMIT = BOX_SIZE_ENTRY_LIMIT;
 
-itemSchema.add({eudr_review_fence:{type:Number,select:false}});
-module.exports = require("../services/eudrSourceWrites.service").install(Item);
+module.exports = Item;

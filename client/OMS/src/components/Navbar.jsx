@@ -77,7 +77,6 @@ const Navbar = () => {
   const normalizedRole = normalizeUserRole(role);
   const { hasPermission, isAdmin, role: permissionRole } = usePermissions();
   const isVendorAdmin = isStrictAdminRole(permissionRole || role) || isAdmin;
-  const canAccessEudr = ["admin", "super_admin", "manager"].includes(normalizeUserRole(permissionRole || role));
 
   const navigate = useNavigate();
   const navShellRef = useRef(null);
@@ -157,7 +156,6 @@ const Navbar = () => {
   const handleNavigate = useCallback(
     (path) => {
       closeAllMenus();
-      if (path === "/eudr" || path === "/eudr-tool/") { window.location.assign("/eudr-tool/"); return; }
       navigate(path);
     },
     [closeAllMenus, navigate],
@@ -434,14 +432,12 @@ const Navbar = () => {
       items.push(routeMenuItem("bulk-shipping", "Bulk Shipping", "/container"));
     }
 
-    if (canAccessEudr) items.push(routeMenuItem("eudr", "EUDR Verification", "/eudr-tool/"));
-
     if (canManageLabels) {
       items.push(actionMenuItem("allocate-labels", "Allocate Labels", "allocate-labels"));
     }
 
     return items;
-  }, [canAccessEudr, canManageLabels, canViewSamples, hasPermission, isQcOnlyRole, isViewer]);
+  }, [canManageLabels, canViewSamples, hasPermission, isQcOnlyRole, isViewer]);
 
   const uploadOrdersMenuItems = useMemo(() => {
     if (!canManageOrders || isQcOnlyRole) return [];
@@ -487,7 +483,6 @@ const Navbar = () => {
     if (canManageLabels) {
       items.push(actionMenuItem("allocate-labels", "Allocate Labels", "allocate-labels"));
     }
-
 
     return items;
   }, [canManageProductDatabase, canViewFinishes, isQcOnlyRole, isViewer]);

@@ -1,8 +1,4 @@
 const test = require("node:test");
-// These mocks cover the legacy contract; feature-on transactions use the isolated review integration suite.
-const inheritedReviewFlag=process.env.EUDR_REVIEW_LAYER;
-test.before(()=>{process.env.EUDR_REVIEW_LAYER="false";});
-test.after(()=>{if(inheritedReviewFlag===undefined)delete process.env.EUDR_REVIEW_LAYER;else process.env.EUDR_REVIEW_LAYER=inheritedReviewFlag;});
 const assert = require("node:assert/strict");
 const mongoose = require("mongoose");
 const Item = require("../models/item.model");
@@ -332,6 +328,9 @@ test("convertToItem creates an item from sample data and copies the sample image
   const sampleDoc = {
     _id: sampleId,
     code: "SAMPLE-CONV-2",
+    timber_cft: 1.234,
+    hs_code: "940360",
+    species_composition: [{ species: new mongoose.Types.ObjectId(), share_bp: 10000 }],
     name: "Sample Name",
     description: "Sample Desc",
     brand: "Brand A",
@@ -418,6 +417,9 @@ test("convertToItem creates an item from sample data and copies the sample image
 
     assert.equal(res.statusVal, 201);
     assert.equal(savedItem.code, "ITEM-CONV-2");
+    assert.equal(savedItem.timber_cft, 1.234);
+    assert.equal(savedItem.hs_code, "940360");
+    assert.equal(String(savedItem.species_composition[0].species), String(sampleDoc.species_composition[0].species));
     assert.equal(savedItem.name, "Converted Name");
     assert.equal(savedItem.brand, "Brand A");
     assert.deepEqual(savedItem.vendors.map(getVendorName), ["Vendor A"]);

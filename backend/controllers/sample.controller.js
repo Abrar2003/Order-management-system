@@ -738,8 +738,8 @@ exports.createSample = async (req, res) => {
       updated_by: actor,
     });
 
-    await require("../services/eudrMetadata.service").applyMetadata(sample,payload,req.user,null);
-    await require("../services/eudrMetadata.service").save(sample,req.user);
+    await require("../helpers/timberSpecies").applyMetadata(sample,payload,req.user,null);
+    await sample.save();
     return res.status(201).json({
       success: true,
       message: "Sample created successfully",
@@ -820,8 +820,8 @@ exports.updateSample = async (req, res) => {
       vendors: sample.vendor,
     }]);
     sample.updated_by = actor;
-    await require("../services/eudrMetadata.service").applyMetadata(sample,payload,req.user,beforeSampleSnapshot.timber_cft);
-    await require("../services/eudrMetadata.service").save(sample,req.user,beforeSampleSnapshot);
+    await require("../helpers/timberSpecies").applyMetadata(sample,payload,req.user,beforeSampleSnapshot.timber_cft);
+    await sample.save();
     return res.status(200).json({
       success: true,
       message: "Sample updated successfully",
@@ -1104,7 +1104,7 @@ exports.convertToItem = async (req, res) => {
     // Create the Item
     const item = new Item({
       timber_cft: sample.timber_cft,
-      ...(require("../helpers/timberSpecies").enabled()?{hs_code:sample.hs_code,species_composition:sample.species_composition}:{}),
+      hs_code:sample.hs_code,species_composition:sample.species_composition,
       code: normalizedCode,
       name: normalizedName,
       description: normalizedDescription,
@@ -1140,7 +1140,7 @@ exports.convertToItem = async (req, res) => {
       },
     });
 
-    await require("../services/eudrMetadata.service").applyMetadata(item,{...(sample.hs_code?{hs_code:sample.hs_code}:{}),...(sample.species_composition?.length?{species_composition:sample.species_composition}:{})},req.user,null);
+    await require("../helpers/timberSpecies").applyMetadata(item,{...(sample.hs_code?{hs_code:sample.hs_code}:{}),...(sample.species_composition?.length?{species_composition:sample.species_composition}:{})},req.user,null);
     // Append update history
     appendItemUpdateHistory(item, {
       before: {},
@@ -1152,7 +1152,7 @@ exports.convertToItem = async (req, res) => {
     });
 
     try {
-      await require("../services/eudrMetadata.service").save(item,req.user);
+      await item.save();
     } catch (saveError) {
       if (itemImage.key) {
         await wasabiStorage.deleteObject(itemImage.key).catch((cleanupError) => {

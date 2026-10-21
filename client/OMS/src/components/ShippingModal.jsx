@@ -239,7 +239,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
             </div>
             <div className={timberCft == null ? "alert alert-warning mb-0" : "alert alert-info mb-0"}>
               {timberCftLoading ? "Loading timber CFT…" : timberCft == null
-                ? "Timber_CFT is missing or unavailable; this line will be excluded from EUDR stuffed CFT."
+                ? "Timber CFT is missing or unavailable; stuffed timber volume cannot be calculated."
                 : `Stuffed timber CFT: ${(Math.round(Number(timberCft) * 1000 * Number(shipmentQuantity || 0)) / 1000).toFixed(3)}`}
             </div>
 

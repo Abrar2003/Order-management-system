@@ -357,7 +357,7 @@ const CreateVendor = () => {
 
               {[["gst", "GST"], ["pan", "PAN"]].map(([name, label]) => (
                 <div className="col-md-6" key={name}>
-                  <label className="form-label">{label} (required for EUDR)</label>
+                  <label className="form-label">{label}</label>
                   <input name={name} value={form[name]} onChange={handleChange} className="form-control" />
                 </div>
               ))}
