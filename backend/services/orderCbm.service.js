@@ -513,6 +513,7 @@ module.exports = {
   calculateOrderTotalPoCbm,
   calculateTotalPoCbm,
   dimensionToCbm,
+  findCartonEntry,
   getValidNormalBoxEntries,
   isOrderEligibleForPoCbm,
   roundCbm,
