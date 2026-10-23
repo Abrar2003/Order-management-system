@@ -151,10 +151,10 @@ const fetchPackedGoodsPeriodOrders = async ({
     { ...ACTIVE_ORDER_MATCH, order_id: { $in: orderIds } },
     user,
   ))
-    .select("order_id item brand vendor quantity shipment qc_record order_date updatedAt total_po_cbm")
+    .select("order_id item brand vendor status quantity shipment qc_record order_date updatedAt total_po_cbm")
     .populate({
       path: "qc_record",
-      select: "_id request_type request_history quantities order_meta item",
+      select: "_id request_type request_history quantities order_meta item inspection_record",
     })
     .sort({ order_date: -1, updatedAt: -1, order_id: 1 });
   return withMaxTime(query, maxTimeMS).lean();
@@ -217,7 +217,7 @@ const allocatePackedQuantities = ({
 };
 
 const resolvePackedCbm = (orderEntry, itemDoc, packedQuantity) => {
-  const calculated = resolveOrderRowCbmSummary(itemDoc, packedQuantity);
+  const calculated = resolveOrderRowCbmSummary(itemDoc, packedQuantity, orderEntry);
   const calculatedTotal = toPositiveCbmNumber(calculated?.total);
   const orderQuantity = Math.max(0, Number(orderEntry?.quantity || 0));
   const storedPoCbm = toPositiveCbmNumber(orderEntry?.total_po_cbm);

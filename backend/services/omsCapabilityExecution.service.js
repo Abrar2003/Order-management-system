@@ -460,9 +460,12 @@ const executeShipmentCbm = async ({ filters, operation }, dependencies = {}) => 
     ? applyDataAccessMatch(orderMatch, dependencies.user)
     : orderMatch;
   const query = models.OrderModel.find(scopedOrderMatch)
-    .select("_id order_id item brand vendor quantity total_po_cbm")
+    .select("_id order_id item brand vendor status quantity shipment qc_record total_po_cbm")
     .sort({ order_date: -1, _id: 1 })
     .limit(MAX_CAPABILITY_ROWS);
+  if (typeof query.populate === "function") {
+    query.populate({ path: "qc_record", select: "inspection_record" });
+  }
   if (typeof query.maxTimeMS === "function") query.maxTimeMS(CAPABILITY_TIMEOUT_MS);
   const orders = await query.lean();
   const itemCodes = [...new Set(orders.map((order) => String(order?.item?.item_code || "").trim()).filter(Boolean))];
@@ -484,7 +487,7 @@ const executeShipmentCbm = async ({ filters, operation }, dependencies = {}) => 
     const itemCode = String(order?.item?.item_code || "").trim();
     const itemDoc = itemByCode.get(itemCode.toLowerCase()) || null;
     const calculatedShipment = normalizedFilters.shipmentQuantity
-      ? resolveOrderRowCbmSummary(itemDoc, shipmentQuantity)
+      ? resolveOrderRowCbmSummary(itemDoc, shipmentQuantity, order)
       : null;
     const cbm = normalizedFilters.shipmentQuantity
       ? {
@@ -493,6 +496,7 @@ const executeShipmentCbm = async ({ filters, operation }, dependencies = {}) => 
             orderQuantity,
             storedPoCbm: order?.total_po_cbm,
             shipmentQuantity,
+            orderEntry: order,
           }),
           per_item: Number(calculatedShipment?.per_item || 0)
             || (orderQuantity > 0 ? Number(order?.total_po_cbm || 0) / orderQuantity : 0),
@@ -503,6 +507,7 @@ const executeShipmentCbm = async ({ filters, operation }, dependencies = {}) => 
           itemDoc,
           quantity: orderQuantity,
           storedTotalCbm: order?.total_po_cbm,
+          orderEntry: order,
         });
     return {
       id: String(order?._id || ""),

@@ -19,8 +19,11 @@ const fixtures = [
   { code: "MISSING" },
 ];
 const orders = fixtures.map((itemDoc, index) => {
-  const summary = resolveOrderRowCbmSummaryWithStoredFallback({ itemDoc, quantity: 15, storedTotalCbm: 9 });
-  return { _id: `order-${index}`, order_id: "117160", brand: "Giga", vendor: "Boranada", status: "Pending",
+  const orderEntry = index === 0
+    ? { status: "Inspection Done", qc_record: { inspection_record: ["inspection-1"] } }
+    : { status: "Pending", qc_record: { inspection_record: [] } };
+  const summary = resolveOrderRowCbmSummaryWithStoredFallback({ itemDoc, quantity: 15, storedTotalCbm: 9, orderEntry });
+  return { _id: `order-${index}`, order_id: "117160", brand: "Giga", vendor: "Boranada", ...orderEntry,
     quantity: 15, shipment: [], item: { item_code: itemDoc.code, description: "Packing CBM regression" },
     order_date: "2026-10-16", ETD: "2027-01-15", cbm_summary: summary, pending_cbm: summary.total };
 });

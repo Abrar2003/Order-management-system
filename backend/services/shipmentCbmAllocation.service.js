@@ -11,6 +11,7 @@ const {
   detectBoxPackagingMode,
   normalizeStoredBoxEntries,
 } = require("../helpers/boxMeasurement");
+const { deriveOrderStatus, normalizeOrderStatus } = require("../helpers/orderStatus");
 
 const CBM_PRECISION = 6;
 const CBM_UNIT_DIVISOR = 1000000;
@@ -55,8 +56,26 @@ const getItemSizeCbm = (sizes) => {
   );
 };
 
-const resolvePackingCbm = (itemDoc) => {
-  for (const source of ["inspected", "pis"]) {
+const hasCompletedInspection = (orderEntry = null) => {
+  const inspectionRecords = orderEntry?.qc_record?.inspection_record;
+  const hasInspectionRecord = Array.isArray(inspectionRecords)
+    ? inspectionRecords.length > 0
+    : Boolean(inspectionRecords);
+  if (!hasInspectionRecord) return false;
+
+  const explicitStatus = normalizeOrderStatus(orderEntry?.status);
+  const derivedStatus = deriveOrderStatus({ orderEntry });
+  const status = ["Inspection Done", "Partial Shipped", "Shipped"].includes(derivedStatus)
+    ? derivedStatus
+    : explicitStatus;
+  return ["Inspection Done", "Partial Shipped", "Shipped"].includes(status);
+};
+
+const resolvePackingCbm = (itemDoc, orderEntry = null) => {
+  const sources = hasCompletedInspection(orderEntry)
+    ? ["inspected", "pis"]
+    : ["pis", "inspected"];
+  for (const source of sources) {
     const sizes = itemDoc?.[`${source}_box_sizes`];
     const mode = detectBoxPackagingMode(itemDoc?.[`${source}_box_mode`], sizes);
     const perItem = source === "inspected"
@@ -96,7 +115,7 @@ const resolvePackingCbm = (itemDoc) => {
   return null;
 };
 
-const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
+const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0, orderEntry = null) => {
   if (!itemDoc || typeof itemDoc !== "object") {
     return {
       source: null,
@@ -106,7 +125,7 @@ const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
     };
   }
 
-  const packing = resolvePackingCbm(itemDoc);
+  const packing = resolvePackingCbm(itemDoc, orderEntry);
   // Preserve product-volume fallbacks for legacy totals only, never for Item CBM.
   let perItem = getItemSizeCbm(itemDoc?.inspected_item_sizes);
   let perItemSource = "inspected_item";
@@ -151,28 +170,24 @@ const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
     }
   }
 
-  let totalPoCbm = calculateTotalPoCbm({
-    orderQuantity,
-    inspectedBoxSizes: itemDoc?.inspected_box_sizes,
-    inspectedBoxMode: itemDoc?.inspected_box_mode,
-  });
-  let totalSource = "inspected_box";
+  let totalPoCbm = packing?.source === "inspected_box"
+    ? calculateTotalPoCbm({
+      orderQuantity,
+      inspectedBoxSizes: itemDoc?.inspected_box_sizes,
+      inspectedBoxMode: itemDoc?.inspected_box_mode,
+    })
+    : packing
+      ? toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * packing.per_item)
+      : 0;
+  let totalSource = packing?.source || null;
 
   if (totalPoCbm <= 0) {
-    const pisBoxMode = detectBoxPackagingMode(
-      itemDoc?.pis_box_mode,
-      itemDoc?.pis_box_sizes,
-    );
-    const pisBoxEntriesCbm = calculateEffectiveBoxEntriesCbmTotal(
-      itemDoc?.pis_box_sizes,
-      pisBoxMode,
-    );
-    if (pisBoxEntriesCbm > 0) {
-      totalPoCbm = toRoundedCbmValue(
-        Math.max(0, Number(orderQuantity || 0)) * pisBoxEntriesCbm,
-      );
-      totalSource = "pis_box";
-    }
+    totalPoCbm = calculateTotalPoCbm({
+      orderQuantity,
+      inspectedBoxSizes: itemDoc?.inspected_box_sizes,
+      inspectedBoxMode: itemDoc?.inspected_box_mode,
+    });
+    totalSource = "inspected_box";
   }
 
   if (perItem <= 0 && totalPoCbm > 0) {
@@ -198,8 +213,9 @@ const resolveOrderRowCbmSummaryWithStoredFallback = ({
   itemDoc = null,
   quantity = 0,
   storedTotalCbm = 0,
+  orderEntry = null,
 } = {}) => {
-  const calculatedSummary = resolveOrderRowCbmSummary(itemDoc, quantity);
+  const calculatedSummary = resolveOrderRowCbmSummary(itemDoc, quantity, orderEntry);
   if (toPositiveCbmNumber(calculatedSummary?.total) > 0) {
     return calculatedSummary;
   }
@@ -221,18 +237,21 @@ const resolveShipmentRowCbm = ({
   shipmentQuantity = 0,
   inspectedBoxSizes = [],
   inspectedBoxMode = "",
+  orderEntry = null,
 } = {}) => {
   const shippedQuantity = Math.max(0, Number(shipmentQuantity || 0));
   if (shippedQuantity <= 0) return 0;
 
-  const inspectionCbm = calculateTotalPoCbm({
-    orderQuantity: shippedQuantity,
-    inspectedBoxSizes,
-    inspectedBoxMode,
-  });
-  if (inspectionCbm > 0) return toRoundedCbmValue(inspectionCbm);
+  if (hasCompletedInspection(orderEntry)) {
+    const inspectionCbm = calculateTotalPoCbm({
+      orderQuantity: shippedQuantity,
+      inspectedBoxSizes,
+      inspectedBoxMode,
+    });
+    if (inspectionCbm > 0) return toRoundedCbmValue(inspectionCbm);
+  }
 
-  const shipmentCbmSummary = resolveOrderRowCbmSummary(itemDoc, shippedQuantity);
+  const shipmentCbmSummary = resolveOrderRowCbmSummary(itemDoc, shippedQuantity, orderEntry);
   if (Number(shipmentCbmSummary?.total || 0) > 0) {
     return toRoundedCbmValue(shipmentCbmSummary.total);
   }
@@ -251,6 +270,7 @@ const resolveShipmentRowCbm = ({
 module.exports = {
   calculateCbmFromLbh,
   getItemSizeCbm,
+  hasCompletedInspection,
   resolveOrderRowCbmSummary,
   resolveOrderRowCbmSummaryWithStoredFallback,
   resolveShipmentRowCbm,

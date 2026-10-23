@@ -1034,6 +1034,20 @@ const fetchMonthlyShipmentContributionRows = async ({
     },
     {
       $lookup: {
+        from: "qcs",
+        localField: "qc_record",
+        foreignField: "_id",
+        as: "qc_record_doc",
+      },
+    },
+    {
+      $unwind: {
+        path: "$qc_record_doc",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $lookup: {
         from: "items",
         let: {
           item_code_key: {
@@ -1134,6 +1148,7 @@ const fetchMonthlyShipmentContributionRows = async ({
         stuffing_date: "$shipment.stuffing_date",
         country: "$country_trim",
         item_doc: 1,
+        qc_record: "$qc_record_doc",
       },
     },
     { $sort: { container: 1, brand: 1, vendor: 1, order_id: 1 } },
@@ -1149,6 +1164,7 @@ const fetchMonthlyShipmentContributionRows = async ({
       orderQuantity: row?.order_quantity,
       storedPoCbm: row?.total_po_cbm,
       shipmentQuantity: row?.shipment_quantity,
+      orderEntry: row,
     });
     const cbmSource =
       row?.item_doc && allocatedCbm > 0
