@@ -1,22 +1,17 @@
 const normalizeIdentifier = (value) => String(value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-const parseTimberCft = (value) => {
-  if (value === undefined || value === null || String(value).trim() === "") return null;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isSafeInteger(Math.round(parsed * 1000)) || Math.abs(Math.round(parsed * 1000) - parsed * 1000) > 1e-7) {
-    const error = new Error("Timber_CFT must be a non-negative number with at most three decimals");
-    error.statusCode = 400;
-    throw error;
-  }
-  return parsed;
-};
+const parseTimberCft = value => require("./woodVolume").volumeInput({ value, unit: "cft" }).cft;
 
 const safeMilli = value => {
   if (!Number.isSafeInteger(value) || value < 0) throw Object.assign(new Error("Timber quantity exceeds safe milli-CFT arithmetic"), { statusCode: 400 });
   return value;
 };
 const toMilliCft = (value) => safeMilli(Math.round(Number(value) * 1000));
-const shipmentMilliCft = (perUnit, quantity) => safeMilli(Math.round(toMilliCft(perUnit) * Number(quantity)));
+const shipmentMilliCft = (perUnit, quantity) => {
+  const micro = safeMilli(Math.round(Number(perUnit) * 1000000)), count = Number(quantity);
+  if (!Number.isSafeInteger(count) || count < 0) return safeMilli(Math.round(micro * count / 1000));
+  return safeMilli(Number((BigInt(micro) * BigInt(count) + 500n) / 1000n));
+};
 const addMilliCft = (a,b) => safeMilli(a+b);
 
 const financialYear = (dateValue) => {

@@ -7,6 +7,8 @@ const Inspection = require("../models/inspection.model");
 const Item = require("../models/item.model");
 const Sample = require("../models/sample.model");
 const { shipmentMilliCft } = require("../helpers/timberCft");
+const { eudrNeeded, applyShipmentWoodMetadata } = require("../helpers/shipmentEudr");
+const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const UploadLog = require("../models/uploadLog.model");
 const {
   buildManualOrderRows,
@@ -2852,6 +2854,7 @@ const normalizeShipmentEntries = (shipmentPayload) => {
     const shipmentEntryId = normalizeShipmentEntryId(entry);
 
     const normalizedEntry = {
+      eudr_needed: eudrNeeded(entry?.eudr_needed),
       container,
       invoice_number: invoiceNumber,
       stuffing_date: stuffingDate,
@@ -2895,6 +2898,7 @@ const fitShipmentEntriesToOrderQuantity = (
 
     cumulativeShipped += adjustedQuantity;
     const nextEntry = {
+      eudr_needed: eudrNeeded(entry?.eudr_needed),
       container: String(entry?.container ?? "").trim(),
       invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number, ""),
       stuffing_date: parseDateLike(entry?.stuffing_date),
@@ -3884,6 +3888,10 @@ const mapSamplesToShipmentRows = (samples = []) =>
         cbm_source: cbmSummary.source,
         line_type: "sample",
         sample_name: sample?.name || "",
+        timber_cft: sample?.timber_cft ?? null,
+        timber_volume_input: sample?.timber_volume_input,
+        hs_code: sample?.hs_code,
+        species_composition: sample?.species_composition,
         shipment_id: entry?._id || `${sample?._id || "sample"}-${index}`,
         stuffing_date: entry?.stuffing_date || null,
         shipping_ETD: entry?.shipping_ETD || null,
@@ -4010,7 +4018,7 @@ const getShipmentDataset = async ({
     ),
   )
     .select(
-      "code name description brand vendor cbm timber_cft box_sizes box_mode shipment createdAt updatedAt",
+      "code name description brand vendor cbm timber_cft timber_volume_input hs_code species_composition box_sizes box_mode shipment createdAt updatedAt",
     )
     .sort({ updatedAt: -1, code: 1 })
     .lean();
@@ -10437,8 +10445,8 @@ exports.getShipmentTimberCft = async (req, res) => {
   try {
     const code = String(req.params.itemCode || "").trim();
     if (!code) return res.status(400).json({ message: "Item code is required" });
-    const item = await Item.findOne({ code: { $regex: `^${escapeRegex(code)}$`, $options: "i" } }).select("timber_cft").lean();
-    return res.json({ timber_cft: item?.timber_cft ?? null });
+    const item = await Item.findOne({ code: { $regex: `^${escapeRegex(code)}$`, $options: "i" } }).select("timber_cft timber_volume_input hs_code species_composition").lean();
+    return res.json({ ...item, timber_cft: item?.timber_cft ?? null });
   } catch (error) {
     return res.status(500).json({ message: "Failed to fetch Timber_CFT" });
   }
@@ -12401,8 +12409,19 @@ exports.finalizeOrder = async (req, res) => {
       });
     }
 
+    const needsEudr = eudrNeeded(req.body.eudr_needed);
+    if (needsEudr) {
+      const item = await Item.findOne({ code: { $regex: `^${escapeRegex(order.item.item_code)}$`, $options: "i" } });
+      if (!item) return res.status(400).json({ message: "Item must exist before recording EUDR shipping details" });
+      const before = item.toObject();
+      await applyShipmentWoodMetadata(item, req.body, req.user);
+      appendItemUpdateHistory(item, { before, after: item.toObject(), reqUser: req.user, source: "shipment" });
+      await item.save();
+    }
+
     order.shipment = order.shipment || [];
     order.shipment.push({
+      eudr_needed: needsEudr,
       container: parsedContainer,
       invoice_number: parsedInvoiceNumber,
       stuffing_date: parsedStuffingDate,
@@ -12443,8 +12462,8 @@ exports.finalizeOrder = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      message: "Failed to finalize order shipment",
+    return res.status(error.statusCode || 500).json({
+      message: error.statusCode === 400 ? error.message : "Failed to finalize order shipment",
       error: error.message,
     });
   }

@@ -1,3 +1,5 @@
+import ProductWoodFields from "./ProductWoodFields";
+import { woodForm, woodPayload } from "../utils/woodMetadata";
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import AdminRequiredFieldsWarning from "./AdminRequiredFieldsWarning";
@@ -132,6 +134,7 @@ const buildInitialForm = (item = {}) => {
 
 const EditItemModal = ({ item, onClose, onUpdated }) => {
   const [form, setForm] = useState(() => buildInitialForm(item));
+  const [wood, setWood] = useState(() => woodForm(item));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [brandOptions, setBrandOptions] = useState([]);
@@ -378,6 +381,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       }
 
       const payload = {
+        ...woodPayload(wood),
         brand: toText(form.brand),
         name: toText(form.name),
         description: toText(form.description),
@@ -497,6 +501,8 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                 />
               </div>
             </div>
+
+            <ProductWoodFields value={wood} onChange={setWood} disabled={saving} />
 
             <div className="row g-3">
               <div className="col-12">

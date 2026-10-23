@@ -1,3 +1,4 @@
+import { integrationContinuation } from "../utils/integrationContinuation";
 import { useEffect, useState } from "react";
 import { signin } from "../auth/auth.service";
 import { useNavigate } from "react-router-dom";
@@ -58,7 +59,10 @@ const SignIn = () => {
         window.setTimeout(clearSigninOverlays, delay),
       );
 
-      navigate(res.user.requires_brand_scope_choice ? "/choose-brand-scope" : "/", { replace: true });
+      const continuation = integrationContinuation(window.location.search);
+      if (res.user.requires_brand_scope_choice) navigate("/choose-brand-scope" + (continuation?.query || ""), { replace: true });
+      else if (continuation) window.location.assign(continuation.url);
+      else navigate("/", { replace: true });
       window.setTimeout(() => {
         cleanupTimers.forEach((timerId) => window.clearTimeout(timerId));
       }, 2000);

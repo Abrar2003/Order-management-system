@@ -544,6 +544,10 @@ const Shipments = () => {
         _id: row?._id,
         code: row?.item_code || "",
         name: row?.sample_name || "",
+        timber_cft: row?.timber_cft,
+        timber_volume_input: row?.timber_volume_input,
+        hs_code: row?.hs_code,
+        species_composition: row?.species_composition,
         description: row?.description || "",
         brand: row?.brand || "",
         vendor: normalizeTextOptions(

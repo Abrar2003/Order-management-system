@@ -936,7 +936,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                   id="pis-timber-cft"
                   type="number"
                   min="0"
-                  step="0.001"
+                  step="0.000001"
                   className="form-control"
                   value={form.timber_cft}
                   onChange={(event) => updateField("timber_cft", event.target.value)}

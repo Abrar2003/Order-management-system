@@ -115,6 +115,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use("/integrations/eudr/v2", express.json({ limit: "4kb", verify: (req, _res, bytes) => { req.rawBody = Buffer.from(bytes); } }), (error, _req, res, _next) => {
+  res.status(error.type === "entity.too.large" ? 413 : 400).json({ code: "REQUEST_BODY_INVALID", message: "Integration requests require a valid JSON body of at most 4 KB" });
+});
 app.use(
   express.json({
     limit: String(process.env.JSON_BODY_LIMIT || "10mb"),
@@ -138,6 +141,8 @@ app.use("/inspectors", inspectorRouter);
 app.use("/users", userRouter);
 app.use("/google", googleRouter);
 app.use("/items", itemRouter);
+app.use("/wood-species", require("./routers/woodSpecies.routes"));
+app.use("/integrations/eudr/v2", require("./integrations/eudrV2.routes"));
 app.use("/samples", sampleRouter);
 app.use("/finishes", finishRouter);
 app.use("/vendors", vendorRouter);

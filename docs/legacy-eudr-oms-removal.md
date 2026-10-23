@@ -1,5 +1,7 @@
 # Legacy EUDR removal
 
+Historical Prompt 1 report. The new, separate V2 implementation is documented in [EUDR_V2_OMS_INTEGRATION.md](EUDR_V2_OMS_INTEGRATION.md). None of the retired bridge, ledger, review, chain or inventory implementations were restored.
+
 The old embedded module and standalone bridge have been removed from active OMS code. No new integration is implemented. Production databases and object storage were not accessed or changed. The only remaining executable references to EUDR are the manual cleanup tool and removal regression tests.
 
 ## Safety and pre-removal inventory

@@ -1494,7 +1494,7 @@ const PRODUCT_DATABASE_TABLE_V1_COMPLETION_FALLBACK_FIELDS = Object.freeze([
 const ITEM_DETAILS_SELECT = [
   "code",
   "timber_cft",
-  "hs_code", "species_composition", "timber_cft_history",
+  "hs_code", "species_composition", "timber_cft_history", "timber_volume_input",
   "name",
   "description",
   "brand",
@@ -4978,7 +4978,7 @@ exports.getItemOrderPresence = async (req, res) => {
 exports.createItem = async (req, res) => {
   try {
     const payload = req.body && typeof req.body === "object" ? req.body : {};
-    if (hasOwn(payload, "timber_cft")) throw createHttpError(400, "Timber_CFT must be set through the PIS update");
+    if (hasOwn(payload, "timber_cft_history")) throw createHttpError(400, "Volume history is read-only");
     const productTypeContext = await resolveItemProductTypeContext(payload);
     const importedCommonFields = productTypeContext.commonFields || {};
     const code = normalizeTextField(
@@ -5119,6 +5119,8 @@ exports.createItem = async (req, res) => {
         : {}),
     });
 
+    await require("../helpers/timberSpecies").applyMetadata(item, payload, req.user, null);
+
     applyCalculatedCbmTotals(item, (pathKey, pathValue) => {
       item.set(pathKey, pathValue);
     });
@@ -5216,8 +5218,7 @@ exports.updateItem = async (req, res) => {
     }
     const lockedFields = [
       "code",
-      "timber_cft",
-  "hs_code", "species_composition", "timber_cft_history",
+      "timber_cft_history",
       "brand_name",
       "brands",
       "vendors",
@@ -5259,7 +5260,9 @@ exports.updateItem = async (req, res) => {
 
     const productTypeContext = await resolveItemProductTypeContext(payload);
 
-    let touched = false;
+    const metadataTouched = ["timber_cft", "finished_wood_volume", "hs_code", "species_composition"].some(key => hasOwn(payload, key));
+    if (metadataTouched) await require("../helpers/timberSpecies").applyMetadata(item, payload, req.user, beforeItemSnapshot.timber_cft);
+    let touched = metadataTouched;
     const setPath = (path, value) => {
       touched = true;
       item.set(path, value);
@@ -5860,7 +5863,7 @@ exports.updateItemPis = async (req, res) => {
       setPisPath("timber_cft", parseTimberCft(payload.timber_cft));
     }
     await require("../helpers/timberSpecies").applyMetadata(item,payload,req.user,beforeItemSnapshot.timber_cft);
-    if (hasOwn(payload, "hs_code") || hasOwn(payload, "species_composition")) pisFieldsTouched = true;
+    if (["finished_wood_volume", "hs_code", "species_composition"].some(key => hasOwn(payload, key))) pisFieldsTouched = true;
     if (hasOwn(payload, "kd")) {
       setPisPath("kd", toBooleanValue(payload.kd, "kd"));
     }

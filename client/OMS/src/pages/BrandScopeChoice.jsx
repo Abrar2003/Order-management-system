@@ -1,3 +1,4 @@
+import { integrationContinuation } from "../utils/integrationContinuation";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { updateBrandScope } from "../auth/auth.service";
@@ -52,7 +53,9 @@ const BrandScopeChoice = () => {
     setError("");
     try {
       await updateBrandScope(nextScope);
-      navigate("/", { replace: true });
+      const continuation = integrationContinuation(window.location.search);
+      if (continuation) window.location.assign(continuation.url);
+      else navigate("/", { replace: true });
     } catch (submitError) {
       console.error(submitError);
       setError(

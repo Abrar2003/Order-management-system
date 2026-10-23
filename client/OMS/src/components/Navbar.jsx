@@ -165,6 +165,11 @@ const Navbar = () => {
     (action) => {
       closeAllMenus();
 
+      if (action === "eudr-v2-launch") {
+        const base = import.meta.env.VITE_EUDR_V2_URL || "/eudr-tool/";
+        window.location.assign(base.replace(/\/$/, "") + "/api/auth/launch");
+        return;
+      }
       if (action === "toggle-theme") {
         toggleTheme();
         return;
@@ -557,6 +562,8 @@ const Navbar = () => {
   const settingsMenuItems = useMemo(
     () => {
       const items = [];
+      if (hasPermission("eudr", "view")) items.push(actionMenuItem("eudr-v2", "Open EUDR", "eudr-v2-launch"));
+      if (isStrictAdminRole(permissionRole || role) && hasPermission("settings", "manage")) items.push(routeMenuItem("wood-species", "Wood Species", "/settings/wood-species"));
 
       if (canCreateUsers) {
         items.push(routeMenuItem("create-users", "Create User", "/users/new"));

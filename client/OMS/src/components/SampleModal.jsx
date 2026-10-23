@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import ProductWoodFields from "./ProductWoodFields";
+import { woodCft, woodForm, woodPayload, eudrShipmentPayload } from "../utils/woodMetadata";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
 import useBrandOptions from "../hooks/useBrandOptions";
@@ -38,7 +40,6 @@ const createInitialSampleForm = () => ({
   description: "",
   brand: "",
   vendor: "",
-  timber_cft: "",hs_code:"",species_composition:[],
   item_count: "1",
   box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
   box_count: "1",
@@ -136,6 +137,9 @@ const SampleModal = ({
   const isShippingMode = mode === "ship";
   const usesExternalShippingContext = Boolean(shippingContext);
   const [sampleForm, setSampleForm] = useState(createInitialSampleForm);
+  const [wood, setWood] = useState(() => woodForm());
+  const [shippingWood, setShippingWood] = useState(() => woodForm());
+  const [eudrNeeded, setEudrNeeded] = useState(shippingContext?.eudr_needed || false);
   const [shippingMode, setShippingMode] = useState("existing");
   const [samples, setSamples] = useState([]);
   const [samplesLoading, setSamplesLoading] = useState(false);
@@ -247,6 +251,12 @@ const SampleModal = ({
       ) || null,
     [samples, selectedSampleId],
   );
+
+  useEffect(() => { setShippingWood(woodForm(selectedSample || {})); }, [selectedSample]);
+
+  const previewWood = shippingMode === "existing" ? shippingWood : wood;
+  const timberCft = shippingMode === "existing" && !eudrNeeded ? selectedSample?.timber_cft
+    : woodCft(previewWood);
 
   const filteredSamples = useMemo(() => {
     const needle = String(sampleSearch || "").trim().toLowerCase();
@@ -367,7 +377,7 @@ const SampleModal = ({
       description: String(sampleForm.description || "").trim(),
       brand: String(sampleForm.brand || "").trim(),
       vendor: getOptionText(sampleForm.vendor),
-      timber_cft: sampleForm.timber_cft,hs_code:sampleForm.hs_code,...(sampleForm.species_composition?.length?{species_composition:sampleForm.species_composition}:{}),
+      ...woodPayload(wood),
       box_mode: sampleForm.box_mode,
       item_sizes: itemSizesPayload.value,
       box_sizes: boxSizesPayload.value,
@@ -385,6 +395,7 @@ const SampleModal = ({
   };
 
   const buildShipmentPayload = () => {
+    const eudr = eudrShipmentPayload(eudrNeeded, shippingMode === "existing" ? shippingWood : wood);
     const quantity = Number(shipmentQuantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new Error("Quantity must be a valid positive number.");
@@ -403,6 +414,7 @@ const SampleModal = ({
       }
 
       return {
+        ...eudr,
         stuffing_date: shippingContext.stuffing_date,
         container: shippingContext.container,
         invoice_number: shippingContext.invoice_number || "",
@@ -432,6 +444,7 @@ const SampleModal = ({
     }
 
     return {
+      ...eudr,
       stuffing_date: stuffingDateIso,
       container: parsedContainer,
       invoice_number: String(invoiceNumber || "").trim(),
@@ -651,9 +664,8 @@ const SampleModal = ({
                       disabled={saving}
                     />
                   </div>
-                  <div className="col-md-6">
-                    <label className="form-label">Timber CFT per sample (optional)</label>
-                    <input type="number" min="0" step="0.001" className="form-control" value={sampleForm.timber_cft} onChange={(event) => handleSampleFieldChange("timber_cft", event.target.value)} disabled={saving} />
+                  <div className="col-12">
+                    <ProductWoodFields value={wood} onChange={setWood} disabled={saving} />
                   </div>
                 </div>
 
@@ -715,6 +727,11 @@ const SampleModal = ({
 
             {isShippingMode && (
               <div className="row g-2">
+                <div className="col-12">
+                  <label className="form-check"><input type="checkbox" className="form-check-input" checked={eudrNeeded} onChange={e => setEudrNeeded(e.target.checked)} disabled={saving} />EUDR needed</label>
+                  {eudrNeeded && <p className="small text-secondary">CFT per item, wood type and HSN are required and will be saved to the sample.</p>}
+                  {eudrNeeded && shippingMode === "existing" && <ProductWoodFields value={shippingWood} onChange={setShippingWood} disabled={saving || !selectedSample} />}
+                </div>
                 <div className="col-md-4">
                   <label className="form-label">Quantity</label>
                   <input
@@ -727,9 +744,9 @@ const SampleModal = ({
                   />
                 </div>
                 <div className="col-12">
-                  {((shippingMode === "existing" ? selectedSample?.timber_cft : sampleForm.timber_cft) == null || String(shippingMode === "existing" ? selectedSample?.timber_cft : sampleForm.timber_cft).trim() === "")
+                  {timberCft == null || !Number.isFinite(timberCft)
                     ? <span className="text-warning">Timber CFT is missing; stuffed timber volume cannot be calculated.</span>
-                    : <span>Stuffed timber CFT: {(Math.round(Number(shippingMode === "existing" ? selectedSample.timber_cft : sampleForm.timber_cft) * 1000 * Number(shipmentQuantity || 0)) / 1000).toFixed(3)}</span>}
+                    : <span>Stuffed timber CFT: {(Math.round(timberCft * 1000 * Number(shipmentQuantity || 0)) / 1000).toFixed(3)}</span>}
                 </div>
 
                 {!usesExternalShippingContext && (

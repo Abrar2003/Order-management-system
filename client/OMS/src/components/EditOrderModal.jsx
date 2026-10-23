@@ -35,6 +35,7 @@ const normalizeStuffedById = (entry = {}) => {
 
 const makeInitialShipmentRows = (shipment = []) =>
   (Array.isArray(shipment) ? shipment : []).map((entry) => ({
+    eudr_needed: entry?.eudr_needed || false,
     _id: String(entry?._id ?? ""),
     container: String(entry?.container ?? ""),
     invoice_number: normalizeShipmentDraftInvoiceNumber(entry?.invoice_number),
@@ -354,6 +355,7 @@ const EditOrderModal = ({ order, qcRecord = null, onClose, onSuccess }) => {
     if (canEditShipmentDetails) {
       payload.quantity = Number(form.quantity);
       payload.shipment = form.shipment.map((entry) => ({
+        eudr_needed: entry.eudr_needed || false,
         _id: String(entry?._id || "").trim(),
         stuffed_by: {
           id: String(entry?.stuffed_by_id || "").trim(),

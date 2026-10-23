@@ -3,6 +3,7 @@ const path = require("path");
 
 const Sample = require("../models/sample.model");
 const { parseTimberCft } = require("../helpers/timberCft");
+const { eudrNeeded, requireShipmentWoodMetadata, applyShipmentWoodMetadata } = require("../helpers/shipmentEudr");
 const Item = require("../models/item.model");
 const {
   BOX_PACKAGING_MODES,
@@ -405,6 +406,7 @@ const normalizeShipmentEntries = (entries = [], actor = {}) => {
     }
     const shipmentEntryId = normalizeShipmentEntryId(entry);
     const normalizedEntry = {
+      eudr_needed: eudrNeeded(entry?.eudr_needed),
       container,
       invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number, ""),
       stuffing_date: stuffingDate,
@@ -739,6 +741,7 @@ exports.createSample = async (req, res) => {
     });
 
     await require("../helpers/timberSpecies").applyMetadata(sample,payload,req.user,null);
+    if (sample.shipment.some(entry => entry.eudr_needed)) requireShipmentWoodMetadata(sample);
     await sample.save();
     return res.status(201).json({
       success: true,
@@ -821,6 +824,7 @@ exports.updateSample = async (req, res) => {
     }]);
     sample.updated_by = actor;
     await require("../helpers/timberSpecies").applyMetadata(sample,payload,req.user,beforeSampleSnapshot.timber_cft);
+    if (sample.shipment.some(entry => entry.eudr_needed)) requireShipmentWoodMetadata(sample);
     await sample.save();
     return res.status(200).json({
       success: true,
@@ -847,6 +851,7 @@ exports.finalizeSampleShipment = async (req, res) => {
     if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
     const actor = buildAuditActor(req.user);
     const shipmentEntry = normalizeShipmentEntries([req.body], actor)[0];
+    await applyShipmentWoodMetadata(sample, req.body, req.user);
     sample.shipment = Array.isArray(sample.shipment) ? sample.shipment : [];
     sample.shipment.push(shipmentEntry);
     sample.updated_by = actor;
@@ -857,9 +862,9 @@ exports.finalizeSampleShipment = async (req, res) => {
       data: serializeSample(sample),
     });
   } catch (error) {
-    return res.status(isBadRequestError(error) ? 400 : 500).json({
+    return res.status(error.statusCode || (isBadRequestError(error) ? 400 : 500)).json({
       success: false,
-      message: "Failed to finalize sample shipment",
+      message: error.statusCode === 400 ? error.message : "Failed to finalize sample shipment",
       error: error.message,
     });
   }
@@ -1104,6 +1109,7 @@ exports.convertToItem = async (req, res) => {
     // Create the Item
     const item = new Item({
       timber_cft: sample.timber_cft,
+      timber_volume_input: sample.timber_volume_input,
       hs_code:sample.hs_code,species_composition:sample.species_composition,
       code: normalizedCode,
       name: normalizedName,

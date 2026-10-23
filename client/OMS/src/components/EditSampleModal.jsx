@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import ProductWoodFields from "./ProductWoodFields";
+import { woodForm, woodPayload } from "../utils/woodMetadata";
 import api from "../api/axios";
 import {
   formatDateDDMMYYYY,
@@ -47,6 +49,7 @@ const normalizeStuffedById = (entry = {}) => {
 
 const makeInitialShipmentRows = (shipment = []) =>
   (Array.isArray(shipment) ? shipment : []).map((entry) => ({
+    eudr_needed: entry?.eudr_needed || false,
     _id: String(entry?._id ?? ""),
     container: String(entry?.container ?? ""),
     invoice_number: normalizeShipmentDraftInvoiceNumber(entry?.invoice_number),
@@ -83,8 +86,6 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
     code: String(sample?.code ?? ""),
     name: String(sample?.name ?? ""),
     description: String(sample?.description ?? ""),
-    timber_cft: sample?.timber_cft == null ? "" : String(sample.timber_cft),
-    hs_code:sample?.hs_code||"",species_composition:sample?.species_composition||[],
     brand: String(sample?.brand ?? ""),
     vendor: normalizeTextOptions(
       Array.isArray(sample?.vendor) ? sample.vendor : [sample?.vendor],
@@ -118,6 +119,7 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
         }))
       : [createEmptyMeasuredSizeEntry({ mode: BOX_PACKAGING_MODES.INDIVIDUAL })],
   });
+  const [wood, setWood] = useState(() => woodForm(sample));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const {
@@ -376,6 +378,7 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
       brand: String(form.brand || "").trim(),
       vendor: getOptionText(form.vendor),
       shipment: form.shipment.map((entry) => ({
+        eudr_needed: entry.eudr_needed || false,
         _id: String(entry?._id || "").trim(),
         stuffed_by: {
           id: String(entry?.stuffed_by_id || "").trim(),
@@ -399,7 +402,12 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
       payload.box_mode = form.box_mode;
       payload.cbm = cbm;
     }
-    payload.timber_cft = form.timber_cft;payload.hs_code=form.hs_code;if(form.species_composition?.length)payload.species_composition=form.species_composition;
+    try {
+      Object.assign(payload, woodPayload(wood));
+    } catch (woodError) {
+      setError(woodError.message);
+      return;
+    }
 
     if (!window.confirm(buildConfirmationMessage(payload))) {
       return;
@@ -506,9 +514,8 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
                   />
                 </div>
               )}
-              <div className="col-md-3">
-                <label className="form-label">Timber CFT per sample (optional)</label>
-                <input type="number" min="0" step="0.001" className="form-control" value={form.timber_cft} onChange={(event) => setForm((prev) => ({ ...prev, timber_cft: event.target.value }))} />
+              <div className="col-12">
+                <ProductWoodFields value={wood} onChange={setWood} disabled={saving} />
               </div>
             </div>
 

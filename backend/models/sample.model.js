@@ -49,6 +49,7 @@ const ShipmentEntrySchema = new mongoose.Schema(
       default: "",
     },
     stuffing_date: { type: Date },
+    eudr_needed: { type: Boolean, default: false },
     shipping_ETD: { type: Date, default: null },
     shipping_ETA: { type: Date, default: null },
     quantity: { type: Number, default: 1, min: 0 },
@@ -248,4 +249,7 @@ sampleSchema.pre("validate", function backfillLegacyShipmentInvoices() {
   });
 });
 
+sampleSchema.index({ "shipment.container": 1 }, { collation: { locale: "en", strength: 2 } });
+sampleSchema.index({ "shipment._id": 1 });
+sampleSchema.index({ "vendor.vendor_id": 1 });
 module.exports = mongoose.model("samples", sampleSchema);

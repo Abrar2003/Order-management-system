@@ -66,7 +66,7 @@ const server = http.createServer((req, res) => {
       await page.waitForFunction(() => window.location.pathname === "/", { timeout: 10000 });
       await page.waitForSelector("nav");
       assert.match(await page.$eval("body", node => node.innerText), /Giga/);
-      assert.doesNotMatch(await page.$eval("body", node => node.innerText), /EUDR|Timber Trace/i);
+      assert.doesNotMatch(await page.$eval("body", node => node.innerText), /EUDR Verification|Timber Trace/i);
       assert.deepEqual(legacyRequests, []);
       assert.deepEqual(errors, []);
       await page.close();

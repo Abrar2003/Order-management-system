@@ -69,6 +69,7 @@ const PisInspectionMasterComparison = lazy(() => import("./pages/PisInspectionMa
 const ProductDatabase = lazy(() => import("./pages/ProductDatabase"));
 const ItemDatabase = lazy(() => import("./pages/ItemDatabase"));
 const ProductDatabaseDetails = lazy(() => import("./pages/ProductDatabaseDetails"));
+const WoodSpecies = lazy(() => import("./pages/WoodSpecies"));
 const ProductTypeTemplates = lazy(() => import("./pages/ProductTypeTemplates"));
 const PermissionManagement = lazy(() => import("./pages/PermissionManagement"));
 const PIS = lazy(() => import("./pages/PIS"));
@@ -859,6 +860,7 @@ const App = () => {
         */}
 
           {/* Fallback */}
+            <Route path="/settings/wood-species" element={<ProtectedRoute allowViewer={false} permissionModule="settings" permissionAction="manage"><WoodSpecies /></ProtectedRoute>} />
             <Route path="*" element={<AppFallbackRoute />} />
           </Routes>
           </Suspense>

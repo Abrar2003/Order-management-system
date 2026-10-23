@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import SampleModal from "../components/SampleModal";
+import ProductWoodFields from "../components/ProductWoodFields";
+import { woodCft, woodForm, eudrShipmentPayload } from "../utils/woodMetadata";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { getUserFromToken } from "../auth/auth.utils";
 import { hasShipmentPrivilegeRole, isViewOnlyUser } from "../auth/permissions";
@@ -91,6 +93,8 @@ const Container = () => {
   const [loadingVendors, setLoadingVendors] = useState(true);
   const [loadingRows, setLoadingRows] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [eudrNeeded, setEudrNeeded] = useState(false);
+  const [woodDrafts, setWoodDrafts] = useState({});
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [syncedQuery, setSyncedQuery] = useState(null);
@@ -117,6 +121,7 @@ const Container = () => {
   }, []);
 
   const fetchVendorRows = useCallback(async (selectedVendor) => {
+    setWoodDrafts({});
     if (!selectedVendor) {
       setRows([]);
       return;
@@ -183,6 +188,7 @@ const Container = () => {
           orderId: qc?.order_meta?.order_id || order?.order_id || "N/A",
           itemCode: qc?.item?.item_code || order?.item?.item_code || "N/A",
           timberCft: qc?.item?.timber_cft ?? null,
+          wood: woodForm(qc?.item || {}),
           itemDescription:
             qc?.item?.description || order?.item?.description || "N/A",
           orderQuantity,
@@ -424,11 +430,12 @@ const Container = () => {
         .filter((row) => Number.isFinite(row.quantity) && row.quantity > 0),
     [filteredRows],
   );
-  const selectedTimberMilliCft = useMemo(
-    () => selectedRows.reduce((sum, row) => row.timberCft == null ? sum : sum + Math.round(Number(row.timberCft) * 1000 * row.quantity), 0),
-    [selectedRows],
-  );
-  const selectedMissingTimberCft = selectedRows.filter((row) => row.timberCft == null).length;
+  const previewRows = selectedRows.map(row => ({ ...row,
+    timberCft: eudrNeeded ? woodCft(woodDrafts[row.itemCode] || row.wood || woodForm()) : row.timberCft,
+  }));
+  const selectedTimberMilliCft = previewRows.reduce((sum, row) => row.timberCft == null || !Number.isFinite(row.timberCft) ? sum : sum + Math.round(row.timberCft * 1000 * row.quantity), 0);
+  const selectedMissingTimberCft = previewRows.filter(row => row.timberCft == null || !Number.isFinite(row.timberCft)).length;
+  const selectedItems = [...new Map(selectedRows.map(row => [row.itemCode, row])).values()];
 
   const handleBulkFinalize = async () => {
     setError("");
@@ -487,29 +494,31 @@ const Container = () => {
     }
 
     try {
+      const eudrByItem = new Map(selectedItems.map(row => [row.itemCode,
+        eudrShipmentPayload(eudrNeeded, woodDrafts[row.itemCode] || row.wood || woodForm()),
+      ]));
       setSaving(true);
 
-      const results = await Promise.allSettled(
-        selectedRows.map((row) =>
-          row.lineType === "sample"
-            ? api.patch(`/samples/${row.orderDocumentId}/finalize-shipment`, {
-                stuffing_date: shippingDateIso,
-                container,
-                invoice_number: invoiceNumberValue,
-                stuffed_by: stuffedBy,
-                quantity: row.quantity,
-                remarks: row.itemDescription || "Bulk container shipment",
-              })
-            : api.patch(`/orders/finalize-order/${row.orderDocumentId}`, {
-                stuffing_date: shippingDateIso,
-                container,
-                invoice_number: invoiceNumberValue,
-                stuffed_by: stuffedBy,
-                quantity: row.quantity,
-                remarks: "Bulk container shipment",
-              }),
-        ),
-      );
+      const results = [];
+      // Save sequentially because different POs may update the same item's wood metadata.
+      for (const row of selectedRows) {
+        try {
+          await api.patch(row.lineType === "sample"
+            ? `/samples/${row.orderDocumentId}/finalize-shipment`
+            : `/orders/finalize-order/${row.orderDocumentId}`, {
+            ...eudrByItem.get(row.itemCode),
+            stuffing_date: shippingDateIso,
+            container,
+            invoice_number: invoiceNumberValue,
+            stuffed_by: stuffedBy,
+            quantity: row.quantity,
+            remarks: row.lineType === "sample" ? row.itemDescription || "Bulk container shipment" : "Bulk container shipment",
+          });
+          results.push({ status: "fulfilled" });
+        } catch (reason) {
+          results.push({ status: "rejected", reason });
+        }
+      }
 
       const failed = results.filter((entry) => entry.status === "rejected");
       const succeededCount = results.length - failed.length;
@@ -537,6 +546,8 @@ const Container = () => {
 
       setSampleRows([]);
       await fetchVendorRows(vendor);
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to finalize shipments."));
     } finally {
       setSaving(false);
     }
@@ -713,6 +724,14 @@ const Container = () => {
               {!isViewOnly && <span className="om-summary-chip">Selected stuffed CFT: {(selectedTimberMilliCft / 1000).toFixed(3)}</span>}
             </div>
             {!isViewOnly && selectedMissingTimberCft > 0 && <div className="alert alert-warning py-2">{selectedMissingTimberCft} selected line(s) have no Timber_CFT and are excluded from this preview.</div>}
+            {!isViewOnly && canFinalizeShipping && <>
+              <label className="form-check mb-3"><input type="checkbox" className="form-check-input" checked={eudrNeeded} onChange={e => setEudrNeeded(e.target.checked)} disabled={saving} />EUDR needed</label>
+              {eudrNeeded && <p className="small text-secondary">Select items below, then fill CFT per item, wood type and HSN for each selected item. These details will be saved to the items.</p>}
+              {eudrNeeded && selectedItems.map(row => <div className="mb-3" key={row.itemCode}>
+                <h6>{row.itemCode} — {row.itemDescription}</h6>
+                <ProductWoodFields value={woodDrafts[row.itemCode] || row.wood || woodForm()} onChange={value => setWoodDrafts(prev => ({ ...prev, [row.itemCode]: value }))} disabled={saving} />
+              </div>)}
+            </>}
 
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
@@ -899,6 +918,7 @@ const Container = () => {
           mode="ship"
           vendorOptions={vendors}
           shippingContext={{
+            eudr_needed: eudrNeeded,
             stuffing_date: toISODateString(shippingDate),
             container: String(containerNumber || "").trim(),
             invoice_number: String(invoiceNumber || "").trim(),

@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import ProductWoodFields from "../ProductWoodFields";
+import { woodForm, woodPayload } from "../../utils/woodMetadata";
 import MeasuredSizeSection from "../MeasuredSizeSection";
 import useBrandOptions from "../../hooks/useBrandOptions";
 import { createSample, updateSample } from "../../services/samples.service";
@@ -20,7 +22,6 @@ import { getOptionText, normalizeTextOptions } from "../../utils/optionText";
 
 const initialForm = (sample = null) => ({
   code: String(sample?.code || ""),
-  timber_cft:sample?.timber_cft??"",hs_code:sample?.hs_code||"",species_composition:sample?.species_composition||[],
   name: String(sample?.name || ""),
   description: String(sample?.description || ""),
   brand: String(sample?.brand || ""),
@@ -100,6 +101,7 @@ const buildSizePayload = ({
 const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
   const isEdit = Boolean(sample?._id);
   const [form, setForm] = useState(() => initialForm(sample));
+  const [wood, setWood] = useState(() => woodForm(sample || {}));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const { brandOptions, loadingBrands } = useBrandOptions([sample?.brand]);
@@ -195,14 +197,21 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
       item_sizes: itemPayload.value,
       box_sizes: boxPayload.value,
       box_mode: form.box_mode,
-      cbm,timber_cft:form.timber_cft,hs_code:form.hs_code,...(form.species_composition?.length?{species_composition:form.species_composition}:{}),
+      cbm,
+      ...woodPayload(wood),
     };
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
-    const payload = buildPayload();
+    let payload;
+    try {
+      payload = buildPayload();
+    } catch (woodError) {
+      setError(woodError.message);
+      return;
+    }
     if (payload.error) {
       setError(payload.error);
       return;
@@ -266,7 +275,6 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
                 <label className="form-label">Vendor</label>
                 <input className="form-control" value={form.vendor} onChange={(e) => setField("vendor", e.target.value)} placeholder="Optional" />
               </div>
-              <label className="form-label col-md-4">Timber CFT per sample<input type="number" min="0" step="0.001" className="form-control" value={form.timber_cft} onChange={e=>setField("timber_cft",e.target.value)}/></label>
               <div className="col-md-6">
                 <label className="form-label">Description</label>
                 <textarea className="form-control" rows="2" value={form.description} onChange={(e) => setField("description", e.target.value)} />
@@ -276,6 +284,7 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
                 <input className="form-control" value={cbm} readOnly />
               </div>
             </div>
+            <ProductWoodFields value={wood} onChange={setWood} disabled={saving} />
             <div className="row g-3">
               <MeasuredSizeSection
                 sectionKey="sample-item"

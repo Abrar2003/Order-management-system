@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
+import ProductWoodFields from "./ProductWoodFields";
+import { woodCft, woodForm, eudrShipmentPayload } from "../utils/woodMetadata";
 import {
   getTodayDDMMYYYY,
   isValidDDMMYYYY,
@@ -26,6 +28,8 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
   const [error, setError] = useState("");
   const [timberCft, setTimberCft] = useState(null);
   const [timberCftLoading, setTimberCftLoading] = useState(true);
+  const [eudrNeeded, setEudrNeeded] = useState(false);
+  const [wood, setWood] = useState(() => woodForm());
   const {
     inspectors,
     inspectorById,
@@ -43,6 +47,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
   );
 
   const orderQuantity = Number(order?.quantity || 0);
+  const previewCft = eudrNeeded ? woodCft(wood) : timberCft;
   const remainingQuantity = Math.max(0, orderQuantity - shippedAlready);
   useEffect(() => {
     const code = String(order?.item?.item_code || "").trim();
@@ -53,6 +58,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
       .then((response) => {
         if (cancelled) return;
         setTimberCft(response?.data?.timber_cft ?? null);
+        setWood(woodForm(response?.data));
       })
       .catch(() => { if (!cancelled) setTimberCft(null); })
       .finally(() => { if (!cancelled) setTimberCftLoading(false); });
@@ -101,8 +107,10 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
     }
 
     try {
+      const eudr = eudrShipmentPayload(eudrNeeded, wood);
       setSaving(true);
       await axios.patch(`/orders/finalize-order/${order._id}`, {
+        ...eudr,
         stuffing_date: stuffingDateIso,
         container: parsedContainer,
         invoice_number: parsedInvoiceNumber,
@@ -115,7 +123,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
       onClose?.();
     } catch (err) {
       setError(
-        err?.response?.data?.message || "Failed to finalize shipping update."
+        err?.response?.data?.message || err?.message || "Failed to finalize shipping update."
       );
     } finally {
       setSaving(false);
@@ -237,10 +245,18 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
                 onChange={(e) => setRemarks(e.target.value)}
               />
             </div>
-            <div className={timberCft == null ? "alert alert-warning mb-0" : "alert alert-info mb-0"}>
-              {timberCftLoading ? "Loading timber CFT…" : timberCft == null
+            <label className="form-check">
+              <input type="checkbox" className="form-check-input" checked={eudrNeeded} onChange={e => setEudrNeeded(e.target.checked)} disabled={saving || timberCftLoading} />
+              EUDR needed
+            </label>
+            {eudrNeeded && <>
+              <p className="small text-secondary mb-0">Enter CFT per item, wood type and HSN. These details will be saved to the item.</p>
+              <ProductWoodFields value={wood} onChange={setWood} disabled={saving} />
+            </>}
+            <div className={previewCft == null ? "alert alert-warning mb-0" : "alert alert-info mb-0"}>
+              {timberCftLoading ? "Loading timber CFT…" : previewCft == null || !Number.isFinite(previewCft)
                 ? "Timber CFT is missing or unavailable; stuffed timber volume cannot be calculated."
-                : `Stuffed timber CFT: ${(Math.round(Number(timberCft) * 1000 * Number(shipmentQuantity || 0)) / 1000).toFixed(3)}`}
+                : `Stuffed timber CFT: ${(Math.round(previewCft * 1000 * Number(shipmentQuantity || 0)) / 1000).toFixed(3)}`}
             </div>
 
             {inspectorError && <div className="alert alert-warning mb-0">{inspectorError}</div>}

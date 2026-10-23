@@ -38,6 +38,7 @@ const PERMISSION_MODULES = Object.freeze([
   { key: "calendar", label: "Calendar" },
   { key: "users", label: "Users" },
   { key: "settings", label: "Settings" },
+  { key: "eudr", label: "EUDR V2 access" },
   { key: "brands", label: "Brands" },
   { key: "vendors", label: "Vendors" },
   { key: "complaints", label: "Complains" },

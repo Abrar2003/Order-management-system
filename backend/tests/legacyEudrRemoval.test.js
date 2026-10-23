@@ -30,7 +30,8 @@ test("cleanup rejects extra collections and fields and preserves business data",
   assert.ok(!COLLECTIONS.includes("eudr_species"));
 });
 
-test("shared metadata validates and records timber changes without an EUDR database", async () => {
+test("shared metadata validates and records timber changes without an EUDR database", async (t) => {
+  t.mock.method(require("../models/woodSpecies.model"), "countDocuments", async () => 1);
   const species = "507f1f77bcf86cd799439011";
   const record = { timber_cft: 2 };
   await applyMetadata(record, { hs_code: "9403 60", species_composition: [{ species, share_bp: 10000 }] }, {}, 1);
@@ -56,15 +57,15 @@ test("active backend and frontend have no legacy imports, endpoints or flags", (
   for (const folder of ["controllers", "models", "services", "routers", "middlewares", "helpers", "config", "queues", "workers", "realtime", "knowledge"]) {
     for (const entry of fs.readdirSync(path.join(__dirname, "..", folder), { recursive: true })) {
       const file = path.join(__dirname, "..", folder, entry);
-      if (fs.statSync(file).isFile() && /\.(js|cjs)$/.test(file)) assert.doesNotMatch(fs.readFileSync(file, "utf8"), /eudr|timber.?trace/i, file);
+      if (fs.statSync(file).isFile() && /\.(js|cjs)$/.test(file)) assert.doesNotMatch(fs.readFileSync(file, "utf8"), /eudrPlugin|eudrSourceWrites|eudrMetadata|EUDR_REVIEW_LAYER|EUDR_BRIDGE_SECRET|timber.?trace|["']\/eudr(?:["']|\/)/i, file);
     }
   }
   const root = path.join(__dirname, "../../client/OMS/src");
   for (const entry of fs.readdirSync(root, { recursive: true })) {
     const file = path.join(root, entry);
-    if (fs.statSync(file).isFile() && /\.(jsx?|css)$/.test(file)) assert.doesNotMatch(fs.readFileSync(file, "utf8"), /eudr|timber.?trace/i, file);
+    if (fs.statSync(file).isFile() && /\.(jsx?|css)$/.test(file)) assert.doesNotMatch(fs.readFileSync(file, "utf8"), /eudrPlugin|eudrSourceWrites|eudrMetadata|EUDR_REVIEW_LAYER|EUDR_BRIDGE_SECRET|timber.?trace|["']\/eudr(?:["']|\/)/i, file);
   }
-  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../index.js"), "utf8"), /eudr|timber.?trace/i);
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../index.js"), "utf8"), /eudrPlugin|eudrSourceWrites|eudrMetadata|EUDR_REVIEW_LAYER|EUDR_BRIDGE_SECRET|timber.?trace|["']\/eudr(?:["']|\/)/i);
   for (const file of ["item", "sample", "order", "vendor"]) {
     const model = require(`../models/${file}.model`);
     assert.equal(model.$eudrSourceWrites, undefined);

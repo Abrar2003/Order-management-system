@@ -28,22 +28,22 @@ test("Timber_CFT can be set and cleared through PIS with an audit entry", async 
   assert.equal(item.update_history.at(-1).action, "pis_update");
 
   const invalid = response();
-  await updateItemPis({ params: { id: itemId }, body: { timber_cft: "1.2345" }, user: { role: "admin" } }, invalid);
+  await updateItemPis({ params: { id: itemId }, body: { timber_cft: "1.2345678" }, user: { role: "admin" } }, invalid);
   assert.equal(invalid.code, 400);
   assert.equal(item.timber_cft, null);
 });
 
-test("general item endpoints cannot change Timber_CFT", async (t) => {
+test("item endpoints reject client-authored volume history", async (t) => {
   t.mock.method(Item, "findOne", () => { throw new Error("should not query item"); });
   const updated = response();
-  await updateItem({ params: { id: itemId }, body: { timber_cft: 1 }, user: { role: "admin" } }, updated);
+  await updateItem({ params: { id: itemId }, body: { timber_cft_history: [] }, user: { role: "admin" } }, updated);
   assert.equal(updated.code, 400);
-  assert.match(updated.body.message, /read-only.*timber_cft/i);
+  assert.match(updated.body.message, /read-only.*timber_cft_history/i);
 
   const created = response();
-  await createItem({ body: { timber_cft: 1 }, user: { role: "admin" } }, created);
+  await createItem({ body: { timber_cft_history: [] }, user: { role: "admin" } }, created);
   assert.equal(created.code, 400);
-  assert.match(created.body.message, /PIS update/);
+  assert.match(created.body.message, /read-only/);
 });
 
 test("PIS saves HS metadata on its own without a legacy ledger", async (t) => {

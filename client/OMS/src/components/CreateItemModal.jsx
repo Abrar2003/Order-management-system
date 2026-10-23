@@ -1,3 +1,5 @@
+import ProductWoodFields from "./ProductWoodFields";
+import { woodForm, woodPayload } from "../utils/woodMetadata";
 import { useMemo, useState } from "react";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
@@ -54,6 +56,7 @@ const CreateItemModal = ({
   vendorOptions = [],
 }) => {
   const [form, setForm] = useState(createInitialForm);
+  const [wood, setWood] = useState(() => woodForm());
   const [pisSheetFile, setPisSheetFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -216,7 +219,9 @@ const CreateItemModal = ({
         throw new Error(pisBoxPayload.error);
       }
 
+      const metadata = woodPayload(wood);
       const formData = new FormData();
+      for (const [key, value] of Object.entries(metadata)) formData.append(key, typeof value === "object" ? JSON.stringify(value) : value);
       formData.append("code", code);
       formData.append("name", name);
       formData.append("description", description);
@@ -326,6 +331,7 @@ const CreateItemModal = ({
                   disabled={saving}
                 />
               </div>
+              <div className="col-12"><ProductWoodFields value={wood} onChange={setWood} disabled={saving} /></div>
               <div className="col-md-4">
                 <label className="form-label">K/D</label>
                 <div className="btn-group w-100" role="group" aria-label="K/D">
