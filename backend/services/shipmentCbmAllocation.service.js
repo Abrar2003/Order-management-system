@@ -1,9 +1,15 @@
 const {
   calculateTotalPoCbm,
+  dimensionToCbm,
+  findCartonEntry,
+  getValidNormalBoxEntries,
 } = require("./orderCbm.service");
 const {
+  BOX_ENTRY_TYPES,
+  BOX_PACKAGING_MODES,
   calculateEffectiveBoxEntriesCbmTotal,
   detectBoxPackagingMode,
+  normalizeStoredBoxEntries,
 } = require("../helpers/boxMeasurement");
 
 const CBM_PRECISION = 6;
@@ -49,15 +55,59 @@ const getItemSizeCbm = (sizes) => {
   );
 };
 
+const resolvePackingCbm = (itemDoc) => {
+  for (const source of ["inspected", "pis"]) {
+    const sizes = itemDoc?.[`${source}_box_sizes`];
+    const mode = detectBoxPackagingMode(itemDoc?.[`${source}_box_mode`], sizes);
+    const perItem = source === "inspected"
+      ? calculateTotalPoCbm({ orderQuantity: 1, inspectedBoxSizes: sizes, inspectedBoxMode: mode })
+      : calculateEffectiveBoxEntriesCbmTotal(sizes, mode);
+    if (perItem <= 0) continue;
+
+    const entries = source === "pis"
+      ? normalizeStoredBoxEntries(sizes, { mode })
+      : sizes;
+    const master = findCartonEntry(entries, BOX_ENTRY_TYPES.MASTER);
+    const inner = findCartonEntry(entries, BOX_ENTRY_TYPES.INNER);
+    const isIndividual = mode === BOX_PACKAGING_MODES.INDIVIDUAL;
+    const individualEntries = source === "pis" ? entries : getValidNormalBoxEntries(entries);
+    const boxes = (isIndividual ? individualEntries : [master]).map((entry) => ({
+      label: entry.remark || entry.type || entry.box_type || "box",
+      L: Number(entry.L),
+      B: Number(entry.B),
+      H: Number(entry.H),
+      cbm: dimensionToCbm(entry),
+    }));
+    const itemsPerInner = mode === BOX_PACKAGING_MODES.CARTON
+      ? Number(inner.item_count_in_inner) : null;
+    const piecesPerMaster = isIndividual ? null : Number(master.box_count_in_master);
+    const divisor = isIndividual ? 1 : (itemsPerInner || 1) * piecesPerMaster;
+
+    return {
+      source: `${source}_box`,
+      mode,
+      boxes,
+      items_per_inner: itemsPerInner,
+      boxes_per_master: piecesPerMaster,
+      per_item: perItem,
+      unrounded_per_item: boxes.reduce((sum, box) => sum + box.cbm, 0) / divisor,
+    };
+  }
+  return null;
+};
+
 const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
   if (!itemDoc || typeof itemDoc !== "object") {
     return {
       source: null,
       per_item: null,
       total: null,
+      packing: null,
     };
   }
 
+  const packing = resolvePackingCbm(itemDoc);
+  // Preserve product-volume fallbacks for legacy totals only, never for Item CBM.
   let perItem = getItemSizeCbm(itemDoc?.inspected_item_sizes);
   let perItemSource = "inspected_item";
 
@@ -138,8 +188,9 @@ const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
 
   return {
     source: totalSource,
-    per_item: perItem > 0 ? toRoundedCbmValue(perItem) : null,
+    per_item: packing ? toRoundedCbmValue(packing.per_item) : null,
     total: totalPoCbm > 0 ? toRoundedCbmValue(totalPoCbm) : null,
+    packing,
   };
 };
 
@@ -156,10 +207,9 @@ const resolveOrderRowCbmSummaryWithStoredFallback = ({
   const total = toPositiveCbmNumber(storedTotalCbm);
   if (total <= 0) return calculatedSummary;
 
-  const quantityValue = Math.max(0, Number(quantity || 0));
   return {
+    ...calculatedSummary,
     source: "total_po_cbm",
-    per_item: quantityValue > 0 ? toRoundedCbmValue(total / quantityValue) : 0,
     total,
   };
 };

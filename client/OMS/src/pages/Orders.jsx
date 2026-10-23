@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
@@ -14,6 +14,7 @@ import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import OrderQuantityWithHistory from "../components/OrderQuantityWithHistory";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import SortHeaderButton from "../components/SortHeaderButton";
+import Tooltip from "../components/Tooltip";
 import { archiveOrder } from "../services/orders.service";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -69,18 +70,77 @@ const formatResolvedCbm = (value) => {
   return formatCbm(parsed);
 };
 
+const formatPackingNumber = (value) => Number(value).toLocaleString("en-GB", {
+  useGrouping: false,
+  maximumFractionDigits: 8,
+});
+
+const OrderItemCbm = ({ summary }) => {
+  const tooltipId = useId();
+  const packing = summary?.packing;
+  const source = packing?.source === "inspected_box" ? "Inspected" : "PIS";
+  const modeLabel = {
+    individual: "Individual packing",
+    carton: "Inner + master packing",
+    individual_master: "Individual + master packing",
+  };
+  const volumeTerms = packing?.boxes.map((box) => formatPackingNumber(box.cbm)).join(" + ");
+  const formula = packing?.mode === "carton"
+    ? `${volumeTerms} ÷ (${packing.items_per_inner} × ${packing.boxes_per_master})`
+    : packing?.mode === "individual_master"
+      ? `${volumeTerms} ÷ ${packing.boxes_per_master}`
+      : volumeTerms;
+
+  return (
+    <div className="orders-cbm-item">
+      <span className="orders-cbm-label">Item:</span>
+      <div className="orders-cbm-item-line">
+      {packing && <span className="orders-cbm-value">{formatResolvedCbm(summary.per_item)} m³</span>}
+      <Tooltip content={
+        <div id={tooltipId} role="tooltip">
+          {packing ? <>
+            <div className="tooltip-title">{source} box sizes · {modeLabel[packing.mode]}</div>
+            {packing.boxes.map((box, index) => (
+              <div className="tooltip-entry" key={index}>
+                <div>{box.label}: {box.L} × {box.B} × {box.H} cm (L × B × H)</div>
+                <div className="tooltip-detail">÷ 1,000,000 = {formatPackingNumber(box.cbm)} m³</div>
+              </div>
+            ))}
+            {packing.mode === "carton" && <div className="tooltip-detail">
+              Items per inner: {packing.items_per_inner}; inners per master: {packing.boxes_per_master}
+            </div>}
+            {packing.mode === "individual_master" && <div className="tooltip-detail">
+              Pieces per master: {packing.boxes_per_master}
+            </div>}
+            <div>{formula} = {formatPackingNumber(packing.unrounded_per_item)} m³ per item</div>
+          </> : <div className="tooltip-empty">
+            Usable inspected and PIS packing-box measurements are unavailable.
+          </div>}
+        </div>
+      }>
+        <button type="button" className={`orders-cbm-trigger ${packing ? "orders-cbm-source" : "orders-cbm-missing"}`} aria-describedby={tooltipId}>
+          {packing && <span className="orders-cbm-source-dot" aria-hidden="true" />}
+          {packing ? source : "N/A"}
+        </button>
+      </Tooltip>
+      </div>
+    </div>
+  );
+};
+
 const renderOrderCbmCell = (order) => {
   const totalCbm = resolvePreferredCbm(
     order?.cbm_summary?.total,
     order?.total_po_cbm,
     order?.top_po_cbm,
   );
-  const perItemCbm = order?.cbm_summary?.per_item;
-
   return (
-    <div className="d-flex flex-column gap-1">
-      <span>Item: {formatResolvedCbm(perItemCbm)}</span>
-      <span>Total: {formatResolvedCbm(totalCbm)}</span>
+    <div className="orders-cbm-cell">
+      <OrderItemCbm summary={order?.cbm_summary} />
+      <div className="orders-cbm-total">
+        <span className="orders-cbm-label">Total:</span>
+        <strong className="orders-cbm-value">{formatResolvedCbm(totalCbm)}</strong>
+      </div>
     </div>
   );
 };
@@ -323,7 +383,7 @@ const Orders = () => {
                       <th>Quantity</th>
                       <th>Open Quantity</th>
                       <th>Packed</th>
-                      <th className="orders-cbm-col">CBM</th>
+                      <th className="orders-item-cbm-col">CBM</th>
                       <th className="orders-cbm-col">Pending CBM</th>
                       <th>Status</th>
                       <th>ETD</th>
