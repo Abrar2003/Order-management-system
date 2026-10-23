@@ -149,24 +149,31 @@ test("real OMS and EUDR V2 authenticate, exchange scoped source facts and create
   const current = await call(eudr, "/eudr-tool/api/auth/me", { headers: { Cookie: sessionCookie } });
   const eapi = (route, options = {}) => call(eudr, "/eudr-tool/api" + route, { ...options, headers: { Cookie: sessionCookie, Origin: eudr, "X-CSRF-Token": current.data.csrf } });
   await eapi(`/rules/${mango._id}`, { method: "PUT", body: { wastagePercentage: "20", revision: 0 } });
+  await eapi(`/rules/${acacia._id}`, { method: "PUT", body: { wastagePercentage: "20", revision: 0 } });
   assert.equal((await eapi("/oms/containers?query=V2-00")).data.containers.length, 1);
   const real = (await eapi("/oms/containers/" + containerKey)).data, group = real.groups.find(g => g.exportInvoiceNumber === "EXP-1" && g.brand === "Giga");
   assert.equal(group.items[0].finishedCftPerUnit, "0.500000"); assert.equal(group.vendor.id, String(vendorA));
   let chain = (await eapi("/chains", { method: "POST", body: { containerKey, groupKey: group.key }, expected: 201 })).data.chain;
   assert.equal(chain.calculation.finishedMicro, 50000000); assert.equal(chain.calculation.requiredMicro, 62500000);
   const manufacturer = (await eapi("/parties", { method: "POST", body: { chainId: chain._id, role: "manufacturer", name: "Vendor A", gstin: "29AAAAA0001A1Z5", pan: "AAAAA0001A" } })).data;
-  chain = (await eapi(`/chains/${chain._id}/declaration`, { method: "PUT", body: { revision: chain.revision, manufacturerPartyId: manufacturer._id, identityConfirmed: true, date: "2026-10-21", finishedCft: "50" } })).data;
-  const seller = (await eapi("/parties", { method: "POST", body: { chainId: chain._id, role: "sawmill", name: "Test Sawmill", gstin: "29AAAAA0003A1Z5", pan: "AAAAA0003A" } })).data;
-  const documentIds = [];
   const { PDFDocument } = require(require.resolve("pdf-lib", { paths: [path.join(eudrRepo, "backend")] }));
-  for (const type of ["purchaseInvoice", "bilty", "driverLicence", "transportPermission"]) {
+  async function evidence(ownerType, type) {
     const pdf = await PDFDocument.create(); pdf.addPage().drawText("Isolated integration evidence " + type);
     const upload = new FormData(); upload.append("file", new Blob([await pdf.save()], { type: "application/pdf" }), type + ".pdf");
-    for (const [name, value] of Object.entries({ ownerType: "draftInvoice", ownerId: chain._id, type })) upload.append(name, value);
+    for (const [name, value] of Object.entries({ ownerType, ownerId: chain._id, type,
+      ...(["bilty", "driverLicence", "weightSlip", "transportPermission"].includes(type) ? { transportEntryId: "legacy" } : {}) })) upload.append(name, value);
     const response = await fetch(eudr + "/eudr-tool/api/evidence", { method: "POST", headers: { Cookie: sessionCookie, Origin: eudr, "X-CSRF-Token": current.data.csrf }, body: upload });
-    assert.equal(response.status, 201, "Required invoice evidence upload failed"); documentIds.push((await response.json())._id);
+    assert.equal(response.status, 201, "Required evidence upload failed: " + type);
+    return (await response.json())._id;
   }
-  const purchase = (await eapi("/invoices", { method: "POST", expected: 201, body: { chainId: chain._id, buyerId: manufacturer._id, sellerId: seller._id, invoiceNumber: "PURCHASE-V2", financialYearStart: 2026, invoiceDate: "2026-10-20", quantities: [{ speciesId: mango._id, quantity: "62.5" }], transport: [{ id: "legacy", biltyNumber: "BILTY-V2", vehicleNumber: "TEST-VEHICLE", driverLicenceNumber: "TEST-DRIVER-LICENCE" }], documentIds } })).data.invoice;
+  await evidence("chain", "manufacturerDeclaration");
+  chain = (await eapi(`/chains/${chain._id}/declaration`, { method: "PUT", body: { revision: chain.revision, manufacturerPartyId: manufacturer._id, identityConfirmed: true, date: "2026-10-21", consumption: [{ speciesId: mango._id, quantity: "62.5", unit: "CFT" }] } })).data;
+  const seller = (await eapi("/parties", { method: "POST", body: { chainId: chain._id, role: "sawmill", name: "Test Sawmill", gstin: "29AAAAA0003A1Z5", pan: "AAAAA0003A" } })).data;
+  const documentIds = [];
+  for (const type of ["purchaseInvoice", "bilty", "driverLicence", "weightSlip", "transportPermission", "araLicence"]) {
+    documentIds.push(await evidence("draftInvoice", type));
+  }
+  const purchase = (await eapi("/invoices", { method: "POST", expected: 201, body: { chainId: chain._id, buyerId: manufacturer._id, sellerId: seller._id, sellerKind: "sawmill", sawmillLicenceNumber: "ARA-TEST", invoiceNumber: "PURCHASE-V2", financialYearStart: 2026, invoiceDate: "2026-10-20", quantities: [{ speciesId: mango._id, quantity: "62.5" }], transport: [{ id: "legacy", biltyNumber: "BILTY-V2", vehicleNumber: "TEST-VEHICLE", driverLicenceNumber: "TEST-DRIVER-LICENCE" }], documentIds } })).data.invoice;
   assert.ok(purchase.batchCode); assert.equal((await eapi("/batches")).data.batches.length, 1);
   const privateGroup = real.groups.find(g => g.brand === "By Boo" && g.vendor.id === String(vendorA));
   const privateChain = (await eapi("/chains", { method: "POST", body: { containerKey, groupKey: privateGroup.key }, expected: 201 })).data.chain;
@@ -177,7 +184,7 @@ test("real OMS and EUDR V2 authenticate, exchange scoped source facts and create
   await db.collection("users").updateOne({ _id: admin }, { $set: { role: "user" } });
   await signed(`/auth/users/${admin}`, { context: user.omsScope, expected: 403 });
   await db.collection("users").updateOne({ _id: admin }, { $set: { role: "super admin" } });
-  await require("./helpers/eudrV2Browser")({ oms, eudr, uiPort, acaciaId: acacia._id, groupKey: group.key });
+  await require("./helpers/eudrV2Browser")({ oms, eudr, uiPort, acaciaId: acacia._id, groupKey: real.groups.find(g => g.exportInvoiceNumber === "EXP-2").key });
   await db.collection("users").updateOne({ _id: admin }, { $set: { is_active: false } });
   await eapi("/auth/me", { expected: 403 });
 });
