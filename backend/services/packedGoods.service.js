@@ -72,10 +72,10 @@ const fetchPackedGoodsOrders = async ({
   maxTimeMS,
 } = {}) => {
   const query = OrderModel.find(applyOptionalDataAccessMatch(orderMatch, user))
-    .select("order_id item brand vendor quantity shipment qc_record order_date updatedAt total_po_cbm")
+    .select("order_id item brand vendor status quantity shipment qc_record order_date updatedAt total_po_cbm")
     .populate({
       path: "qc_record",
-      select: "quantities request_history last_inspected_date inspection_dates",
+      select: "quantities request_history last_inspected_date inspection_dates inspection_record",
     })
     .sort({ order_date: -1, updatedAt: -1, order_id: 1 });
   return withMaxTime(query, maxTimeMS).lean();
@@ -167,7 +167,7 @@ const buildPackedGoodsDataset = async ({
     const itemDoc = itemMap.get(itemCode.toLowerCase()) || null;
     const storedPoCbm = toPositiveCbmNumber(orderEntry?.total_po_cbm);
     const orderQuantity = Math.max(0, Number(orderEntry?.quantity || 0));
-    const cbmSummary = resolveOrderRowCbmSummary(itemDoc, packedQuantity);
+    const cbmSummary = resolveOrderRowCbmSummary(itemDoc, packedQuantity, orderEntry);
     const calculatedPackedCbm = toPositiveCbmNumber(cbmSummary?.total);
     const storedPerItemCbm = storedPoCbm > 0 && orderQuantity > 0
       ? toRoundedCbmValue(storedPoCbm / orderQuantity)

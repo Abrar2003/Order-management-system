@@ -317,6 +317,10 @@ test("shipment CBM prefers the linked QC inspection over a shared item measureme
       { L: 117, B: 9, H: 78 },
       { L: 62, B: 45, H: 39 },
     ],
+    orderEntry: {
+      status: "Inspection Done",
+      qc_record: { inspection_record: ["inspection-1"] },
+    },
   });
 
   assert.equal(allocated, 3.81888);

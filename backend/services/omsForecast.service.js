@@ -225,6 +225,7 @@ const getContainerTargetCbm = (value = process.env.OMS_CHAT_CONTAINER_TARGET_CBM
 const resolveRowCbm = (row, quantity) => resolveOrderRowCbmSummaryWithStoredFallback({
   itemDoc: row?.item_doc || row?.itemDoc || row?.resolved_item || null,
   quantity,
+  orderEntry: row,
   storedTotalCbm: number(row?.quantity) > 0
     ? number(row?.total_po_cbm) * (number(quantity) / number(row.quantity))
     : 0,
@@ -712,6 +713,7 @@ const buildOpenOrderPipeline = ({ vendor, brand, itemCode } = {}) => {
         qc_passed: "$qc.quantities.qc_passed",
         qc_quantity_requested: "$qc.quantities.quantity_requested",
         qc_latest_request: { $arrayElemAt: ["$qc.request_history", -1] },
+        qc_inspection_record: "$qc.inspection_record",
         inspected_item_sizes: "$item_doc.inspected_item_sizes",
         pis_item_sizes: "$item_doc.pis_item_sizes",
         inspected_box_sizes: "$item_doc.inspected_box_sizes",
@@ -790,6 +792,7 @@ const hydrateForecastOrder = (row = {}) => ({
     request_history: row.qc_latest_request
       ? [row.qc_latest_request]
       : row.qc_request_history,
+    inspection_record: row.qc_inspection_record,
   },
   item_doc: row.item_doc || {
     inspected_item_sizes: row.inspected_item_sizes,

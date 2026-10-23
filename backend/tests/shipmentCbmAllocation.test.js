@@ -15,10 +15,16 @@ const item8824177 = {
     { remark: "top", L: 135.5, B: 16.5, H: 135 },
     { remark: "base", L: 57, B: 58, H: 81 },
   ],
+  pis_box_sizes: [{ remark: "PIS box", L: 100, B: 100, H: 50 }],
+};
+
+const completedInspection = {
+  status: "Inspection Done",
+  qc_record: { inspection_record: ["inspection-1"] },
 };
 
 test("8824177 uses combined packing CBM per item and preserves total and shipment precision", async () => {
-  const summary = resolveOrderRowCbmSummary(item8824177, 15);
+  const summary = resolveOrderRowCbmSummary(item8824177, 15, completedInspection);
   assert.equal(summary.per_item, 0.569612);
   assert.equal(summary.total, 8.544184);
   assert.equal(summary.source, "inspected_box");
@@ -28,13 +34,13 @@ test("8824177 uses combined packing CBM per item and preserves total and shipmen
     { label: "top", L: 135.5, B: 16.5, H: 135, cbm: 0.30182625 },
     { label: "base", L: 57, B: 58, H: 81, cbm: 0.267786 },
   ]);
-  const shippedCbm = resolveShipmentRowCbm({ itemDoc: item8824177, orderQuantity: 15, shipmentQuantity: 5 });
+  const shippedCbm = resolveShipmentRowCbm({ itemDoc: item8824177, orderQuantity: 15, shipmentQuantity: 5, orderEntry: completedInspection });
   assert.equal(shippedCbm, 2.848061);
   assert.equal(Number((summary.total - shippedCbm).toFixed(6)), 5.696123);
   const packed = await buildPackedGoodsDataset({}, {
     fetchOrders: async () => [{
       _id: "order-117160", order_id: "117160", item: { item_code: "8824177" },
-      quantity: 15, shipment: [], qc_record: { quantities: { qc_passed: 15 }, request_history: [] },
+      status: "Inspection Done", quantity: 15, shipment: [], qc_record: { quantities: { qc_passed: 15 }, request_history: [], inspection_record: ["inspection-1"] },
     }],
     fetchItems: async () => [item8824177],
   });
@@ -61,7 +67,7 @@ for (const source of ["inspected", "pis"]) {
         inspected_item_sizes: [{ remark: "item", L: 200, B: 200, H: 200 }],
         [`${source}_box_mode`]: mode,
         [`${source}_box_sizes`]: sizes,
-      }, 15);
+      }, 15, source === "inspected" ? completedInspection : null);
       assert.equal(summary.per_item, expectedPerItem);
       assert.equal(summary.total, expectedPerItem * 15);
       assert.equal(summary.packing.source, `${source}_box`);
@@ -73,13 +79,39 @@ for (const source of ["inspected", "pis"]) {
   }
 }
 
-test("inspected packing takes precedence without mixing PIS dimensions", () => {
+test("PIS packing remains primary until an inspection record reaches Inspection Done", () => {
   const summary = resolveOrderRowCbmSummary({
     ...item8824177,
     pis_box_sizes: [{ remark: "box", L: 100, B: 100, H: 100 }],
   }, 15);
-  assert.equal(summary.per_item, 0.569612);
-  assert.deepEqual(summary.packing.boxes.map((box) => box.label), ["top", "base"]);
+  assert.equal(summary.per_item, 1);
+  assert.deepEqual(summary.packing.boxes.map((box) => box.label), ["box"]);
+
+  for (const orderEntry of [
+    { status: "Inspection Done", qc_record: { inspection_record: [] } },
+    { status: "Pending", qc_record: { inspection_record: ["inspection-1"] } },
+  ]) {
+    assert.equal(resolveOrderRowCbmSummary({
+      ...item8824177,
+      pis_box_sizes: [{ remark: "box", L: 100, B: 100, H: 100 }],
+    }, 15, orderEntry).packing.source, "pis_box");
+  }
+
+  const inspected = resolveOrderRowCbmSummary({
+    ...item8824177,
+    pis_box_sizes: [{ remark: "box", L: 100, B: 100, H: 100 }],
+  }, 15, completedInspection);
+  assert.equal(inspected.per_item, 0.569612);
+  assert.deepEqual(inspected.packing.boxes.map((box) => box.label), ["top", "base"]);
+
+  assert.equal(resolveOrderRowCbmSummary({
+    ...item8824177,
+    pis_box_sizes: [{ remark: "box", L: 100, B: 100, H: 100 }],
+  }, 15, {
+    status: "Pending",
+    quantity: 15,
+    qc_record: { quantities: { qc_passed: 15 }, inspection_record: ["inspection-1"] },
+  }).packing.source, "inspected_box");
 });
 
 for (const invalidSizes of [
@@ -95,7 +127,7 @@ for (const invalidSizes of [
     const summary = resolveOrderRowCbmSummary({
       inspected_box_sizes: invalidSizes,
       pis_box_sizes: [{ remark: "box", L: 100, B: 100, H: 50 }],
-    }, 15);
+    }, 15, completedInspection);
     assert.equal(summary.per_item, 0.5);
     assert.equal(summary.total, 7.5);
     assert.equal(summary.packing.source, "pis_box");
@@ -122,7 +154,7 @@ test("missing packing stays N/A despite product sizes, cached CBM, or stored ord
 });
 
 test("zero quantity retains packing provenance without inventing an order total", () => {
-  const summary = resolveOrderRowCbmSummary(item8824177, 0);
+  const summary = resolveOrderRowCbmSummary(item8824177, 0, completedInspection);
   assert.equal(summary.per_item, 0.569612);
   assert.equal(summary.total, null);
   assert.equal(summary.packing.source, "inspected_box");
@@ -141,7 +173,7 @@ test("PIS provenance follows its existing normalization and four-box limit", () 
   const summary = resolveOrderRowCbmSummary({
     pis_box_mode: "individual",
     pis_box_sizes: ["master", "top", "base", "box3", "box4"].map((remark) => ({ remark, L: 100, B: 100, H: 10 })),
-  }, 15);
+  }, 15, completedInspection);
   assert.equal(summary.per_item, 0.4);
   assert.equal(summary.total, 6);
   assert.deepEqual(summary.packing.boxes.map((box) => box.label), ["master", "top", "base", "box3"]);
@@ -154,7 +186,7 @@ test("normal packing ignores invalid rows and carton rows in its provenance", ()
       { remark: "box3", L: 100, B: 100, H: 0 },
       { remark: "master", box_type: "master", L: 100, B: 100, H: 100 },
     ],
-  }, 15);
+  }, 15, completedInspection);
   assert.equal(summary.per_item, 0.569612);
   assert.deepEqual(summary.packing.boxes.map((box) => box.label), ["top", "base"]);
 });

@@ -3231,7 +3231,7 @@ const buildPoBucketDataset = async ({
 
       groupingOrders = await Order.find(fullOrderMatch)
         .select(
-          "_id order_id brand vendor ETD revised_ETD order_date quantity item shipment qc_record total_po_cbm",
+          "_id order_id brand vendor status ETD revised_ETD order_date quantity item shipment qc_record total_po_cbm",
         )
         .populate({
           path: "qc_record",
@@ -3390,6 +3390,7 @@ const buildPoBucketDataset = async ({
       itemDoc,
       quantity: lineProgress.order_quantity,
       storedTotalCbm: storedPoCbm,
+      orderEntry: { ...orderEntry, qc_record: qcRecord },
     });
     groupedEntry.total_cbm += Number(cbmSummary?.total || 0);
     const shippedCbm = (
@@ -3402,6 +3403,7 @@ const buildPoBucketDataset = async ({
           orderQuantity: lineProgress.order_quantity,
           storedPoCbm,
           shipmentQuantity: shipmentEntry?.quantity,
+          orderEntry: { ...orderEntry, qc_record: qcRecord },
         }),
       0,
     );
@@ -3414,12 +3416,14 @@ const buildPoBucketDataset = async ({
       orderQuantity: lineProgress.order_quantity,
       storedPoCbm,
       shipmentQuantity: lineProgress.inspected_unshipped_quantity,
+      orderEntry: { ...orderEntry, qc_record: qcRecord },
     });
     groupedEntry.total_packing_pending_cbm += resolveShipmentRowCbm({
       itemDoc,
       orderQuantity: lineProgress.order_quantity,
       storedPoCbm,
       shipmentQuantity: lineProgress.pending_inspection_quantity,
+      orderEntry: { ...orderEntry, qc_record: qcRecord },
     });
     groupedEntry.order_date = resolveEarlierDate(
       groupedEntry.order_date,
@@ -3714,6 +3718,7 @@ const mapOrdersToShipmentRows = (orders = []) =>
       itemDoc: order?.itemDoc,
       quantity: normalizedOrderQuantity,
       storedTotalCbm: storedPoCbm,
+      orderEntry: order,
     });
     const perItemCbm = Number(cbmSummary?.per_item || 0);
 
@@ -3784,6 +3789,7 @@ const mapOrdersToShipmentRows = (orders = []) =>
             : 0,
           inspectedBoxSizes: order?.shipmentInspection?.inspected_box_sizes,
           inspectedBoxMode: order?.shipmentInspection?.inspected_box_mode,
+          orderEntry: order,
         }),
         shipment_cft: resolveShipmentCft(
           order?.itemDoc?.timber_cft,
@@ -3992,7 +3998,7 @@ const getShipmentDataset = async ({
     )
     .populate({
       path: "qc_record",
-      select: "quantities request_history",
+      select: "quantities request_history inspection_record",
     })
     .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
     .lean();
@@ -6832,6 +6838,7 @@ exports.getOrderById = async (req, res) => {
         itemDoc,
         quantity: orderRow?.quantity,
         storedTotalCbm: storedPoCbm,
+        orderEntry: orderRow,
       });
       const shippedCbm = (
         Array.isArray(orderRow?.shipment) ? orderRow.shipment : []
@@ -6843,6 +6850,7 @@ exports.getOrderById = async (req, res) => {
             orderQuantity: orderRow?.quantity,
             storedPoCbm,
             shipmentQuantity: shipmentEntry?.quantity,
+            orderEntry: orderRow,
           }),
         0,
       );
