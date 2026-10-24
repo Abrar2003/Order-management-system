@@ -79,8 +79,13 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.$eval("h2", node => node.textContent), "Shipping Mark Files");
     assert.equal((await page.$$("tbody tr:first-child .item-file-dropzone")).length, 5);
     assert.equal((await page.$$("tbody tr:nth-child(2) .item-file-dropzone")).length, 4);
+    assert.equal((await page.$$("thead th")).length, 5);
+    assert.equal((await page.$$('td[data-label="CBM"], .items-size-column')).length, 0);
+    assert.equal(await page.$$eval("tbody button", buttons => buttons.some(button => button.textContent.trim() === "Preview")), false);
+    assert.equal(await page.$eval(".shipping-mark-file-grid", grid => getComputedStyle(grid).gridTemplateColumns.split(" ").length), 5);
+    assert.equal(await page.$eval(".shipping-mark-files-table", table => table.getBoundingClientRect().width > innerWidth * 0.9), true);
     assert.equal(await page.$$eval("tbody tr:first-child .item-file-dropzone", zones => zones.every(zone => {
-      const cell = zone.closest("td").getBoundingClientRect();
+      const cell = zone.closest(".shipping-mark-file-window").getBoundingClientRect();
       const box = zone.getBoundingClientRect();
       return box.left >= cell.left && box.right <= cell.right;
     })), true, "Desktop drop zones must fit inside their own columns");
@@ -91,10 +96,6 @@ const server = http.createServer((req, res) => {
       await page.waitForSelector(".item-file-dropzone:not([disabled])");
       assert.equal(uploads.at(-1).type, options[index]);
       assert.equal((uploads.at(-1).data.match(/filename=/g) || []).length, names.length);
-      await page.click(`[aria-label="Preview ${labels[index]} for KD-ITEM"]`);
-      await page.waitForSelector("[data-file-preview]");
-      assert.equal(previews.at(-1), options[index]);
-      await page.keyboard.press("Escape");
     }
     await drop("EAN", ["invalid.txt"]);
     await page.waitForSelector(".alert-danger");
@@ -117,12 +118,20 @@ const server = http.createServer((req, res) => {
     assert.equal(uploads.at(-1).type, "flat_carton", "The picker must retain its selected category");
     await page.setViewport({ width: 390, height: 844 });
     assert.equal((await page.$$("tbody tr:first-child .item-file-dropzone")).length, 5);
+    assert.equal(await page.$eval(".shipping-mark-file-grid", grid => getComputedStyle(grid).gridTemplateColumns.split(" ").length), 2);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.setViewport({ width: 1600, height: 1000 });
     await load("/item-files?file_type=ean");
     assert.equal((await page.$$("tbody tr:first-child .item-file-dropzone")).length, 1);
+    assert.equal((await page.$$('td[data-label="CBM"]')).length, 2);
+    await page.$$eval('tbody tr:first-child td[data-label="Action"] button', buttons => buttons.find(button => button.textContent.trim() === "Preview").click());
+    await page.waitForSelector("[data-file-preview]");
+    assert.equal(previews.at(-1), "ean", "Existing file pages retain their previews");
+    await page.keyboard.press("Escape");
     canUpload = false;
     await load("/shipping-mark-files");
     assert.equal((await page.$$(".item-file-dropzone")).length, 0, "Upload permissions must be respected");
     assert.deepEqual(errors, []);
-    console.log("Shipping mark file browser checks passed: five destinations, multi-file drops, previews, validation, picker, mobile, KD eligibility, permissions and existing page.");
+    console.log("Shipping mark file browser checks passed: compact grid, wider table, removed sizes/CBM/previews, five upload destinations, validation, picker, mobile, permissions and existing page.");
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

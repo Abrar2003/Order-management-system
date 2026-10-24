@@ -1857,10 +1857,72 @@ small,
   min-width: 1040px;
 }
 
+.page-shell.shipping-mark-files-page {
+  width: calc(100% - 2rem);
+}
+
+.shipping-mark-file-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.shipping-mark-file-window {
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--om-color-border);
+  border-radius: 0.5rem;
+  background: var(--om-color-surface);
+}
+
+.shipping-mark-file-title {
+  font-size: 0.78rem;
+}
+
+.shipping-mark-file-window .item-file-dropzone {
+  min-width: 0;
+  min-height: 3.5rem;
+}
+
+.shipping-mark-file-window small {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
 @media (min-width: 992px) {
   .shipping-mark-files-table.responsive-card-table {
-    min-width: 1840px;
-    table-layout: auto;
+    min-width: 1280px;
+  }
+
+  .shipping-mark-files-table > thead > tr > th:first-child {
+    width: 6rem;
+  }
+
+  .shipping-mark-files-table > thead > tr > th:nth-child(2) {
+    width: 11rem;
+  }
+
+  .shipping-mark-files-table > thead > tr > th:nth-child(3),
+  .shipping-mark-files-table > thead > tr > th:last-child {
+    width: 7rem;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .shipping-mark-file-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .shipping-mark-files-table.responsive-card-table > tbody > tr > td[data-label="Files"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 575.98px) {
+  .shipping-mark-file-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

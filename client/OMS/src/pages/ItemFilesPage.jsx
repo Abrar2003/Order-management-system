@@ -856,7 +856,7 @@ const ItemFilesPage = ({ shippingMarkFiles = false }) => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3 item-files-page oms-responsive-list-page">
+      <div className={`page-shell py-3 item-files-page oms-responsive-list-page${shippingMarkFiles ? " shipping-mark-files-page" : ""}`}>
         <input
           ref={itemFileInputRef}
           type="file"
@@ -1060,25 +1060,25 @@ const ItemFilesPage = ({ shippingMarkFiles = false }) => {
                           onClick={() => handleSortColumn("brand", "asc")}
                         />
                       </th>
-                      <th>
-                        <SortHeaderButton
-                          label="CBM"
-                          isActive={sortBy === "cbm"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("cbm", "desc")}
-                        />
-                      </th>
-                      <th className="items-size-column">
-                        <SortHeaderButton
-                          label={preferPisMeasurements ? "PIS Size" : "Inspected Size"}
-                          isActive={sortBy === "sizeData"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("sizeData", "asc")}
-                        />
-                      </th>
-                      {shippingMarkFiles ? pageFileOptions.map((option) => (
-                        <th key={option.value}>{option.value === "shipping_marks" ? "Shipping Marks" : option.label}</th>
-                      )) : <th>
+                      {!shippingMarkFiles && <>
+                        <th>
+                          <SortHeaderButton
+                            label="CBM"
+                            isActive={sortBy === "cbm"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("cbm", "desc")}
+                          />
+                        </th>
+                        <th className="items-size-column">
+                          <SortHeaderButton
+                            label={preferPisMeasurements ? "PIS Size" : "Inspected Size"}
+                            isActive={sortBy === "sizeData"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("sizeData", "asc")}
+                          />
+                        </th>
+                      </>}
+                      {shippingMarkFiles ? <th>Files</th> : <th>
                         <SortHeaderButton
                           label={activeFileOption.label}
                           isActive={sortBy === "file"}
@@ -1092,7 +1092,7 @@ const ItemFilesPage = ({ shippingMarkFiles = false }) => {
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr className="responsive-card-table-empty-row">
-                        <td colSpan={6 + pageFileOptions.length} className="text-center py-4">
+                        <td colSpan={shippingMarkFiles ? 5 : 7} className="text-center py-4">
                           No items found
                         </td>
                       </tr>
@@ -1105,6 +1105,102 @@ const ItemFilesPage = ({ shippingMarkFiles = false }) => {
                       const isSubmittingCommentThisItem = submittingCommentItemId === itemId;
                       const storedFiles = getItemFileValues(item, activeFileOption);
                       const hasFile = storedFiles.length > 0;
+
+                      const fileCells = pageFileOptions.map((fileOption) => {
+                        const FileCell = shippingMarkFiles ? "div" : "td";
+                        const storedFiles = getItemFileValues(item, fileOption);
+                        const storedFile = storedFiles[0] || null;
+                        const hasFile = storedFiles.length > 0;
+                        const canUploadThisFile = canUploadActiveFile && isItemFileOptionAvailableForItem(fileOption, item);
+                        return (
+                          <FileCell key={fileOption.value} data-label={fileOption.label} className={shippingMarkFiles ? "shipping-mark-file-window" : undefined}>
+                            <div className="d-flex flex-column gap-2">
+                              {shippingMarkFiles && <strong className="shipping-mark-file-title">{fileOption.value === "shipping_marks" ? "Shipping Marks" : fileOption.label}</strong>}
+                              {hasFile ? (
+                                <div className="item-file-product-image-cell">
+                                  {isProductImageFileType(fileOption.value) && (
+                                    <ProductImageThumbnail
+                                      src={item?.product_image_url}
+                                      originalName={storedFile?.originalName}
+                                      alt={`${item?.code || "Item"} product image`}
+                                    />
+                                  )}
+                                  {!isProductImageFileType(fileOption.value) && (
+                                    <span className={`badge align-self-start ${isQcApprovalMode ? "text-bg-warning" : "text-bg-success"}`}>
+                                      {isQcApprovalMode
+                                        ? approvalStatus === "completed" ? "QC approved" : approvalStatus === "pending" ? "Pending QC approval" : "QC approval"
+                                        : storedFiles.length > 1
+                                          ? `${storedFiles.length} Uploaded`
+                                          : "Uploaded"}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="d-flex flex-column gap-1">
+                                  <span className="text-secondary">Not uploaded</span>
+                                  <span className="badge text-bg-secondary align-self-start">
+                                    Missing
+                                  </span>
+                                </div>
+                              )}
+                              {canUploadThisFile && (
+                                <button
+                                  type="button"
+                                  className={`item-file-dropzone${draggingItemId === `${itemId}:${fileOption.value}` ? " is-dragging" : ""}`}
+                                  disabled={Boolean(uploadingItemId)}
+                                  aria-label={`Upload ${fileOption.label} for ${item.code}`}
+                                  onClick={() => handleOpenItemFilePicker(item, fileOption)}
+                                  onDragOver={(event) => handleItemFileDragOver(event, item, fileOption)}
+                                  onDragLeave={() => setDraggingItemId("")}
+                                  onDrop={(event) => handleItemFileDrop(event, item, fileOption)}
+                                >
+                                  {isUploadingThisItem ? "Uploading..." : `Drop ${fileOption.buttonLabel} here or click`}
+                                </button>
+                              )}
+                              {shippingMarkFiles && (
+                                <>
+                                  {!isItemFileOptionAvailableForItem(fileOption, item) && (
+                                    <small className="text-secondary">Only available for KD items.</small>
+                                  )}
+                                  {storedFiles.map((file, index) => (
+                                    <small key={file.key || file.url || index} className="text-break" title={file.originalName || fileOption.label}>{file.originalName || fileOption.label}</small>
+                                  ))}
+                                </>
+                              )}
+                              {canApproveActiveFile && hasFile && (
+                                <textarea
+                                  className="form-control form-control-sm item-file-approval-comment"
+                                  rows="2"
+                                  maxLength="2000"
+                                  disabled={isSubmittingCommentThisItem}
+                                  value={approvalComments[itemId] || ""}
+                                  onChange={(event) => setApprovalComments((current) => ({
+                                    ...current,
+                                    [itemId]: event.target.value,
+                                  }))}
+                                  placeholder="Describe the needed update or add an approval note"
+                                  aria-label={`${fileOption.label} approval comment`}
+                                />
+                              )}
+                              {canApproveActiveFile && hasFile && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-warning btn-sm item-file-submit-comment"
+                                  onClick={() => handleSubmitApprovalComment(item)}
+                                  disabled={!String(approvalComments[itemId] || "").trim() || isSubmittingCommentThisItem}
+                                >
+                                  {isSubmittingCommentThisItem ? "Sending..." : "Submit Comment"}
+                                </button>
+                              )}
+                              {item?.file_approvals?.[fileOption.value]?.comment && (
+                                <small className="text-secondary">
+                                  QC comment: {item.file_approvals[fileOption.value].comment}
+                                </small>
+                              )}
+                            </div>
+                          </FileCell>
+                        );
+                      });
 
                       return (
                         <tr key={item?._id || item?.code}>
@@ -1126,118 +1222,23 @@ const ItemFilesPage = ({ shippingMarkFiles = false }) => {
                                 ? item.brands[0]
                                 : "N/A")}
                           </td>
-                          <td data-label="CBM">{formatCbm(getPreferredCbm(item, preferPisMeasurements))}</td>
-                          <td
-                            className="items-size-column"
-                            data-label={preferPisMeasurements ? "PIS Size" : "Inspected Size"}
-                          >
-                            <SizeDataCell
-                              item={item}
-                              preferPis={preferPisMeasurements}
-                            />
-                          </td>
-                          {pageFileOptions.map((fileOption) => {
-                            const storedFiles = getItemFileValues(item, fileOption);
-                            const storedFile = storedFiles[0] || null;
-                            const hasFile = storedFiles.length > 0;
-                            const canUploadThisFile = canUploadActiveFile && isItemFileOptionAvailableForItem(fileOption, item);
-                            return (
-                              <td key={fileOption.value} data-label={fileOption.label}>
-                                <div className="d-flex flex-column gap-2">
-                                  {hasFile ? (
-                                    <div className="item-file-product-image-cell">
-                                      {isProductImageFileType(fileOption.value) && (
-                                        <ProductImageThumbnail
-                                          src={item?.product_image_url}
-                                          originalName={storedFile?.originalName}
-                                          alt={`${item?.code || "Item"} product image`}
-                                        />
-                                      )}
-                                      {!isProductImageFileType(fileOption.value) && (
-                                        <span className={`badge align-self-start ${isQcApprovalMode ? "text-bg-warning" : "text-bg-success"}`}>
-                                          {isQcApprovalMode
-                                            ? approvalStatus === "completed" ? "QC approved" : approvalStatus === "pending" ? "Pending QC approval" : "QC approval"
-                                            : storedFiles.length > 1
-                                              ? `${storedFiles.length} Uploaded`
-                                              : "Uploaded"}
-                                        </span>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <div className="d-flex flex-column gap-1">
-                                      <span className="text-secondary">Not uploaded</span>
-                                      <span className="badge text-bg-secondary align-self-start">
-                                        Missing
-                                      </span>
-                                    </div>
-                                  )}
-                                  {canUploadThisFile && (
-                                    <button
-                                      type="button"
-                                      className={`item-file-dropzone${draggingItemId === `${itemId}:${fileOption.value}` ? " is-dragging" : ""}`}
-                                      disabled={Boolean(uploadingItemId)}
-                                      aria-label={`Upload ${fileOption.label} for ${item.code}`}
-                                      onClick={() => handleOpenItemFilePicker(item, fileOption)}
-                                      onDragOver={(event) => handleItemFileDragOver(event, item, fileOption)}
-                                      onDragLeave={() => setDraggingItemId("")}
-                                      onDrop={(event) => handleItemFileDrop(event, item, fileOption)}
-                                    >
-                                      {isUploadingThisItem ? "Uploading..." : `Drop ${fileOption.buttonLabel} here or click`}
-                                    </button>
-                                  )}
-                                  {shippingMarkFiles && (
-                                    <>
-                                      {!isItemFileOptionAvailableForItem(fileOption, item) && (
-                                        <small className="text-secondary">Only available for KD items.</small>
-                                      )}
-                                      {storedFiles.map((file, index) => (
-                                        <small key={file.key || file.url || index} className="text-break">{file.originalName || fileOption.label}</small>
-                                      ))}
-                                      <button
-                                        type="button"
-                                        className="btn btn-outline-secondary btn-sm"
-                                        onClick={() => handlePreviewFile(item, fileOption)}
-                                        disabled={!hasFile || isOpeningThisItem}
-                                        aria-label={`Preview ${fileOption.label} for ${item.code}`}
-                                      >
-                                        {isOpeningThisItem ? "Loading..." : "Preview"}
-                                      </button>
-                                    </>
-                                  )}
-                                  {canApproveActiveFile && hasFile && (
-                                    <textarea
-                                      className="form-control form-control-sm item-file-approval-comment"
-                                      rows="2"
-                                      maxLength="2000"
-                                      disabled={isSubmittingCommentThisItem}
-                                      value={approvalComments[itemId] || ""}
-                                      onChange={(event) => setApprovalComments((current) => ({
-                                        ...current,
-                                        [itemId]: event.target.value,
-                                      }))}
-                                      placeholder="Describe the needed update or add an approval note"
-                                      aria-label={`${fileOption.label} approval comment`}
-                                    />
-                                  )}
-                                  {canApproveActiveFile && hasFile && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-outline-warning btn-sm item-file-submit-comment"
-                                      onClick={() => handleSubmitApprovalComment(item)}
-                                      disabled={!String(approvalComments[itemId] || "").trim() || isSubmittingCommentThisItem}
-                                    >
-                                      {isSubmittingCommentThisItem ? "Sending..." : "Submit Comment"}
-                                    </button>
-                                  )}
-                                  {item?.file_approvals?.[fileOption.value]?.comment && (
-                                    <small className="text-secondary">
-                                      QC comment: {item.file_approvals[fileOption.value].comment}
-                                    </small>
-                                  )}
-                                </div>
-                              </td>
-                            );
-                          })}
+                          {!shippingMarkFiles && <>
+                            <td data-label="CBM">{formatCbm(getPreferredCbm(item, preferPisMeasurements))}</td>
+                            <td
+                              className="items-size-column"
+                              data-label={preferPisMeasurements ? "PIS Size" : "Inspected Size"}
+                            >
+                              <SizeDataCell
+                                item={item}
+                                preferPis={preferPisMeasurements}
+                              />
+                            </td>
+                          </>}
+                          {shippingMarkFiles ? (
+                            <td data-label="Files">
+                              <div className="shipping-mark-file-grid">{fileCells}</div>
+                            </td>
+                          ) : fileCells}
                           <td data-label="Action">
                             {isQcApprovalMode ? (
                               <div className="d-flex flex-wrap gap-2 item-file-approval-actions">
