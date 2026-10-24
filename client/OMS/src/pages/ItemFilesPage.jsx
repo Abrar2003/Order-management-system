@@ -20,6 +20,7 @@ import {
   isItemFileOptionAvailableForItem,
   isPisSpreadsheetUploadType,
   shouldOpenFilePreviewExternally,
+  SHIPPING_MARK_FILE_PAGE_OPTIONS,
 } from "../constants/itemFiles";
 import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import {
@@ -289,22 +290,23 @@ const getPreferredCbm = (item, preferPis = false) => {
 const isProductImageFileType = (fileType = "") =>
   String(fileType || "").trim().toLowerCase() === "product_image";
 
-const ItemFilesPage = () => {
+const ItemFilesPage = ({ shippingMarkFiles = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  useRememberSearchParams(searchParams, setSearchParams, "item-files");
+  useRememberSearchParams(searchParams, setSearchParams, shippingMarkFiles ? "shipping-mark-files" : "item-files");
 
   const { canEditPis, hasPermission } = usePermissions();
   const canUploadItemFiles = hasPermission("images_documents", "upload");
 
   const requestedFileType = normalizeFilterParam(
-    searchParams.get("file_type"),
+    shippingMarkFiles ? "shipping_marks" : searchParams.get("file_type"),
     DEFAULT_ITEM_FILE_TYPE,
   );
   const activeFileOption =
     getItemFileOption(requestedFileType) || getItemFileOption(DEFAULT_ITEM_FILE_TYPE);
   const activeFileType = activeFileOption?.value || DEFAULT_ITEM_FILE_TYPE;
+  const pageFileOptions = shippingMarkFiles ? SHIPPING_MARK_FILE_PAGE_OPTIONS : [activeFileOption];
   const isQcUser = isQcOnlyUserRole(getUserFromToken()?.role);
   const requestedApprovalStatus = normalizeFilterParam(searchParams.get("approval_status"), "");
   const isQcApprovalMode =
@@ -365,6 +367,7 @@ const ItemFilesPage = () => {
   const [uploadingItemId, setUploadingItemId] = useState("");
   const [draggingItemId, setDraggingItemId] = useState("");
   const [itemFilePickerItemId, setItemFilePickerItemId] = useState("");
+  const [pickerFileOption, setPickerFileOption] = useState(null);
   const [openingFileItemId, setOpeningFileItemId] = useState("");
   const [approvingItemId, setApprovingItemId] = useState("");
   const [submittingCommentItemId, setSubmittingCommentItemId] = useState("");
@@ -386,7 +389,7 @@ const ItemFilesPage = () => {
         {
         params: {
           search: searchInput,
-          file_type: activeFileType,
+          ...(!shippingMarkFiles && { file_type: activeFileType }),
           page,
           limit,
           ...(isQcApprovalMode
@@ -395,7 +398,7 @@ const ItemFilesPage = () => {
                 brand: brandFilter,
                 vendor: vendorFilter,
                 country: countryFilter,
-                file_status: fileStatus,
+                ...(!shippingMarkFiles && { file_status: fileStatus }),
               }),
         },
       });
@@ -427,7 +430,7 @@ const ItemFilesPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeFileType, approvalStatus, brandFilter, countryFilter, fileStatus, isQcApprovalMode, isQcUser, limit, page, searchInput, vendorFilter]);
+  }, [activeFileType, approvalStatus, brandFilter, countryFilter, fileStatus, isQcApprovalMode, isQcUser, limit, page, searchInput, shippingMarkFiles, vendorFilter]);
 
   useEffect(() => {
     fetchItems();
@@ -468,7 +471,7 @@ const ItemFilesPage = () => {
     if (syncedQuery !== currentQuery) return;
 
     const next = new URLSearchParams();
-    next.set("file_type", activeFileType);
+    if (!shippingMarkFiles) next.set("file_type", activeFileType);
     next.set("country", isQcApprovalMode ? "India" : countryFilter);
 
     const searchValue = normalizeSearchParam(searchInput);
@@ -476,7 +479,7 @@ const ItemFilesPage = () => {
     if (!isQcApprovalMode && brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
     if (!isQcApprovalMode && vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
     if (isQcApprovalMode) next.set("approval_status", approvalStatus);
-    else if (["missing", "uploaded"].includes(fileStatus)) next.set("file_status", fileStatus);
+    else if (!shippingMarkFiles && ["missing", "uploaded"].includes(fileStatus)) next.set("file_status", fileStatus);
     if (page > 1) next.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
 
@@ -495,6 +498,7 @@ const ItemFilesPage = () => {
     searchInput,
     searchParams,
     setSearchParams,
+    shippingMarkFiles,
     syncedQuery,
     vendorFilter,
   ]);
@@ -645,10 +649,10 @@ const ItemFilesPage = () => {
     [location.pathname, location.search, navigate],
   );
 
-  const handleOpenItemFilePicker = useCallback((item) => {
+  const handleOpenItemFilePicker = useCallback((item, fileOption = activeFileOption) => {
     if (!canUploadActiveFile || uploadingItemId) return;
-    if (!isItemFileOptionAvailableForItem(activeFileOption, item)) {
-      setError(`${activeFileOption.label} is not enabled for this item.`);
+    if (!isItemFileOptionAvailableForItem(fileOption, item)) {
+      setError(`${fileOption.label} is not enabled for this item.`);
       return;
     }
 
@@ -656,13 +660,14 @@ const ItemFilesPage = () => {
     if (!itemId) return;
 
     setItemFilePickerItemId(itemId);
+    setPickerFileOption(fileOption);
 
     window.setTimeout(() => {
       itemFileInputRef.current?.click();
     }, 0);
   }, [activeFileOption, canUploadActiveFile, uploadingItemId]);
 
-  const uploadItemFiles = useCallback(async (itemId, selectedFiles) => {
+  const uploadItemFiles = useCallback(async (itemId, selectedFiles, fileOption = activeFileOption) => {
     if (!itemId || selectedFiles.length === 0) return;
 
     try {
@@ -673,38 +678,38 @@ const ItemFilesPage = () => {
       for (const selectedFile of selectedFiles) {
         const normalizedName = String(selectedFile.name || "").toLowerCase();
         const normalizedType = String(selectedFile.type || "").toLowerCase();
-        const hasAllowedExtension = activeFileOption.extensions.some((extension) =>
+        const hasAllowedExtension = fileOption.extensions.some((extension) =>
           normalizedName.endsWith(extension)
         );
         const hasAllowedMimeType =
-          !normalizedType || activeFileOption.mimeTypes.includes(normalizedType);
+          !normalizedType || fileOption.mimeTypes.includes(normalizedType);
 
         if (!hasAllowedExtension || !hasAllowedMimeType) {
-          throw new Error(activeFileOption.invalidMessage);
+          throw new Error(fileOption.invalidMessage);
         }
       }
 
       const uploadRequest = buildItemFileUploadRequest({
         itemId,
-        fileType: activeFileType,
-        files: activeFileOption.supportsMultiple ? selectedFiles : selectedFiles.slice(0, 1),
+        fileType: fileOption.value,
+        files: fileOption.supportsMultiple ? selectedFiles : selectedFiles.slice(0, 1),
       });
       const response = await api.post(uploadRequest.path, uploadRequest.formData);
 
       setSuccess(
-        response?.data?.message || `${activeFileOption.label} uploaded successfully.`,
+        response?.data?.message || `${fileOption.label} uploaded successfully.`,
       );
       await fetchItems();
     } catch (err) {
       setError(
         err?.response?.data?.message
           || err?.message
-          || `Failed to upload ${activeFileOption.label}.`,
+          || `Failed to upload ${fileOption.label}.`,
       );
     } finally {
       setUploadingItemId("");
     }
-  }, [activeFileOption, activeFileType, fetchItems]);
+  }, [activeFileOption, fetchItems]);
 
   const handleItemFileChange = useCallback(async (event) => {
     const inputElement = event.target;
@@ -715,41 +720,41 @@ const ItemFilesPage = () => {
       return;
     }
 
-    await uploadItemFiles(itemFilePickerItemId, selectedFiles);
+    await uploadItemFiles(itemFilePickerItemId, selectedFiles, pickerFileOption || activeFileOption);
     setItemFilePickerItemId("");
     if (inputElement) inputElement.value = "";
-  }, [itemFilePickerItemId, uploadItemFiles]);
+  }, [activeFileOption, itemFilePickerItemId, pickerFileOption, uploadItemFiles]);
 
-  const handleItemFileDrop = useCallback((event, item) => {
+  const handleItemFileDrop = useCallback((event, item, fileOption = activeFileOption) => {
     event.preventDefault();
     setDraggingItemId("");
     if (!canUploadActiveFile || uploadingItemId) return;
-    if (!isItemFileOptionAvailableForItem(activeFileOption, item)) {
-      setError(`${activeFileOption.label} is not enabled for this item.`);
+    if (!isItemFileOptionAvailableForItem(fileOption, item)) {
+      setError(`${fileOption.label} is not enabled for this item.`);
       return;
     }
 
     const itemId = String(item?._id || "").trim();
     const selectedFiles = Array.from(event.dataTransfer?.files || []);
-    void uploadItemFiles(itemId, selectedFiles);
+    void uploadItemFiles(itemId, selectedFiles, fileOption);
   }, [activeFileOption, canUploadActiveFile, uploadItemFiles, uploadingItemId]);
 
-  const handleItemFileDragOver = useCallback((event, item) => {
+  const handleItemFileDragOver = useCallback((event, item, fileOption = activeFileOption) => {
     if (!canUploadActiveFile || uploadingItemId) return;
-    if (!isItemFileOptionAvailableForItem(activeFileOption, item)) return;
+    if (!isItemFileOptionAvailableForItem(fileOption, item)) return;
 
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
-    setDraggingItemId(String(item?._id || "").trim());
+    setDraggingItemId(`${item?._id}:${fileOption.value}`);
   }, [activeFileOption, canUploadActiveFile, uploadingItemId]);
 
-  const handlePreviewFile = useCallback(async (item) => {
+  const handlePreviewFile = useCallback(async (item, fileOption = activeFileOption) => {
     const itemId = String(item?._id || "").trim();
-    const storedFile = getPrimaryStoredItemFile(item, activeFileOption);
+    const storedFile = getPrimaryStoredItemFile(item, fileOption);
 
     if (!itemId || !hasStoredItemFile(storedFile)) {
       setSuccess("");
-      setError(`${activeFileOption.label} is not uploaded yet.`);
+      setError(`${fileOption.label} is not uploaded yet.`);
       return;
     }
 
@@ -757,35 +762,35 @@ const ItemFilesPage = () => {
       setOpeningFileItemId(itemId);
       setError("");
       const response = await api.get(
-        `/items/${encodeURIComponent(itemId)}/files/${encodeURIComponent(activeFileType)}/url`,
+        `/items/${encodeURIComponent(itemId)}/files/${encodeURIComponent(fileOption.value)}/url`,
       );
       const fileUrl = String(response?.data?.data?.url || "").trim();
       if (!fileUrl) {
-        throw new Error(`${activeFileOption.label} URL is not available.`);
+        throw new Error(`${fileOption.label} URL is not available.`);
       }
 
-      if (shouldOpenFilePreviewExternally(activeFileOption.previewMode)) {
+      if (shouldOpenFilePreviewExternally(fileOption.previewMode)) {
         window.open(fileUrl, "_blank", "noopener,noreferrer");
         return;
       }
 
       setPreviewFile({
-        title: activeFileOption.label,
+        title: fileOption.label,
         url: fileUrl,
         originalName:
           String(response?.data?.data?.file?.originalName || storedFile?.originalName || "").trim(),
-        previewMode: activeFileOption.previewMode,
+        previewMode: fileOption.previewMode,
       });
     } catch (previewError) {
       setError(
         previewError?.response?.data?.message
           || previewError?.message
-          || `Failed to preview ${activeFileOption.label}.`,
+          || `Failed to preview ${fileOption.label}.`,
       );
     } finally {
       setOpeningFileItemId("");
     }
-  }, [activeFileOption, activeFileType]);
+  }, [activeFileOption]);
 
   const handleApproveFile = useCallback(async (item) => {
     const itemId = String(item?._id || "").trim();
@@ -856,8 +861,8 @@ const ItemFilesPage = () => {
           ref={itemFileInputRef}
           type="file"
           className="d-none"
-          accept={activeFileOption.accept}
-          multiple={Boolean(activeFileOption.supportsMultiple)}
+          accept={(pickerFileOption || activeFileOption).accept}
+          multiple={Boolean((pickerFileOption || activeFileOption).supportsMultiple)}
           disabled={!canUploadActiveFile || Boolean(uploadingItemId)}
           onChange={handleItemFileChange}
         />
@@ -871,9 +876,11 @@ const ItemFilesPage = () => {
             Back
           </button>
           <div className="text-center flex-grow-1">
-            <h2 className="h4 mb-1">{activeFileOption.label}</h2>
+            <h2 className="h4 mb-1">{shippingMarkFiles ? "Shipping Mark Files" : activeFileOption.label}</h2>
             <div className="text-secondary small">
-              {isQcApprovalMode
+              {shippingMarkFiles
+                ? "Upload shipping marks, flat carton, EAN, logistics EAN and 3D carton files in their separate drop zones."
+                : isQcApprovalMode
                 ? `Indian ${activeFileOption.label.toLowerCase()} files with ${approvalStatus === "pending" ? "pending" : approvalStatus === "completed" ? "completed" : "all"} QC approvals.`
                 : fileStatus === "missing"
                   ? `Items missing ${activeFileOption.label.toLowerCase()}.`
@@ -927,7 +934,7 @@ const ItemFilesPage = () => {
                     {filters.vendors.map((vendor) => <option key={vendor} value={vendor}>{vendor}</option>)}
                   </select>
                 </div>
-                <div className="col-md-2">
+                {!shippingMarkFiles && <div className="col-md-2">
                   <label className="form-label">File status</label>
                   <select
                     className="form-select"
@@ -938,7 +945,7 @@ const ItemFilesPage = () => {
                     <option value="missing">Missing only</option>
                     <option value="uploaded">Uploaded only</option>
                   </select>
-                </div>
+                </div>}
               </>}
               {isQcApprovalMode && (
                 <div className="col-md-2">
@@ -995,14 +1002,14 @@ const ItemFilesPage = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
-            <span className="om-summary-chip">File: {activeFileOption.label}</span>
-            {!isQcApprovalMode && ["missing", "uploaded"].includes(fileStatus) && (
+            <span className="om-summary-chip">File: {shippingMarkFiles ? "Shipping Mark Files" : activeFileOption.label}</span>
+            {!shippingMarkFiles && !isQcApprovalMode && ["missing", "uploaded"].includes(fileStatus) && (
               <span className="om-summary-chip">Status: {fileStatus === "missing" ? "Missing only" : "Uploaded only"}</span>
             )}
             <span className="om-summary-chip">Records: {totalRecords}</span>
-            <span className="om-summary-chip">
+            {!shippingMarkFiles && <span className="om-summary-chip">
               {isQcApprovalMode ? `${approvalStatus === "completed" ? "Approved" : approvalStatus === "pending" ? "Pending approval" : "QC approval"}` : "Visible Uploaded"}: {uploadedVisibleCount}
-            </span>
+            </span>}
             <span className="om-summary-chip">Page: {page}</span>
             <span className="om-summary-chip">Limit: {limit}</span>
           </div>
@@ -1026,7 +1033,7 @@ const ItemFilesPage = () => {
               <div className="text-center py-4">Loading...</div>
             ) : (
               <div className="table-responsive responsive-table-shell">
-                <table className="table table-striped table-hover align-middle om-table items-table item-files-table responsive-card-table mb-0">
+                <table className={`table table-striped table-hover align-middle om-table items-table item-files-table responsive-card-table mb-0${shippingMarkFiles ? " shipping-mark-files-table" : ""}`}>
                   <thead className="table-primary">
                     <tr>
                       <th>
@@ -1069,21 +1076,23 @@ const ItemFilesPage = () => {
                           onClick={() => handleSortColumn("sizeData", "asc")}
                         />
                       </th>
-                      <th>
+                      {shippingMarkFiles ? pageFileOptions.map((option) => (
+                        <th key={option.value}>{option.value === "shipping_marks" ? "Shipping Marks" : option.label}</th>
+                      )) : <th>
                         <SortHeaderButton
                           label={activeFileOption.label}
                           isActive={sortBy === "file"}
                           direction={sortOrder}
                           onClick={() => handleSortColumn("file", "asc")}
                         />
-                      </th>
+                      </th>}
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr className="responsive-card-table-empty-row">
-                        <td colSpan="7" className="text-center py-4">
+                        <td colSpan={6 + pageFileOptions.length} className="text-center py-4">
                           No items found
                         </td>
                       </tr>
@@ -1095,11 +1104,7 @@ const ItemFilesPage = () => {
                       const isApprovingThisItem = approvingItemId === itemId;
                       const isSubmittingCommentThisItem = submittingCommentItemId === itemId;
                       const storedFiles = getItemFileValues(item, activeFileOption);
-                      const storedFile = storedFiles[0] || null;
                       const hasFile = storedFiles.length > 0;
-                      const canUploadThisItem =
-                        canUploadActiveFile
-                        && isItemFileOptionAvailableForItem(activeFileOption, item);
 
                       return (
                         <tr key={item?._id || item?.code}>
@@ -1131,80 +1136,108 @@ const ItemFilesPage = () => {
                               preferPis={preferPisMeasurements}
                             />
                           </td>
-                          <td data-label={activeFileOption.label}>
-                            <div className="d-flex flex-column gap-2">
-                              {hasFile ? (
-                                <div className="item-file-product-image-cell">
-                                  {isProductImageFileType(activeFileType) && (
-                                    <ProductImageThumbnail
-                                      src={item?.product_image_url}
-                                      originalName={storedFile?.originalName}
-                                      alt={`${item?.code || "Item"} product image`}
+                          {pageFileOptions.map((fileOption) => {
+                            const storedFiles = getItemFileValues(item, fileOption);
+                            const storedFile = storedFiles[0] || null;
+                            const hasFile = storedFiles.length > 0;
+                            const canUploadThisFile = canUploadActiveFile && isItemFileOptionAvailableForItem(fileOption, item);
+                            return (
+                              <td key={fileOption.value} data-label={fileOption.label}>
+                                <div className="d-flex flex-column gap-2">
+                                  {hasFile ? (
+                                    <div className="item-file-product-image-cell">
+                                      {isProductImageFileType(fileOption.value) && (
+                                        <ProductImageThumbnail
+                                          src={item?.product_image_url}
+                                          originalName={storedFile?.originalName}
+                                          alt={`${item?.code || "Item"} product image`}
+                                        />
+                                      )}
+                                      {!isProductImageFileType(fileOption.value) && (
+                                        <span className={`badge align-self-start ${isQcApprovalMode ? "text-bg-warning" : "text-bg-success"}`}>
+                                          {isQcApprovalMode
+                                            ? approvalStatus === "completed" ? "QC approved" : approvalStatus === "pending" ? "Pending QC approval" : "QC approval"
+                                            : storedFiles.length > 1
+                                              ? `${storedFiles.length} Uploaded`
+                                              : "Uploaded"}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="d-flex flex-column gap-1">
+                                      <span className="text-secondary">Not uploaded</span>
+                                      <span className="badge text-bg-secondary align-self-start">
+                                        Missing
+                                      </span>
+                                    </div>
+                                  )}
+                                  {canUploadThisFile && (
+                                    <button
+                                      type="button"
+                                      className={`item-file-dropzone${draggingItemId === `${itemId}:${fileOption.value}` ? " is-dragging" : ""}`}
+                                      disabled={Boolean(uploadingItemId)}
+                                      aria-label={`Upload ${fileOption.label} for ${item.code}`}
+                                      onClick={() => handleOpenItemFilePicker(item, fileOption)}
+                                      onDragOver={(event) => handleItemFileDragOver(event, item, fileOption)}
+                                      onDragLeave={() => setDraggingItemId("")}
+                                      onDrop={(event) => handleItemFileDrop(event, item, fileOption)}
+                                    >
+                                      {isUploadingThisItem ? "Uploading..." : `Drop ${fileOption.buttonLabel} here or click`}
+                                    </button>
+                                  )}
+                                  {shippingMarkFiles && (
+                                    <>
+                                      {!isItemFileOptionAvailableForItem(fileOption, item) && (
+                                        <small className="text-secondary">Only available for KD items.</small>
+                                      )}
+                                      {storedFiles.map((file, index) => (
+                                        <small key={file.key || file.url || index} className="text-break">{file.originalName || fileOption.label}</small>
+                                      ))}
+                                      <button
+                                        type="button"
+                                        className="btn btn-outline-secondary btn-sm"
+                                        onClick={() => handlePreviewFile(item, fileOption)}
+                                        disabled={!hasFile || isOpeningThisItem}
+                                        aria-label={`Preview ${fileOption.label} for ${item.code}`}
+                                      >
+                                        {isOpeningThisItem ? "Loading..." : "Preview"}
+                                      </button>
+                                    </>
+                                  )}
+                                  {canApproveActiveFile && hasFile && (
+                                    <textarea
+                                      className="form-control form-control-sm item-file-approval-comment"
+                                      rows="2"
+                                      maxLength="2000"
+                                      disabled={isSubmittingCommentThisItem}
+                                      value={approvalComments[itemId] || ""}
+                                      onChange={(event) => setApprovalComments((current) => ({
+                                        ...current,
+                                        [itemId]: event.target.value,
+                                      }))}
+                                      placeholder="Describe the needed update or add an approval note"
+                                      aria-label={`${fileOption.label} approval comment`}
                                     />
                                   )}
-                                  {!isProductImageFileType(activeFileType) && (
-                                    <span className={`badge align-self-start ${isQcApprovalMode ? "text-bg-warning" : "text-bg-success"}`}>
-                                      {isQcApprovalMode
-                                        ? approvalStatus === "completed" ? "QC approved" : approvalStatus === "pending" ? "Pending QC approval" : "QC approval"
-                                        : storedFiles.length > 1
-                                          ? `${storedFiles.length} Uploaded`
-                                          : "Uploaded"}
-                                    </span>
+                                  {canApproveActiveFile && hasFile && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-warning btn-sm item-file-submit-comment"
+                                      onClick={() => handleSubmitApprovalComment(item)}
+                                      disabled={!String(approvalComments[itemId] || "").trim() || isSubmittingCommentThisItem}
+                                    >
+                                      {isSubmittingCommentThisItem ? "Sending..." : "Submit Comment"}
+                                    </button>
+                                  )}
+                                  {item?.file_approvals?.[fileOption.value]?.comment && (
+                                    <small className="text-secondary">
+                                      QC comment: {item.file_approvals[fileOption.value].comment}
+                                    </small>
                                   )}
                                 </div>
-                              ) : (
-                                <div className="d-flex flex-column gap-1">
-                                  <span className="text-secondary">Not uploaded</span>
-                                  <span className="badge text-bg-secondary align-self-start">
-                                    Missing
-                                  </span>
-                                </div>
-                              )}
-                              {canUploadThisItem && (
-                                <button
-                                  type="button"
-                                  className={`item-file-dropzone${draggingItemId === itemId ? " is-dragging" : ""}`}
-                                  disabled={Boolean(uploadingItemId)}
-                                  onClick={() => handleOpenItemFilePicker(item)}
-                                  onDragOver={(event) => handleItemFileDragOver(event, item)}
-                                  onDragLeave={() => setDraggingItemId("")}
-                                  onDrop={(event) => handleItemFileDrop(event, item)}
-                                >
-                                  {isUploadingThisItem ? "Uploading..." : `Drop ${activeFileOption.buttonLabel} here or click`}
-                                </button>
-                              )}
-                              {canApproveActiveFile && hasFile && (
-                                <textarea
-                                  className="form-control form-control-sm item-file-approval-comment"
-                                  rows="2"
-                                  maxLength="2000"
-                                  disabled={isSubmittingCommentThisItem}
-                                  value={approvalComments[itemId] || ""}
-                                  onChange={(event) => setApprovalComments((current) => ({
-                                    ...current,
-                                    [itemId]: event.target.value,
-                                  }))}
-                                  placeholder="Describe the needed update or add an approval note"
-                                  aria-label={`${activeFileOption.label} approval comment`}
-                                />
-                              )}
-                              {canApproveActiveFile && hasFile && (
-                                <button
-                                  type="button"
-                                  className="btn btn-outline-warning btn-sm item-file-submit-comment"
-                                  onClick={() => handleSubmitApprovalComment(item)}
-                                  disabled={!String(approvalComments[itemId] || "").trim() || isSubmittingCommentThisItem}
-                                >
-                                  {isSubmittingCommentThisItem ? "Sending..." : "Submit Comment"}
-                                </button>
-                              )}
-                              {item?.file_approvals?.[activeFileType]?.comment && (
-                                <small className="text-secondary">
-                                  QC comment: {item.file_approvals[activeFileType].comment}
-                                </small>
-                              )}
-                            </div>
-                          </td>
+                              </td>
+                            );
+                          })}
                           <td data-label="Action">
                             {isQcApprovalMode ? (
                               <div className="d-flex flex-wrap gap-2 item-file-approval-actions">
@@ -1265,7 +1298,7 @@ const ItemFilesPage = () => {
                                     Inspection Report
                                   </button>
                                 </li>
-                                <li>
+                                {!shippingMarkFiles && <li>
                                   <button
                                     className="dropdown-item"
                                     type="button"
@@ -1274,8 +1307,8 @@ const ItemFilesPage = () => {
                                   >
                                     {isOpeningThisItem ? "Loading..." : "Preview"}
                                   </button>
-                                </li>
-                                {canUploadActiveFile && (
+                                </li>}
+                                {!shippingMarkFiles && canUploadActiveFile && (
                                   <>
                                     <li>
                                       <hr className="dropdown-divider" />

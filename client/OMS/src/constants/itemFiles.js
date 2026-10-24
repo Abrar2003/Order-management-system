@@ -222,6 +222,10 @@ export const getItemFileOption = (value) => {
   return SHIPPING_MARKS_SUB_OPTIONS.find(opt => opt.value.toLowerCase() === normalizedValue) || null;
 };
 
+export const SHIPPING_MARK_FILE_PAGE_OPTIONS = Object.freeze(
+  ["shipping_marks", "flat_carton", "ean", "logistics_ean", "three_d_carton"].map(getItemFileOption),
+);
+
 export const isItemFileOptionAvailableForItem = (option, item = {}) => {
   const resolvedOption =
     typeof option === "string" ? getItemFileOption(option) : option;

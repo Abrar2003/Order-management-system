@@ -1857,6 +1857,13 @@ small,
   min-width: 1040px;
 }
 
+@media (min-width: 992px) {
+  .shipping-mark-files-table.responsive-card-table {
+    min-width: 1840px;
+    table-layout: auto;
+  }
+}
+
 .pis-table.responsive-card-table {
   min-width: 1280px;
 }

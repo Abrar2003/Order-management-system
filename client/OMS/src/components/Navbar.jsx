@@ -288,7 +288,10 @@ const Navbar = () => {
       .filter((option) => ITEM_DOC_FILE_TYPES.has(option.value))
       .map(itemFileRouteMenuItem);
 
-    const shippingMarksMenuItems = SHIPPING_MARKS_SUB_OPTIONS.map(itemFileRouteMenuItem);
+    const shippingMarksMenuItems = [
+      routeMenuItem("shipping-mark-files", "Shipping Mark Files", "/shipping-mark-files"),
+      ...SHIPPING_MARKS_SUB_OPTIONS.map(itemFileRouteMenuItem),
+    ];
 
     const otherItemFileMenuItems = ITEM_FILE_NAV_OPTIONS
       .filter(
@@ -526,6 +529,9 @@ const Navbar = () => {
       )
     );
 
+    shippingMarksMenuItems.unshift(
+      routeMenuItem("shipping-mark-files", "Shipping Mark Files", "/shipping-mark-files"),
+    );
     items.push(groupMenuItem("shipping-marks-group", "Shipping Marks", shippingMarksMenuItems));
 
     return sortEntriesByLabel(items);

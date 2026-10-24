@@ -612,6 +612,15 @@ const App = () => {
           />
 
           <Route
+            path="/shipping-mark-files"
+            element={
+              <ProtectedRoute allowViewer={false} permissionModule="items">
+                <ItemFilesPage key="shipping-mark-files" shippingMarkFiles />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
             path="/item-files"
             element={
               <ProtectedRoute allowViewer={false}>
