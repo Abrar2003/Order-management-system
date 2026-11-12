@@ -16,6 +16,7 @@ import "../App.css";
 
 const DEFAULT_TODAY_ETD_SORT_BY = "ETD";
 const DEFAULT_COUNTRY = "India";
+const HOME_COUNTRY_OPTIONS = [...COUNTRY_OPTIONS, { value: "all", label: "All" }];
 
 const parseTodayEtdSortBy = (value) => {
   const normalized = String(value || "")
@@ -57,7 +58,7 @@ const Home = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "home");
   const countryParam = searchParams.get("country")?.trim().toLowerCase();
-  const selectedCountry = COUNTRY_OPTIONS.find(
+  const selectedCountry = HOME_COUNTRY_OPTIONS.find(
     ({ value }) => value.toLowerCase() === countryParam,
   )?.value || DEFAULT_COUNTRY;
   const initialTodayEtdSortBy = parseTodayEtdSortBy(
@@ -401,7 +402,7 @@ const Home = () => {
             <div className="home-country-filter d-flex flex-wrap gap-2 align-items-center ms-md-auto">
               <span className="fw-semibold me-1">Country:</span>
               <div className="btn-group btn-group-sm" role="group" aria-label="Country">
-                {COUNTRY_OPTIONS.map(({ value, label }) => (
+                {HOME_COUNTRY_OPTIONS.map(({ value, label }) => (
                   <button
                     key={value}
                     type="button"
@@ -557,7 +558,8 @@ const Home = () => {
                       <tr>
                         <td colSpan="9" className="text-center py-4">
                           No {vendorScope === "active" ? "active " : ""}vendors
-                          found for {selectedBrand} in {selectedCountry}
+                          found for {selectedBrand}
+                          {selectedCountry === "all" ? "" : ` in ${selectedCountry}`}
                         </td>
                       </tr>
                     )}
