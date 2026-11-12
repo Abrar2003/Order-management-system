@@ -1,6 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { extractRowsFromFragments } = require("../services/pdfRectifyParser.service");
+const {
+  extractRowsFromFragments,
+  extractTableRowsFromPdfBuffer,
+} = require("../services/pdfRectifyParser.service");
 
 const headers = [
   [20, "Ordernr."], [100, "Refer"], [180, "Order"], [220, "Date"], [270, "ETD"],
@@ -54,4 +57,29 @@ test("rectify parser ignores headers and footers", () => {
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].ourItemCode, "ITEM-3");
+});
+
+test("rectify PDF reads order dates left of their header and keeps an absent date blank", () => {
+  const data = [
+    [650, [[20, "20260475"], [100, "68-1 / 66 CBM"], [135, "27-10-2026"], [270, "18-01-2027"], [410, "95749"], [850, "50.00"]]],
+    [630, [[20, "20260490"], [100, "68-2 / 66"], [135, "28-10-2026"], [270, "20-01-2027"], [410, "96106"], [850, "50.00"]]],
+    [610, [[20, "20260491"], [105, "29-10-2026"], [270, "21-01-2027"], [410, "96152"], [850, "50.00"]]],
+  ].flatMap(([y, cells]) => cells.map(([x, text]) => ({ x, y, text })));
+  const content = [...headers, ...data].map(({ x, y, text }) =>
+    `BT 1 0 0 1 ${x} ${y} Tm (${text}) Tj ET`,
+  ).join("\n");
+  const pdf = Buffer.from(`%PDF-1.4
+1 0 obj << /Type /Page /Contents 2 0 R >> endobj
+2 0 obj << /Length ${content.length} >>
+stream
+${content}
+endstream
+endobj`);
+
+  const rows = extractTableRowsFromPdfBuffer(pdf);
+  assert.deepEqual(rows.map(({ orderNumber, refer, orderDate, etd }) => [orderNumber, refer, orderDate, etd]), [
+    ["20260475", "68-1 / 66 CBM", "27-10-2026", "18-01-2027"],
+    ["20260490", "68-2 / 66", "28-10-2026", "20-01-2027"],
+    ["20260491", "29-10-2026", "", "21-01-2027"],
+  ]);
 });

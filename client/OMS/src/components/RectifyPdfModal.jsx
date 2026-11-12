@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { applyRectifiedRows, rectifyPdfOrders } from "../services/orders.service";
 import PreviousOrderCheckModal from "./PreviousOrderCheckModal";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { extractDateParts, formatDateDDMMYYYY } from "../utils/date";
 import useBrandOptions from "../hooks/useBrandOptions";
 import { getCountryOptions } from "../constants/countries";
 import { getOptionText, normalizeTextOptions } from "../utils/optionText";
@@ -30,6 +30,7 @@ const triggerFileDownload = (blob, fileName) => {
 
 const isReviewRowValid = (row = {}) =>
   Boolean(String(row?.order_id || "").trim() && String(row?.item_code || "").trim())
+  && Boolean(extractDateParts(row?.order_date))
   && Number(row?.quantity) > 0;
 
 const isPreviousOrderCheckable = (row = {}) =>
@@ -439,11 +440,11 @@ const RectifyPdfModal = ({
                               <td className="rectify-description-cell">{isReviewRow ? <input className="form-control form-control-sm" value={row.description || ""} onChange={(e) => updatePreviewRow(row.row_id, "description", e.target.value)} /> : row.description || "-"}</td>
                               <td>{isReviewRow ? <input type="number" min="0" className="form-control form-control-sm" value={row.quantity ?? ""} onChange={(e) => updatePreviewRow(row.row_id, "quantity", e.target.value)} /> : Number(row.quantity || 0)}</td>
                               <td className="text-nowrap">{isReviewRow ? <input className="form-control form-control-sm" value={row.ETD || ""} onChange={(e) => updatePreviewRow(row.row_id, "ETD", e.target.value)} /> : toDateText(row.ETD)}</td>
-                              <td className="text-nowrap">{isReviewRow ? <input className="form-control form-control-sm" value={row.order_date || ""} onChange={(e) => updatePreviewRow(row.row_id, "order_date", e.target.value)} /> : toDateText(row.order_date)}</td>
+                              <td className="text-nowrap">{isReviewRow ? <input className="form-control form-control-sm" aria-label="Order date" placeholder="DD/MM/YYYY" value={row.order_date || ""} onChange={(e) => updatePreviewRow(row.row_id, "order_date", e.target.value)} /> : toDateText(row.order_date)}</td>
                               <td className="text-nowrap">{row.existing_order_status || "-"}</td>
                               <td>
                                 {Array.isArray(row.changed_fields) && row.changed_fields.length > 0
-                                  ? row.changed_fields.join(", ")
+                                  ? row.changed_fields.map((field) => field === "invalid_order_date" ? "Enter a valid order date" : field).join(", ")
                                   : "-"}
                               </td>
                               <td>

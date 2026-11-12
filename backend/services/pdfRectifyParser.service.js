@@ -1,4 +1,5 @@
 const zlib = require("zlib");
+const { parseDateOnly } = require("../helpers/dateOnly");
 
 function parsePdfObjects(pdfBuffer) {
   const pdfText = pdfBuffer.toString("latin1");
@@ -270,7 +271,7 @@ function extractPageFragments(pageObject, pageIndex, objectMap, toUnicodeByFontO
     if (!rawStream) continue;
 
     const content = inflatePdfStream(rawStream, contentObject.body);
-    const textBlocks = content.matchAll(/BT([\s\S]*?)ET/g);
+    const textBlocks = content.matchAll(/\bBT\b([\s\S]*?)\sET\b/g);
     for (const blockMatch of textBlocks) {
       const block = blockMatch[1];
       let x = 0;
@@ -459,8 +460,27 @@ function lineToCells(line, layout) {
   };
 
   const sortedFragments = [...line.fragments].sort((a, b) => a.x - b.x);
+  const refer = layout.find((column) => column.key === "refer");
+  const orderDate = layout.find((column) => column.key === "orderDate");
+  const etd = layout.find((column) => column.key === "etd");
+  // Date values can start left of their header. Recover the pair only when it ends in ETD.
+  const dates = etd ? sortedFragments.filter(({ x, text }) =>
+    x > (refer?.x ?? orderDate?.start ?? etd.start)
+    && x < etd.end
+    && /^[\d/-]+$/.test(text)
+    && parseDateOnly(text),
+  ) : [];
+  const firstDateIndex = sortedFragments.indexOf(dates[0]);
+  const previousFragment = sortedFragments[firstDateIndex - 1];
+  const orderDateFragment = dates.length === 2
+    && dates[1].x >= etd.start
+    && sortedFragments[firstDateIndex + 1] === dates[1]
+    && (!refer || dates[0].x >= refer.end || columnForX(previousFragment?.x, layout) === "refer")
+    ? dates[0]
+    : null;
+
   for (const fragment of sortedFragments) {
-    const column = columnForX(fragment.x, layout);
+    const column = fragment === orderDateFragment ? "orderDate" : columnForX(fragment.x, layout);
     if (!column) continue;
     cells[column] = appendText(cells[column], fragment.text);
   }

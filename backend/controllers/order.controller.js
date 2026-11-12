@@ -5761,12 +5761,13 @@ exports.rectifyPdfOrders = async (req, res) => {
         }
 
         if (
+          !normalizedRow.order_date ||
           !Number.isFinite(Number(normalizedRow.quantity)) ||
           Number(normalizedRow.quantity) <= 0
         ) {
           invalidEntries.push({
             row_index: index + 1,
-            reason: "invalid_quantity",
+            reason: normalizedRow.order_date ? "invalid_quantity" : "invalid_order_date",
             source: selectedRowsPayload[index],
           });
           continue;
@@ -5977,12 +5978,13 @@ exports.rectifyPdfOrders = async (req, res) => {
       presentPdfKeys.add(key);
 
       if (
+        !normalizedRow.order_date ||
         !Number.isFinite(Number(normalizedRow.quantity)) ||
         Number(normalizedRow.quantity) <= 0
       ) {
         invalidEntries.push({
           row_index: index + 1,
-          reason: "invalid_quantity",
+          reason: normalizedRow.order_date ? "invalid_quantity" : "invalid_order_date",
           source: extractedRows[index],
         });
         continue;
