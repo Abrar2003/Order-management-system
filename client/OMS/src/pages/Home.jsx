@@ -6,7 +6,7 @@ import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import POEtdCalendar from "../components/POEtdCalendar";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { COUNTRY_OPTIONS } from "../constants/countries";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { getOptionText } from "../utils/optionText";
@@ -15,6 +15,7 @@ import { formatCbm } from "../utils/cbm";
 import "../App.css";
 
 const DEFAULT_TODAY_ETD_SORT_BY = "ETD";
+const DEFAULT_COUNTRY = "India";
 
 const parseTodayEtdSortBy = (value) => {
   const normalized = String(value || "")
@@ -55,6 +56,10 @@ const Home = () => {
   const [todayEtdError, setTodayEtdError] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "home");
+  const countryParam = searchParams.get("country")?.trim().toLowerCase();
+  const selectedCountry = COUNTRY_OPTIONS.find(
+    ({ value }) => value.toLowerCase() === countryParam,
+  )?.value || DEFAULT_COUNTRY;
   const initialTodayEtdSortBy = parseTodayEtdSortBy(
     searchParams.get("today_sort_by"),
   );
@@ -251,6 +256,7 @@ const Home = () => {
 
     const next = new URLSearchParams();
     if (selectedBrand) next.set("brand", selectedBrand);
+    if (selectedCountry !== DEFAULT_COUNTRY) next.set("country", selectedCountry);
     if (todayEtdSortBy !== DEFAULT_TODAY_ETD_SORT_BY) {
       next.set("today_sort_by", todayEtdSortBy);
     }
@@ -264,6 +270,7 @@ const Home = () => {
   }, [
     searchParams,
     selectedBrand,
+    selectedCountry,
     setSearchParams,
     todayEtdSortBy,
     todayEtdSortOrder,
@@ -278,8 +285,8 @@ const Home = () => {
       try {
         setLoading(true);
         const res = await axios.get(
-          `/orders/${selectedBrand}/vendor-summary`,
-          {},
+          `/orders/${encodeURIComponent(selectedBrand)}/vendor-summary`,
+          { params: { country: selectedCountry } },
         );
 
         if (!isMounted) return;
@@ -299,7 +306,7 @@ const Home = () => {
     return () => {
       isMounted = false;
     };
-  }, [selectedBrand, page]);
+  }, [selectedBrand, selectedCountry, page]);
 
   useEffect(() => {
     if (!selectedBrand) {
@@ -323,6 +330,7 @@ const Home = () => {
         const response = await axios.get("/orders/today-etd-orders", {
           params: {
             brand: selectedBrand,
+            country: selectedCountry,
             sort_by: todayEtdSortBy,
             sort_order: todayEtdSortOrder,
             date: todayLocalIso,
@@ -351,7 +359,7 @@ const Home = () => {
     return () => {
       isMounted = false;
     };
-  }, [selectedBrand, todayEtdSortBy, todayEtdSortOrder]);
+  }, [selectedBrand, selectedCountry, todayEtdSortBy, todayEtdSortOrder]);
 
   return (
     <>
@@ -390,6 +398,29 @@ const Home = () => {
                 </button>
               );
             })}
+            <div className="home-country-filter d-flex flex-wrap gap-2 align-items-center ms-md-auto">
+              <span className="fw-semibold me-1">Country:</span>
+              <div className="btn-group btn-group-sm" role="group" aria-label="Country">
+                {COUNTRY_OPTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`btn ${selectedCountry === value ? "btn-primary" : "btn-outline-primary"}`}
+                    aria-pressed={selectedCountry === value}
+                    onClick={() => {
+                      if (selectedCountry === value) return;
+                      setPage(1);
+                      const next = new URLSearchParams(searchParams);
+                      if (value === DEFAULT_COUNTRY) next.delete("country");
+                      else next.set("country", value);
+                      setSearchParams(next, { replace: true });
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -526,7 +557,7 @@ const Home = () => {
                       <tr>
                         <td colSpan="9" className="text-center py-4">
                           No {vendorScope === "active" ? "active " : ""}vendors
-                          found for {selectedBrand}
+                          found for {selectedBrand} in {selectedCountry}
                         </td>
                       </tr>
                     )}
@@ -700,7 +731,7 @@ const Home = () => {
           <div className="card-body">
             <h3 className="h5 mb-1">PO ETD Calendar</h3>
             <p className="text-muted small mb-3">Upcoming purchase order ETDs</p>
-            <POEtdCalendar brand={selectedBrand} />
+            <POEtdCalendar brand={selectedBrand} country={selectedCountry} />
           </div>
         </div>
       </div>

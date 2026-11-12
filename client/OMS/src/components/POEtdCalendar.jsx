@@ -15,7 +15,7 @@ const STATUS_COLORS = Object.freeze({
 
 const toDateOnly = (value = "") => String(value).slice(0, 10);
 
-const POEtdCalendar = ({ brand = "" }) => {
+const POEtdCalendar = ({ brand = "", country }) => {
   const navigate = useNavigate();
   const [range, setRange] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -36,7 +36,7 @@ const POEtdCalendar = ({ brand = "" }) => {
         setLoading(true);
         setError("");
         setOrders([]);
-        const response = await getEtdCalendarOrders({ brand, ...range });
+        const response = await getEtdCalendarOrders({ brand, country, ...range });
         if (active) {
           setOrders(Array.isArray(response?.data) ? response.data : []);
         }
@@ -54,7 +54,7 @@ const POEtdCalendar = ({ brand = "" }) => {
     return () => {
       active = false;
     };
-  }, [brand, range]);
+  }, [brand, country, range]);
 
   const events = useMemo(
     () =>

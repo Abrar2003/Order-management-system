@@ -8378,7 +8378,8 @@ small,
     align-items: stretch !important;
   }
 
-  .home-brand-list > .fw-semibold {
+  .home-brand-list > .fw-semibold,
+  .home-country-filter {
     grid-column: 1 / -1;
   }
 

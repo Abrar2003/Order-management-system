@@ -2,6 +2,7 @@ const XLSX = require("xlsx");
 const ExcelJS = require("exceljs");
 const path = require("path");
 const Order = require("../models/order.model");
+const Vendor = require("../models/vendor.model");
 const referenceDocuments = require("../services/orderReferenceDocuments.service");
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
@@ -72,6 +73,7 @@ const {
   applyDataAccessMatch,
   assertBrandVendorAssociations,
   assertUserDataAccess,
+  combineMongoMatches,
   getUserBrandScope,
   getVendorAccessOptions,
   hasDataAccessFilter,
@@ -645,6 +647,35 @@ const buildOrderListMatch = ({
   }
 
   return applyDataAccessMatch(match, user);
+};
+
+const buildOrderCountryMatch = async (value) => {
+  const country = normalizeFilterValue(value);
+  if (!country) return {};
+
+  const countryPattern = new RegExp(`^\\s*${escapeRegex(country)}\\s*$`, "i");
+  const snapshotMatch = { "vendor.country": countryPattern };
+  const vendors = await Vendor.find({ country: countryPattern, deleted_at: null })
+    .select("_id name")
+    .lean();
+  if (!vendors.length) return snapshotMatch;
+
+  const vendorNames = vendors.map(getVendorName).filter(Boolean)
+    .map((name) => new RegExp(`^\\s*${escapeRegex(name)}\\s*$`, "i"));
+
+  return {
+    $or: [
+      snapshotMatch,
+      {
+        "vendor.country": { $in: [null, /^\s*$/] },
+        $or: [
+          { "vendor.vendor_id": { $in: vendors.map((vendor) => vendor._id) } },
+          { "vendor.vendor_id": null, "vendor.name": { $in: vendorNames } },
+          { vendor: { $in: vendorNames } },
+        ],
+      },
+    ],
+  };
 };
 
 const buildShipmentMatch = ({
@@ -3162,6 +3193,7 @@ const comparePoBucketRows = (
 const buildPoBucketDataset = async ({
   brand = "",
   vendor = "",
+  country = "",
   order = "",
   itemCode = "",
   status = "",
@@ -3173,6 +3205,7 @@ const buildPoBucketDataset = async ({
   user = null,
 } = {}) => {
   const selectedBucket = normalizePoBucket(poBucket);
+  const countryMatch = await buildOrderCountryMatch(country);
   const matchStage = buildOrderListMatch({
     brand,
     vendor,
@@ -3190,7 +3223,7 @@ const buildPoBucketDataset = async ({
     matchStage.ETD = etdRange;
   }
 
-  const sourceOrders = await Order.find(matchStage)
+  const sourceOrders = await Order.find(combineMongoMatches(matchStage, countryMatch))
     .select(
       "_id order_id brand vendor ETD revised_ETD order_date quantity item shipment qc_record total_po_cbm",
     )
@@ -3234,7 +3267,7 @@ const buildPoBucketDataset = async ({
         fullOrderMatch.ETD = etdRange;
       }
 
-      groupingOrders = await Order.find(fullOrderMatch)
+      groupingOrders = await Order.find(combineMongoMatches(fullOrderMatch, countryMatch))
         .select(
           "_id order_id brand vendor status ETD revised_ETD order_date quantity item shipment qc_record total_po_cbm",
         )
@@ -6953,11 +6986,13 @@ exports.getRevisedEtdHistory = async (req, res) => {
 exports.getVendorSummaryByBrand = async (req, res) => {
   try {
     const { brand } = req.params;
+    const country = normalizeFilterValue(req.query?.country);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const dataset = await buildPoBucketDataset({
       brand,
+      country,
       poBucket: "all",
       sortBy: "order_date",
       sortOrder: "desc",
@@ -7061,7 +7096,7 @@ exports.getVendorSummaryByBrand = async (req, res) => {
         );
       });
 
-    if (!result.length) {
+    if (!result.length && !country) {
       return res.status(404).json({
         message: "No vendors found for this brand",
       });
@@ -7084,15 +7119,18 @@ exports.getEtdCalendarOrders = async (req, res) => {
       });
     }
 
-    const baseMatch = buildOrderListMatch({
-      brand: req.query?.brand,
-      includeVendor: false,
-      includeStatus: false,
-      user: req.user,
-    });
-    const candidateRows = await Order.find({
-      $and: [baseMatch, buildEffectiveEtdCalendarMatch(range)],
-    })
+    const baseMatch = combineMongoMatches(
+      buildOrderListMatch({
+        brand: req.query?.brand,
+        includeVendor: false,
+        includeStatus: false,
+        user: req.user,
+      }),
+      await buildOrderCountryMatch(req.query?.country),
+    );
+    const candidateRows = await Order.find(
+      combineMongoMatches(baseMatch, buildEffectiveEtdCalendarMatch(range)),
+    )
       .select("_id order_id brand vendor")
       .lean();
     const candidateGroupKeys = new Set(
@@ -7110,13 +7148,9 @@ exports.getEtdCalendarOrders = async (req, res) => {
       return res.status(200).json({ success: true, count: 0, data: [] });
     }
 
-    const groupMatch = buildOrderListMatch({
-      brand: req.query?.brand,
-      includeVendor: false,
-      includeStatus: false,
-      user: req.user,
+    const groupMatch = combineMongoMatches(baseMatch, {
+      order_id: { $in: candidateOrderIds },
     });
-    groupMatch.order_id = { $in: candidateOrderIds };
     const groupRows = await Order.find(groupMatch)
       .select("_id order_id brand vendor ETD revised_ETD status")
       .lean();
@@ -7194,6 +7228,7 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
 
     const dataset = await buildPoBucketDataset({
       brand,
+      country: req.query.country,
       poBucket: "all",
       sortBy,
       sortOrder,
