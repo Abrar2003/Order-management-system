@@ -1,5 +1,6 @@
 const express = require("express");
 const upload = require("../config/multer.config");
+const referenceDocuments = require("../controllers/orderReferenceDocuments.controller");
 const authenticate = require("../middlewares/auth.middleware");
 const {
   requireNonViewer,
@@ -96,6 +97,12 @@ router.get(
   requirePermission("orders", "create"),
   getManualOrderOptions,
 );
+
+router.post("/reference-documents/uploads", authenticate, referenceDocuments.prepare);
+router.get("/:id/reference-documents", authenticate, requirePermission("orders", "view"), referenceDocuments.list);
+router.post("/:id/reference-documents", authenticate, requirePermission("orders", "edit"), referenceDocuments.commit);
+router.get("/:id/reference-documents/:fileId/link", authenticate, requirePermission("orders", "view"), referenceDocuments.link);
+router.post("/:id/reference-documents/:fileId/comments", authenticate, requirePermission("orders", "view"), referenceDocuments.comment);
 
 router.post(
   "/rectify-pdf",

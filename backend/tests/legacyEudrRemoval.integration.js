@@ -68,8 +68,15 @@ test("OMS starts, authenticates and writes source records without legacy EUDR", 
   await request("PUT", `/vendors/${vendor._id}`, { ...vendorPayload, phone: "1234567890" });
   const item = await db.collection("items").findOne({ code: "CLEANUP-1" });
   await request("PATCH", `/items/${item._id}/pis`, { timber_cft: 2, hs_code: "9403 60" });
+  const documentUpload = await db.collection("order_reference_uploads").insertOne({
+    uploader: userId, order_row: null, state: "ready", expires_at: new Date(Date.now() + 60_000),
+    copy_id: new mongoose.Types.ObjectId(),
+    group_key: JSON.stringify(["CLEANUP-PO", "giga", vendor._id]),
+    files: [{ _id: new mongoose.Types.ObjectId(), name: "order.pdf", size: 100, content_type: "application/pdf" }],
+  });
   await request("POST", "/orders/manual-orders", { po: { order_id: "CLEANUP-PO", brand: "Giga", vendor: vendor.name,
-    order_date: "2026-10-01", ETD: "2026-11-01" }, items: [{ item_code: "CLEANUP-1", description: "Chair", quantity: 10 }] }, 201);
+    order_date: "2026-10-01", ETD: "2026-11-01" }, items: [{ item_code: "CLEANUP-1", description: "Chair", quantity: 10 }],
+    reference_document_upload_id: documentUpload.insertedId }, 201);
   const order = await db.collection("orders").findOne({ order_id: "CLEANUP-PO" });
   assert.ok(order);
   await require("../models/qc.model").create({ order: order._id, order_meta: { order_id: order.order_id,

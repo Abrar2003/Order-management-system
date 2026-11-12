@@ -4,9 +4,11 @@ const fsp = require("fs/promises");
 const { Upload } = require("@aws-sdk/lib-storage");
 const {
   S3Client,
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectVersionsCommand,
   GetBucketCorsCommand,
   PutObjectCommand,
   PutBucketCorsCommand,
@@ -139,6 +141,8 @@ const getClient = () => {
     region: config.region,
     endpoint: config.endpoint,
     forcePathStyle: true,
+    // Presigned PUTs have no body at signing time, so do not attach an empty-body checksum.
+    requestChecksumCalculation: "WHEN_REQUIRED",
     credentials: {
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey,
@@ -166,6 +170,7 @@ const getSignedObjectUrl = async (
     expiresIn,
     download = false,
     filename = "",
+    contentType,
   } = {},
 ) => {
   if (!normalizeValue(key)) {
@@ -181,14 +186,16 @@ const getSignedObjectUrl = async (
       : config.signedUrlExpiresIn;
 
   const safeFilename = normalizeValue(filename);
+  const asciiFilename = safeFilename.replace(/[^\x20-\x7e]|["\\]/g, "_");
   const responseContentDisposition = safeFilename
-    ? `${download ? "attachment" : "inline"}; filename="${safeFilename.replace(/"/g, "")}"`
+    ? `${download ? "attachment" : "inline"}; filename="${asciiFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename.toWellFormed()).replace(/['()*]/g, (character) => `%${character.charCodeAt(0).toString(16)}`)}`
     : undefined;
   const cacheKey = JSON.stringify({
     key,
     expiresIn: safeExpiresIn,
     download: Boolean(download),
     filename: safeFilename,
+    contentType,
   });
   const now = Date.now();
   const cachedSignedUrl = signedUrlCache.get(cacheKey);
@@ -211,6 +218,7 @@ const getSignedObjectUrl = async (
       new GetObjectCommand({
         Bucket: config.bucket,
         Key: key,
+        ...(contentType ? { ResponseContentType: contentType } : {}),
         ...(responseContentDisposition
           ? { ResponseContentDisposition: responseContentDisposition }
           : {}),
@@ -239,6 +247,7 @@ const getPresignedUploadUrl = async (
   {
     contentType = "application/octet-stream",
     expiresIn = 900,
+    contentLength,
   } = {},
 ) => {
   if (!normalizeValue(key)) {
@@ -259,14 +268,28 @@ const getPresignedUploadUrl = async (
         Bucket: config.bucket,
         Key: key,
         ContentType: normalizeValue(contentType) || "application/octet-stream",
+        ...(contentLength ? { ContentLength: contentLength } : {}),
       }),
-      { expiresIn: safeExpiresIn },
+      {
+        expiresIn: safeExpiresIn,
+        ...(contentLength ? { signableHeaders: new Set(["content-type"]) } : {}),
+      },
     );
   } catch (error) {
     throw new Error(
       `Wasabi presigned upload URL generation failed: ${error?.message || String(error)}`,
     );
   }
+};
+
+const copyObject = async (sourceKey, key, etag) => {
+  const { bucket } = getConfig();
+  await getClient().send(new CopyObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    CopySource: `${bucket}/${encodeKey(sourceKey)}`,
+    CopySourceIfMatch: `"${etag}"`,
+  }), { abortSignal: AbortSignal.timeout(30_000) });
 };
 
 const uploadBuffer = async ({
@@ -469,6 +492,26 @@ const deleteObject = async (key) => {
   }
 };
 
+const deleteObjectPrefix = async (prefix) => {
+  if (!prefix || !prefix.endsWith("/")) throw new Error("A directory prefix is required");
+  const { bucket } = getConfig();
+  const client = getClient();
+  // Drain the first page each time so deleted version markers cannot affect pagination.
+  for (;;) {
+    const page = await client.send(new ListObjectVersionsCommand({
+      Bucket: bucket, Prefix: prefix,
+    }), { abortSignal: AbortSignal.timeout(30_000) });
+    const objects = [...(page.Versions || []), ...(page.DeleteMarkers || [])];
+    if (!objects.length) return;
+    for (const { Key, VersionId } of objects) {
+      await client.send(new DeleteObjectCommand({
+        Bucket: bucket, Key, ...(VersionId ? { VersionId } : {}),
+      }), { abortSignal: AbortSignal.timeout(30_000) });
+    }
+    if (!page.IsTruncated) return;
+  }
+};
+
 const getObjectBuffer = async (key) => {
   if (!normalizeValue(key)) {
     throw new Error("Object key is required");
@@ -559,7 +602,7 @@ const objectExists = async (key) => {
   }
 };
 
-const getObjectMetadata = async (key) => {
+const getObjectMetadata = async (key, { abortSignal } = {}) => {
   if (!normalizeValue(key)) {
     throw new Error("Object key is required");
   }
@@ -573,6 +616,7 @@ const getObjectMetadata = async (key) => {
         Bucket: config.bucket,
         Key: key,
       }),
+      { abortSignal },
     );
 
     return {
@@ -710,6 +754,7 @@ module.exports = {
   getObjectUrl,
   getSignedObjectUrl,
   getPresignedUploadUrl,
+  copyObject,
   getObjectBuffer,
   getObjectMetadata,
   objectExists,
@@ -719,4 +764,5 @@ module.exports = {
   uploadStream,
   uploadFile,
   deleteObject,
+  deleteObjectPrefix,
 };

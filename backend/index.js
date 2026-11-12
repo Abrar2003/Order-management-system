@@ -43,6 +43,7 @@ const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
 const { createNotificationSocketServer } = require("./realtime/notificationSocket");
 const { closeNotificationRelay, startNotificationRelay } = require("./services/notificationRelay.service");
+const { cleanupExpiredUploads } = require("./services/orderReferenceDocuments.service");
 const {
   startSecurityBaselineCron,
   stopSecurityBaselineCron,
@@ -229,6 +230,10 @@ const startServer = async () => {
     app.set("io", io);
     startNotificationRelay(io).catch((error) => console.warn("Notification relay unavailable:", error.message));
     startSecurityBaselineCron();
+    const documentCleanup = setInterval(() => {
+      cleanupExpiredUploads().catch((error) => console.warn("Order reference upload cleanup failed", error.message));
+    }, 15 * 60 * 1000);
+    documentCleanup.unref();
 
     server.listen(PORT, () => {
       console.log(`Server started on port ${PORT}`);
@@ -246,6 +251,7 @@ const startServer = async () => {
       server.close(async () => {
         try {
           stopSecurityBaselineCron();
+          clearInterval(documentCleanup);
           await io.close();
           await closeNotificationRelay();
           await closePdfRenderer();

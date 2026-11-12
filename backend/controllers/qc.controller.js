@@ -489,6 +489,7 @@ const buildActiveOrderLookupStage = (asField = "order", user = null) => ({
       {
         $match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, user),
       },
+      { $unset: "order_reference_documents" },
     ],
     as: asField,
   },

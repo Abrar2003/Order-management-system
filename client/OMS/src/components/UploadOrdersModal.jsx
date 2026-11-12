@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../api/axios";
 import PreviousOrderCheckModal from "./PreviousOrderCheckModal";
+import OrderReferenceFileInput from "./OrderReferenceFileInput";
+import useOrderReferenceUpload from "../hooks/useOrderReferenceUpload";
 import {
   applyUploadedRows,
   createManualOrders,
@@ -147,6 +149,8 @@ const UploadOrdersModal = ({
   const [nextRowId, setNextRowId] = useState(2);
   const [manualPo, setManualPo] = useState(createEmptyManualPo);
   const [manualRows, setManualRows] = useState([createEmptyManualRow(1)]);
+  const [referenceFiles, setReferenceFiles] = useState([]);
+  const referenceUpload = useOrderReferenceUpload();
   const [brandOptions, setBrandOptions] = useState([]);
   const [vendorOptions, setVendorOptions] = useState([]);
   const [itemCodeOptions, setItemCodeOptions] = useState([]);
@@ -585,61 +589,66 @@ const UploadOrdersModal = ({
       setError(`Complete the required PO fields: ${missingPoFields.join(", ")}`);
       return;
     }
-
-    const { rows: resolvedRows, metaByRow } =
-      await resolveRowsWithItemDescriptions(manualRows);
-    setManualRows(resolvedRows);
-    setItemMetaByRow((prev) => ({
-      ...prev,
-      ...metaByRow,
-    }));
-
-    const payloadItems = getManualPayloadItems(resolvedRows);
-
-    if (payloadItems.length === 0) {
-      setError("Please add at least one item row.");
-      return;
-    }
-
-    const missingRequiredEntries = payloadItems
-      .map((row) => ({
-        row_number: row.row_number,
-        missing_fields: getMissingManualItemFields(row),
-      }))
-      .filter((entry) => entry.missing_fields.length > 0);
-    if (missingRequiredEntries.length > 0) {
-      setError(formatMissingManualOrderFields(missingRequiredEntries));
+    if (referenceFiles.length === 0) {
+      setError("Select at least one Order Reference Document.");
       return;
     }
 
     try {
       setLoading(true);
       setError("");
-      const payload = {
-        po: {
-          order_id: toTrimmedString(manualPo.order_id),
-          brand: toTrimmedString(manualPo.brand),
-          vendor: toTrimmedString(manualPo.vendor),
-          order_date: toTrimmedString(manualPo.order_date),
-          ETD: toTrimmedString(manualPo.ETD),
-        },
-        items: payloadItems,
-      };
-      try {
-        await createManualOrders(payload);
-      } catch (manualError) {
-        const reminders = Array.isArray(manualError?.response?.data?.reminders)
-          ? manualError.response.data.reminders
-          : [];
-        if (manualError?.response?.data?.code !== "PENDING_ADMIN_REMINDERS" || reminders.length === 0) {
-          throw manualError;
-        }
-        window.alert(formatAdminReminderWarnings(reminders));
-        await createManualOrders({
-          ...payload,
-          acknowledgedReminderIds: reminders.map((reminder) => reminder?._id).filter(Boolean),
-        });
+      const { rows: resolvedRows, metaByRow } =
+        await resolveRowsWithItemDescriptions(manualRows);
+      setManualRows(resolvedRows);
+      setItemMetaByRow((prev) => ({ ...prev, ...metaByRow }));
+
+      const payloadItems = getManualPayloadItems(resolvedRows);
+
+      if (payloadItems.length === 0) {
+        setError("Please add at least one item row.");
+        return;
       }
+
+      const missingRequiredEntries = payloadItems
+        .map((row) => ({
+          row_number: row.row_number,
+          missing_fields: getMissingManualItemFields(row),
+        }))
+        .filter((entry) => entry.missing_fields.length > 0);
+      if (missingRequiredEntries.length > 0) {
+        setError(formatMissingManualOrderFields(missingRequiredEntries));
+        return;
+      }
+
+      const target = {
+        order_id: toTrimmedString(manualPo.order_id),
+        brand: toTrimmedString(manualPo.brand),
+        vendor: toTrimmedString(manualPo.vendor),
+      };
+      await referenceUpload.submit({ po: target }, referenceFiles, async (referenceUploadId) => {
+        const payload = {
+          po: {
+            ...target,
+            order_date: toTrimmedString(manualPo.order_date),
+            ETD: toTrimmedString(manualPo.ETD),
+          },
+          items: payloadItems,
+          referenceUploadId,
+        };
+        try {
+          await createManualOrders(payload);
+        } catch (manualError) {
+          const reminders = manualError?.response?.data?.reminders;
+          if (manualError?.response?.data?.code !== "PENDING_ADMIN_REMINDERS" || !reminders?.length) {
+            throw manualError;
+          }
+          window.alert(formatAdminReminderWarnings(reminders));
+          await createManualOrders({
+            ...payload,
+            acknowledgedReminderIds: reminders.map((reminder) => reminder?._id).filter(Boolean),
+          });
+        }
+      });
       onSuccess?.();
       onClose?.();
     } catch (err) {
@@ -651,7 +660,7 @@ const UploadOrdersModal = ({
       setError(
         missingEntries.length > 0
           ? formatMissingManualOrderFields(missingEntries)
-          : err?.response?.data?.message || "Manual add failed",
+          : err?.response?.data?.message || err.message || "Manual add failed",
       );
     } finally {
       setLoading(false);
@@ -664,7 +673,7 @@ const UploadOrdersModal = ({
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title">{title}</h5>
-            <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
+            <button type="button" className="btn-close" onClick={onClose} disabled={mode === "manual" && loading} aria-label="Close" />
           </div>
 
           <div className="modal-body d-grid gap-3">
@@ -674,6 +683,7 @@ const UploadOrdersModal = ({
                   <button
                     type="button"
                     className={`btn ${mode === "upload" ? "btn-primary" : "btn-outline-primary"}`}
+                    disabled={mode === "manual" && loading}
                     onClick={() => {
                       setMode("upload");
                       setError("");
@@ -686,6 +696,7 @@ const UploadOrdersModal = ({
                   <button
                     type="button"
                     className={`btn ${mode === "manual" ? "btn-primary" : "btn-outline-primary"}`}
+                    disabled={mode === "manual" && loading}
                     onClick={() => {
                       setMode("manual");
                       setError("");
@@ -834,7 +845,7 @@ const UploadOrdersModal = ({
                 )}
               </div>
             ) : (
-              <div className="d-grid gap-2">
+              <fieldset className="d-grid gap-2" disabled={loading}>
                 <div className="card">
                   <div className="card-header">
                     <strong>PO Details</strong>
@@ -916,6 +927,10 @@ const UploadOrdersModal = ({
                           }
                         />
                       </div>
+                    </div>
+                    <div className="mt-3">
+                      <OrderReferenceFileInput files={referenceFiles} onChange={setReferenceFiles} required />
+                      {referenceUpload.progress && <div className="small mt-2" role="status">{referenceUpload.progress}</div>}
                     </div>
                   </div>
                 </div>
@@ -1022,7 +1037,7 @@ const UploadOrdersModal = ({
                 {loadingReferenceData && (
                   <small className="text-muted">Loading PO and item options...</small>
                 )}
-              </div>
+              </fieldset>
             )}
 
             {error && (
@@ -1036,7 +1051,7 @@ const UploadOrdersModal = ({
           </div>
 
           <div className="modal-footer">
-            <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            <button type="button" className="btn btn-outline-secondary" onClick={onClose} disabled={mode === "manual" && loading}>
               Cancel
             </button>
             {mode === "manual" ? (

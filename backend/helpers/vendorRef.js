@@ -351,6 +351,7 @@ module.exports = {
   buildVendorNameMap,
   buildVendorsArrayFilter,
   embeddedVendorSchema,
+  findVendorByName,
   getVendorCountry,
   getVendorId,
   getVendorName,

@@ -9,6 +9,7 @@ const Sample = require("../models/sample.model");
 const UploadLog = require("../models/uploadLog.model");
 const Vendor = require("../models/vendor.model");
 const orderController = require("../controllers/order.controller");
+const referenceDocuments = require("../services/orderReferenceDocuments.service");
 
 const GIGA_ID = "64b000000000000000000001";
 const BY_BOO_ID = "64b000000000000000000002";
@@ -38,6 +39,7 @@ const asQuery = (value) => ({
 });
 
 const validBody = (overrides = {}) => ({
+  reference_document_upload_id: "64d000000000000000000001",
   po: {
     order_id: "PO-1",
     brand: "Giga",
@@ -132,7 +134,8 @@ const stubManualOrderWrites = (t, { associatedBrand = "Giga" } = {}) => {
   ]));
   t.mock.method(Order, "aggregate", async () => []);
   t.mock.method(Order, "find", () => asQuery([]));
-  t.mock.method(Order, "insertMany", async (orders) => {
+  t.mock.method(referenceDocuments, "insertManualOrders", async (orders, uploadIds) => {
+    assert.deepEqual(uploadIds, ["64d000000000000000000001"]);
     inserted.push(...orders);
     return orders;
   });

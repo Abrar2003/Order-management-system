@@ -52,14 +52,43 @@ export const getManualOrderOptions = async () => {
   return res.data;
 };
 
-export const createManualOrders = async ({ po = {}, items = [], acknowledgedReminderIds = [] } = {}) => {
+export const createManualOrders = async ({ po = {}, items = [], acknowledgedReminderIds = [], referenceUploadId } = {}) => {
   const res = await axios.post("/orders/manual-orders", {
     po,
     items,
+    reference_document_upload_id: referenceUploadId,
     acknowledged_admin_reminder_ids: acknowledgedReminderIds,
   });
 
   return res.data;
+};
+
+const referenceDocumentsPath = (orderRowId) => `/orders/${orderRowId}/reference-documents`;
+
+export const prepareOrderReferenceUpload = async (target, files) => {
+  const { data } = await axios.post("/orders/reference-documents/uploads", {
+    ...target, files: files.map(({ name, size }) => ({ name, size })),
+  });
+  return data;
+};
+
+export const listOrderReferenceDocuments = async (orderRowId) => {
+  const { data } = await axios.get(referenceDocumentsPath(orderRowId));
+  return data;
+};
+
+export const commitOrderReferenceUpload = (orderRowId, uploadId) =>
+  axios.post(referenceDocumentsPath(orderRowId), { upload_id: uploadId });
+
+export const getOrderReferenceFileLink = (orderRowId, fileId, download = false) =>
+  axios.getUri({
+    url: `${referenceDocumentsPath(orderRowId)}/${fileId}/link`,
+    params: download ? { download: 1 } : undefined,
+  });
+
+export const addOrderReferenceComment = async (orderRowId, fileId, text) => {
+  const { data } = await axios.post(`${referenceDocumentsPath(orderRowId)}/${fileId}/comments`, { text });
+  return data;
 };
 
 export const checkPreviousOrder = async ({

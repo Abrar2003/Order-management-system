@@ -52,6 +52,27 @@ const AuditActorSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const ReferenceDocumentCommentSchema = new mongoose.Schema({
+  text: { type: String, required: true, trim: true, maxlength: 2000 },
+  author: { type: AuditActorSchema, required: true },
+  created_at: { type: Date, required: true },
+});
+
+const ReferenceDocumentFileSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  size: { type: Number, required: true },
+  content_type: { type: String, required: true },
+  key: { type: String, required: true },
+  comments: { type: [ReferenceDocumentCommentSchema], default: [] },
+});
+
+const ReferenceDocumentBatchSchema = new mongoose.Schema({
+  group_key: { type: String, required: true },
+  uploader: { type: AuditActorSchema, required: true },
+  uploaded_at: { type: Date, required: true },
+  files: { type: [ReferenceDocumentFileSchema], required: true },
+});
+
 const ShipmentEntrySchema = new mongoose.Schema(
   {
     container: { type: String, trim: true, required: true },
@@ -138,6 +159,11 @@ const Order_Schema = new mongoose.Schema(
       default: null,
     },
     reminders: { type: [ReminderSchema], default: [] },
+    order_reference_documents: {
+      type: [ReferenceDocumentBatchSchema],
+      default: undefined,
+      select: false,
+    },
     archived: { type: Boolean, default: false },
     archived_remark: { type: String, default: "" },
     archived_at: { type: Date, default: null },
@@ -263,4 +289,5 @@ Order_Schema.index({ "shipment.container": 1 }, { collation: { locale: "en", str
 Order_Schema.index({ "shipment._id": 1 });
 Order_Schema.index({ "vendor.vendor_id": 1 });
 Order_Schema.index({ "item.item_code": 1 });
+Order_Schema.index({ "order_reference_documents.group_key": 1 }, { sparse: true });
 module.exports = mongoose.model("orders", Order_Schema);

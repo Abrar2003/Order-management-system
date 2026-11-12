@@ -2,6 +2,7 @@ const XLSX = require("xlsx");
 const ExcelJS = require("exceljs");
 const path = require("path");
 const Order = require("../models/order.model");
+const referenceDocuments = require("../services/orderReferenceDocuments.service");
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
 const Item = require("../models/item.model");
@@ -5546,10 +5547,13 @@ exports.createOrdersManually = async (req, res) => {
       });
     }
 
-    insertedCount = newOrders.length;
-
     if (newOrders.length > 0) {
-      await Order.insertMany(newOrders);
+      const { reference_document_upload_id, reference_document_upload_ids } = req.body || {};
+      const uploadIds = Array.isArray(reference_document_upload_ids)
+        ? reference_document_upload_ids
+        : [reference_document_upload_id].filter(Boolean);
+      await referenceDocuments.insertManualOrders(newOrders, uploadIds, req.user);
+      insertedCount = newOrders.length;
 
       try {
         await upsertItemsFromOrders(newOrders);
@@ -5657,9 +5661,11 @@ exports.createOrdersManually = async (req, res) => {
       });
     }
 
+    const isDocumentError = typeof error?.code === "string" && error.code.startsWith("REFERENCE_");
     return res.status(error?.statusCode || 500).json({
-      message: "Manual order add failed",
+      message: isDocumentError ? error.message : "Manual order add failed",
       error: error.message,
+      ...(isDocumentError ? { code: error.code } : {}),
     });
   }
 };
@@ -11805,7 +11811,16 @@ exports.editCompleteOrder = async (req, res) => {
     }, new Map());
 
     const oldGroupMap = new Map();
+    const vendorIdentities = new Map();
+    const nextReferenceGroup = await referenceDocuments.groupKey({
+      order_id: nextOrderId, brand: nextBrand, vendor: nextVendor,
+    }, vendorIdentities);
+    const previousReferenceGroups = new Set();
+    const referenceGroupById = new Map();
     for (const orderDoc of groupOrders) {
+      const previousReferenceGroup = await referenceDocuments.groupKey(orderDoc, vendorIdentities);
+      referenceGroupById.set(String(orderDoc._id), previousReferenceGroup);
+      if (previousReferenceGroup !== nextReferenceGroup) previousReferenceGroups.add(previousReferenceGroup);
       const oldGroup = {
         order_id: String(orderDoc?.order_id || "").trim(),
         brand: String(orderDoc?.brand || "").trim(),
@@ -11833,8 +11848,32 @@ exports.editCompleteOrder = async (req, res) => {
       }
     }
 
-    await Promise.all(groupOrders.map((orderDoc) => orderDoc.save()));
-    await Promise.all(qcRecords.map((qcRecord) => qcRecord.save()));
+    const groupsToMove = [...previousReferenceGroups];
+    const moveReferenceHistory = groupsToMove.length > 0 && (
+      mongoose.connection.$supportsTransactions !== false ||
+      await Order.exists({ "order_reference_documents.group_key": { $in: groupsToMove } })
+    );
+    if (moveReferenceHistory) {
+      await referenceDocuments.inTransaction(async (session) => {
+        const currentOrders = await Order.find(
+          applyDataAccessMatch({ order_id: anchorOrder.order_id, ...ACTIVE_ORDER_MATCH }, req.user),
+        ).select("order_id brand vendor").session(session).lean();
+        const vendors = new Map();
+        for (const row of currentOrders) {
+          if (referenceGroupById.get(String(row._id)) === await referenceDocuments.groupKey(row, vendors)) continue;
+          throw Object.assign(new Error("The PO changed. Reload it and try again."), { statusCode: 409 });
+        }
+        if (currentOrders.length !== groupOrders.length) {
+          throw Object.assign(new Error("The PO changed. Reload it and try again."), { statusCode: 409 });
+        }
+        for (const orderDoc of groupOrders) await orderDoc.save({ session });
+        for (const qcRecord of qcRecords) await qcRecord.save({ session });
+        await referenceDocuments.moveBatches(groupsToMove, nextReferenceGroup, session);
+      });
+    } else {
+      await Promise.all(groupOrders.map((orderDoc) => orderDoc.save()));
+      await Promise.all(qcRecords.map((qcRecord) => qcRecord.save()));
+    }
 
     try {
       await Promise.all(

@@ -11,6 +11,7 @@ import ArchiveOrderModal from "../components/ArchiveOrderModal";
 import RevisedEtdModal from "../components/RevisedEtdModal";
 import BulkRevisedEtdModal from "../components/BulkRevisedEtdModal";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
+import OrderReferenceDocuments from "../components/OrderReferenceDocuments";
 import OrderQuantityWithHistory from "../components/OrderQuantityWithHistory";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import SortHeaderButton from "../components/SortHeaderButton";
@@ -152,6 +153,8 @@ const Orders = () => {
   const [editingCompleteOrder, setEditingCompleteOrder] = useState(null);
   const [revisedEtdTarget, setRevisedEtdTarget] = useState(null);
   const [showBulkRevisedEtdModal, setShowBulkRevisedEtdModal] = useState(false);
+  const [showReferenceDocuments, setShowReferenceDocuments] = useState(false);
+  const referenceDocumentsId = useId();
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [archiving, setArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState("");
@@ -209,6 +212,7 @@ const Orders = () => {
   }, [itemCodeSortOrder, orders]);
 
   const primaryOrder = orders[0];
+  const canOpenReferenceDocuments = primaryOrder?.order_id === orderId;
   const allOrdersCompletelyShipped =
     orders.length > 0 && orders.every((order) => isCompletelyShipped(order));
   const navigateToQcForItem = (orderId, itemCode) => {
@@ -335,16 +339,25 @@ const Orders = () => {
                 ETD: {formatDateDDMMYYYY(primaryOrder?.ETD)}
               </span>
             </div>
-            {canEditOrder && primaryOrder ? (
+            {primaryOrder && (
               <div className="d-flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="btn btn-outline-primary btn-sm"
-                  onClick={() => setEditingCompleteOrder(primaryOrder)}
-                >
-                  Update Complete Order
-                </button>
-                {!allOrdersCompletelyShipped && (
+                {canOpenReferenceDocuments && (
+                  <button type="button" className="btn btn-outline-secondary btn-sm"
+                    aria-expanded={showReferenceDocuments} aria-controls={showReferenceDocuments ? referenceDocumentsId : undefined}
+                    onClick={() => setShowReferenceDocuments((open) => !open)}>
+                    Order Reference Documents
+                  </button>
+                )}
+                {canEditOrder && (
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary btn-sm"
+                    onClick={() => setEditingCompleteOrder(primaryOrder)}
+                  >
+                    Update Complete Order
+                  </button>
+                )}
+                {canEditOrder && !allOrdersCompletelyShipped && (
                   <button
                     type="button"
                     className="btn btn-outline-secondary btn-sm"
@@ -354,8 +367,11 @@ const Orders = () => {
                   </button>
                 )}
               </div>
-            ) : null}
+            )}
           </div>
+          {showReferenceDocuments && canOpenReferenceDocuments && (
+            <OrderReferenceDocuments key={orderId} id={referenceDocumentsId} orders={orders} canEdit={canEditOrder} />
+          )}
         </div>
 
         <div className="card om-card">
