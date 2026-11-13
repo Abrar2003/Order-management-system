@@ -19,6 +19,7 @@ import {
   ITEM_FILE_UPLOAD_OPTIONS,
   ITEM_FILE_OPTIONS_BY_VALUE,
   getItemFileValues,
+  getShippingMarkStatus,
   isItemFileOptionAvailableForItem,
 } from "../constants/itemFiles";
 import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
@@ -847,7 +848,7 @@ const Items = () => {
 
     const shippingMarkUpdated = !Boolean(item?.shipping_mark_updated);
     if (!window.confirm(
-      `Mark shipping mark as ${shippingMarkUpdated ? "updated" : "not updated"} for ${item?.code || "this item"}?`,
+      `Mark shipping mark as ${shippingMarkUpdated ? "approved" : "not approved"} for ${item?.code || "this item"}?`,
     )) return;
 
     try {
@@ -862,7 +863,7 @@ const Items = () => {
           ? { ...row, shipping_mark_updated: shippingMarkUpdated }
           : row,
       ));
-      setSuccess(`Shipping mark for ${item?.code || "item"} marked ${shippingMarkUpdated ? "updated" : "not updated"}.`);
+      setSuccess(`Shipping mark for ${item?.code || "item"} marked ${shippingMarkUpdated ? "approved" : "not approved"}.`);
     } catch (updateError) {
       setError(updateError?.response?.data?.message || "Failed to update shipping mark status.");
     } finally {
@@ -1251,6 +1252,7 @@ const Items = () => {
                     )}
                     {sortedRows.map((item) => {
                       const itemId = String(item?._id || "").trim();
+                      const shippingMarkStatus = getShippingMarkStatus(item);
                       const availableItemFileOptions = ITEM_FILE_UPLOAD_OPTIONS.filter((option) =>
                         isItemFileOptionAvailableForItem(option, item),
                       );
@@ -1360,17 +1362,15 @@ const Items = () => {
                                 <button
                                   type="button"
                                   className={
-                                    item?.shipping_mark_updated
+                                    shippingMarkStatus === "Approved"
                                       ? "items-action-btn items-shipping-mark-action items-action-btn-success"
                                       : "items-action-btn items-shipping-mark-action"
                                   }
                                   onClick={() => handleShippingMarkUpdatedToggle(item)}
-                                  disabled={Boolean(updatingShippingMarkItemId)}
-                                  title="Update this item's shipping mark status"
+                                  disabled={Boolean(updatingShippingMarkItemId) || shippingMarkStatus === "Not Uploaded"}
+                                  title="Update this item's shipping mark approval"
                                 >
-                                  {item?.shipping_mark_updated
-                                    ? "Shipping Mark Updated"
-                                    : "Shipping Mark Not Updated"}
+                                  Shipping Mark {shippingMarkStatus}
                                 </button>
                               )}
                               {canUploadItemFiles && itemId && (

@@ -4,6 +4,7 @@ import {
   SHIPPING_MARK_FILE_PAGE_OPTIONS,
   buildItemFileUploadRequest,
   getItemFileValues,
+  getShippingMarkStatus,
   isItemFileOptionAvailableForItem,
 } from "./itemFiles.js";
 
@@ -18,6 +19,16 @@ test("shipping mark page keeps the five upload destinations separate", () => {
     assert.equal(request.formData.get("file_type"), option.value);
     assert.equal(request.formData.get("file").name, file.name);
   }
+});
+
+test("shipping mark status requires a stored file before showing approval", () => {
+  const file = { key: "shipping-mark.pdf" };
+  assert.equal(getShippingMarkStatus({ shipping_mark_updated: true }), "Not Uploaded");
+  assert.equal(getShippingMarkStatus({ shipping_marks: { files: [file] } }), "Not Approved");
+  assert.equal(getShippingMarkStatus({
+    shipping_marks: { shipping_marks_1: file },
+    shipping_mark_updated: true,
+  }), "Approved");
 });
 
 test("shipping mark page preserves legacy files and KD eligibility", () => {

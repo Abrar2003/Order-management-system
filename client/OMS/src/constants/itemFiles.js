@@ -282,6 +282,11 @@ export const getItemFileValues = (item = {}, option = {}) => {
 export const getPrimaryStoredItemFile = (item = {}, option = {}) =>
   getItemFileValues(item, option)[0] || null;
 
+export const getShippingMarkStatus = (item) => {
+  if (!getPrimaryStoredItemFile(item, "shipping_marks")) return "Not Uploaded";
+  return item.shipping_mark_updated ? "Approved" : "Not Approved";
+};
+
 export const buildItemFilesPagePath = (fileType = DEFAULT_ITEM_FILE_TYPE) => {
   const resolvedType = getItemFileOption(fileType)?.value || DEFAULT_ITEM_FILE_TYPE;
   return `/item-files?file_type=${encodeURIComponent(resolvedType)}`;
