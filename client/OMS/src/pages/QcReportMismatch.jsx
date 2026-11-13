@@ -218,13 +218,16 @@ const getMismatchMaxLength = (inspections = [], mismatchKey = "") =>
 
 const buildSheetRows = ({
   inspections = [],
+  master,
   labelPrefix = "",
   fields = [],
   snapshotKey = "",
   mismatchKey = "",
 } = {}) => {
   const safeInspections = Array.isArray(inspections) ? inspections : [];
+  const masterEntries = master?.[snapshotKey] || [];
   const maxLength = Math.max(
+    masterEntries.length,
     ...safeInspections.map((inspection) =>
       Array.isArray(inspection?.inspection_snapshot?.[snapshotKey])
         ? inspection.inspection_snapshot[snapshotKey].length
@@ -239,7 +242,7 @@ const buildSheetRows = ({
 
   const rows = [];
   for (let index = 0; index < maxLength; index += 1) {
-    const baselineEntry = safeInspections[0]?.inspection_snapshot?.[snapshotKey]?.[index] || {};
+    const baselineEntry = masterEntries[index] || {};
 
     fields.forEach((field) => {
       const inspectionCells = safeInspections.map((inspection, inspectionIndex) => {
@@ -267,19 +270,22 @@ const buildSheetRows = ({
           value: hasInspectionValue
             ? formatComparisonValue(inspectionValue, field.type, field.key)
             : "No Data",
-          is_baseline: inspectionIndex === 0,
+          has_value: hasInspectionValue,
           is_comparable: isComparable,
           is_mismatch: isMismatch,
         };
       });
 
-      if (!inspectionCells.some((cell) => cell.is_comparable || cell.is_mismatch)) {
+      const masterValue = baselineEntry[field.key];
+      const hasMasterValue = hasFieldData(masterValue, field);
+      if (!hasMasterValue && !inspectionCells.some((cell) => cell.has_value)) {
         return;
       }
 
       rows.push({
         key: `${labelPrefix}-${index}-${field.key}`,
         field: `${labelPrefix} ${index + 1} - ${field.label}`,
+        master_value: hasMasterValue ? formatComparisonValue(masterValue, field.type, field.key) : "No Data",
         inspection_cells: inspectionCells,
         is_mismatch: inspectionCells.some((cell) => cell.is_mismatch),
       });
@@ -291,17 +297,14 @@ const buildSheetRows = ({
 
 const buildBoxModeSheetRows = ({
   inspections = [],
+  master,
 } = {}) => {
   const safeInspections = Array.isArray(inspections) ? inspections : [];
-  const baselineMode = safeInspections[0]?.inspection_snapshot?.inspected_box_mode || "";
-  if (!baselineMode && safeInspections.length === 0) {
-    return [];
-  }
+  const baselineMode = master?.inspected_box_sizes?.length ? master.inspected_box_mode : "";
 
   const inspectionCells = safeInspections.map((inspection, inspectionIndex) => {
-    const inspectionMode = inspection?.inspection_snapshot?.inspected_box_mode || "";
-    const isComparable = hasComparableTextValue(baselineMode) &&
-      hasComparableTextValue(inspectionMode);
+    const snapshot = inspection?.inspection_snapshot;
+    const inspectionMode = snapshot?.inspected_box_sizes?.length ? snapshot.inspected_box_mode : "";
 
     return {
       key: `${inspection?.inspection_id || inspectionIndex}-box-mode`,
@@ -309,20 +312,21 @@ const buildBoxModeSheetRows = ({
       label: inspection?.sheet_label || `Inspection ${inspectionIndex + 1}`,
       inspection_date: inspection?.inspection_date || "",
       inspector_name: inspection?.inspector_name || "Unassigned",
-      value: isComparable ? formatBoxModeLabel(inspectionMode) : "No Data",
-      is_baseline: inspectionIndex === 0,
-      is_comparable: isComparable,
+      value: inspectionMode ? formatBoxModeLabel(inspectionMode) : "No Data",
+      has_value: Boolean(inspectionMode),
+      is_comparable: Boolean(inspection?.has_comparable_box_mode),
       is_mismatch: Boolean(inspection?.box_mode_mismatch),
     };
   });
 
-  if (!inspectionCells.some((cell) => cell.is_comparable || cell.is_mismatch)) {
+  if (!baselineMode && !inspectionCells.some((cell) => cell.has_value)) {
     return [];
   }
 
   return [{
     key: "box-mode",
     field: "Box Mode",
+    master_value: baselineMode ? formatBoxModeLabel(baselineMode) : "No Data",
     inspection_cells: inspectionCells,
     is_mismatch: inspectionCells.some((cell) => cell.is_mismatch),
   }];
@@ -377,6 +381,7 @@ const SummaryCard = ({ label, value }) => (
 const QcReportMismatch = ({ afterMasterOne = false }) => {
   const reportKey = afterMasterOne ? "qc-report-mismatch-level-2" : "qc-report-mismatch";
   const title = afterMasterOne ? "Reports mismatch lv 2" : "Reports mismatch lv 1";
+  const masterLabel = afterMasterOne ? "Master 1" : "Master";
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, reportKey);
 
@@ -891,6 +896,7 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
     if (!selectedRow) return [];
     return buildSheetRows({
       inspections: selectedInspectionRecords,
+      master: selectedRow.master_snapshot,
       labelPrefix: "Item Size",
       fields: ITEM_SIZE_FIELDS,
       snapshotKey: "inspected_item_sizes",
@@ -902,6 +908,7 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
     if (!selectedRow) return [];
     return buildSheetRows({
       inspections: selectedInspectionRecords,
+      master: selectedRow.master_snapshot,
       labelPrefix: "Box Size",
       fields: BOX_SIZE_FIELDS,
       snapshotKey: "inspected_box_sizes",
@@ -913,6 +920,7 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
     if (!selectedRow) return [];
     return buildBoxModeSheetRows({
       inspections: selectedInspectionRecords,
+      master: selectedRow.master_snapshot,
     });
   }, [selectedInspectionRecords, selectedRow]);
 
@@ -924,14 +932,14 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h2 className="h4 mb-0">{title}</h2>
           <span className="small text-secondary">
-            Latest three inspection snapshots compared with each other
+            Three inspection snapshots compared with {masterLabel}
           </span>
         </div>
 
         <ReportInfoBanner
-          description="Highlights discrepancies between historical inspection reports submitted by QCs and current records of item/box dimensions in the database."
+          description={`Highlights differences between QC inspection measurements and ${masterLabel}.`}
           dataShown="Brand, vendor, item code, description, POs list, request/inspection dates, match status, and detailed mismatched fields."
-          howItWorks="Compiles historical QC sheet snapshots vs current sizes, filterable by date, brand, vendor, inspector, status, PO, item code, and a mismatch-only checkbox."
+          howItWorks="Filter by date, brand, vendor, inspector, status, PO, item code, or mismatches only."
         />
 
         <div className="card om-card mb-3">
@@ -1129,7 +1137,7 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
             <span className="om-summary-chip">
               {afterMasterOne
                 ? "Per item: First 3 qualifying POs after Master 1, latest approved inspection per PO"
-                : `Per Item: Latest ${filters.comparison_inspection_limit ?? 3} POs, latest inspection per PO`}
+                : `Per item: Latest ${filters.comparison_inspection_limit ?? 3} POs with inspections after first Master, latest inspection per PO`}
             </span>
             <span className="om-summary-chip">
               Page: {pagination.page ?? 1}
@@ -1174,6 +1182,7 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
                   <tbody>
                     {rows.map((row) => {
                       const hasMismatch = Boolean(row?.mismatch_summary?.has_mismatch);
+                      const hasComparison = hasMismatch || row?.mismatch_summary?.clean_inspection_count > 0;
                       const poCount = getPoCount(row);
                       const commentCount = getCommentCount(row);
                       return (
@@ -1192,8 +1201,8 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
                           <td>{formatDateDDMMYYYY(row?.inspection_date)}</td>
                           <td>{row?.status || "N/A"}</td>
                           <td>
-                            <span className={`badge ${hasMismatch ? "text-bg-danger" : "text-bg-success"}`}>
-                              {hasMismatch ? "Mismatch" : "Matched"}
+                            <span className={`badge ${hasMismatch ? "text-bg-danger" : hasComparison ? "text-bg-success" : "text-bg-secondary"}`}>
+                              {hasMismatch ? "Mismatch" : hasComparison ? "Matched" : "No comparable data"}
                             </span>
                             <div className="small text-secondary mt-1">
                               {row?.mismatch_summary?.mismatch_inspection_count || 0} / {row?.inspection_count || 0} inspections
@@ -1335,8 +1344,7 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
                 </div>
 
                 <div className="alert alert-info small mb-3" role="alert">
-                  <strong>Comparison:</strong> Inspection 1 is compared with the other displayed
-                  inspections. Item-master and PIS reference values are not used.
+                  Each inspection is compared with {afterMasterOne ? "the saved Master 1" : "the current Master"}.
                 </div>
 
                 <section className="mb-4 bg-light p-3 rounded border">
@@ -1461,6 +1469,7 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
                           <thead>
                             <tr>
                               <th>Field</th>
+                              <th scope="col">{masterLabel}</th>
                               {selectedInspectionRecords.map((inspection) => (
                                 <th key={inspection?.inspection_id || inspection?.sheet_label}>
                                   <div>{inspection?.sheet_label || "Inspection"}</div>
@@ -1492,6 +1501,7 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
                                   className={mismatchClassName}
                                 >
                                   <td>{entry.field}</td>
+                                  <td>{entry.master_value}</td>
                                   {entry.inspection_cells.map((cell) => (
                                     <td
                                       key={cell.key}
@@ -1500,9 +1510,7 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
                                       <div className="small text-secondary">
                                         {cell.is_mismatch
                                           ? "Mismatch"
-                                          : (cell.is_comparable
-                                            ? (cell.is_baseline ? "Comparison baseline" : "Matched")
-                                            : "No comparable data")}
+                                          : (cell.is_comparable ? "Matched" : "No comparable data")}
                                       </div>
                                     </td>
                                   ))}

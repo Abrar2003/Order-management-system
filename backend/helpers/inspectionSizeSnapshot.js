@@ -480,6 +480,7 @@ const compareInspectionSizeSnapshot = (inspection = {}, currentSource = {}) => {
     item_size_mismatches: itemSizeMismatches,
     box_size_mismatches: boxSizeMismatches,
     box_mode_mismatch: boxModeMismatch,
+    has_comparable_box_mode: hasComparableBoxMode,
     has_comparable_data:
       itemSizeComparison.hasComparableData ||
       boxSizeComparison.hasComparableData ||

@@ -232,13 +232,13 @@ export default function MasterWorkflowPage({ view }) {
       const response = await api.get(`/items/${view}/export-preview?${query}`);
       if (!response.data.data.rows.length) throw new Error("No items match these filters to export.");
       flushSync(() => setReportRows(response.data.data.rows));
-      await exportElementToPdf({ element: reportRef.current, endpoint: "/items/pdf/render", reportKey: view, filename: `${view}.pdf`, repeatHeader: { title: pageInfo.title, subtitle: "Data sanity workflow · Cycle 3 October 2026" } });
+      await exportElementToPdf({ element: reportRef.current, endpoint: "/items/pdf/render", reportKey: view, filename: `${view}.pdf`, repeatHeader: { title: pageInfo.title, subtitle: "Data sanity workflow" } });
     } catch (err) { setError(errorMessage(err)); }
     finally { setExporting(false); setReportRows([]); }
   };
   const setPage = (value) => { const next = new URLSearchParams(params); next.set("page", String(value)); setParams(next); };
   return <><Navbar /><main className="page-shell py-3 mw-page">
-    <div className="d-flex justify-content-between align-items-start flex-wrap gap-3"><div><h1 className="h4">{pageInfo.title}</h1><p className="text-secondary mb-1">{pageInfo.description}</p><p className="small text-secondary">Cycle started 3 October 2026 · 1 + 3 + 3 + 3 distinct POs · Super Admin review</p></div>
+    <div className="d-flex justify-content-between align-items-start flex-wrap gap-3"><div><h1 className="h4">{pageInfo.title}</h1><p className="text-secondary mb-1">{pageInfo.description}</p><p className="small text-secondary">1 + 3 + 3 + 3 distinct POs · Super Admin review</p></div>
       <div className="d-flex gap-2 mw-no-print"><button className="btn btn-outline-secondary btn-sm" onClick={fetchRows} disabled={busy || loading}>Refresh</button>{hasPermission("pis", "export") && <><button className="btn btn-outline-primary btn-sm" onClick={exportReport} disabled={exporting || loading}>{exporting ? "Exporting…" : "Export Excel"}</button><button className="btn btn-outline-secondary btn-sm" disabled={exporting || loading} onClick={exportPdf}>Export PDF</button></>}</div>
     </div>
     <nav aria-label="Master workflow pages" className="nav nav-pills gap-1 mb-3 mw-no-print">{Object.entries(PAGES).map(([route, info]) => <Link key={route} className={`nav-link ${route === view ? "active" : ""}`} to={`/${route}`}>{info.title}</Link>)}</nav>
@@ -256,6 +256,7 @@ export default function MasterWorkflowPage({ view }) {
       <div className="mw-item-heading"><div><h2 className="h6 mb-1">{row.code} · {row.description || row.name}</h2><div className="small text-secondary">{row.brand_label} · {row.vendor_labels.join(", ")}</div></div>
         <div className="d-flex gap-2 align-items-center flex-wrap"><span className={`badge ${row.status === "finalized" ? "text-bg-success" : row.status === "ready" ? "text-bg-primary" : "text-bg-light"}`}>{STAGE_LABELS[row.master_workflow.stage]}</span>{row.evidence.required > 0 && <span className="small">{Math.min(row.evidence.count, row.evidence.required)} / {row.evidence.required} approved POs</span>}<button className="btn btn-outline-primary btn-sm mw-no-print" aria-expanded={expanded === row.id} disabled={busy} onClick={() => setExpanded(expanded === row.id ? null : row.id)}>{expanded === row.id ? "Close" : row.status === "finalized" ? "View" : "Review"}</button></div>
       </div>
+      {row.master_workflow.started_at && <p className="small text-secondary mb-1">Cycle started {date(row.master_workflow.started_at)}</p>}
       {expanded === row.id && <ItemReview row={row} view={view} onSave={(action, payload) => save(row, action, payload)} onRefresh={fetchRows} busy={busy} canOpenPd={hasPermission("product_database", "view")} />}
     </article>)}</div>}
     <div className="d-flex justify-content-between align-items-center mt-3 mw-no-print"><span className="small text-secondary">{pagination.totalRecords} items · Page {page} of {pagination.totalPages}</span><div className="d-flex gap-2"><button className="btn btn-outline-secondary btn-sm" disabled={page <= 1 || busy || loading} onClick={() => setPage(page - 1)}>Previous</button><button className="btn btn-outline-secondary btn-sm" disabled={page >= pagination.totalPages || busy || loading} onClick={() => setPage(page + 1)}>Next</button></div></div>
@@ -263,6 +264,7 @@ export default function MasterWorkflowPage({ view }) {
       {reportRows.map((row) => <section key={row.id} className="mb-4">
         <h2 className="h5">{row.code} · {row.description || row.name}</h2>
         <p>{row.brand_label} · {row.vendor_labels.join(", ")} · {STAGE_LABELS[row.master_workflow.stage]} · {row.status}</p>
+        {row.master_workflow.started_at && <p>Cycle started {date(row.master_workflow.started_at)}</p>}
         <div className="mw-sources"><Measurements source={itemSource(row, "pis")} title="Vendor PIS" /><Measurements source={itemSource(row, "master")} title="Current master" />{row.evidence.inspections.map((inspection) => <Measurements source={inspection} key={inspection.inspection_id} title={`${inspection.po} · ${inspection.inspection_date}`} />)}</div>
         {row.comparison && <><h3 className="h6 mt-3">Master vs PD</h3><Measurements source={itemSource(row, "pd")} title="Product Database" /><table className="table table-sm"><thead><tr><th>Field</th><th>Master</th><th>PD</th><th>Result</th><th>Acceptance reason</th></tr></thead><tbody>{row.comparison.rows.map((entry) => <tr key={entry.key}><td>{entry.group} {entry.part} {fieldLabel(entry.field)}</td><td>{display(entry.master)}</td><td>{display(entry.other)}</td><td>{entry.status}</td><td>{row.comparison.reviewed ? row.comparison.review?.reasons?.[entry.key] || "" : ""}</td></tr>)}</tbody></table></>}
         <ul>{row.master_workflow.reviews.map((review) => <li key={review.stage}>{STAGE_LABELS[review.stage]} · {review.evidence.map((entry) => entry.po).join(", ")} · {review.reviewed_by.name} · {date(review.reviewed_at)}</li>)}</ul>

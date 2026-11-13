@@ -7,7 +7,6 @@ const { detectBoxPackagingMode, normalizeBoxEntryMetadata } = require("./boxMeas
 const { compareItemSizeDimensionVariance, compareBoxSizeDimensionVariance, compareWeightVariance } = require("./measurementMismatchRules");
 
 const CYCLE_VERSION = "2026-10-03";
-const CYCLE_STARTED_AT = "2026-10-02T18:30:00.000Z";
 const STAGES = ["awaiting_master_1", "master", "master_1", "master_2", "final_master", "finalized"];
 const REVIEW_PO_COUNTS = [1, 3, 3, 3];
 const MASTER_FIELDS = ["master_item_sizes", "master_box_sizes", "master_box_mode", "master_country_of_origin", "master_barcode", "master_master_barcode", "master_inner_barcode"];
@@ -26,9 +25,14 @@ const canonical = (value) => {
 };
 const fingerprint = (value) => crypto.createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 const failure = (message, status = 409) => Object.assign(new Error(message), { status });
-const getWorkflow = (item = {}) => item.master_workflow?.cycle_version === CYCLE_VERSION
-  ? clone(item.master_workflow)
-  : { cycle_version: CYCLE_VERSION, started_at: CYCLE_STARTED_AT, stage: STAGES[0], revision: 0, reviews: [], consumed_pos: [] };
+const getWorkflow = (item = {}) => {
+  if (item.master_workflow?.cycle_version !== CYCLE_VERSION) {
+    return { cycle_version: CYCLE_VERSION, started_at: null, stage: STAGES[0], revision: 0, reviews: [], consumed_pos: [] };
+  }
+  const workflow = clone(item.master_workflow);
+  workflow.started_at = workflow.reviews?.find((review) => review.stage === "master")?.reviewed_at || null;
+  return workflow;
+};
 const masterSnapshot = (item = {}) => ({
   ...Object.fromEntries(MASTER_FIELDS.map((field) => [field, clone(item[field] ?? (field.endsWith("sizes") ? [] : ""))])),
   calculated_master_total: text(item.cbm?.calculated_master_total || "0"),
@@ -163,6 +167,7 @@ const transition = ({ item, user, payload, action, evidence, values, now = new D
     nextItem.cbm = { ...nextItem.cbm, calculated_master_total: values.calculated_master_total };
     delete nextItem.calculated_master_total;
     workflow.stage = STAGES[stageIndex + 1];
+    if (workflow.stage === "master") workflow.started_at = timestamp;
     workflow.reviews = [...(workflow.reviews || []), { stage: workflow.stage, reviewed_at: timestamp, reviewed_by: actor(user), evidence: clone(evidence.inspections), master: masterSnapshot(nextItem) }];
     workflow.consumed_pos = [...new Set([...(workflow.consumed_pos || []), ...evidence.inspections.map((r) => key(r.po))])];
     workflow.pd_review = null;
@@ -196,4 +201,4 @@ const transition = ({ item, user, payload, action, evidence, values, now = new D
   return { ...nextItem, master_workflow: workflow };
 };
 
-module.exports = { CYCLE_VERSION, CYCLE_STARTED_AT, STAGES, MASTER_FIELDS, PD_FIELDS, key, text, clone, fingerprint, failure, getWorkflow, masterSnapshot, pdSnapshot, isSuperAdmin, buildEvidence, sourceValues, compareSizes, buildPdComparison, assertAction, transition };
+module.exports = { CYCLE_VERSION, STAGES, MASTER_FIELDS, PD_FIELDS, key, text, clone, fingerprint, failure, getWorkflow, masterSnapshot, pdSnapshot, isSuperAdmin, buildEvidence, sourceValues, compareSizes, buildPdComparison, assertAction, transition };

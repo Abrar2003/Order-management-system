@@ -5,11 +5,13 @@ const XLSX = require("xlsx");
 const Inspection = require("../models/inspection.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
+const PisUpdateLog = require("../models/pisUpdateLog.model");
 const Brand = require("../models/brand.model");
 const Order = require("../models/order.model");
 const Tenure = require("../models/tenure.model");
 const Vendor = require("../models/vendor.model");
 const { buildEvidence, getWorkflow } = require("../helpers/masterWorkflow");
+const { getMasterComparisonSource, getFirstMasterDate, isMasterCreationAudit, isInspectionAfterMaster, sizeLabels } = require("../helpers/qcMismatchMaster");
 const { getApprovedRecords } = require("../services/masterWorkflow.service");
 const { getItemBrand } = require("../helpers/itemBrand");
 const {
@@ -992,6 +994,10 @@ const normalizeInspectionStatusFilter = (value) => {
 const QC_REPORT_MISMATCH_ITEM_SELECT = [
   "code",
   "qc_mismatch_comments",
+  "master_item_sizes",
+  "master_box_sizes",
+  "master_box_mode",
+  "master_workflow",
 ].join(" ");
 const QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT = 3;
 const QC_REPORT_MISMATCH_STATUS = "Inspection Done";
@@ -1104,7 +1110,7 @@ const selectLatestInspectionPerLatestPo = (
   inspections.forEach((inspection) => {
     const normalizedPo = normalizeText(inspection?.order_id);
     if (!normalizedPo || normalizedPo.toLowerCase() === "n/a") return;
-    const poKey = normalizedPo;
+    const poKey = normalizeLookupKey(normalizedPo);
     const group = poGroups.get(poKey) || {
       order_id: normalizedPo,
       inspections: [],
@@ -2969,6 +2975,24 @@ const selectPostMasterOneInspections = (item, candidates, approvedRecords) => {
   return selected.length === QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT ? selected : [];
 };
 
+const getLegacyMasterCreationDates = async (items) => {
+  if (!items.length) return new Map();
+  const logs = await PisUpdateLog.find({
+    item: { $in: items.map((item) => item._id) },
+    source: { $not: /^master_workflow_/ },
+    changes: { $elemMatch: { scope: "Master", field: { $in: sizeLabels }, before: "Not Set" } },
+  }).select("item createdAt changes missing_fields").lean();
+  const datesByItem = new Map();
+  for (const log of logs) {
+    if (!isMasterCreationAudit(log)) continue;
+    const itemId = String(log.item);
+    const dates = datesByItem.get(itemId) || [];
+    dates.push(log.createdAt);
+    datesByItem.set(itemId, dates);
+  }
+  return datesByItem;
+};
+
 const getQcReportMismatch = async (req, res, afterMasterOne) => {
   try {
     const brand = normalizeOptionalFilter(req.query.brand);
@@ -3041,11 +3065,9 @@ const getQcReportMismatch = async (req, res, afterMasterOne) => {
         afterMasterOne,
       }),
     ).allowDiskUse(true);
-    const candidates = afterMasterOne ? inspections : limitRecentInspectionsByItem(inspections);
-
     const uniqueItemCodes = [
       ...new Set(
-        candidates
+        inspections
           .map((entry) => normalizeText(entry?.item_code || ""))
           .filter(Boolean),
       ),
@@ -3069,7 +3091,7 @@ const getQcReportMismatch = async (req, res, afterMasterOne) => {
             },
           ),
         )
-          .select(afterMasterOne ? `${QC_REPORT_MISMATCH_ITEM_SELECT} master_workflow` : QC_REPORT_MISMATCH_ITEM_SELECT)
+          .select(afterMasterOne ? QC_REPORT_MISMATCH_ITEM_SELECT : `${QC_REPORT_MISMATCH_ITEM_SELECT} update_history`)
           .lean()
       : [];
 
@@ -3080,60 +3102,66 @@ const getQcReportMismatch = async (req, res, afterMasterOne) => {
       ]),
     );
 
-    let inspectionsForComparison = candidates;
-    if (afterMasterOne) {
-      const candidatesByItem = new Map();
-      for (const inspection of candidates) {
-        const code = normalizeLookupKey(inspection.item_code);
-        const group = candidatesByItem.get(code) || [];
-        group.push(inspection);
-        candidatesByItem.set(code, group);
-      }
-      const approvedRecords = await getApprovedRecords(
-        itemDocs.filter((item) => getWorkflow(item).stage === "master_1"),
-        req.user,
-      );
-      inspectionsForComparison = itemDocs.flatMap((item) => {
-        const code = normalizeLookupKey(item.code);
-        return selectPostMasterOneInspections(item, candidatesByItem.get(code) || [], approvedRecords.get(code) || []);
-      });
+    const candidatesByItem = new Map();
+    for (const inspection of inspections) {
+      const code = normalizeLookupKey(inspection.item_code);
+      const group = candidatesByItem.get(code) || [];
+      group.push(inspection);
+      candidatesByItem.set(code, group);
     }
+    const itemsWithMaster = itemDocs.flatMap((item) => {
+      const workflow = getWorkflow(item);
+      const master = afterMasterOne ? workflow.reviews?.find((review) => review.stage === "master_1")?.master : item;
+      const source = getMasterComparisonSource(master);
+      return source ? [{ item, workflow, source }] : [];
+    });
+    const approvedRecords = afterMasterOne
+      ? await getApprovedRecords(itemsWithMaster.filter(({ workflow }) => workflow.stage === "master_1").map(({ item }) => item), req.user)
+      : new Map();
+    const auditDates = afterMasterOne ? new Map() : await getLegacyMasterCreationDates(itemsWithMaster.map(({ item }) => item));
 
-    const inspectionRows = inspectionsForComparison.map((inspection) => {
-      const snapshot = buildNormalizedInspectionSizeState(inspection);
-      if (
-        !afterMasterOne &&
-        snapshot.inspected_item_sizes.length === 0 &&
-        snapshot.inspected_box_sizes.length === 0
-      ) {
-        return null;
+    const inspectionRows = itemsWithMaster.flatMap(({ item, workflow, source }) => {
+      const code = normalizeLookupKey(item.code);
+      const candidates = candidatesByItem.get(code) || [];
+      let selected;
+      if (afterMasterOne) {
+        selected = selectPostMasterOneInspections(item, candidates, approvedRecords.get(code) || []);
+      } else {
+        const start = getFirstMasterDate(item, workflow, auditDates.get(String(item._id)));
+        const eligible = candidates.filter((inspection) => {
+          if (!isInspectionAfterMaster(inspection, start)) return false;
+          const snapshot = buildNormalizedInspectionSizeState(inspection);
+          return snapshot.inspected_item_sizes.length || snapshot.inspected_box_sizes.length;
+        });
+        selected = selectLatestInspectionPerLatestPo(eligible);
       }
+      return selected.map((inspection) => {
+        const comparison = compareInspectionSizeSnapshot(inspection, source);
 
-      return {
-        id: String(inspection?._id || ""),
-        inspection_id: String(inspection?._id || ""),
-        qc_id: String(inspection?.qc_id || ""),
-        order_id: normalizeText(inspection?.order_id) || "N/A",
-        brand: normalizeText(inspection?.brand) || "N/A",
-        vendor: normalizeText(inspection?.vendor) || "N/A",
-        item_code: normalizeText(inspection?.item_code) || "N/A",
-        item_description: normalizeText(inspection?.item_description) || "N/A",
-        inspector_id: normalizeText(inspection?.inspector_id),
-        inspector_name: normalizeText(inspection?.inspector_name) || "Unassigned",
-        requested_date: normalizeText(inspection?.requested_date),
-        inspection_date: normalizeText(inspection?.inspection_date),
-        inspection_date_value: inspection?.inspection_date_value || null,
-        inspection_date_recency_value: inspection?.inspection_date_recency_value || null,
-        order_date_value: inspection?.order_date_value || null,
-        status: normalizeText(inspection?.status),
-        checked: normalizeNumber(inspection?.checked),
-        passed: normalizeNumber(inspection?.passed),
-        pending_after: normalizeNumber(inspection?.pending_after),
-        inspection_inspected_item_sizes: snapshot.inspected_item_sizes,
-        inspection_inspected_box_sizes: snapshot.inspected_box_sizes,
-        inspection_inspected_box_mode: snapshot.inspected_box_mode,
-      };
-    }).filter(Boolean);
+        return {
+          id: String(inspection?._id || ""),
+          inspection_id: String(inspection?._id || ""),
+          qc_id: String(inspection?.qc_id || ""),
+          order_id: normalizeText(inspection?.order_id) || "N/A",
+          brand: normalizeText(inspection?.brand) || "N/A",
+          vendor: normalizeText(inspection?.vendor) || "N/A",
+          item_code: normalizeText(inspection?.item_code) || "N/A",
+          item_description: normalizeText(inspection?.item_description) || "N/A",
+          inspector_id: normalizeText(inspection?.inspector_id),
+          inspector_name: normalizeText(inspection?.inspector_name) || "Unassigned",
+          requested_date: normalizeText(inspection?.requested_date),
+          inspection_date: normalizeText(inspection?.inspection_date),
+          inspection_date_value: inspection?.inspection_date_value || null,
+          inspection_date_recency_value: inspection?.inspection_date_recency_value || null,
+          order_date_value: inspection?.order_date_value || null,
+          status: normalizeText(inspection?.status),
+          checked: normalizeNumber(inspection?.checked),
+          passed: normalizeNumber(inspection?.passed),
+          pending_after: normalizeNumber(inspection?.pending_after),
+          comparison,
+        };
+      });
+    });
 
     const groupedRowsMap = new Map();
     inspectionRows.forEach((row) => {
@@ -3175,6 +3203,7 @@ const getQcReportMismatch = async (req, res, afterMasterOne) => {
           pending_after: row?.pending_after ?? 0,
           inspection_count: 0,
           qc_mismatch_comments: currentItemDoc.qc_mismatch_comments || [],
+          master_snapshot: row.comparison.current_snapshot,
           mismatch_summary: {
             has_mismatch: false,
             mismatch_count: 0,
@@ -3239,25 +3268,7 @@ const getQcReportMismatch = async (req, res, afterMasterOne) => {
         checked: Number(row?.checked || 0),
         passed: Number(row?.passed || 0),
         pending_after: Number(row?.pending_after || 0),
-        inspection_snapshot: {
-          inspected_item_sizes: Array.isArray(row?.inspection_inspected_item_sizes)
-            ? row.inspection_inspected_item_sizes
-            : [],
-          inspected_box_sizes: Array.isArray(row?.inspection_inspected_box_sizes)
-            ? row.inspection_inspected_box_sizes
-            : [],
-          inspected_box_mode: row?.inspection_inspected_box_mode || "",
-        },
-        mismatch_summary: {
-          has_mismatch: false,
-          mismatch_count: 0,
-          item_size_mismatch_count: 0,
-          box_size_mismatch_count: 0,
-          box_mode_mismatch_count: 0,
-        },
-        item_size_mismatches: [],
-        box_size_mismatches: [],
-        box_mode_mismatch: null,
+        comparison: row.comparison,
       };
 
       group.inspection_records.push(inspectionRecord);
@@ -3266,11 +3277,7 @@ const getQcReportMismatch = async (req, res, afterMasterOne) => {
     const groupedRows = [...groupedRowsMap.values()]
       .map((group) => {
         const sortedInspectionRecords = sortInspectionsByOrderAndInspectionDate(group.inspection_records);
-        const baselineSnapshot = sortedInspectionRecords[0]?.inspection_snapshot || null;
-        const comparisonRecords = sortedInspectionRecords.map((inspectionRecord, index) => {
-          const mismatch = index === 0 || !baselineSnapshot
-            ? null
-            : compareInspectionSizeSnapshot(inspectionRecord.inspection_snapshot, baselineSnapshot);
+        const comparisonRecords = sortedInspectionRecords.map(({ comparison: mismatch, ...inspectionRecord }, index) => {
           const mismatchSummary = {
             has_mismatch: Boolean(mismatch?.has_mismatch),
             mismatch_count: Number(mismatch?.mismatch_count || 0),
@@ -3281,6 +3288,9 @@ const getQcReportMismatch = async (req, res, afterMasterOne) => {
 
           return {
             ...inspectionRecord,
+            inspection_snapshot: mismatch.inspection_snapshot,
+            has_comparable_data: mismatch.has_comparable_data,
+            has_comparable_box_mode: mismatch.has_comparable_box_mode,
             sheet_label: `Inspection ${index + 1}`,
             mismatch_summary: mismatchSummary,
             item_size_mismatches: mismatch?.item_size_mismatches || [],
@@ -3297,7 +3307,7 @@ const getQcReportMismatch = async (req, res, afterMasterOne) => {
             if (inspectionRecord.mismatch_summary.has_mismatch) {
               summary.has_mismatch = true;
               summary.mismatch_inspection_count += 1;
-            } else {
+            } else if (inspectionRecord.has_comparable_data) {
               summary.clean_inspection_count += 1;
             }
             return summary;
@@ -3358,7 +3368,7 @@ const getQcReportMismatch = async (req, res, afterMasterOne) => {
           accumulator.total_inspections += 1;
           if (inspectionRecord?.mismatch_summary?.has_mismatch) {
             accumulator.mismatch_inspections += 1;
-          } else {
+          } else if (inspectionRecord.has_comparable_data) {
             accumulator.clean_inspections += 1;
           }
           accumulator.item_size_mismatch_count += Number(

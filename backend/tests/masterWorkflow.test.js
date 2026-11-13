@@ -11,6 +11,8 @@ const {
 const { buildRow, getWorkflowRows, parseMasterValues, performAction, buildWriteFilter, getApprovedRecords } = require("../services/masterWorkflow.service");
 const { masterWorkflowGuard, updateTouchesMaster } = require("../helpers/masterWorkflowGuard");
 const { updateItemPis, updateFinalPisCheckMasterValues } = require("../controllers/item.controller");
+const { exportRows } = require("../controllers/masterWorkflow.controller");
+const { APP_DATE_TIMEZONE } = require("../helpers/dateOnly");
 
 const USER = { _id: "507f1f77bcf86cd799439011", role: "super admin", name: "Reviewer" };
 const NOW = new Date("2026-10-20T10:00:00Z");
@@ -48,6 +50,8 @@ test("legacy masters and imported, checked, matching items requeue using approve
   const row = buildRow(item, [visit("PO-1")], USER);
   assert.equal(row.master_workflow.cycle_version, CYCLE_VERSION);
   assert.equal(row.master_workflow.stage, "awaiting_master_1");
+  assert.equal(row.master_workflow.started_at, null);
+  assert.equal(exportRows([row])[0]["Cycle started"], "");
   assert.equal(row.status, "ready");
   assert.equal(row.actions.review, true);
   assert.equal(row.inspection_comparisons[0].rows.filter((r) => r.status !== "match").length, 0);
@@ -57,6 +61,14 @@ test("legacy masters and imported, checked, matching items requeue using approve
 test("complete 1 + 3 + 3 + 3 sequence preserves PIS and legacy master, permits unchanged reviews, and freezes evidence", () => {
   const before = baseline();
   const item = throughFinalMaster();
+  const firstReviewDate = item.master_workflow.reviews[0].reviewed_at;
+  assert.equal(firstReviewDate, "2026-10-03T03:00:00.000Z");
+  assert.equal(item.master_workflow.started_at, firstReviewDate);
+  item.master_workflow.started_at = "2026-10-02T18:30:00.000Z";
+  const existingRow = buildRow(item, [], USER);
+  assert.equal(existingRow.master_workflow.started_at, firstReviewDate);
+  assert.equal(existingRow.master_workflow.stage, "final_master");
+  assert.equal(exportRows([existingRow])[0]["Cycle started"], new Date(firstReviewDate).toLocaleString("en-GB", { timeZone: APP_DATE_TIMEZONE }));
   assert.equal(item.master_workflow.stage, "final_master");
   assert.equal(item.master_workflow.revision, 4);
   assert.equal(item.master_workflow.consumed_pos.length, 10);

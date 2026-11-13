@@ -1,6 +1,7 @@
 const XLSX = require("xlsx");
 const { getWorkflowRows, performAction } = require("../services/masterWorkflow.service");
 const { CYCLE_VERSION } = require("../helpers/masterWorkflow");
+const { APP_DATE_TIMEZONE } = require("../helpers/dateOnly");
 const { invalidateItemCaches } = require("../services/cacheInvalidation.service");
 
 const sendError = (res, error) => {
@@ -26,6 +27,7 @@ const action = (name) => async (req, res) => {
 const exportRows = (rows) => rows.map((row) => ({
   "Item code": row.code, Description: row.description || row.name, Brand: row.brand_label, Vendors: row.vendor_labels.join(", "),
   Stage: row.master_workflow.stage, Status: row.status, "Approved POs": row.evidence.count, "Required POs": row.evidence.required,
+  "Cycle started": row.master_workflow.started_at ? new Date(row.master_workflow.started_at).toLocaleString("en-GB", { timeZone: APP_DATE_TIMEZONE }) : "",
   "Review evidence": row.evidence.inspections.map((r) => `${r.po} (${r.inspection_date})`).join(", "),
   "Completed reviews": row.master_workflow.reviews.map((r) => `${r.stage}: ${r.evidence.map((e) => e.po).join(", ")} / ${r.reviewed_by.name} / ${r.reviewed_at}`).join("; "),
   "Master item sizes": JSON.stringify(row.master_item_sizes || []), "Master box sizes": JSON.stringify(row.master_box_sizes || []), "Master box mode": row.master_box_mode,
