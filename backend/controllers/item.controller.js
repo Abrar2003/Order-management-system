@@ -5752,6 +5752,45 @@ exports.deleteItemFormDraft = async (req, res) => {
   }
 };
 
+exports.checkItemPis = async (req, res) => {
+  if (!isManagerLikeRole(req.user?.role)) {
+    return res.status(403).json({ message: "Only managers and admins can mark PIS as checked." });
+  }
+
+  const itemId = String(req.params.id || "").trim();
+  if (!mongoose.Types.ObjectId.isValid(itemId)) {
+    return res.status(400).json({ message: "Invalid item id" });
+  }
+
+  try {
+    const match = applyItemDataAccess({ _id: itemId }, req.user);
+    const fields = "pis_checked_flag pis_checked_by";
+    const updated = await Item.findOneAndUpdate(
+      {
+        $and: [match, { $or: [
+          { pis_checked_flag: { $ne: true } },
+          { "pis_checked_by.name": { $in: [null, ""] } },
+        ] }],
+      },
+      { $set: {
+        pis_checked_flag: true,
+        pis_checked_by: { ...buildAuditActor(req.user), checked_at: new Date() },
+      } },
+      { new: true, runValidators: true },
+    ).select(fields).lean();
+    const item = updated || await Item.findOne(match).select(fields).lean();
+    if (!item) return res.status(404).json({ message: "Item not found" });
+
+    return res.json({
+      pis_checked_flag: item.pis_checked_flag,
+      pis_checked_by: item.pis_checked_by,
+    });
+  } catch (error) {
+    console.error("Check Item PIS Error:", error);
+    return res.status(500).json({ message: "Failed to mark PIS as checked." });
+  }
+};
+
 exports.updateItemPis = async (req, res) => {
   try {
     const itemId = String(req.params.id || "").trim();
@@ -6104,6 +6143,7 @@ const syncProductDatabaseValuesIntoPisItem = async ({
 
   if (touched) {
     item.set("pis_checked_flag", false);
+    item.set("pis_checked_by", undefined);
     if (!changedFields.includes("pis_checked_flag")) {
       changedFields.push("pis_checked_flag");
     }

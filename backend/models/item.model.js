@@ -682,6 +682,7 @@ const itemSchema = new mongoose.Schema(
       public_id: { type: String, default: "", trim: true },
     },
     pis_checked_flag: { type: Boolean, default: false },
+    pis_checked_by: { type: productDatabaseActorSchema, default: undefined },
     pd_measurement_revision: { type: Number, default: 0, min: 0 },
     // Absent on legacy items until their first review; existing master values stay intact.
     master_workflow: {
