@@ -1,8 +1,8 @@
 export const STAGE_LABELS = {
-  awaiting_master_1: "Awaiting Master 1", master_1: "Master 1", master_2: "Master 2",
+  awaiting_master_1: "Awaiting Master", master: "Master", master_1: "Master 1", master_2: "Master 2",
   final_master: "Final Master", finalized: "Final Master · Locked",
 };
-export const NEXT_STAGE_LABELS = { awaiting_master_1: "Master 1", master_1: "Master 2", master_2: "Final Master" };
+export const NEXT_STAGE_LABELS = { awaiting_master_1: "Master", master: "Master 1", master_1: "Master 2", master_2: "Final Master" };
 export const BOX_MODES = { individual: "Individual boxes", carton: "Inner + Master", individual_master: "Individual + Master" };
 export const MASTER_FIELDS = ["master_item_sizes", "master_box_sizes", "master_box_mode", "master_country_of_origin", "master_barcode", "master_master_barcode", "master_inner_barcode"];
 const clone = (value) => JSON.parse(JSON.stringify(value));

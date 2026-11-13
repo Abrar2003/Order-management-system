@@ -19,7 +19,7 @@ const {
 
 const WORKFLOW_SELECT = ["code", "name", "description", "brand", "brand_name", "brands", "vendors", "country_of_origin", "image", "master_workflow", "pd_measurement_revision", "pis_item_sizes", "pis_box_sizes", "pis_box_mode", "pis_master_barcode", "pis_barcode", "pis_inner_barcode", "pis_update_comments", "cbm.calculated_master_total", "updatedAt", ...MASTER_FIELDS, ...PD_FIELDS].join(" ");
 const VIEW_STAGES = {
-  "pis-diffs": ["awaiting_master_1"], "final-pis-check": ["master_1"],
+  "pis-diffs": ["awaiting_master_1"], "final-pis-check": ["master", "master_1"],
   "final-masters": ["master_2", "final_master", "finalized"], "master-vs-pd": ["final_master", "finalized"],
 };
 const stageMatch = (view) => view === "pis-diffs"

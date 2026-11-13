@@ -38,7 +38,8 @@ const advance = (item, records, now) => {
 const throughFinalMaster = () => {
   let item = advance(baseline(), [visit("PO-1", "2026-09-01")], new Date("2026-10-03T03:00:00Z"));
   item = advance(item, [visit("PO-2"), visit("PO-3", "2026-10-04"), visit("PO-4", "2026-10-05")], new Date("2026-10-06T03:00:00Z"));
-  return advance(item, [visit("PO-5", "2026-10-06"), visit("PO-6", "2026-10-07"), visit("PO-7", "2026-10-08")], new Date("2026-10-09T03:00:00Z"));
+  item = advance(item, [visit("PO-5", "2026-10-06"), visit("PO-6", "2026-10-07"), visit("PO-7", "2026-10-08")], new Date("2026-10-09T03:00:00Z"));
+  return advance(item, [visit("PO-8", "2026-10-09"), visit("PO-9", "2026-10-10"), visit("PO-10", "2026-10-11")], new Date("2026-10-12T03:00:00Z"));
 };
 const signoff = (item, reasons = {}) => transition({ item, user: USER, action: "pd-review", payload: { revision: getWorkflow(item).revision, comparison_token: buildPdComparison(item).token, reasons }, now: NOW });
 
@@ -53,13 +54,14 @@ test("legacy masters and imported, checked, matching items requeue using approve
   assert.equal(buildRow(item, [visit("PO-1")], { role: "admin" }).actions.review, false);
 });
 
-test("complete 1 + 3 + 3 sequence preserves PIS and legacy master, permits unchanged reviews, and freezes evidence", () => {
+test("complete 1 + 3 + 3 + 3 sequence preserves PIS and legacy master, permits unchanged reviews, and freezes evidence", () => {
   const before = baseline();
   const item = throughFinalMaster();
   assert.equal(item.master_workflow.stage, "final_master");
-  assert.equal(item.master_workflow.revision, 3);
-  assert.equal(item.master_workflow.consumed_pos.length, 7);
-  assert.deepEqual(item.master_workflow.reviews.map((r) => r.evidence.length), [1, 3, 3]);
+  assert.equal(item.master_workflow.revision, 4);
+  assert.equal(item.master_workflow.consumed_pos.length, 10);
+  assert.deepEqual(item.master_workflow.reviews.map((r) => r.evidence.length), [1, 3, 3, 3]);
+  assert.deepEqual(item.master_workflow.reviews.map((r) => r.stage), ["master", "master_1", "master_2", "final_master"]);
   assert.deepEqual(item.master_workflow.legacy_master, masterSnapshot(before));
   for (const field of Object.keys(before).filter((k) => k.startsWith("pis_") || k === "country_of_origin")) assert.deepEqual(item[field], before[field]);
   assert.equal(item.cbm.calculated_pis_total, before.cbm.calculated_pis_total);
@@ -219,6 +221,7 @@ test("service requeues legacy items, preserves PIS byte-for-byte, and accepts on
   const args = { id: baseline()._id, user: USER, action: "review", payload };
   const results = await Promise.allSettled([performAction(args), performAction(args)]);
   assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+  assert.equal(db.get().master_workflow.stage, "master");
   assert.equal(db.get().master_workflow.reviews.length, 1);
   assert.equal(db.get().master_item_sizes[0].L, 102);
   for (const field of ["pis_barcode", "pis_inner_barcode", "pis_item_sizes", "pis_box_sizes", "country_of_origin"]) assert.deepEqual(db.get()[field], baseline()[field]);

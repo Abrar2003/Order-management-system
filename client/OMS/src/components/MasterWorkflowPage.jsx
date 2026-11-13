@@ -11,8 +11,8 @@ import { STAGE_LABELS, NEXT_STAGE_LABELS, BOX_MODES, masterForm, blankSize, form
 import "./MasterWorkflowPage.css";
 
 const PAGES = {
-  "pis-diffs": { title: "PIS Diffs", description: "Review an approved inspection to create Master 1. Existing masters remain available until this review is saved." },
-  "final-pis-check": { title: "Final PIS Check", description: "Review three additional approved POs after Master 1 to create Master 2." },
+  "pis-diffs": { title: "PIS Diffs", description: "Review an approved inspection to create Master. Existing masters remain available until this review is saved." },
+  "final-pis-check": { title: "Final PIS Check", description: "Review three new approved POs at each step to create Master 1, then Master 2." },
   "final-masters": { title: "Final Master", description: "Review three more approved POs after Master 2, then compare the Final Master against Product Database." },
   "master-vs-pd": { title: "Master vs PD", description: "Review sizes, correct differences or accept them with a reason, then finalize and permanently lock Final Master." },
 };
@@ -238,7 +238,7 @@ export default function MasterWorkflowPage({ view }) {
   };
   const setPage = (value) => { const next = new URLSearchParams(params); next.set("page", String(value)); setParams(next); };
   return <><Navbar /><main className="page-shell py-3 mw-page">
-    <div className="d-flex justify-content-between align-items-start flex-wrap gap-3"><div><h1 className="h4">{pageInfo.title}</h1><p className="text-secondary mb-1">{pageInfo.description}</p><p className="small text-secondary">Cycle started 3 October 2026 · 1 + 3 + 3 distinct POs · Super Admin review</p></div>
+    <div className="d-flex justify-content-between align-items-start flex-wrap gap-3"><div><h1 className="h4">{pageInfo.title}</h1><p className="text-secondary mb-1">{pageInfo.description}</p><p className="small text-secondary">Cycle started 3 October 2026 · 1 + 3 + 3 + 3 distinct POs · Super Admin review</p></div>
       <div className="d-flex gap-2 mw-no-print"><button className="btn btn-outline-secondary btn-sm" onClick={fetchRows} disabled={busy || loading}>Refresh</button>{hasPermission("pis", "export") && <><button className="btn btn-outline-primary btn-sm" onClick={exportReport} disabled={exporting || loading}>{exporting ? "Exporting…" : "Export Excel"}</button><button className="btn btn-outline-secondary btn-sm" disabled={exporting || loading} onClick={exportPdf}>Export PDF</button></>}</div>
     </div>
     <nav aria-label="Master workflow pages" className="nav nav-pills gap-1 mb-3 mw-no-print">{Object.entries(PAGES).map(([route, info]) => <Link key={route} className={`nav-link ${route === view ? "active" : ""}`} to={`/${route}`}>{info.title}</Link>)}</nav>

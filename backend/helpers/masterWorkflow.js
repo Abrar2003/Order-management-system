@@ -8,7 +8,8 @@ const { compareItemSizeDimensionVariance, compareBoxSizeDimensionVariance, compa
 
 const CYCLE_VERSION = "2026-10-03";
 const CYCLE_STARTED_AT = "2026-10-02T18:30:00.000Z";
-const STAGES = ["awaiting_master_1", "master_1", "master_2", "final_master", "finalized"];
+const STAGES = ["awaiting_master_1", "master", "master_1", "master_2", "final_master", "finalized"];
+const REVIEW_PO_COUNTS = [1, 3, 3, 3];
 const MASTER_FIELDS = ["master_item_sizes", "master_box_sizes", "master_box_mode", "master_country_of_origin", "master_barcode", "master_master_barcode", "master_inner_barcode"];
 const PD_FIELDS = ["pd_item_sizes", "pd_box_sizes", "pd_box_mode"];
 const text = (value) => String(value ?? "").trim();
@@ -52,7 +53,7 @@ const compareVisits = (a, b) => time(parseDateOnly(a.inspection_date)) - time(pa
 const buildEvidence = (item, records = [], now = new Date()) => {
   const workflow = getWorkflow(item);
   const stageIndex = STAGES.indexOf(workflow.stage);
-  const required = stageIndex === 0 ? 1 : stageIndex < 3 ? 3 : 0;
+  const required = REVIEW_PO_COUNTS[stageIndex] ?? 0;
   const anchor = workflow.reviews?.at(-1)?.reviewed_at;
   const consumed = new Set((workflow.consumed_pos || []).map(key));
   const visits = records.map(inspectionSnapshot).filter((r) => {
@@ -154,13 +155,14 @@ const transition = ({ item, user, payload, action, evidence, values, now = new D
   const timestamp = new Date(now).toISOString();
   const nextItem = clone(item);
   if (action === "review") {
-    if (!evidence?.ready || !["awaiting_master_1", "master_1", "master_2"].includes(workflow.stage)) throw failure("The required approved PO inspections are not yet available.");
+    const stageIndex = STAGES.indexOf(workflow.stage);
+    if (!evidence?.ready || !REVIEW_PO_COUNTS[stageIndex]) throw failure("The required approved PO inspections are not yet available.");
     if (payload.evidence_token !== evidence.token) throw failure("Inspection evidence changed. Refresh and review it again.");
     if (!workflow.legacy_master) workflow.legacy_master = masterSnapshot(item);
     Object.assign(nextItem, values);
     nextItem.cbm = { ...nextItem.cbm, calculated_master_total: values.calculated_master_total };
     delete nextItem.calculated_master_total;
-    workflow.stage = STAGES[STAGES.indexOf(workflow.stage) + 1];
+    workflow.stage = STAGES[stageIndex + 1];
     workflow.reviews = [...(workflow.reviews || []), { stage: workflow.stage, reviewed_at: timestamp, reviewed_by: actor(user), evidence: clone(evidence.inspections), master: masterSnapshot(nextItem) }];
     workflow.consumed_pos = [...new Set([...(workflow.consumed_pos || []), ...evidence.inspections.map((r) => key(r.po))])];
     workflow.pd_review = null;

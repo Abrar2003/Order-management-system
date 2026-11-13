@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { STAGES } = require("../helpers/masterWorkflow");
 const { masterWorkflowGuard } = require("../helpers/masterWorkflowGuard");
 const {
   coerceVendorArrayForSchema,
@@ -687,7 +688,7 @@ const itemSchema = new mongoose.Schema(
       type: new mongoose.Schema({
         cycle_version: { type: String, required: true },
         started_at: { type: Date, required: true },
-        stage: { type: String, enum: ["awaiting_master_1", "master_1", "master_2", "final_master", "finalized"], required: true },
+        stage: { type: String, enum: STAGES, required: true },
         revision: { type: Number, min: 0, required: true },
         consumed_pos: { type: [String], default: [] },
         legacy_master: mongoose.Schema.Types.Mixed,

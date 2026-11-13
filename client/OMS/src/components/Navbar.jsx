@@ -323,10 +323,13 @@ const Navbar = () => {
       items.push(
         routeMenuItem("pis", "PIS", "/pis"),
         routeMenuItem("pis-diffs", "PIS Diffs", "/pis-diffs"),
+        routeMenuItem("qc-report-mismatch", "Reports mismatch lv 1", "/reports/qc-report-mismatch"),
         routeMenuItem("final-pis-check", "Final PIS Check", "/final-pis-check"),
+        ...(canAccessAnalytics ? [
+          routeMenuItem("qc-report-mismatch-level-2", "Reports mismatch lv 2", "/reports/qc-report-mismatch-level-2"),
+        ] : []),
         routeMenuItem("final-masters", "Final Master", "/final-masters"),
         routeMenuItem("master-vs-pd", "Master vs PD", "/master-vs-pd"),
-        routeMenuItem("qc-report-mismatch", "QC Report Mismatch", "/reports/qc-report-mismatch"),
       );
     }
     if (canAccessAnalytics) {
@@ -338,7 +341,7 @@ const Navbar = () => {
         ),
       );
       if (!canViewPis) {
-        items.push(routeMenuItem("qc-report-mismatch", "QC Report Mismatch", "/reports/qc-report-mismatch"));
+        items.push(routeMenuItem("qc-report-mismatch", "Reports mismatch lv 1", "/reports/qc-report-mismatch"));
       }
     }
     return items;

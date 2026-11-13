@@ -374,9 +374,11 @@ const SummaryCard = ({ label, value }) => (
   </div>
 );
 
-const QcReportMismatch = () => {
+const QcReportMismatch = ({ afterMasterOne = false }) => {
+  const reportKey = afterMasterOne ? "qc-report-mismatch-level-2" : "qc-report-mismatch";
+  const title = afterMasterOne ? "Reports mismatch lv 2" : "Reports mismatch lv 1";
   const [searchParams, setSearchParams] = useSearchParams();
-  useRememberSearchParams(searchParams, setSearchParams, "qc-report-mismatch");
+  useRememberSearchParams(searchParams, setSearchParams, reportKey);
 
   const initialTimeline = normalizeTimeline(searchParams.get("timeline"));
   const initialCustomDays = parseCustomDays(searchParams.get("custom_days"));
@@ -632,7 +634,7 @@ const QcReportMismatch = () => {
         params.item_code = itemCodeFilter;
       }
 
-      const response = await api.get("/reports/qc-report-mismatch", { params });
+      const response = await api.get(`/reports/${reportKey}`, { params });
       const responseData = response?.data || {};
 
       setReport({
@@ -649,7 +651,7 @@ const QcReportMismatch = () => {
       });
     } catch (err) {
       setReport(defaultReport);
-      setError(err?.response?.data?.message || "Failed to load QC report mismatch.");
+      setError(err?.response?.data?.message || `Failed to load ${title}.`);
     } finally {
       setLoading(false);
     }
@@ -663,8 +665,10 @@ const QcReportMismatch = () => {
     mismatchOnly,
     orderIdFilter,
     page,
+    reportKey,
     statusFilter,
     timeline,
+    title,
     toDate,
     vendorFilter,
   ]);
@@ -918,7 +922,7 @@ const QcReportMismatch = () => {
 
       <div className="page-shell om-report-page py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
-          <h2 className="h4 mb-0">QC Report Mismatch</h2>
+          <h2 className="h4 mb-0">{title}</h2>
           <span className="small text-secondary">
             Latest three inspection snapshots compared with each other
           </span>
@@ -1123,7 +1127,9 @@ const QcReportMismatch = () => {
               Mismatch Only: {filters.mismatch_only ? "Yes" : "No"}
             </span>
             <span className="om-summary-chip">
-              Per Item: Latest {filters.comparison_inspection_limit ?? 3} POs, latest inspection per PO
+              {afterMasterOne
+                ? "Per item: First 3 qualifying POs after Master 1, latest approved inspection per PO"
+                : `Per Item: Latest ${filters.comparison_inspection_limit ?? 3} POs, latest inspection per PO`}
             </span>
             <span className="om-summary-chip">
               Page: {pagination.page ?? 1}
@@ -1143,7 +1149,7 @@ const QcReportMismatch = () => {
         <div className="card om-card">
           <div className="card-body p-0">
             {loading ? (
-              <div className="text-center py-5">Loading QC report mismatch...</div>
+              <div className="text-center py-5">Loading {title}...</div>
             ) : rows.length === 0 ? (
               <div className="text-center py-5 text-secondary">
                 No comparable inspection records found for the selected filters.
@@ -1290,7 +1296,7 @@ const QcReportMismatch = () => {
             <div className="modal-content">
               <div className="modal-header">
                 <div>
-                  <h5 className="modal-title">QC Report Mismatch Details</h5>
+                  <h5 className="modal-title">{title} Details</h5>
                   <div className="small text-muted">
                     {selectedRow?.item_code || "N/A"} | {selectedRow?.inspection_count || 0} inspections | {getPoCount(selectedRow)} POs
                   </div>

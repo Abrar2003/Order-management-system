@@ -94,6 +94,13 @@ router.get(
   reportsController.getQcReportMismatch,
 );
 
+router.get(
+  "/qc-report-mismatch-level-2",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.getQcReportMismatchLevelTwo,
+);
+
 router.post(
   "/qc-report-mismatch/:code/comments",
   auth,

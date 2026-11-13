@@ -458,6 +458,15 @@ const App = () => {
           />
 
           <Route
+            path="/reports/qc-report-mismatch-level-2"
+            element={
+              <ProtectedRoute allowViewer={false} permissionModule="reports">
+                <QcReportMismatch key="level-2" afterMasterOne />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
             path="/reports/product-analytics"
             element={
               <ProtectedRoute>

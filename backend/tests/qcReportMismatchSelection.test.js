@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   __test__: {
     limitRecentInspectionsByItem,
+    selectPostMasterOneInspections,
     selectLatestInspectionPerLatestPo,
     canCreateQcMismatchComment,
   },
@@ -104,4 +105,46 @@ test("QC mismatch selection includes one latest inspection from exactly 3 distin
   ]);
 
   assert.deepEqual(ids(selected), ["po-3", "po-2", "po-1"]);
+});
+
+test("level 2 uses the Master 2 PO set before and after the review", () => {
+  const { CYCLE_VERSION, buildEvidence } = require("../helpers/masterWorkflow");
+  const item = { master_workflow: {
+    cycle_version: CYCLE_VERSION,
+    stage: "master_1",
+    revision: 2,
+    consumed_pos: ["used"],
+    reviews: [{ stage: "master_1", reviewed_at: "2026-10-03T08:00:00Z" }],
+  } };
+  const visit = (id, po, day, approved = true) => ({
+    _id: id,
+    po,
+    inspector: "reviewer",
+    is_approved: approved,
+    inspection_date: day,
+    createdAt: day + "T10:00:00Z",
+    inspected_item_sizes: [{ L: 10 }],
+  });
+  const records = [
+    visit("old", "old", "2026-10-02"),
+    visit("used", "USED", "2026-10-04"),
+    visit("unapproved", "unapproved", "2026-10-04", false),
+    visit("first", "A", "2026-10-04"),
+    visit("second", "B", "2026-10-05"),
+    visit("third", "C", "2026-10-06"),
+    visit("extra", "D", "2026-10-07"),
+    visit("updated", " a ", "2026-10-08"),
+  ];
+  const expected = ["updated", "second", "third"];
+  assert.deepEqual(ids(selectPostMasterOneInspections(item, records, records)), expected);
+  assert.deepEqual(selectPostMasterOneInspections(item, records.slice(0, 5), records), []);
+  assert.deepEqual(selectPostMasterOneInspections(item, records, records.slice(0, 5)), []);
+  const evidence = buildEvidence(item, records).inspections;
+  item.master_workflow.stage = "finalized";
+  item.master_workflow.reviews.push({ stage: "master_2", evidence });
+  records.at(-1).inspected_item_sizes[0].L = 99;
+  const saved = selectPostMasterOneInspections(item, records, []);
+  assert.deepEqual(ids(saved), expected);
+  assert.equal(saved[0].inspected_item_sizes[0].L, 10);
+  assert.deepEqual(selectPostMasterOneInspections({}, records, records), []);
 });

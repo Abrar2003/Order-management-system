@@ -80,10 +80,10 @@ test("item country filter combines with existing filters", () => {
   });
 });
 
-test("Final PIS Check filters the current Master 1 stage and keeps the country filter", () => {
+test("Final PIS Check filters Master and Master 1 stages and keeps the country filter", () => {
   const match = buildFinalPisCheckMatch({ country: "India" });
   assert.deepEqual(match.$and[0], buildItemMatch({ country: "India" }));
-  assert.deepEqual(match.$and[1]["master_workflow.stage"], { $in: ["master_1"] });
+  assert.deepEqual(match.$and[1]["master_workflow.stage"], { $in: ["master", "master_1"] });
   assert.doesNotMatch(JSON.stringify(match), /pis_checked_flag|is_rectify_imported/);
 });
 test("Final PIS Check ignores country when all is selected", () => {

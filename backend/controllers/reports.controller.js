@@ -9,6 +9,8 @@ const Brand = require("../models/brand.model");
 const Order = require("../models/order.model");
 const Tenure = require("../models/tenure.model");
 const Vendor = require("../models/vendor.model");
+const { buildEvidence, getWorkflow } = require("../helpers/masterWorkflow");
+const { getApprovedRecords } = require("../services/masterWorkflow.service");
 const { getItemBrand } = require("../helpers/itemBrand");
 const {
   applyDataAccessMatch,
@@ -1430,10 +1432,10 @@ const buildItemCbmPerUnitExpression = () => ({
 const buildInitialInspectionMatch = ({
   reportRange,
   inspectorObjectId = null,
+  afterMasterOne = false,
 } = {}) => {
   const baseMatch = {
-    status: QC_REPORT_MISMATCH_STATUS,
-    passed: { $gt: 0 },
+    ...(afterMasterOne ? {} : { status: QC_REPORT_MISMATCH_STATUS, passed: { $gt: 0 } }),
     $or: [
       {
         inspection_date: {
@@ -1457,9 +1459,9 @@ const buildInitialInspectionMatch = ({
   return baseMatch;
 };
 
-const buildDateNormalizationStages = ({ reportRange, inspectorObjectId = null } = {}) => [
+const buildDateNormalizationStages = ({ reportRange, inspectorObjectId = null, afterMasterOne = false } = {}) => [
   {
-    $match: buildInitialInspectionMatch({ reportRange, inspectorObjectId }),
+    $match: buildInitialInspectionMatch({ reportRange, inspectorObjectId, afterMasterOne }),
   },
   ...buildInspectionPassedStages(),
   {
@@ -1588,9 +1590,10 @@ const buildQcReportMismatchPipeline = ({
   orderId = "",
   itemCode = "",
   user = null,
+  afterMasterOne = false,
 } = {}) => {
   const pipeline = [
-    ...buildDateNormalizationStages({ reportRange, inspectorObjectId }),
+    ...buildDateNormalizationStages({ reportRange, inspectorObjectId, afterMasterOne }),
     ...buildQcLookupStages(),
     ...buildUserLookupStages(),
   ];
@@ -2946,7 +2949,27 @@ exports.exportCommonErrorsReport = async (req, res) => {
   }
 };
 
-exports.getQcReportMismatch = async (req, res) => {
+const selectPostMasterOneInspections = (item, candidates, approvedRecords) => {
+  const workflow = getWorkflow(item);
+  const savedReview = workflow.reviews?.find((review) => review.stage === "master_2");
+  const evidence = savedReview?.evidence || (
+    workflow.stage === "master_1" ? buildEvidence(item, approvedRecords).inspections : []
+  );
+  const candidatesById = new Map(candidates.map((inspection) => [String(inspection._id), inspection]));
+  const selected = evidence.flatMap((visit) => {
+    const inspection = candidatesById.get(visit.inspection_id);
+    if (!inspection) return [];
+    return [{
+      ...inspection,
+      inspected_item_sizes: visit.item_sizes,
+      inspected_box_sizes: visit.box_sizes,
+      inspected_box_mode: visit.box_mode,
+    }];
+  });
+  return selected.length === QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT ? selected : [];
+};
+
+const getQcReportMismatch = async (req, res, afterMasterOne) => {
   try {
     const brand = normalizeOptionalFilter(req.query.brand);
     const vendor = normalizeOptionalFilter(req.query.vendor);
@@ -3015,13 +3038,14 @@ exports.getQcReportMismatch = async (req, res) => {
         orderId,
         itemCode,
         user: req.user,
+        afterMasterOne,
       }),
     ).allowDiskUse(true);
-    const inspectionsForComparison = limitRecentInspectionsByItem(inspections);
+    const candidates = afterMasterOne ? inspections : limitRecentInspectionsByItem(inspections);
 
     const uniqueItemCodes = [
       ...new Set(
-        inspectionsForComparison
+        candidates
           .map((entry) => normalizeText(entry?.item_code || ""))
           .filter(Boolean),
       ),
@@ -3045,7 +3069,7 @@ exports.getQcReportMismatch = async (req, res) => {
             },
           ),
         )
-          .select(QC_REPORT_MISMATCH_ITEM_SELECT)
+          .select(afterMasterOne ? `${QC_REPORT_MISMATCH_ITEM_SELECT} master_workflow` : QC_REPORT_MISMATCH_ITEM_SELECT)
           .lean()
       : [];
 
@@ -3056,9 +3080,29 @@ exports.getQcReportMismatch = async (req, res) => {
       ]),
     );
 
+    let inspectionsForComparison = candidates;
+    if (afterMasterOne) {
+      const candidatesByItem = new Map();
+      for (const inspection of candidates) {
+        const code = normalizeLookupKey(inspection.item_code);
+        const group = candidatesByItem.get(code) || [];
+        group.push(inspection);
+        candidatesByItem.set(code, group);
+      }
+      const approvedRecords = await getApprovedRecords(
+        itemDocs.filter((item) => getWorkflow(item).stage === "master_1"),
+        req.user,
+      );
+      inspectionsForComparison = itemDocs.flatMap((item) => {
+        const code = normalizeLookupKey(item.code);
+        return selectPostMasterOneInspections(item, candidatesByItem.get(code) || [], approvedRecords.get(code) || []);
+      });
+    }
+
     const inspectionRows = inspectionsForComparison.map((inspection) => {
       const snapshot = buildNormalizedInspectionSizeState(inspection);
       if (
+        !afterMasterOne &&
         snapshot.inspected_item_sizes.length === 0 &&
         snapshot.inspected_box_sizes.length === 0
       ) {
@@ -3390,7 +3434,7 @@ exports.getQcReportMismatch = async (req, res) => {
         mismatch_only: mismatchOnly,
         comparison_inspection_limit: QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT,
         comparison_recency_field: "order_date_then_inspection_date",
-        comparison_strategy: "latest_po_latest_inspection",
+        comparison_strategy: afterMasterOne ? "master_2_evidence" : "latest_po_latest_inspection",
         brand_options: sortedBrands,
         vendor_options: sortedVendors,
         inspector_options: inspectorOptions,
@@ -3665,7 +3709,11 @@ exports.getMonthlyShipmentsDrilldown = async (req, res) => {
   }
 };
 
+exports.getQcReportMismatch = (req, res) => getQcReportMismatch(req, res, false);
+exports.getQcReportMismatchLevelTwo = (req, res) => getQcReportMismatch(req, res, true);
+
 exports.__test__ = {
+  selectPostMasterOneInspections,
   buildClaimComparisonRows,
   buildClaimsExportRows,
   getClaimsTenureIds,
