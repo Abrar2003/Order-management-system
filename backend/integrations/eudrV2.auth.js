@@ -81,7 +81,7 @@ async function projection(user, context) {
     }).map(vendor => String(vendor._id)).sort();
   }
   const brandNames = getAllowedBrandNames(user);
-  return { id: String(user._id), name: user.name, active: true, permissions: user.integrationPermissions, allVendors, vendorIds,
+  return { id: String(user._id), name: user.name, active: true, isAdmin: ['admin', 'super admin'].includes(user.role), permissions: user.integrationPermissions, allVendors, vendorIds,
     allBrands: brandNames === null, brandNames: brandNames || [], brandScope: getUserBrandScope(user), omsScope: context };
 }
 async function actor(req, _res, next) {
