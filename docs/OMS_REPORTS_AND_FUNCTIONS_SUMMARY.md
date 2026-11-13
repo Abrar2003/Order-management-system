@@ -498,7 +498,7 @@ Source classes used below: `CANONICAL`, `CANONICAL_WITH_FALLBACK`, `DERIVED_HELP
 
 - **Representative questions:** “List active vendors by country”; “What brands/codes belong to vendor X?”; “Show shipment contacts for Vietnam vendors.”
 - **Trace:** `VendorDetails.jsx` → `/vendors` and `/vendors/export` → vendor controller → vendors + brands.
-- **Rules/output:** Excludes soft-deleted vendors and applies accessible vendor/brand options. Vendor records include identity, owner/contact data, country (India/China/Vietnam), per-brand vendor codes, contacts, default shipping time and active state. Export optionally filters comma/array country and emits one vendor row.
+- **Rules/output:** Excludes soft-deleted vendors and applies accessible vendor/brand options. Vendor records include identity, owner/contact data, country (India/China/Vietnam/Indonesia), per-brand vendor codes, contacts, default shipping time and active state. Export optionally filters comma/array country and emits one vendor row.
 - **Trust:** master collection is canonical, with `vendorRef` normalization for embedded snapshots elsewhere. Project contacts only when the user and use case permit it.
 
 ### VEN-02 — Brand/vendor option sets

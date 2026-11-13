@@ -4,6 +4,7 @@ export const COUNTRY_OPTIONS = Object.freeze([
   { value: "India", label: "India" },
   { value: "China", label: "China" },
   { value: "Vietnam", label: "Vietnam" },
+  { value: "Indonesia", label: "Indonesia" },
 ]);
 
 export const getCountryOptions = (currentValue = "") => {

@@ -23,7 +23,7 @@ const vendorSchema = new mongoose.Schema({
     type: String,
     trim: true,
     default: "India",
-    enum: ["India", "China", "Vietnam"],
+    enum: ["India", "China", "Vietnam", "Indonesia"],
   },
   vendor_code: [
     {
