@@ -3779,6 +3779,7 @@ const mapOrdersToShipmentRows = (orders = []) =>
       status: order?.status || "",
       passed_quantity: Number(order?.passed_quantity || 0),
       shippable_quantity: Number(order?.shippable_quantity || 0),
+      qc_id: String(order?.qc_record?._id || order?.qc_record || ""),
       per_item_cbm: Number.isFinite(perItemCbm) ? perItemCbm : 0,
       cbm_source: cbmSummary?.source || null,
       shipment_inspection: order?.shipmentInspection || null,

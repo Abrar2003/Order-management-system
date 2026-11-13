@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import SortHeaderButton from "../components/SortHeaderButton";
@@ -1122,7 +1122,16 @@ const Shipments = () => {
                         <td className="shipments-col-date">{formatDateDDMMYYYY(row?.stuffing_date)}</td>
                         <td className="shipments-col-container">{row?.container || "N/A"}</td>
                         <td className="shipments-col-invoice">{row?.invoice_number || "N/A"}</td>
-                        <td className="shipments-col-qty">{row?.quantity ?? "N/A"}</td>
+                        <td className="shipments-col-qty">
+                          {row.shipment_id && row.qc_id && row.quantity > 0 && hasPermission("qc", "view") ? (
+                            <Link
+                              to={`/qc/${encodeURIComponent(row.qc_id)}`}
+                              aria-label={`View QC details for ${row.quantity} shipped units on PO ${row.order_id}, item ${row.item_code}`}
+                            >
+                              {row.quantity}
+                            </Link>
+                          ) : (row.quantity ?? "N/A")}
+                        </td>
                         <td className="shipments-col-qty">{formatCbm(row?.shipment_cbm)}</td>
                         <td className="shipments-col-qty">{row?.shipment_id ? (row?.shipment_cft == null ? <span className="text-danger">Missing</span> : Number(row.shipment_cft).toFixed(3)) : "—"}</td>
                         <td className="shipments-col-pending">{row?.pending ?? "N/A"}</td>
