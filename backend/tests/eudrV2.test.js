@@ -6,6 +6,13 @@ const S = require("../integrations/eudrV2.source");
 const A = require("../integrations/eudrV2.auth");
 const oid = n => String(n).padStart(24, "0");
 
+test("EUDR administrator status is granted only to admin and super admin roles", async () => {
+  for (const role of ['admin', 'super admin', 'manager', 'product manager', 'user']) {
+    const result = await A.projection({ _id: oid(1), name: 'Role test', role, allowed_brands: [], allowed_vendors: ['all'], brand_scope: 'all', integrationPermissions: ['eudr:read', 'eudr:review', 'eudr:rules'] }, 'test-scope');
+    assert.equal(result.isAdmin, ['admin', 'super admin'].includes(role));
+  }
+});
+
 test("finished volume uses exact conversion and rounds only at six canonical CFT decimals", () => {
   assert.equal(volumeInput({ value: "0.014158423296", unit: "m3" }).cft, 0.5);
   assert.equal(volumeInput({ value: "1", unit: "m3" }).cft, 35.314667);
