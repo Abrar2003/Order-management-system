@@ -50,6 +50,7 @@ const {
   syncItemsFromOrders,
   updateItem,
   updateShippingMarkUpdated,
+  checkItemPis,
   updateItemPis,
   syncAllProductDatabaseToPis,
   syncProductDatabaseToPis,
@@ -500,6 +501,14 @@ router.patch(
   requirePermission("items", "edit"),
   invalidateItemsOnSuccess,
   updateItem,
+);
+
+router.patch(
+  "/:id/pis/check",
+  auth,
+  requirePermission("pis", "view"),
+  invalidateItemsOnSuccess,
+  checkItemPis,
 );
 
 router.patch(

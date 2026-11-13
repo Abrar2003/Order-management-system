@@ -8,6 +8,7 @@ import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import SortHeaderButton from "../components/SortHeaderButton";
 import UploadFinishModal from "../components/UploadFinishModal";
 import { usePermissions } from "../auth/PermissionContext";
+import { isManagerLikeRole } from "../auth/permissions";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import {
@@ -89,13 +90,15 @@ const getPisWeight = (item, key) => {
 const PIS = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "pis");
-  const { canEditPis, hasPermission } = usePermissions();
+  const { canEditPis, hasPermission, role } = usePermissions();
+  const canCheckPis = hasPermission("pis", "view") && isManagerLikeRole(role);
   const canUploadFinish = hasPermission("finishes", "upload");
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [showUploadFinishModal, setShowUploadFinishModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [checkingPis, setCheckingPis] = useState(false);
   const [syncingDatabase, setSyncingDatabase] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -299,6 +302,22 @@ const PIS = () => {
     },
     [sortBy, sortOrder],
   );
+
+  const handleCheckPis = async (item) => {
+    if (!canCheckPis || checkingPis || !item._id) return;
+    if (!window.confirm(`Mark PIS for ${item.code || "this item"} as checked?`)) return;
+
+    setCheckingPis(true);
+    setError("");
+    try {
+      const { data } = await api.patch(`/items/${item._id}/pis/check`);
+      setRows((current) => current.map((row) => row._id === item._id ? { ...row, ...data } : row));
+    } catch (checkError) {
+      setError(checkError?.response?.data?.message || "Failed to mark PIS as checked.");
+    } finally {
+      setCheckingPis(false);
+    }
+  };
 
   const handleSyncProductDatabase = useCallback(
     async () => {
@@ -585,13 +604,13 @@ const PIS = () => {
                           onClick={() => handleSortColumn("cbm", "desc")}
                         />
                       </th>
-                      {canEditPis && <th>Action</th>}
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr className="responsive-card-table-empty-row">
-                        <td colSpan={canEditPis ? "11" : "10"} className="text-center py-4">
+                        <td colSpan={11} className="text-center py-4">
                           No items found
                         </td>
                       </tr>
@@ -627,17 +646,33 @@ const PIS = () => {
                           />
                         </td>
                         <td data-label="PIS CBM">{formatCbm(item?.cbm?.calculated_pis_total)}</td>
-                        {canEditPis && (
-                          <td data-label="Action">
-                            <button
-                              type="button"
-                              className="btn btn-outline-primary btn-sm"
-                              onClick={() => setSelectedItem(item)}
-                            >
-                              Update PIS
-                            </button>
-                          </td>
-                        )}
+                        <td data-label="Action">
+                          <div className="d-grid gap-1">
+                            {canEditPis && (
+                              <button
+                                type="button"
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={() => setSelectedItem(item)}
+                              >
+                                Update PIS
+                              </button>
+                            )}
+                            {item.pis_checked_flag && item.pis_checked_by?.name ? (
+                              <span className="items-action-btn items-action-btn-success">
+                                Checked by {item.pis_checked_by.name}
+                              </span>
+                            ) : canCheckPis && (
+                              <button
+                                type="button"
+                                className="items-action-btn"
+                                onClick={() => handleCheckPis(item)}
+                                disabled={checkingPis}
+                              >
+                                PIS checked
+                              </button>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
