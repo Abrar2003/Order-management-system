@@ -1,7 +1,13 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const Item = require("../models/item.model");
+const Inspection = require("../models/inspection.model");
+const PisUpdateLog = require("../models/pisUpdateLog.model");
+const { CYCLE_VERSION } = require("../helpers/masterWorkflow");
 
 const {
+  getQcReportMismatch,
+  getQcReportMismatchLevelTwo,
   __test__: {
     limitRecentInspectionsByItem,
     selectPostMasterOneInspections,
@@ -147,4 +153,111 @@ test("level 2 uses the Master 2 PO set before and after the review", () => {
   assert.deepEqual(ids(saved), expected);
   assert.equal(saved[0].inspected_item_sizes[0].L, 10);
   assert.deepEqual(selectPostMasterOneInspections({}, records, records), []);
+});
+
+const reportVisit = (itemCode, po, orderDate, day, recordedAt, sizes = [{ L: 20 }]) => ({
+  ...makeInspection({ id: `${itemCode}-${po}`, itemCode, po, orderDate, inspectionDate: day }),
+  inspection_date: day,
+  createdAt: new Date(recordedAt),
+  inspected_item_sizes: sizes,
+  brand: itemCode,
+});
+
+const report = async (t, endpoint, { items, inspections, logs = [] }) => {
+  t.mock.method(Inspection, "aggregate", () => ({ allowDiskUse: async () => inspections }));
+  t.mock.method(Item, "find", () => ({ select: () => ({ lean: async () => items }) }));
+  const findLogs = t.mock.method(PisUpdateLog, "find", () => ({ select: () => ({ lean: async () => logs }) }));
+  const res = { status(code) { assert.equal(code, 200); return this; }, json(payload) { return payload; } };
+  const result = await endpoint({ user: { role: "super_admin" }, query: { from: "2026-11-01", to: "2026-11-15" } }, res);
+  return { result, findLogs };
+};
+
+test("level 1 uses verified Master dates before choosing POs and compares all three inspections", async (t) => {
+  const created = "2026-11-04T20:00:00Z"; // 5 November in India
+  const review = "2026-11-07T08:00:00Z";
+  const master = { master_item_sizes: [{ L: 10, H: 30 }] };
+  const items = [
+    { _id: "history-id", code: "history", ...master, update_history: [{
+      timestamp: created, before: { master_item_sizes: [], master_box_sizes: [] }, after: master,
+    }] },
+    { _id: "audit-id", code: "audit", ...master, master_workflow: {
+      cycle_version: CYCLE_VERSION, stage: "master", reviews: [{ stage: "master", reviewed_at: review }],
+    } },
+    { _id: "workflow-id", code: "workflow", ...master, master_workflow: {
+      cycle_version: CYCLE_VERSION, stage: "master", started_at: "2026-10-02T18:30:00Z",
+      reviews: [{ stage: "master", reviewed_at: created }],
+    } },
+    { _id: "unknown-id", code: "unknown", ...master, createdAt: created, update_history: [{
+      timestamp: created, before: { master_item_sizes: [{ L: 9 }] }, after: master,
+    }] },
+    { _id: "missing-id", code: "missing", master_item_sizes: [{ L: 0 }], pis_item_sizes: [{ L: 20 }] },
+    { _id: "incomplete-id", code: "incomplete", ...master, master_workflow: {
+      cycle_version: CYCLE_VERSION, stage: "master", reviews: [{ stage: "master", reviewed_at: review }],
+    } },
+  ];
+  const inspections = items.flatMap(({ code }) => [
+    reportVisit(code, "old-record", "2026-11-10", "2026-11-05", created),
+    reportVisit(code, "backdated", "2026-11-09", "2026-11-04", "2026-11-08T08:00:00Z"),
+    reportVisit(code, "same-day", "2026-11-03", "2026-11-05", "2026-11-04T20:01:00Z"),
+    reportVisit(code, "next", "2026-11-02", "2026-11-06", "2026-11-06T08:00:00Z"),
+    reportVisit(code, "last", "2026-11-01", "2026-11-07", "2026-11-07T09:00:00Z"),
+  ]);
+  const changes = [{ scope: "Master", field: "Master Item Sizes", before: "Not Set", after: "Item: 10 x 0 x 30 | Net Weight: 0" }];
+  const logs = [
+    { item: "audit-id", createdAt: created, changes, missing_fields: [{ scope: "Master", field: "master_box_sizes" }] },
+    { item: "unknown-id", createdAt: created, changes }, // No evidence the other size group was empty.
+  ];
+  const { result, findLogs } = await report(t, getQcReportMismatch, { items, inspections, logs });
+  assert.ok(findLogs.mock.calls[0].arguments[0].item.$in.includes("audit-id"));
+  assert.equal(result.pagination.total, 3);
+  assert.deepEqual(result.filters.brand_options, ["audit", "history", "workflow"]);
+  assert.equal(result.summary.mismatch_inspections, 9);
+  assert.equal(result.summary.clean_inspections, 0);
+  for (const row of result.rows) {
+    assert.deepEqual(row.order_ids, ["same-day", "next", "last"]);
+    assert.equal(row.master_snapshot.inspected_item_sizes[0].L, 10);
+    assert.deepEqual(row.inspection_records.map((visit) => visit.sheet_label), ["Inspection 1", "Inspection 2", "Inspection 3"]);
+    for (const visit of row.inspection_records) {
+      assert.deepEqual(visit.item_size_mismatches.map((field) => field.field), ["L"]);
+    }
+  }
+});
+
+test("level 2 compares saved evidence against saved Master 1 after later Master changes", async (t) => {
+  const inspections = ["A", "B", "C"].map((po) =>
+    reportVisit("ITEM-1", po, "2026-11-01", "2026-11-05", "2026-11-05T08:00:00Z"),
+  );
+  const evidence = inspections.map((visit, index) => ({
+    inspection_id: visit._id,
+    item_sizes: index === 2 ? [] : [{ L: 20 }],
+  }));
+  const item = {
+    _id: "item-id", code: "ITEM-1", master_item_sizes: [{ L: 20 }],
+    master_workflow: {
+      cycle_version: CYCLE_VERSION, stage: "finalized",
+      reviews: [
+        { stage: "master_1", master: { master_item_sizes: [{ L: 10 }] } },
+        { stage: "master_2", evidence },
+      ],
+    },
+  };
+  const withoutSnapshot = { ...item, _id: "other-id", code: "ITEM-2", master_workflow: {
+    ...item.master_workflow,
+    reviews: [{ stage: "master_1" }, { stage: "master_2", evidence: evidence.map((visit) => ({
+      ...visit, inspection_id: visit.inspection_id.replace("ITEM-1", "ITEM-2"),
+    })) }],
+  } };
+  const otherInspections = inspections.map((visit) => ({
+    ...visit, item_code: "ITEM-2", _id: visit._id.replace("ITEM-1", "ITEM-2"),
+  }));
+  const { result, findLogs } = await report(t, getQcReportMismatchLevelTwo, {
+    items: [item, withoutSnapshot], inspections: [...inspections, ...otherInspections],
+  });
+  assert.equal(findLogs.mock.callCount(), 0);
+  assert.equal(result.pagination.total, 1);
+  assert.equal(result.rows[0].master_snapshot.inspected_item_sizes[0].L, 10);
+  assert.equal(result.summary.total_inspections, 3);
+  assert.equal(result.summary.mismatch_inspections, 2);
+  assert.equal(result.summary.clean_inspections, 0);
+  assert.equal(result.rows[0].inspection_records[2].has_comparable_data, false);
 });

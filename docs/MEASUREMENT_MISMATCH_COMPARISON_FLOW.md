@@ -1,6 +1,6 @@
 # Measurement Mismatch Comparison Flow
 
-> Since 3 October 2026, PIS Diffs and Final PIS Check use the staged [PIS data sanity workflow](PIS_PD_MASTER_ITEM_FLOW.md), along with Final Master and Master vs PD. Their legacy eligibility descriptions below are historical. The new workflow uses actual approved inspection evidence, item tolerance 0.5 cm, box tolerance 1 cm, weight tolerance 10%, and visible missing-value issues. QC report behavior is unchanged.
+> PIS Diffs, Final PIS Check, Final Master, and Master vs PD use the staged [PIS data sanity workflow](PIS_PD_MASTER_ITEM_FLOW.md). QC Report Mismatch Lv 1 compares inspections after the first verified Master creation with current Master. Lv 2 compares the Master 2 evidence with saved Master 1. The older flow tables below are historical.
 
 This document describes where OMS compares and displays inspected data, PIS data, Product Database data, and master data for the PIS Diffs, QC Report Mismatch, Final PIS Check, and Product Database surfaces.
 

@@ -659,8 +659,8 @@ const capabilities = [
   capability({
     auditId: "QC-13", id: "qc_report_mismatch", name: "QC report mismatch", type: "report",
     sourceClass: "DERIVED_HELPER", assistantRecommendation: "EXTRACT_TO_SERVICE_THEN_CAPABILITY",
-    description: "Historical Inspection measurement snapshots compared with current Item inspected fields using executable tolerance rules.",
-    businessPurpose: "Identify where an inspection report no longer matches current inspected Item data.",
+    description: "Historical inspection measurements from after verified Master creation, compared with current Item Master measurements.",
+    businessPurpose: "Identify where an inspection report differs from current Master measurements.",
     collections: ["inspections", "qcs", "orders", "items"], relationships: ["inspection_qc", "qc_order", "qc_item_code"], routes: routes("/reports/qc-report-mismatch"),
     canonicalFile: "backend/helpers/inspectionSizeSnapshot.js", canonicalSymbols: ["compareInspectionSizeSnapshot"], sourceKind: "derived_helper", controllerLocal: false,
     filters: filters("brand", "vendor", "inspector", "status", "po", "item", "mismatch_only", "timeline", "from_date", "to_date"), outputFields: outputs("rows", "summary", "order_id", "item_code", "measurements", "differences", "dates"), resultGrain: "item_inspection_snapshot",
@@ -735,7 +735,7 @@ const capabilities = [
   capability({
     auditId: "ITM-07", id: "pis_differences", name: "PIS Diffs / Master 1 review", type: "derived_report",
     sourceClass: "DERIVED_HELPER", assistantRecommendation: "EXTRACT_TO_SERVICE_THEN_CAPABILITY",
-    description: "All approved Items awaiting the 2026-10-03 Master 1 review, including legacy masters, old checked flags and matching measurements.",
+    description: "All approved Items awaiting their first Master review, including legacy masters, old checked flags and matching measurements.",
     businessPurpose: "Review actual approved inspection evidence alongside PIS and existing master values.",
     collections: ["items", "inspections", "qcs"], relationships: ["qc_item_code", "qc_inspection_records"], routes: routes("/items/pis-diffs"),
     canonicalFile: "backend/services/masterWorkflow.service.js", canonicalSymbols: ["getWorkflowRows"], sourceKind: "derived_helper",
@@ -1026,7 +1026,7 @@ const businessConceptMappings = [
   { phrase: "today ETD", capabilityIds: ["today_etd"], distinction: "Current code uses original ETD and client-day boundaries." },
   { phrase: "QC request", capabilityIds: ["qc_list", "qc_detail"], distinction: "qcs request state is not an Inspection event." },
   { phrase: "inspector performance", capabilityIds: ["inspector_performance"], distinction: "Inspection activity with allocated approved-goods CBM." },
-  { phrase: "QC mismatch", capabilityIds: ["qc_report_mismatch"], distinction: "Historical Inspection snapshot versus current inspected Item state." },
+  { phrase: "QC mismatch", capabilityIds: ["qc_report_mismatch"], distinction: "Historical inspection measurements versus current Item Master." },
   { phrase: "PIS diff", capabilityIds: ["pis_differences", "checked_pis_difference_export"], distinction: "Approved inspection evidence for all Items awaiting Master 1, independent of legacy master or checked state." },
   { phrase: "Final PIS Check", capabilityIds: ["final_pis_check", "final_pis_export"], distinction: "Master 2 review using three fresh approved POs after Master 1; consumed POs cannot be reused." },
   { phrase: "three-inspection comparison", capabilityIds: ["pis_inspection_master_comparison"], distinction: "PIS plus newest valid inspections from three distinct POs plus Master." },

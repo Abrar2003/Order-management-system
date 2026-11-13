@@ -1,6 +1,6 @@
 # PIS data sanity workflow
 
-Effective cycle: **3 October 2026, Asia/Kolkata** (2026-10-02T18:30:00Z). One cycle per Item record. This is an additive rollout: do not reset master data, check flags, or historical logs, and do not reconstruct stages from old logs.
+Each Item's cycle starts when its first Master review is saved. PIS Diffs queues the evidence for that review. Legacy Master measurements and review history are retained.
 
 ## Review sequence
 

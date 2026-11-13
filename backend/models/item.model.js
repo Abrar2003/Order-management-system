@@ -688,7 +688,7 @@ const itemSchema = new mongoose.Schema(
     master_workflow: {
       type: new mongoose.Schema({
         cycle_version: { type: String, required: true },
-        started_at: { type: Date, required: true },
+        started_at: { type: Date, default: null },
         stage: { type: String, enum: STAGES, required: true },
         revision: { type: Number, min: 0, required: true },
         consumed_pos: { type: [String], default: [] },

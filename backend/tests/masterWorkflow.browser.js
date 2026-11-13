@@ -9,6 +9,8 @@ const puppeteer = require("puppeteer");
 const { buildRow, parseMasterValues, VIEW_STAGES } = require("../services/masterWorkflow.service");
 const { buildEvidence, transition, clone, getWorkflow } = require("../helpers/masterWorkflow");
 const { parseDateOnly } = require("../helpers/dateOnly");
+const { compareInspectionSizeSnapshot } = require("../helpers/inspectionSizeSnapshot");
+const { getMasterComparisonSource } = require("../helpers/qcMismatchMaster");
 
 const root = path.resolve(__dirname, "../../client/OMS/dist");
 assert.ok(fs.existsSync(path.join(root, "index.html")), "Build client/OMS first");
@@ -51,6 +53,7 @@ const server = http.createServer((req, res) => {
     const page = await browser.newPage();
     await page.setViewport({ width: 1440, height: 1100 });
     const pageErrors = [];
+    let pdfPayload;
     page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.setRequestInterception(true);
     page.on("request", async (request) => {
@@ -58,6 +61,7 @@ const server = http.createServer((req, res) => {
       const route = url.pathname.replace(/^\/api/, "");
       const respond = (body, status = 200) => request.respond({ status, contentType: "application/json", headers: { "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true", "Access-Control-Allow-Headers": "content-type", "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS" }, body: JSON.stringify(body) });
       try {
+        if (request.isNavigationRequest() && url.origin === origin) return request.continue();
         if (url.pathname.endsWith("/bootstrap.min.css") || url.pathname.endsWith("/bootstrap.bundle.min.js")) {
           const css = url.pathname.endsWith(".css");
           const asset = path.resolve(__dirname, `../../client/OMS/node_modules/bootstrap/dist/${css ? "css/bootstrap.min.css" : "js/bootstrap.bundle.min.js"}`);
@@ -65,8 +69,30 @@ const server = http.createServer((req, res) => {
         }
         if (request.method() === "OPTIONS") return respond({});
         if (route.startsWith("/auth/")) return respond({ user });
-        if (route === "/permissions/me") return respond({ role: user.role, permissions: { pis: { view: true, edit: true, export: true }, items: { view: true }, product_database: { view: true } } });
+        if (route === "/permissions/me") return respond({ role: user.role, permissions: { pis: { view: true, edit: true, export: true }, items: { view: true }, product_database: { view: true }, reports: { view: true } } });
         if (route.startsWith("/notifications")) return respond({ data: [], unreadCount: 0 });
+        if (route === "/items/pdf/render") {
+          pdfPayload = JSON.parse(request.postData());
+          return respond({});
+        }
+        if (route === "/reports/qc-report-mismatch" || route === "/reports/qc-report-mismatch-level-2") {
+          const master = route.endsWith("-2") ? getWorkflow(item).reviews.find((review) => review.stage === "master_1").master : item;
+          const comparison = compareInspectionSizeSnapshot({
+            inspected_item_sizes: [{ L: 120, B: 50, H: 75, remark: "item" }],
+          }, getMasterComparisonSource(master));
+          return respond({
+            rows: [{
+              id: "test-item", item_code: item.code, inspection_count: 3, po_count: 3,
+              master_snapshot: comparison.current_snapshot,
+              mismatch_summary: { has_mismatch: true, mismatch_inspection_count: 3 },
+              inspection_records: [1, 2, 3].map((index) => ({
+                inspection_id: String(index), sheet_label: `Inspection ${index}`,
+                inspection_snapshot: comparison.inspection_snapshot, item_size_mismatches: comparison.item_size_mismatches,
+              })),
+            }],
+            pagination: { total: 1, totalPages: 1 },
+          });
+        }
         if (route.includes("/master-workflow/")) {
           const action = route.split("/").at(-1) === "final-master" ? "correct" : route.split("/").at(-1);
           const payload = JSON.parse(request.postData());
@@ -78,6 +104,7 @@ const server = http.createServer((req, res) => {
           const view = route.split("/")[2];
           if (VIEW_STAGES[view]) {
             const rows = VIEW_STAGES[view].includes(getWorkflow(item).stage) ? [buildRow(item, records, user)] : [];
+            if (route.endsWith("/export-preview")) return respond({ data: { rows } });
             return respond({ data: rows, pagination: { totalPages: 1, totalRecords: rows.length } });
           }
         }
@@ -101,10 +128,17 @@ const server = http.createServer((req, res) => {
       check();
     });
     await openPage("pis-diffs");
+    assert.doesNotMatch(await page.$eval("main", (e) => e.textContent), /Cycle started/);
     await checked(".mw-editor input[type=checkbox]");
     await clickButton("Confirm unchanged as Master");
     await waitStage("master");
     await openPage("final-pis-check");
+    const cycleStarted = await page.$eval(".mw-item > p", (e) => e.textContent);
+    assert.match(cycleStarted, /Cycle started/);
+    await clickButton("Export PDF");
+    await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent.trim() === "Export PDF" && !b.disabled));
+    assert.ok(pdfPayload.html.includes(cycleStarted));
+    assert.doesNotMatch(pdfPayload.html, /Cycle 3 October 2026/);
     assert.match(await page.$eval(".mw-review", (e) => e.textContent), /0 \/ 3 qualifying/);
     addVisits(["PO-1", "PO-2", "PO-3", "PO-4"]);
     await openPage("final-pis-check");
@@ -147,7 +181,22 @@ const server = http.createServer((req, res) => {
     const screenshot = path.resolve(__dirname, "../../.tmp/master-workflow-browser.png");
     fs.mkdirSync(path.dirname(screenshot), { recursive: true });
     await page.screenshot({ path: screenshot, fullPage: true });
-    console.log("Browser workflow passed: legacy review, unchanged 1 + 3 + 3 + 3, PO exclusion, PD reason/sign-off invalidation, final lock and unchanged PIS.");
+    item.master_item_sizes = [{ ...size, L: 110 }];
+    for (const [route, label, value] of [["qc-report-mismatch", "Master", "110"], ["qc-report-mismatch-level-2", "Master 1", "100"]]) {
+      await page.goto(`${origin}/reports/${route}`, { waitUntil: "networkidle0" });
+      assert.match(await page.$eval("body", (e) => e.innerText), /View Details/, route);
+      await clickButton("View Details");
+      await page.waitForSelector(".modal tbody");
+      const headers = await page.$$eval(".modal table:first-of-type thead th", (cells) => cells.map((cell) => cell.textContent.trim()));
+      assert.equal(headers[1], label);
+      const fields = await page.$$eval(".modal tbody tr", (rows) => rows.map((row) => [...row.cells].map((cell) => cell.textContent.trim())));
+      const length = fields.find(([field]) => field === "Item Size 1 - L");
+      assert.deepEqual(length.slice(1), [value, "120Mismatch", "120Mismatch", "120Mismatch"]);
+      const weight = fields.find(([field]) => field === "Item Size 1 - Net Weight");
+      assert.match(weight[2], /No comparable data/);
+    }
+    assert.deepEqual(pageErrors, []);
+    console.log("Browser workflow, PDF export payload, and both QC mismatch detail modals passed.");
     console.log(`Screenshot: ${screenshot}`);
   } finally { await browser.close(); server.close(); }
 })().catch((error) => { console.error(error); server.close(); process.exitCode = 1; });
