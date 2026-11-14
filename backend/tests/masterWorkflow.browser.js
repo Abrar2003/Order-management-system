@@ -15,6 +15,7 @@ const { getMasterComparisonSource } = require("../helpers/qcMismatchMaster");
 const root = path.resolve(__dirname, "../../client/OMS/dist");
 assert.ok(fs.existsSync(path.join(root, "index.html")), "Build client/OMS first");
 const user = { _id: "507f1f77bcf86cd799439011", id: "507f1f77bcf86cd799439011", role: "super_admin", name: "Workflow reviewer" };
+const qcId = "507f1f77bcf86cd799439013";
 const size = { L: 100, B: 50, H: 75, net_weight: 10, remark: "item" };
 const box = { L: 110, B: 60, H: 85, gross_weight: 12, remark: "box", box_type: "individual" };
 let item = {
@@ -27,7 +28,7 @@ const pisBefore = JSON.stringify(Object.fromEntries(Object.entries(item).filter(
 let simulatedTime = Date.now() - 600000;
 const records = [];
 const addVisits = (pos) => pos.forEach((po) => records.push({
-  _id: `visit-${po}`, qc: "test-qc", po, inspector: user.id, is_approved: true,
+  _id: `visit-${po}`, qc: qcId, po, inspector: user.id, is_approved: true,
   inspection_date: parseDateOnly(new Date(simulatedTime)), createdAt: new Date(simulatedTime += 1000),
   inspected_item_sizes: [size], inspected_box_sizes: [box], inspected_box_mode: "individual",
 }));
@@ -54,6 +55,7 @@ const server = http.createServer((req, res) => {
     await page.setViewport({ width: 1440, height: 1100 });
     const pageErrors = [];
     let pdfPayload;
+    let qcImages = [{ _id: "test-image", url: `${origin}/logo.png`, originalName: "Test QC image" }];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.setRequestInterception(true);
     page.on("request", async (request) => {
@@ -69,8 +71,12 @@ const server = http.createServer((req, res) => {
         }
         if (request.method() === "OPTIONS") return respond({});
         if (route.startsWith("/auth/")) return respond({ user });
-        if (route === "/permissions/me") return respond({ role: user.role, permissions: { pis: { view: true, edit: true, export: true }, items: { view: true }, product_database: { view: true }, reports: { view: true } } });
+        if (route === "/permissions/me") return respond({ role: user.role, permissions: { pis: { view: true, edit: true, export: true }, items: { view: true }, product_database: { view: true }, reports: { view: true }, qc: { view: true } } });
         if (route.startsWith("/notifications")) return respond({ data: [], unreadCount: 0 });
+        if (route === `/qc/${qcId}`) return respond({ data: {
+          _id: qcId, item: { item_code: item.code, description: item.description },
+          order: { order_id: "PO-1" }, quantities: {}, qc_images: qcImages,
+        } });
         if (route === "/items/pdf/render") {
           pdfPayload = JSON.parse(request.postData());
           return respond({});
@@ -129,6 +135,26 @@ const server = http.createServer((req, res) => {
     });
     await openPage("pis-diffs");
     assert.doesNotMatch(await page.$eval("main", (e) => e.textContent), /Cycle started/);
+    const detailsLink = await page.$eval(".mw-source a", (link) => link.getAttribute("href"));
+    assert.equal(detailsLink, `/qc/${qcId}`);
+    const gallery = '[aria-label="QC image gallery"]';
+    await clickButton("View QC Images");
+    await page.waitForSelector(`${gallery} [title="Test QC image"]`);
+    assert.equal(new URL(page.url()).pathname, "/pis-diffs");
+    await page.click(`${gallery} .qc-image-gallery-accordion-summary`);
+    await page.click(`${gallery} [title="Test QC image"]`);
+    await page.waitForSelector('[aria-label="QC image carousel"]');
+    await page.keyboard.press("Escape");
+    await page.waitForSelector('[aria-label="QC image carousel"]', { hidden: true });
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(gallery, { hidden: true });
+    assert.equal(await page.evaluate(() => document.activeElement.textContent.trim()), "View QC Images");
+    qcImages = [];
+    await clickButton("View QC Images");
+    await page.waitForSelector(".qc-image-gallery-empty-state");
+    assert.match(await page.$eval(".qc-image-gallery-empty-state", (e) => e.textContent), /No QC images found/);
+    await page.click(`${gallery} .qc-image-gallery-actions .btn-outline-secondary:last-child`);
+    await page.waitForSelector(gallery, { hidden: true });
     await clickButton("Use measurements from PO-1");
     await checked(".mw-editor input[type=checkbox]");
     await clickButton("Save Master");
@@ -197,7 +223,7 @@ const server = http.createServer((req, res) => {
       assert.match(weight[2], /No comparable data/);
     }
     assert.deepEqual(pageErrors, []);
-    console.log("Browser workflow, PDF export payload, and both QC mismatch detail modals passed.");
+    console.log("Browser workflow, QC image gallery, PDF export payload, and both QC mismatch detail modals passed.");
     console.log(`Screenshot: ${screenshot}`);
   } finally { await browser.close(); server.close(); }
 })().catch((error) => { console.error(error); server.close(); process.exitCode = 1; });
