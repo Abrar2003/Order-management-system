@@ -102,6 +102,13 @@ router.get(
 );
 
 router.post(
+  "/qc-report-mismatch/:code/review-done",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.completeQcMismatchReview,
+);
+
+router.post(
   "/qc-report-mismatch/:code/comments",
   auth,
   requirePermission("reports", "view"),

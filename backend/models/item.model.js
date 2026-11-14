@@ -582,6 +582,8 @@ const itemSchema = new mongoose.Schema(
     update_history: { type: [itemUpdateHistorySchema], default: [] },
     pis_update_comments: { type: [pisUpdateCommentSchema], default: [] },
     qc_mismatch_comments: { type: [qcMismatchCommentSchema], default: [] },
+    qc_mismatch_reviewed_at: Date,
+    qc_mismatch_reviewed_by: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
     pis_box_top_LBH: legacyLbhSchema,
     pis_box_bottom_LBH: legacyLbhSchema,
     pis_barcode: { type: String, default: "", trim: true },
@@ -689,6 +691,7 @@ const itemSchema = new mongoose.Schema(
       type: new mongoose.Schema({
         cycle_version: { type: String, required: true },
         started_at: { type: Date, default: null },
+        legacy_master_created_at: Date,
         stage: { type: String, enum: STAGES, required: true },
         revision: { type: Number, min: 0, required: true },
         consumed_pos: { type: [String], default: [] },

@@ -4,10 +4,12 @@ const Item = require("../models/item.model");
 const Inspection = require("../models/inspection.model");
 const PisUpdateLog = require("../models/pisUpdateLog.model");
 const { CYCLE_VERSION } = require("../helpers/masterWorkflow");
+const { backfillQcMismatchReviews } = require("../scripts/backfillQcMismatchReviews");
 
 const {
   getQcReportMismatch,
   getQcReportMismatchLevelTwo,
+  completeQcMismatchReview,
   __test__: {
     limitRecentInspectionsByItem,
     selectPostMasterOneInspections,
@@ -194,6 +196,8 @@ test("level 1 uses verified Master dates before choosing POs and compares all th
     { _id: "incomplete-id", code: "incomplete", ...master, master_workflow: {
       cycle_version: CYCLE_VERSION, stage: "master", reviews: [{ stage: "master", reviewed_at: review }],
     } },
+    { _id: "reviewed-id", code: "reviewed", ...master, qc_mismatch_reviewed_at: new Date(review),
+      master_workflow: { cycle_version: CYCLE_VERSION, stage: "master", reviews: [{ stage: "master", reviewed_at: created }] } },
   ];
   const inspections = items.flatMap(({ code }) => [
     reportVisit(code, "old-record", "2026-11-10", "2026-11-05", created),
@@ -221,6 +225,36 @@ test("level 1 uses verified Master dates before choosing POs and compares all th
       assert.deepEqual(visit.item_size_mismatches.map((field) => field.field), ["L"]);
     }
   }
+});
+
+test("only managers can complete an item review, and the original completion survives a retry", async (t) => {
+  const reviewedAt = new Date("2026-11-14T08:00:00Z");
+  const update = t.mock.method(Item, "findOneAndUpdate", () => ({
+    select: () => ({ lean: async () => null }),
+  }));
+  t.mock.method(Item, "findOne", () => ({ select: () => ({ lean: async () => ({ qc_mismatch_reviewed_at: reviewedAt }) }) }));
+  const res = { code: 200, status(code) { this.code = code; return this; }, json(payload) { return payload; } };
+  const req = { params: { code: "ITEM-1" }, user: { role: "qc" } };
+  await completeQcMismatchReview(req, res);
+  assert.equal(res.code, 403);
+  assert.equal(update.mock.callCount(), 0);
+  req.user = { role: "admin", _id: "507f1f77bcf86cd799439011" };
+  const result = await completeQcMismatchReview(req, res);
+  const [filter, change] = update.mock.calls[0].arguments;
+  assert.deepEqual(filter.$and[1], { qc_mismatch_reviewed_at: null });
+  assert.equal(change.$set.qc_mismatch_reviewed_by, req.user._id);
+  assert.equal(result.reviewed_at, reviewedAt);
+});
+
+test("backfill only marks unreviewed items with nonblank comments from the cutoff or earlier", async (t) => {
+  const update = t.mock.method(Item, "updateMany", async () => ({ modifiedCount: 1 }));
+  await backfillQcMismatchReviews();
+  const [filter, change] = update.mock.calls[0].arguments;
+  const comment = filter.qc_mismatch_comments.$elemMatch;
+  assert.equal(filter.qc_mismatch_reviewed_at, null);
+  assert.equal(comment.created_at.$lte, change.$set.qc_mismatch_reviewed_at);
+  assert.equal(comment.comment.test(" "), false);
+  assert.equal(comment.comment.test("Reviewed dimensions"), true);
 });
 
 test("level 2 compares saved evidence against saved Master 1 after later Master changes", async (t) => {

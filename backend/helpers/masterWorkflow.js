@@ -30,7 +30,7 @@ const getWorkflow = (item = {}) => {
     return { cycle_version: CYCLE_VERSION, started_at: null, stage: STAGES[0], revision: 0, reviews: [], consumed_pos: [] };
   }
   const workflow = clone(item.master_workflow);
-  workflow.started_at = workflow.reviews?.find((review) => review.stage === "master")?.reviewed_at || null;
+  workflow.started_at = workflow.reviews?.find((review) => review.stage === "master")?.reviewed_at || workflow.legacy_master_created_at || null;
   return workflow;
 };
 const masterSnapshot = (item = {}) => ({
@@ -58,7 +58,8 @@ const buildEvidence = (item, records = [], now = new Date()) => {
   const workflow = getWorkflow(item);
   const stageIndex = STAGES.indexOf(workflow.stage);
   const required = REVIEW_PO_COUNTS[stageIndex] ?? 0;
-  const anchor = workflow.reviews?.at(-1)?.reviewed_at;
+  const anchor = workflow.reviews?.at(-1)?.reviewed_at ||
+    (workflow.stage === "master" ? workflow.legacy_master_created_at : null);
   const consumed = new Set((workflow.consumed_pos || []).map(key));
   const visits = records.map(inspectionSnapshot).filter((r) => {
     const date = parseDateOnly(r.inspection_date);

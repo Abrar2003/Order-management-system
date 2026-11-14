@@ -55,6 +55,7 @@ const server = http.createServer((req, res) => {
     await page.setViewport({ width: 1440, height: 1100 });
     const pageErrors = [];
     let pdfPayload;
+    let reviewDone = false;
     let qcImages = [{ _id: "test-image", url: `${origin}/logo.png`, originalName: "Test QC image" }];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.setRequestInterception(true);
@@ -81,7 +82,12 @@ const server = http.createServer((req, res) => {
           pdfPayload = JSON.parse(request.postData());
           return respond({});
         }
+        if (route === `/reports/qc-report-mismatch/${item.code}/review-done` && request.method() === "POST") {
+          reviewDone = true;
+          return respond({ success: true });
+        }
         if (route === "/reports/qc-report-mismatch" || route === "/reports/qc-report-mismatch-level-2") {
+          if (reviewDone && !route.endsWith("-2")) return respond({ rows: [], pagination: { total: 0, totalPages: 1 } });
           const master = route.endsWith("-2") ? getWorkflow(item).reviews.find((review) => review.stage === "master_1").master : item;
           const comparison = compareInspectionSizeSnapshot({
             inspected_item_sizes: [{ L: 120, B: 50, H: 75, remark: "item" }],
@@ -160,7 +166,7 @@ const server = http.createServer((req, res) => {
     await clickButton("Save Master");
     await waitStage("master");
     await openPage("final-pis-check");
-    const cycleStarted = await page.$eval(".mw-item > p", (e) => e.textContent);
+    const cycleStarted = await page.$eval(".mw-item-heading p", (e) => e.textContent);
     assert.match(cycleStarted, /Cycle started/);
     await clickButton("Export PDF");
     await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent.trim() === "Export PDF" && !b.disabled));
@@ -221,6 +227,14 @@ const server = http.createServer((req, res) => {
       assert.deepEqual(length.slice(1), [value, "120Mismatch", "120Mismatch", "120Mismatch"]);
       const weight = fields.find(([field]) => field === "Item Size 1 - Net Weight");
       assert.match(weight[2], /No comparable data/);
+      if (route === "qc-report-mismatch") {
+        await clickButton("Review Done");
+        await page.waitForSelector(".modal", { hidden: true });
+        await page.waitForSelector(".qc-details-comment-button", { hidden: true });
+        assert.equal(reviewDone, true);
+      } else {
+        assert.doesNotMatch(await page.$eval(".modal-footer", (e) => e.textContent), /Review Done/);
+      }
     }
     assert.deepEqual(pageErrors, []);
     console.log("Browser workflow, QC image gallery, PDF export payload, and both QC mismatch detail modals passed.");

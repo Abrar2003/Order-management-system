@@ -152,6 +152,7 @@ NODE_ENV=production npm run check:env
 NODE_ENV=production npm run update:table-template-fields
 NODE_ENV=production npm run seed:table-sub-product-type
 NODE_ENV=production npm run update:table-product-spec-groups
+NODE_ENV=production node scripts/backfillQcMismatchReviews.js
 
 log "Installing frontend dependencies"
 cd "$FRONTEND_DIR"
