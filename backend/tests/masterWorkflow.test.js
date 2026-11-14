@@ -210,8 +210,9 @@ const mockDatabase = (t, initial) => {
   let beforeWrite = () => {};
   t.mock.method(Item, "findOne", () => queryResult(() => clone(stored)));
   t.mock.method(Item, "find", () => queryResult(() => [clone(stored)]));
-  t.mock.method(QC, "find", () => queryResult(() => [{ _id: records[0].qc, item: { item_code: stored.code }, order: { order_id: records[0].po } }]));
+  t.mock.method(QC, "find", () => queryResult(() => records.map((record) => ({ _id: record.qc, item: { item_code: stored.code }, order: { order_id: record.po } }))));
   t.mock.method(Inspection, "find", () => queryResult(() => clone(records)));
+  t.mock.method(PisUpdateLog, "find", () => queryResult(() => []));
   t.mock.method(PisUpdateLog, "create", async () => ({}));
   t.mock.method(Item, "findOneAndUpdate", (filter, update) => queryResult(() => {
     beforeWrite();
@@ -234,6 +235,46 @@ test("PIS Diffs excludes an item with either item or box Master measurements", a
   db.get().master_box_sizes = [];
   assert.deepEqual(await getWorkflowRows({ view: "pis-diffs", user: USER }), []);
   assert.equal(QC.find.mock.callCount(), 0);
+});
+
+test("Final PIS Check shows an undated legacy Master waiting for a verified creation date", async (t) => {
+  const db = mockDatabase(t, baseline());
+  assert.deepEqual(await getWorkflowRows({ view: "final-pis-check", user: USER }), []);
+  await assert.rejects(performAction({ id: baseline()._id, user: USER, action: "review", payload: { revision: 0 } }), /Review Done/);
+  db.get().qc_mismatch_reviewed_at = NOW;
+  const [row] = await getWorkflowRows({ view: "final-pis-check", user: USER });
+  assert.equal(row.master_workflow.stage, "master");
+  assert.equal(row.master_workflow.started_at, null);
+  assert.equal(row.evidence.required, 3);
+  assert.equal(row.evidence.count, 0);
+  assert.equal(row.actions.review, false);
+  assert.equal(db.get().master_workflow, undefined);
+});
+
+test("a dated legacy Master counts inspections after creation and saves directly as Master 1", async (t) => {
+  const created = "2026-10-03T08:00:00.000Z";
+  const item = { ...baseline(), qc_mismatch_reviewed_at: NOW, update_history: [{
+    timestamp: created,
+    before: { master_item_sizes: [], master_box_sizes: [] },
+    after: { master_item_sizes: [size] },
+  }] };
+  const db = mockDatabase(t, item);
+  db.setRecords([
+    visit("PO-1", "2026-10-03", { qc: "qc-1" }),
+    visit("PO-2", "2026-10-03", { qc: "qc-2", createdAt: "2026-10-03T09:00:00Z" }),
+    visit("PO-3", "2026-10-04", { qc: "qc-3" }),
+    visit("PO-4", "2026-10-05", { qc: "qc-4" }),
+  ]);
+  const [row] = await getWorkflowRows({ view: "final-pis-check", user: USER });
+  assert.equal(row.master_workflow.started_at, created);
+  assert.equal(row.update_history, undefined);
+  assert.deepEqual(row.evidence.inspections.map(({ po }) => po), ["PO-2", "PO-3", "PO-4"]);
+  const payload = { revision: row.master_workflow.revision, evidence_token: row.evidence.token, values: {} };
+  const updated = await performAction({ id: item._id, user: USER, action: "review", payload });
+  assert.equal(updated.master_workflow.stage, "master_1");
+  assert.equal(updated.master_workflow.started_at, created);
+  assert.deepEqual(updated.master_workflow.reviews.map(({ stage }) => stage), ["master_1"]);
+  assert.deepEqual(updated.master_workflow.legacy_master, masterSnapshot(item));
 });
 
 test("the first review preserves PIS byte-for-byte and accepts only one concurrent submission", async (t) => {

@@ -196,7 +196,11 @@ function ItemReview({ row, view, onSave, onRefresh, busy, canOpenPd }) {
       const issues = comparison.rows.filter((entry) => entry.status !== "match");
       return <div key={comparison.inspection_id} className="mt-2"><strong>{row.evidence.inspections[index].po}</strong>{issues.length ? <ul>{issues.map((entry) => <li key={entry.key}>{entry.group} {entry.part} {fieldLabel(entry.field)}: master {display(entry.master)}, inspected {display(entry.other)} ({entry.status})</li>)}</ul> : <p className="text-success">All measurements are within tolerance.</p>}</div>;
     })}</details>}
-    {row.status === "waiting" && <div className="alert alert-info mt-3">{row.evidence.count} / {row.evidence.required} qualifying approved POs. Previously used POs and visits recorded before the last review cannot count.</div>}
+    {row.status === "waiting" && <div className="alert alert-info mt-3">
+      {workflow.stage === "master" && !workflow.started_at
+        ? "The Master creation date could not be verified. A verified date is required to count POs toward Master 1."
+        : `${row.evidence.count} / ${row.evidence.required} qualifying approved POs. Only new POs inspected after the previous stage qualify.`}
+    </div>}
     {(row.actions.review || row.actions.correct) && <div className="mw-no-print mt-3"><ReviewEditor key={`${row.id}-${workflow.revision}`} row={row} onSave={onSave} busy={busy} /></div>}
     {row.comparison && view === "master-vs-pd" && <PdReview key={`${row.id}-${workflow.revision}-${row.comparison.token}`} row={row} onSave={onSave} busy={busy} canOpenPd={canOpenPd} />}
     {row.comparison && view !== "master-vs-pd" && <Link className="btn btn-outline-primary mt-3 mw-no-print" to={`/master-vs-pd?search=${encodeURIComponent(row.code)}`}>Review Master vs PD</Link>}
@@ -283,10 +287,14 @@ export default function MasterWorkflowPage({ view }) {
     </form>
     {error && <div className="alert alert-danger" role="alert">{error}</div>}{message && <div className="alert alert-success" role="status">{message}</div>}
     {loading ? <p role="status">Loading workflow…</p> : rows.length === 0 ? <div className="card p-4 text-secondary">No items in this stage match these filters.</div> : <div className="mw-items">{rows.map((row) => <article className="card mw-item" key={row.id}>
-      <div className="mw-item-heading"><div><h2 className="h6 mb-1">{row.code} · {row.description || row.name}</h2><div className="small text-secondary">{row.brand_label} · {row.vendor_labels.join(", ")}</div></div>
+      <div className="mw-item-heading">
+        <div>
+          <h2 className="h6 mb-1">{row.code} · {row.description || row.name}</h2>
+          <div className="small text-secondary">{row.brand_label} · {row.vendor_labels.join(", ")}</div>
+          {row.master_workflow.started_at && <p className="small text-secondary mt-1 mb-0">Cycle started {date(row.master_workflow.started_at)}</p>}
+        </div>
         <div className="d-flex gap-2 align-items-center flex-wrap"><span className={`badge ${row.status === "finalized" ? "text-bg-success" : row.status === "ready" ? "text-bg-primary" : "text-bg-light"}`}>{STAGE_LABELS[row.master_workflow.stage]}</span>{row.evidence.required > 0 && <span className="small">{Math.min(row.evidence.count, row.evidence.required)} / {row.evidence.required} approved POs</span>}<button className="btn btn-outline-primary btn-sm mw-no-print" aria-expanded={expanded === row.id} disabled={busy} onClick={() => setExpanded(expanded === row.id ? null : row.id)}>{expanded === row.id ? "Close" : row.status === "finalized" ? "View" : "Review"}</button></div>
       </div>
-      {row.master_workflow.started_at && <p className="small text-secondary mb-1">Cycle started {date(row.master_workflow.started_at)}</p>}
       {expanded === row.id && <ItemReview row={row} view={view} onSave={(action, payload) => save(row, action, payload)} onRefresh={fetchRows} busy={busy} canOpenPd={hasPermission("product_database", "view")} />}
     </article>)}</div>}
     <div className="d-flex justify-content-between align-items-center mt-3 mw-no-print"><span className="small text-secondary">{pagination.totalRecords} items · Page {page} of {pagination.totalPages}</span><div className="d-flex gap-2"><button className="btn btn-outline-secondary btn-sm" disabled={page <= 1 || busy || loading} onClick={() => setPage(page - 1)}>Previous</button><button className="btn btn-outline-secondary btn-sm" disabled={page >= pagination.totalPages || busy || loading} onClick={() => setPage(page + 1)}>Next</button></div></div>

@@ -11,7 +11,7 @@ const { normalizeSingleMasterSizeRemarks } = require("../helpers/masterSizeRemar
 const { normalizeVendorDisplayList } = require("../helpers/vendorRef");
 const { buildItemUpdateAuditSnapshot, buildItemUpdateLogPayload } = require("../helpers/itemUpdateAudit");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
-const { getMasterComparisonSource } = require("../helpers/qcMismatchMaster");
+const { getMasterComparisonSource, getFirstMasterDate, getLegacyMasterCreationDates } = require("../helpers/qcMismatchMaster");
 const {
   CYCLE_VERSION, MASTER_FIELDS, PD_FIELDS, key, text, clone, getWorkflow,
   masterSnapshot, buildEvidence, sourceValues, compareSizes, buildPdComparison, isSuperAdmin,
@@ -23,9 +23,28 @@ const VIEW_STAGES = {
   "pis-diffs": ["awaiting_master_1"], "final-pis-check": ["master", "master_1"],
   "final-masters": ["master_2", "final_master", "finalized"], "master-vs-pd": ["final_master", "finalized"],
 };
-const stageMatch = (view) => view === "pis-diffs"
-  ? { $or: [{ "master_workflow.cycle_version": { $ne: CYCLE_VERSION } }, { "master_workflow.stage": "awaiting_master_1" }] }
-  : { "master_workflow.cycle_version": CYCLE_VERSION, "master_workflow.stage": { $in: VIEW_STAGES[view] || [] } };
+const awaitingMasterMatch = { $or: [{ "master_workflow.cycle_version": { $ne: CYCLE_VERSION } }, { "master_workflow.stage": "awaiting_master_1" }] };
+const stageMatch = (view) => {
+  if (view === "pis-diffs") return awaitingMasterMatch;
+  const savedStages = { "master_workflow.cycle_version": CYCLE_VERSION, "master_workflow.stage": { $in: VIEW_STAGES[view] || [] } };
+  if (view !== "final-pis-check") return savedStages;
+  return { $or: [
+    { ...savedStages, "master_workflow.stage": "master_1" },
+    { qc_mismatch_reviewed_at: { $type: "date" }, $or: [
+      { ...savedStages, "master_workflow.stage": "master" },
+      { $and: [awaitingMasterMatch, {
+        $or: [{ "master_item_sizes.0": { $exists: true } }, { "master_box_sizes.0": { $exists: true } }],
+      }] },
+    ] },
+  ] };
+};
+
+const hasLegacyMaster = (item) => getWorkflow(item).stage === "awaiting_master_1" && Boolean(getMasterComparisonSource(item));
+const useLegacyMaster = (item, auditDates) => {
+  const workflow = getWorkflow(item);
+  const createdAt = getFirstMasterDate(item, workflow, auditDates)?.toISOString() ?? null;
+  return { ...item, master_workflow: { ...workflow, stage: "master", legacy_master_created_at: createdAt } };
+};
 
 const getApprovedRecords = async (items, user) => {
   if (!items.length) return new Map();
@@ -47,13 +66,14 @@ const getApprovedRecords = async (items, user) => {
 };
 
 const buildRow = (item, records, user) => {
+  const { update_history, ...publicItem } = item;
   const workflow = getWorkflow(item);
   const evidence = buildEvidence(item, records);
   const comparison = ["final_master", "finalized"].includes(workflow.stage) ? buildPdComparison(item) : null;
   const status = workflow.stage === "finalized" ? "finalized" : workflow.stage === "final_master" ? "created" : evidence.ready ? "ready" : "waiting";
   const canWrite = isSuperAdmin(user) && workflow.stage !== "finalized";
   return {
-    ...item, id: String(item._id), master_workflow: workflow, evidence, status,
+    ...publicItem, id: String(item._id), master_workflow: workflow, evidence, status,
     brand_label: item.brand_name || item.brand || item.brands?.[0] || "",
     vendor_labels: normalizeVendorDisplayList(item.vendors), comparison,
     inspection_comparisons: evidence.inspections.map((inspection) => ({ inspection_id: inspection.inspection_id, rows: compareSizes(sourceValues(item, "master"), inspection) })),
@@ -63,8 +83,20 @@ const buildRow = (item, records, user) => {
 
 const getWorkflowRows = async ({ view, filters = {}, user = {} }) => {
   if (!VIEW_STAGES[view]) throw failure("Unknown workflow page.", 400);
-  const candidates = await Item.find(applyItemDataAccess({ $and: [buildItemMatch(filters), stageMatch(view)] }, user)).select(WORKFLOW_SELECT).sort({ code: 1 }).lean();
-  const items = view === "pis-diffs" ? candidates.filter((item) => !getMasterComparisonSource(item)) : candidates;
+  const select = view === "final-pis-check" ? `${WORKFLOW_SELECT} update_history qc_mismatch_reviewed_at` : WORKFLOW_SELECT;
+  const candidates = await Item.find(applyItemDataAccess({ $and: [buildItemMatch(filters), stageMatch(view)] }, user)).select(select).sort({ code: 1 }).lean();
+  let items = candidates;
+  if (view === "pis-diffs") items = candidates.filter((item) => !hasLegacyMaster(item));
+  if (view === "final-pis-check") {
+    const legacyItems = candidates.filter(hasLegacyMaster);
+    const legacyIds = new Set(legacyItems.map((item) => String(item._id)));
+    const dates = await getLegacyMasterCreationDates(legacyItems);
+    items = candidates.map((item) => legacyIds.has(String(item._id)) ? useLegacyMaster(item, dates.get(String(item._id))) : item)
+      .filter((item) => {
+        const stage = getWorkflow(item).stage;
+        return stage === "master_1" || (stage === "master" && item.qc_mismatch_reviewed_at);
+      });
+  }
   const records = await getApprovedRecords(items.filter((item) => !["final_master", "finalized"].includes(getWorkflow(item).stage)), user);
   return items.filter((item) => view !== "pis-diffs" || records.has(key(item.code)))
     .map((item) => buildRow(item, records.get(key(item.code)) || [], user))
@@ -111,8 +143,17 @@ const buildWriteFilter = (item) => ({
 const performAction = async ({ id, user, payload = {}, action }) => {
   if (!mongoose.Types.ObjectId.isValid(id)) throw failure("Invalid item id.", 400);
   if (!isSuperAdmin(user)) throw failure("Only Super Admin can review or update master data.", 403);
-  const item = await Item.findOne(applyItemDataAccess({ _id: id }, user)).select(WORKFLOW_SELECT).lean();
-  if (!item) throw failure("Item not found.", 404);
+  const storedItem = await Item.findOne(applyItemDataAccess({ _id: id }, user)).select(`${WORKFLOW_SELECT} update_history qc_mismatch_reviewed_at`).lean();
+  if (!storedItem) throw failure("Item not found.", 404);
+  let item = storedItem;
+  const legacy = action === "review" && hasLegacyMaster(item);
+  if (action === "review" && (legacy || getWorkflow(item).stage === "master") && !item.qc_mismatch_reviewed_at) {
+    throw failure("Mark Review Done in Reports mismatch lv 1 before reviewing Master 1.");
+  }
+  if (legacy) {
+    const dates = await getLegacyMasterCreationDates([item]);
+    item = useLegacyMaster(item, dates.get(String(item._id)));
+  }
   assertAction(item, user, payload);
   const records = action === "review" ? await getApprovedRecords([item], user) : new Map();
   const evidence = buildEvidence(item, records.get(key(item.code)) || []);
@@ -123,8 +164,8 @@ const performAction = async ({ id, user, payload = {}, action }) => {
     for (const field of MASTER_FIELDS) $set[field] = values[field];
     $set["cbm.calculated_master_total"] = values.calculated_master_total;
   }
-  const history = appendItemUpdateHistory(next, { before: item, after: next, reqUser: user, action: "master_update", source: "master_workflow", metadata: { action, stage: next.master_workflow.stage, revision: next.master_workflow.revision } });
-  const updated = await Item.findOneAndUpdate(buildWriteFilter(item), {
+  const history = appendItemUpdateHistory(next, { before: storedItem, after: next, reqUser: user, action: "master_update", source: "master_workflow", metadata: { action, stage: next.master_workflow.stage, revision: next.master_workflow.revision } });
+  const updated = await Item.findOneAndUpdate(buildWriteFilter(storedItem), {
     $set, ...(history ? { $push: { update_history: { $each: [history], $slice: -200 } } } : {}),
   }, { new: true, runValidators: true }).select(WORKFLOW_SELECT).lean();
   if (!updated) throw failure("The item changed while you were reviewing it. Refresh and try again.");

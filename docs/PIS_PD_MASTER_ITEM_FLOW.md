@@ -21,6 +21,8 @@ PIS Diffs shows items awaiting Master that have approved inspection evidence and
 
 Evidence comes from actual approved Inspection records joined through QC to the item and PO, within existing brand/vendor access. Cached latest item inspection values are never evidence. PO identifiers are trimmed and case-normalized; repeated visits count once, and a PO consumed by an earlier stage cannot count again.
 
+Items at Master, including existing Masters without a saved workflow, enter Final PIS Check after a manager selects **Review Done** in Reports mismatch lv 1. The deployment backfills review completion for items with existing comments. For legacy Masters, the first three qualifying POs must follow the verified Master creation date from item history or a legacy audit log. Items without that date appear as waiting. The first saved review for a legacy Master creates Master 1 and preserves the existing Master snapshot.
+
 For Master 1, Master 2, and Final Master, a visit must have been recorded strictly after the previous stage review and its inspection date must be on or after that review's India calendar date. Fresh same-day visits are valid; older recorded visits, backdating, future dates, and unapproved records are excluded. Eligible POs are ordered by their first qualifying visit; the first three are selected, using the latest approved qualifying visit for each. Latest visits are ordered by inspection date, recording timestamp and ID. No automatic averaging is performed.
 
 The reviewer sees all selected visits before submission. Each stage stores the exact evidence, measurements, normalized consumed POs, reviewer, timestamp, and saved master snapshot. Later source inspection changes do not rewrite completed stage evidence. Matching measurements still require an explicit review.
@@ -54,7 +56,7 @@ Shared implementation: backend/helpers/masterWorkflow.js, backend/services/maste
 | Method / route | Purpose |
 | --- | --- |
 | GET /items/pis-diffs | Awaiting Master with approved records and no Master measurements |
-| GET /items/final-pis-check | Master and Master 1 items with progress toward the next stage |
+| GET /items/final-pis-check | Master and Master 1 items with progress toward the next stage, including legacy Masters |
 | GET /items/final-masters | Master 2 waiting/ready, Final Master created, finalized |
 | GET /items/master-vs-pd | Final Master and current PD comparison |
 | POST /items/:id/master-workflow/review | Advance one stage with revision, evidence_token and values containing only master fields |

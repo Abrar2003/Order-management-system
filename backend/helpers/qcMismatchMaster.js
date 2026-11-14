@@ -1,3 +1,4 @@
+const PisUpdateLog = require("../models/pisUpdateLog.model");
 const { parseDateOnly, parseDateTime } = require("./dateOnly");
 const { buildNormalizedInspectionSizeState } = require("./inspectionSizeSnapshot");
 const { hasComparableNumber } = require("./measurementMismatchRules");
@@ -63,4 +64,22 @@ const isInspectionAfterMaster = (inspection, start) => {
     inspectedOn && inspectedOn >= parseDateOnly(start));
 };
 
-module.exports = { getMasterComparisonSource, getFirstMasterDate, isMasterCreationAudit, isInspectionAfterMaster, sizeLabels };
+const getLegacyMasterCreationDates = async (items) => {
+  if (!items.length) return new Map();
+  const logs = await PisUpdateLog.find({
+    item: { $in: items.map((item) => item._id) },
+    source: { $not: /^master_workflow_/ },
+    changes: { $elemMatch: { scope: "Master", field: { $in: sizeLabels }, before: "Not Set" } },
+  }).select("item createdAt changes missing_fields").lean();
+  const datesByItem = new Map();
+  for (const log of logs) {
+    if (!isMasterCreationAudit(log)) continue;
+    const itemId = String(log.item);
+    const dates = datesByItem.get(itemId) || [];
+    dates.push(log.createdAt);
+    datesByItem.set(itemId, dates);
+  }
+  return datesByItem;
+};
+
+module.exports = { getMasterComparisonSource, getFirstMasterDate, getLegacyMasterCreationDates, isInspectionAfterMaster };

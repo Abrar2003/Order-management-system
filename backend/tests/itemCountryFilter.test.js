@@ -83,13 +83,21 @@ test("item country filter combines with existing filters", () => {
 test("Final PIS Check filters Master and Master 1 stages and keeps the country filter", () => {
   const match = buildFinalPisCheckMatch({ country: "India" });
   assert.deepEqual(match.$and[0], buildItemMatch({ country: "India" }));
-  assert.deepEqual(match.$and[1]["master_workflow.stage"], { $in: ["master", "master_1"] });
+  const [masterOne, reviewed] = match.$and[1].$or;
+  assert.equal(masterOne["master_workflow.stage"], "master_1");
+  assert.deepEqual(reviewed.qc_mismatch_reviewed_at, { $type: "date" });
+  const [master, legacyCandidates] = reviewed.$or;
+  assert.equal(master["master_workflow.stage"], "master");
+  assert.deepEqual(legacyCandidates.$and[0], buildPisDiffMissingItemMasterMatch());
+  assert.deepEqual(legacyCandidates.$and[1].$or, [
+    { "master_item_sizes.0": { $exists: true } }, { "master_box_sizes.0": { $exists: true } },
+  ]);
   assert.doesNotMatch(JSON.stringify(match), /pis_checked_flag|is_rectify_imported/);
 });
 test("Final PIS Check ignores country when all is selected", () => {
   assert.deepEqual(buildFinalPisCheckMatch({ country: "all" }).$and[0], {});
 });
-test("PIS Diffs requeue legacy items regardless of existing masters or old flags", () => {
+test("PIS Diffs starts with items awaiting a saved workflow stage", () => {
   const match = buildPisDiffMissingItemMasterMatch();
   assert.equal(match.$or[0]["master_workflow.cycle_version"].$ne, "2026-10-03");
   assert.equal(match.$or[1]["master_workflow.stage"], "awaiting_master_1");

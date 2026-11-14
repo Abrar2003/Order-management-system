@@ -5,13 +5,12 @@ const XLSX = require("xlsx");
 const Inspection = require("../models/inspection.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
-const PisUpdateLog = require("../models/pisUpdateLog.model");
 const Brand = require("../models/brand.model");
 const Order = require("../models/order.model");
 const Tenure = require("../models/tenure.model");
 const Vendor = require("../models/vendor.model");
 const { buildEvidence, getWorkflow } = require("../helpers/masterWorkflow");
-const { getMasterComparisonSource, getFirstMasterDate, isMasterCreationAudit, isInspectionAfterMaster, sizeLabels } = require("../helpers/qcMismatchMaster");
+const { getMasterComparisonSource, getFirstMasterDate, getLegacyMasterCreationDates, isInspectionAfterMaster } = require("../helpers/qcMismatchMaster");
 const { getApprovedRecords } = require("../services/masterWorkflow.service");
 const { getItemBrand } = require("../helpers/itemBrand");
 const {
@@ -994,6 +993,7 @@ const normalizeInspectionStatusFilter = (value) => {
 const QC_REPORT_MISMATCH_ITEM_SELECT = [
   "code",
   "qc_mismatch_comments",
+  "qc_mismatch_reviewed_at",
   "master_item_sizes",
   "master_box_sizes",
   "master_box_mode",
@@ -2975,24 +2975,6 @@ const selectPostMasterOneInspections = (item, candidates, approvedRecords) => {
   return selected.length === QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT ? selected : [];
 };
 
-const getLegacyMasterCreationDates = async (items) => {
-  if (!items.length) return new Map();
-  const logs = await PisUpdateLog.find({
-    item: { $in: items.map((item) => item._id) },
-    source: { $not: /^master_workflow_/ },
-    changes: { $elemMatch: { scope: "Master", field: { $in: sizeLabels }, before: "Not Set" } },
-  }).select("item createdAt changes missing_fields").lean();
-  const datesByItem = new Map();
-  for (const log of logs) {
-    if (!isMasterCreationAudit(log)) continue;
-    const itemId = String(log.item);
-    const dates = datesByItem.get(itemId) || [];
-    dates.push(log.createdAt);
-    datesByItem.set(itemId, dates);
-  }
-  return datesByItem;
-};
-
 const getQcReportMismatch = async (req, res, afterMasterOne) => {
   try {
     const brand = normalizeOptionalFilter(req.query.brand);
@@ -3110,6 +3092,7 @@ const getQcReportMismatch = async (req, res, afterMasterOne) => {
       candidatesByItem.set(code, group);
     }
     const itemsWithMaster = itemDocs.flatMap((item) => {
+      if (!afterMasterOne && item.qc_mismatch_reviewed_at) return [];
       const workflow = getWorkflow(item);
       const master = afterMasterOne ? workflow.reviews?.find((review) => review.stage === "master_1")?.master : item;
       const source = getMasterComparisonSource(master);
@@ -3477,6 +3460,31 @@ const getActorDisplayName = (user = {}) => {
 
 const canCreateQcMismatchComment = (user = {}) =>
   isManagerLikeRole(user?.role) || normalizeUserRoleKey(user?.role) === "qc";
+
+exports.completeQcMismatchReview = async (req, res) => {
+  if (!isManagerLikeRole(req.user?.role)) {
+    return res.status(403).json({ message: "Only managers can mark a mismatch review done." });
+  }
+  const code = String(req.params.code || "").trim();
+  if (!code) return res.status(400).json({ message: "Item code is required." });
+  const scope = applyDataAccessMatch({ code: new RegExp(`^\\s*${escapeRegex(code)}\\s*$`, "i") }, req.user, {
+    brandFields: ["brand", "brand_name", "brands"], vendorFields: ["vendors"],
+  });
+  try {
+    const updated = await Item.findOneAndUpdate(
+      { $and: [scope, { qc_mismatch_reviewed_at: null }] },
+      { $set: { qc_mismatch_reviewed_at: new Date(), qc_mismatch_reviewed_by: req.user._id || req.user.id } },
+      { new: true },
+    ).select("qc_mismatch_reviewed_at").lean();
+    const item = updated || await Item.findOne(scope).select("qc_mismatch_reviewed_at").lean();
+    if (!item) return res.status(404).json({ message: "Item not found or access denied." });
+    await invalidateItemCaches();
+    return res.json({ success: true, reviewed_at: item.qc_mismatch_reviewed_at });
+  } catch (error) {
+    console.error("Complete QC mismatch review error:", error);
+    return res.status(500).json({ message: "Could not mark the review done." });
+  }
+};
 
 exports.getQcMismatchComments = async (req, res) => {
   try {

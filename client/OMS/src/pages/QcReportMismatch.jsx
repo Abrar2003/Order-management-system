@@ -452,6 +452,8 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
   const [report, setReport] = useState(defaultReport);
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [selectedRow, setSelectedRow] = useState(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [reviewError, setReviewError] = useState("");
 
   const currentUser = useMemo(() => getUserFromToken(), []);
   const currentUserRole = normalizeUserRole(currentUser?.role);
@@ -677,6 +679,20 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
     toDate,
     vendorFilter,
   ]);
+
+  const markReviewDone = async () => {
+    setReviewSaving(true);
+    setReviewError("");
+    try {
+      await api.post(`/reports/qc-report-mismatch/${encodeURIComponent(selectedRow.item_code)}/review-done`);
+      setSelectedRow(null);
+      await fetchReport();
+    } catch (err) {
+      setReviewError(err?.response?.data?.message || "Could not mark the review done.");
+    } finally {
+      setReviewSaving(false);
+    }
+  };
 
   useEffect(() => {
     fetchReport();
@@ -1218,7 +1234,7 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
                               <button
                                 type="button"
                                 className={`btn btn-outline-primary btn-sm qc-details-comment-button${commentCount > 0 ? " has-comments" : ""}`}
-                                onClick={() => setSelectedRow(row)}
+                                onClick={() => { setReviewError(""); setSelectedRow(row); }}
                               >
                                 {commentCount > 0 && (
                                   <span
@@ -1526,6 +1542,12 @@ const QcReportMismatch = ({ afterMasterOne = false }) => {
               </div>
 
               <div className="modal-footer">
+                {reviewError && <div className="text-danger me-auto" role="alert">{reviewError}</div>}
+                {!afterMasterOne && isManagerLikeRole(currentUserRole) && (
+                  <button type="button" className="btn btn-primary" disabled={reviewSaving} onClick={markReviewDone}>
+                    {reviewSaving ? "Saving…" : "Review Done"}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn btn-outline-secondary"
