@@ -288,12 +288,18 @@ export default function MasterWorkflowPage({ view }) {
     {error && <div className="alert alert-danger" role="alert">{error}</div>}{message && <div className="alert alert-success" role="status">{message}</div>}
     {loading ? <p role="status">Loading workflow…</p> : rows.length === 0 ? <div className="card p-4 text-secondary">No items in this stage match these filters.</div> : <div className="mw-items">{rows.map((row) => <article className="card mw-item" key={row.id}>
       <div className="mw-item-heading">
-        <div>
-          <h2 className="h6 mb-1">{row.code} · {row.description || row.name}</h2>
-          <div className="small text-secondary">{row.brand_label} · {row.vendor_labels.join(", ")}</div>
-          {row.master_workflow.started_at && <p className="small text-secondary mt-1 mb-0">Cycle started {date(row.master_workflow.started_at)}</p>}
+        <div className="mw-item-summary">
+          <h2 className="h6 mb-0">{row.code} · {row.description || row.name}</h2>
+          <div className="mw-item-meta small text-secondary">
+            <span>{[row.brand_label, row.vendor_labels.join(", ")].filter(Boolean).join(" · ")}</span>
+            {row.master_workflow.started_at && <p className="mb-0">Cycle started {date(row.master_workflow.started_at)}</p>}
+          </div>
         </div>
-        <div className="d-flex gap-2 align-items-center flex-wrap"><span className={`badge ${row.status === "finalized" ? "text-bg-success" : row.status === "ready" ? "text-bg-primary" : "text-bg-light"}`}>{STAGE_LABELS[row.master_workflow.stage]}</span>{row.evidence.required > 0 && <span className="small">{Math.min(row.evidence.count, row.evidence.required)} / {row.evidence.required} approved POs</span>}<button className="btn btn-outline-primary btn-sm mw-no-print" aria-expanded={expanded === row.id} disabled={busy} onClick={() => setExpanded(expanded === row.id ? null : row.id)}>{expanded === row.id ? "Close" : row.status === "finalized" ? "View" : "Review"}</button></div>
+        <div className="mw-item-actions">
+          <span className={`badge rounded-pill ${row.status === "finalized" ? "text-bg-success" : row.status === "ready" ? "text-bg-primary" : "text-bg-light"}`}>{STAGE_LABELS[row.master_workflow.stage]}</span>
+          {row.evidence.required > 0 && <span className="small text-secondary">{Math.min(row.evidence.count, row.evidence.required)} / {row.evidence.required} approved POs</span>}
+          <button type="button" className="btn btn-outline-primary btn-sm mw-no-print" aria-expanded={expanded === row.id} disabled={busy} onClick={() => setExpanded(expanded === row.id ? null : row.id)}>{expanded === row.id ? "Close" : row.status === "finalized" ? "View" : "Review"}</button>
+        </div>
       </div>
       {expanded === row.id && <ItemReview row={row} view={view} onSave={(action, payload) => save(row, action, payload)} onRefresh={fetchRows} busy={busy} canOpenPd={hasPermission("product_database", "view")} />}
     </article>)}</div>}
