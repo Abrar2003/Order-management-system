@@ -20,7 +20,7 @@ const box = { L: 110, B: 60, H: 85, gross_weight: 12, remark: "box", box_type: "
 let item = {
   _id: "507f1f77bcf86cd799439012", code: "SANITY-001", description: "Representative table", brand: "Test", vendors: ["Test vendor"],
   pis_item_sizes: [{ ...size, L: 90 }], pis_box_sizes: [box], pis_barcode: "VENDOR-PIS", country_of_origin: "India", pis_checked_flag: true,
-  master_item_sizes: [size], master_box_sizes: [box], master_box_mode: "individual", master_master_barcode: "MASTER", master_inner_barcode: "", master_country_of_origin: "India",
+  master_item_sizes: [], master_box_sizes: [], master_box_mode: "individual", master_master_barcode: "MASTER", master_inner_barcode: "", master_country_of_origin: "India",
   pd_item_sizes: [size], pd_box_sizes: [box], pd_box_mode: "individual", pd_measurement_revision: 0,
 };
 const pisBefore = JSON.stringify(Object.fromEntries(Object.entries(item).filter(([key]) => key.startsWith("pis_") || key === "country_of_origin")));
@@ -129,8 +129,9 @@ const server = http.createServer((req, res) => {
     });
     await openPage("pis-diffs");
     assert.doesNotMatch(await page.$eval("main", (e) => e.textContent), /Cycle started/);
+    await clickButton("Use measurements from PO-1");
     await checked(".mw-editor input[type=checkbox]");
-    await clickButton("Confirm unchanged as Master");
+    await clickButton("Save Master");
     await waitStage("master");
     await openPage("final-pis-check");
     const cycleStarted = await page.$eval(".mw-item > p", (e) => e.textContent);

@@ -11,7 +11,7 @@ import { STAGE_LABELS, NEXT_STAGE_LABELS, BOX_MODES, masterForm, blankSize, form
 import "./MasterWorkflowPage.css";
 
 const PAGES = {
-  "pis-diffs": { title: "PIS Diffs", description: "Review an approved inspection to create Master. Existing masters remain available until this review is saved." },
+  "pis-diffs": { title: "PIS Diffs", description: "Review an approved inspection to create Master for an item without Master measurements." },
   "final-pis-check": { title: "Final PIS Check", description: "Review three new approved POs at each step to create Master 1, then Master 2." },
   "final-masters": { title: "Final Master", description: "Review three more approved POs after Master 2, then compare the Final Master against Product Database." },
   "master-vs-pd": { title: "Master vs PD", description: "Review sizes, correct differences or accept them with a reason, then finalize and permanently lock Final Master." },

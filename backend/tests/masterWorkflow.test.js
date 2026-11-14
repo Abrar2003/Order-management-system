@@ -45,7 +45,7 @@ const throughFinalMaster = () => {
 };
 const signoff = (item, reasons = {}) => transition({ item, user: USER, action: "pd-review", payload: { revision: getWorkflow(item).revision, comparison_token: buildPdComparison(item).token, reasons }, now: NOW });
 
-test("legacy masters and imported, checked, matching items requeue using approved inspection evidence", () => {
+test("a first review row uses approved inspection evidence and requires a Super Admin", () => {
   const item = baseline();
   const row = buildRow(item, [visit("PO-1")], USER);
   assert.equal(row.master_workflow.cycle_version, CYCLE_VERSION);
@@ -225,8 +225,19 @@ const mockDatabase = (t, initial) => {
   return { get: () => stored, setRecords: (next) => { records = next; }, beforeWrite: (fn) => { beforeWrite = fn; } };
 };
 
-test("service requeues legacy items, preserves PIS byte-for-byte, and accepts only one concurrent review", async (t) => {
+test("PIS Diffs excludes an item with either item or box Master measurements", async (t) => {
   const db = mockDatabase(t, baseline());
+  assert.deepEqual(await getWorkflowRows({ view: "pis-diffs", user: USER }), []);
+  db.get().master_item_sizes = [];
+  assert.deepEqual(await getWorkflowRows({ view: "pis-diffs", user: USER }), []);
+  db.get().master_item_sizes = [size];
+  db.get().master_box_sizes = [];
+  assert.deepEqual(await getWorkflowRows({ view: "pis-diffs", user: USER }), []);
+  assert.equal(QC.find.mock.callCount(), 0);
+});
+
+test("the first review preserves PIS byte-for-byte and accepts only one concurrent submission", async (t) => {
+  const db = mockDatabase(t, { ...baseline(), master_item_sizes: [{ L: 0 }], master_box_sizes: [] });
   const rows = await getWorkflowRows({ view: "pis-diffs", user: USER });
   assert.equal(rows.length, 1);
   const payload = { revision: 0, evidence_token: rows[0].evidence.token, values: { master_item_sizes: [{ ...size, L: 102 }] } };
@@ -240,7 +251,7 @@ test("service requeues legacy items, preserves PIS byte-for-byte, and accepts on
 });
 
 test("service refuses newly changed evidence and refuses a PD change racing finalization", async (t) => {
-  const db = mockDatabase(t, baseline());
+  const db = mockDatabase(t, { ...baseline(), master_item_sizes: [], master_box_sizes: [] });
   const [row] = await getWorkflowRows({ view: "pis-diffs", user: USER });
   db.setRecords([visit("PO-1", "2026-09-01", { inspected_item_sizes: [{ ...size, L: 222 }] })]);
   await assert.rejects(performAction({ id: baseline()._id, user: USER, action: "review", payload: { revision: 0, evidence_token: row.evidence.token, values: {} } }), /evidence changed/);
