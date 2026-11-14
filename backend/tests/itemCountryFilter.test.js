@@ -80,11 +80,10 @@ test("item country filter combines with existing filters", () => {
   });
 });
 
-test("Final PIS Check filters Master and Master 1 stages and keeps the country filter", () => {
+test("Final PIS Check filters reviewed Master and keeps the country filter", () => {
   const match = buildFinalPisCheckMatch({ country: "India" });
   assert.deepEqual(match.$and[0], buildItemMatch({ country: "India" }));
-  const [masterOne, reviewed] = match.$and[1].$or;
-  assert.equal(masterOne["master_workflow.stage"], "master_1");
+  const reviewed = match.$and[1];
   assert.deepEqual(reviewed.qc_mismatch_reviewed_at, { $type: "date" });
   const [master, legacyCandidates] = reviewed.$or;
   assert.equal(master["master_workflow.stage"], "master");

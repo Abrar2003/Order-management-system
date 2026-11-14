@@ -8,7 +8,7 @@ Each Item's cycle starts when its first Master review is saved. PIS Diffs queues
 | --- | --- | --- |
 | Awaiting Master | PIS Diffs | Latest approved inspection from one PO; review/save or Confirm unchanged |
 | Master | Final PIS Check | First three additional qualifying distinct POs; review/save Master 1 |
-| Master 1 | Final PIS Check | First three additional qualifying distinct POs; review/save Master 2 |
+| Master 1 | Final Master | First three additional qualifying distinct POs; review/save Master 2 |
 | Master 2 | Final Master | First three more qualifying distinct POs; review/save Final Master |
 | Final Master | Master vs PD | Correct Final Master, open the normal PD editor, or accept each unresolved issue with a reason; sign off |
 | Current comparison signed off | Master vs PD | Finalize PIS permanently locks Final Master |
@@ -56,8 +56,8 @@ Shared implementation: backend/helpers/masterWorkflow.js, backend/services/maste
 | Method / route | Purpose |
 | --- | --- |
 | GET /items/pis-diffs | Awaiting Master with approved records and no Master measurements |
-| GET /items/final-pis-check | Master and Master 1 items with progress toward the next stage, including legacy Masters |
-| GET /items/final-masters | Master 2 waiting/ready, Final Master created, finalized |
+| GET /items/final-pis-check | Reviewed Master items awaiting Master 1, including legacy Masters |
+| GET /items/final-masters | Master 1 and Master 2 waiting/ready, Final Master created, finalized |
 | GET /items/master-vs-pd | Final Master and current PD comparison |
 | POST /items/:id/master-workflow/review | Advance one stage with revision, evidence_token and values containing only master fields |
 | PATCH /items/:id/master-workflow/final-master | Correct unlocked Final Master with revision and master values |
