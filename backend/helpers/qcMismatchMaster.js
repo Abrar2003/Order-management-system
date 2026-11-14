@@ -64,13 +64,15 @@ const isInspectionAfterMaster = (inspection, start) => {
     inspectedOn && inspectedOn >= parseDateOnly(start));
 };
 
-const getLegacyMasterCreationDates = async (items) => {
+const getLegacyMasterCreationDates = async (items, session = null) => {
   if (!items.length) return new Map();
-  const logs = await PisUpdateLog.find({
+  const query = PisUpdateLog.find({
     item: { $in: items.map((item) => item._id) },
     source: { $not: /^master_workflow_/ },
     changes: { $elemMatch: { scope: "Master", field: { $in: sizeLabels }, before: "Not Set" } },
-  }).select("item createdAt changes missing_fields").lean();
+  }).select("item createdAt changes missing_fields");
+  if (session) query.session(session);
+  const logs = await query.lean();
   const datesByItem = new Map();
   for (const log of logs) {
     if (!isMasterCreationAudit(log)) continue;
