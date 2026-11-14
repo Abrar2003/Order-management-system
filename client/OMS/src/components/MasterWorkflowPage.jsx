@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
@@ -9,6 +9,8 @@ import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { exportElementToPdf } from "../services/pdfExport.service";
 import { STAGE_LABELS, NEXT_STAGE_LABELS, BOX_MODES, masterForm, blankSize, formFromInspection, changeBoxMode } from "../utils/masterWorkflow";
 import "./MasterWorkflowPage.css";
+
+const QcDetails = lazy(() => import("../pages/QcDetails"));
 
 const PAGES = {
   "pis-diffs": { title: "PIS Diffs", description: "Review an approved inspection to create Master for an item without Master measurements." },
@@ -21,10 +23,13 @@ const date = (value) => value ? new Date(value).toLocaleString("en-GB", { timeZo
 const errorMessage = (error) => error?.response?.data?.message || error.message || "Request failed.";
 const fieldLabel = (field) => ({ L: "L (cm)", B: "B (cm)", H: "H (cm)", net_weight: "Net weight (kg)", gross_weight: "Gross weight (kg)", item_count_in_inner: "Pieces / inner", box_count_in_master: "Boxes or pieces / master" }[field] || field);
 
-function Measurements({ source, title }) {
+function Measurements({ source, title, actions }) {
   const groups = [{ key: "item", label: "Item", weight: "net_weight" }, { key: "box", label: "Box", weight: "gross_weight" }];
   return <section className="mw-source">
-    <h4 className="h6">{title}</h4>
+    <div className="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-2">
+      <h4 className="h6 mb-0">{title}</h4>
+      {actions}
+    </div>
     <div className="small text-secondary mb-2">{BOX_MODES[source.box_mode] || "Packaging not set"}</div>
     <table className="table table-sm mb-0"><caption className="visually-hidden">{title} measurements</caption>
       <thead><tr><th>Part</th><th>L × B × H (cm)</th><th>Weight (kg)</th><th>Counts</th></tr></thead>
@@ -155,13 +160,38 @@ function Comments({ row, onRefresh }) {
 
 function ItemReview({ row, view, onSave, onRefresh, busy, canOpenPd }) {
   const workflow = row.master_workflow;
+  const { hasPermission } = usePermissions();
+  const [galleryQcId, setGalleryQcId] = useState("");
+  const galleryTrigger = useRef(null);
+  const closeGallery = useCallback(() => {
+    setGalleryQcId("");
+    galleryTrigger.current?.focus();
+  }, []);
   return <div className="mw-review">
     <div className="mw-sources">
       <Measurements source={itemSource(row, "pis")} title="Vendor PIS" />
       <Measurements source={itemSource(row, "master")} title={workflow.stage === "awaiting_master_1" ? "Existing master" : STAGE_LABELS[workflow.stage]} />
       {workflow.stage === "final_master" && workflow.reviews.find((entry) => entry.stage === "master_2") && <Measurements source={itemSource(workflow.reviews.find((entry) => entry.stage === "master_2").master, "master")} title="Master 2 at review" />}
-      {row.evidence.inspections.map((inspection) => <div key={inspection.inspection_id}><Measurements source={inspection} title={`${inspection.po} · ${inspection.inspection_date}`} /><div className="small text-secondary mt-1">Approved inspection · Recorded {date(inspection.created_at)}</div></div>)}
+      {row.evidence.inspections.map((inspection) => (
+        <div key={inspection.inspection_id}>
+          <Measurements
+            source={inspection}
+            title={`${inspection.po} · ${inspection.inspection_date}`}
+            actions={inspection.qc_id && hasPermission("qc", "view") && (
+              <div className="d-flex flex-wrap gap-2">
+                <Link className="btn btn-outline-primary btn-sm" to={`/qc/${encodeURIComponent(inspection.qc_id)}`}>See Details</Link>
+                <button type="button" className="btn btn-outline-secondary btn-sm" aria-haspopup="dialog" onClick={(event) => {
+                  galleryTrigger.current = event.currentTarget;
+                  setGalleryQcId(inspection.qc_id);
+                }}>View QC Images</button>
+              </div>
+            )}
+          />
+          <div className="small text-secondary mt-1">Approved inspection · Recorded {date(inspection.created_at)}</div>
+        </div>
+      ))}
     </div>
+    {galleryQcId && <Suspense fallback={null}><QcDetails galleryQcId={galleryQcId} onCloseGallery={closeGallery} /></Suspense>}
     {row.inspection_comparisons?.length > 0 && <details className="mt-3"><summary>Inspection differences against current master</summary>{row.inspection_comparisons.map((comparison, index) => {
       const issues = comparison.rows.filter((entry) => entry.status !== "match");
       return <div key={comparison.inspection_id} className="mt-2"><strong>{row.evidence.inspections[index].po}</strong>{issues.length ? <ul>{issues.map((entry) => <li key={entry.key}>{entry.group} {entry.part} {fieldLabel(entry.field)}: master {display(entry.master)}, inspected {display(entry.other)} ({entry.status})</li>)}</ul> : <p className="text-success">All measurements are within tolerance.</p>}</div>;

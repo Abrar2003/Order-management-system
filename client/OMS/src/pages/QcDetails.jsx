@@ -561,8 +561,10 @@ const getNestedValue = (obj, path) => {
   return path.split(".").reduce((acc, part) => acc && acc[part], obj);
 };
 
-const QcDetails = () => {
-  const { id } = useParams();
+const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
+  const { id: routeId } = useParams();
+  const galleryOnly = Boolean(galleryQcId);
+  const id = galleryQcId || routeId;
   const [qc, setQc] = useState(null);
   const [claimWarningOpen, setClaimWarningOpen] = useState(false);
   const [claimWarningIsAutomatic, setClaimWarningIsAutomatic] = useState(false);
@@ -605,7 +607,7 @@ const QcDetails = () => {
   const [showTransferRequestModal, setShowTransferRequestModal] = useState(false);
   const [transferInspectionRecord, setTransferInspectionRecord] = useState(null);
   const [inspectionRecordToUpdate, setInspectionRecordToUpdate] = useState(null);
-  const [showQcImageGallery, setShowQcImageGallery] = useState(false);
+  const [showQcImageGallery, setShowQcImageGallery] = useState(galleryOnly);
   const [showQcImageCarousel, setShowQcImageCarousel] = useState(false);
   const [qcImageCarouselZoom, setQcImageCarouselZoom] = useState(1);
   const [qcImageCarouselBaseSize, setQcImageCarouselBaseSize] = useState(null);
@@ -763,6 +765,7 @@ const QcDetails = () => {
   useEffect(() => {
     const requestId = String(latestRequestEntry?._id || "").trim();
     if (
+      galleryOnly ||
       !isQcUser ||
       !latestRequestEntry?.is_first_inspection ||
       !requestId ||
@@ -776,7 +779,7 @@ const QcDetails = () => {
     window.alert(
       "First Time Inspection\nThis item has no passed quantity in any previous PO.",
     );
-  }, [alignedInspectorId, currentUserId, isQcUser, latestRequestEntry]);
+  }, [alignedInspectorId, currentUserId, galleryOnly, isQcUser, latestRequestEntry]);
   const isLabelExemptAlignedInspectionEditor =
     isCurrentUserLabelExempt &&
     Boolean(currentUserId) &&
@@ -1140,7 +1143,7 @@ const QcDetails = () => {
   const claimTenures = Array.isArray(qc?.item_master?.claim_tenures) ? qc.item_master.claim_tenures : [];
 
   useEffect(() => {
-    if (claimPercentage <= CLAIM_WARNING_THRESHOLD || !qc?._id) {
+    if (galleryOnly || claimPercentage <= CLAIM_WARNING_THRESHOLD || !qc?._id) {
       setClaimWarningOpen(false);
       return undefined;
     }
@@ -1165,7 +1168,7 @@ const QcDetails = () => {
     }, 1000);
 
     return () => globalThis.clearInterval(timerId);
-  }, [claimPercentage, qc?._id]);
+  }, [claimPercentage, galleryOnly, qc?._id]);
 
   const acknowledgeClaimWarning = useCallback(() => {
     if ((claimWarningIsAutomatic && claimWarningSeconds > 0) || !qc?._id) return;
@@ -1185,7 +1188,7 @@ const QcDetails = () => {
       claimPercentage > CLAIM_WARNING_THRESHOLD &&
       globalThis.sessionStorage?.getItem(claimAcknowledgementKey) !== "true";
 
-    if (!qcId || !isAlignedQcUser || itemReminders.length === 0) {
+    if (galleryOnly || !qcId || !isAlignedQcUser || itemReminders.length === 0) {
       setReminderPopupOpen(false);
       return;
     }
@@ -1204,6 +1207,7 @@ const QcDetails = () => {
     claimPercentage,
     claimWarningOpen,
     currentUserId,
+    galleryOnly,
     isQcUser,
     itemReminders.length,
     qc?._id,
@@ -1963,16 +1967,16 @@ const QcDetails = () => {
 
   const fetchQcDetails = useCallback(async () => {
     try {
-      const res = await api.get(`/qc/${id}`, {
+      const res = await api.get(`/qc/${encodeURIComponent(id)}`, {
       });
       setQc(res.data.data);
     } catch (err) {
       console.error(err);
-      alert("Failed to load QC details");
+      if (!galleryOnly) alert("Failed to load QC details");
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [galleryOnly, id]);
 
   const fetchQcTests = useCallback(async () => {
     try {
@@ -2512,9 +2516,13 @@ const QcDetails = () => {
   }, [qcImages.length]);
 
   const handleCloseQcImageGallery = useCallback(() => {
+    if (onCloseGallery) {
+      onCloseGallery();
+      return;
+    }
     setShowQcImageCarousel(false);
     setShowQcImageGallery(false);
-  }, []);
+  }, [onCloseGallery]);
 
   const handleOpenQcImageCarousel = useCallback((index = 0) => {
     if (qcImages.length === 0) return;
@@ -2694,7 +2702,7 @@ const QcDetails = () => {
 
   useEffect(() => {
     if (qcImages.length === 0) {
-      setShowQcImageGallery(false);
+      if (!galleryOnly) setShowQcImageGallery(false);
       setShowQcImageCarousel(false);
       setActiveQcImageIndex(0);
       setSelectedQcImageIds([]);
@@ -2704,7 +2712,7 @@ const QcDetails = () => {
     if (activeQcImageIndex > qcImages.length - 1) {
       setActiveQcImageIndex(0);
     }
-  }, [activeQcImageIndex, qcImages.length]);
+  }, [activeQcImageIndex, galleryOnly, qcImages.length]);
 
   useEffect(() => {
     if (!showQcImageGallery) return;
@@ -2746,7 +2754,7 @@ const QcDetails = () => {
           setShowQcImageCarousel(false);
           return;
         }
-        setShowQcImageGallery(false);
+        handleCloseQcImageGallery();
       }
       if (showQcImageCarousel && event.key === "ArrowLeft") {
         handleMoveQcImageCarousel(-1);
@@ -2763,15 +2771,15 @@ const QcDetails = () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [handleMoveQcImageCarousel, showQcImageCarousel, showQcImageGallery]);
+  }, [handleCloseQcImageGallery, handleMoveQcImageCarousel, showQcImageCarousel, showQcImageGallery]);
 
   useEffect(() => {
     fetchQcDetails();
   }, [fetchQcDetails]);
 
   useEffect(() => {
-    fetchQcTests();
-  }, [fetchQcTests]);
+    if (!galleryOnly) fetchQcTests();
+  }, [fetchQcTests, galleryOnly]);
 
   useEffect(() => {
     if (
@@ -2785,7 +2793,7 @@ const QcDetails = () => {
     );
   }, [availableRelatedFileOptions, relatedFileType]);
 
-  if (loading) {
+  if (!galleryOnly && loading) {
     return (
       <>
         <Navbar />
@@ -2794,7 +2802,7 @@ const QcDetails = () => {
     );
   }
 
-  if (!qc) {
+  if (!galleryOnly && !qc) {
     return (
       <>
         <Navbar />
@@ -2805,6 +2813,7 @@ const QcDetails = () => {
 
   return (
     <>
+      {!galleryOnly && <>
       <Navbar />
 
       <div className="page-shell py-3 qc-details-page">
@@ -4246,7 +4255,9 @@ const QcDetails = () => {
         />
       )}
 
-      {showQcImageGallery && activeQcImage && (
+      </>}
+
+      {showQcImageGallery && (galleryOnly || activeQcImage) && (
         <div
           className="qc-image-gallery-backdrop"
           role="dialog"
@@ -4262,7 +4273,7 @@ const QcDetails = () => {
               <div>
                 <h3 className="h5 mb-1">QC Image Gallery</h3>
                 <div className="small text-muted">
-                  {showOnlyCommentedQcImages
+                  {loading ? "Loading…" : !qc ? "Could not load QC images." : showOnlyCommentedQcImages
                     ? `${visibleQcImages.length} of ${qcImages.length} image${qcImages.length === 1 ? "" : "s"} with comments`
                     : `${qcImages.length} image${qcImages.length === 1 ? "" : "s"} available`}
                 </div>
@@ -4333,6 +4344,7 @@ const QcDetails = () => {
                   type="button"
                   className="btn btn-outline-secondary btn-sm"
                   onClick={handleCloseQcImageGallery}
+                  autoFocus={galleryOnly}
                   disabled={deletingQcImages || downloadingQcImages}
                 >
                   Close
@@ -4341,7 +4353,7 @@ const QcDetails = () => {
             </div>
 
             <div className="qc-image-gallery-body" ref={qcImageGalleryBodyRef}>
-              {qcImageGroups.length === 0 ? (
+              {loading || !qc ? null : qcImageGroups.length === 0 ? (
                 <div className="qc-image-gallery-empty-state">
                   {showOnlyCommentedQcImages
                     ? "No QC images with comments found."
