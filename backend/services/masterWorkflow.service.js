@@ -20,22 +20,19 @@ const {
 
 const WORKFLOW_SELECT = ["code", "name", "description", "brand", "brand_name", "brands", "vendors", "country_of_origin", "image", "master_workflow", "pd_measurement_revision", "pis_item_sizes", "pis_box_sizes", "pis_box_mode", "pis_master_barcode", "pis_barcode", "pis_inner_barcode", "pis_update_comments", "cbm.calculated_master_total", "updatedAt", ...MASTER_FIELDS, ...PD_FIELDS].join(" ");
 const VIEW_STAGES = {
-  "pis-diffs": ["awaiting_master_1"], "final-pis-check": ["master", "master_1"],
-  "final-masters": ["master_2", "final_master", "finalized"], "master-vs-pd": ["final_master", "finalized"],
+  "pis-diffs": ["awaiting_master_1"], "final-pis-check": ["master"],
+  "final-masters": ["master_1", "master_2", "final_master", "finalized"], "master-vs-pd": ["final_master", "finalized"],
 };
 const awaitingMasterMatch = { $or: [{ "master_workflow.cycle_version": { $ne: CYCLE_VERSION } }, { "master_workflow.stage": "awaiting_master_1" }] };
 const stageMatch = (view) => {
   if (view === "pis-diffs") return awaitingMasterMatch;
   const savedStages = { "master_workflow.cycle_version": CYCLE_VERSION, "master_workflow.stage": { $in: VIEW_STAGES[view] || [] } };
   if (view !== "final-pis-check") return savedStages;
-  return { $or: [
-    { ...savedStages, "master_workflow.stage": "master_1" },
-    { qc_mismatch_reviewed_at: { $type: "date" }, $or: [
-      { ...savedStages, "master_workflow.stage": "master" },
-      { $and: [awaitingMasterMatch, {
-        $or: [{ "master_item_sizes.0": { $exists: true } }, { "master_box_sizes.0": { $exists: true } }],
-      }] },
-    ] },
+  return { qc_mismatch_reviewed_at: { $type: "date" }, $or: [
+    { ...savedStages, "master_workflow.stage": "master" },
+    { $and: [awaitingMasterMatch, {
+      $or: [{ "master_item_sizes.0": { $exists: true } }, { "master_box_sizes.0": { $exists: true } }],
+    }] },
   ] };
 };
 
@@ -92,10 +89,7 @@ const getWorkflowRows = async ({ view, filters = {}, user = {} }) => {
     const legacyIds = new Set(legacyItems.map((item) => String(item._id)));
     const dates = await getLegacyMasterCreationDates(legacyItems);
     items = candidates.map((item) => legacyIds.has(String(item._id)) ? useLegacyMaster(item, dates.get(String(item._id))) : item)
-      .filter((item) => {
-        const stage = getWorkflow(item).stage;
-        return stage === "master_1" || (stage === "master" && item.qc_mismatch_reviewed_at);
-      });
+      .filter((item) => getWorkflow(item).stage === "master" && item.qc_mismatch_reviewed_at);
   }
   const records = await getApprovedRecords(items.filter((item) => !["final_master", "finalized"].includes(getWorkflow(item).stage)), user);
   return items.filter((item) => view !== "pis-diffs" || records.has(key(item.code)))

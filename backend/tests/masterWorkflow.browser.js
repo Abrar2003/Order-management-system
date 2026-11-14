@@ -178,8 +178,9 @@ const server = http.createServer((req, res) => {
     await checked(".mw-editor input[type=checkbox]");
     await clickButton("Confirm unchanged as Master 1");
     await waitStage("master_1");
+    await page.waitForSelector(".mw-item", { hidden: true });
     addVisits(["PO-5", "PO-6", "PO-7"]);
-    await openPage("final-pis-check");
+    await openPage("final-masters");
     await checked(".mw-editor input[type=checkbox]");
     await clickButton("Confirm unchanged as Master 2");
     await waitStage("master_2");
