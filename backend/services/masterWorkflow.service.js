@@ -11,6 +11,7 @@ const { normalizeSingleMasterSizeRemarks } = require("../helpers/masterSizeRemar
 const { normalizeVendorDisplayList } = require("../helpers/vendorRef");
 const { buildItemUpdateAuditSnapshot, buildItemUpdateLogPayload } = require("../helpers/itemUpdateAudit");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
+const { getMasterComparisonSource } = require("../helpers/qcMismatchMaster");
 const {
   CYCLE_VERSION, MASTER_FIELDS, PD_FIELDS, key, text, clone, getWorkflow,
   masterSnapshot, buildEvidence, sourceValues, compareSizes, buildPdComparison, isSuperAdmin,
@@ -62,7 +63,8 @@ const buildRow = (item, records, user) => {
 
 const getWorkflowRows = async ({ view, filters = {}, user = {} }) => {
   if (!VIEW_STAGES[view]) throw failure("Unknown workflow page.", 400);
-  const items = await Item.find(applyItemDataAccess({ $and: [buildItemMatch(filters), stageMatch(view)] }, user)).select(WORKFLOW_SELECT).sort({ code: 1 }).lean();
+  const candidates = await Item.find(applyItemDataAccess({ $and: [buildItemMatch(filters), stageMatch(view)] }, user)).select(WORKFLOW_SELECT).sort({ code: 1 }).lean();
+  const items = view === "pis-diffs" ? candidates.filter((item) => !getMasterComparisonSource(item)) : candidates;
   const records = await getApprovedRecords(items.filter((item) => !["final_master", "finalized"].includes(getWorkflow(item).stage)), user);
   return items.filter((item) => view !== "pis-diffs" || records.has(key(item.code)))
     .map((item) => buildRow(item, records.get(key(item.code)) || [], user))

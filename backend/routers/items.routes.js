@@ -52,8 +52,6 @@ const {
   updateShippingMarkUpdated,
   checkItemPis,
   updateItemPis,
-  syncAllProductDatabaseToPis,
-  syncProductDatabaseToPis,
   getItemFileUrl,
   getPendingFileApprovals,
   approveItemFile,
@@ -518,24 +516,6 @@ router.patch(
   requirePermission("pis", "edit"),
   invalidateItemsOnSuccess,
   updateItemPis,
-);
-
-router.post(
-  "/pis/sync-product-database",
-  auth,
-  requireAdminOnlyPisEdit,
-  requirePermission("pis", "edit"),
-  invalidateItemsOnSuccess,
-  syncAllProductDatabaseToPis,
-);
-
-router.post(
-  "/:id/pis/sync-product-database",
-  auth,
-  requireAdminOnlyPisEdit,
-  requirePermission("pis", "edit"),
-  invalidateItemsOnSuccess,
-  syncProductDatabaseToPis,
 );
 
 router.post(

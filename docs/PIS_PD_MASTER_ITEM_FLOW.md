@@ -13,7 +13,7 @@ Each Item's cycle starts when its first Master review is saved. PIS Diffs queues
 | Final Master | Master vs PD | Correct Final Master, open the normal PD editor, or accept each unresolved issue with a reason; sign off |
 | Current comparison signed off | Master vs PD | Finalize PIS permanently locks Final Master |
 
-Every approved item awaiting Master appears even if it has legacy masters, an old checked flag, imported data, matching measurements, or missing measurements. Existing master values remain in use until the first review; that review also preserves a legacy snapshot. Later pages show waiting progress as well as ready items. Final Master also shows created and finalized items. Only Super Admin can write master data or approve stages/sign-offs/finalization; inspection approval permissions are unchanged.
+PIS Diffs shows items awaiting Master that have approved inspection evidence and no usable Master measurements. This includes imported items and items with old checked flags if they meet those conditions. Later pages show waiting progress as well as ready items. Final Master also shows created and finalized items. Only Super Admin can write master data or approve stages/sign-offs/finalization; inspection approval permissions are unchanged.
 
 **Workflow actions write only master data and workflow history. Vendor PIS values and the PIS page are unchanged. Finalize PIS locks only Final Master.** Normal PIS edits, PD approval/editing and inspections remain available after finalization. There is no unlock action.
 
@@ -53,7 +53,7 @@ Shared implementation: backend/helpers/masterWorkflow.js, backend/services/maste
 
 | Method / route | Purpose |
 | --- | --- |
-| GET /items/pis-diffs | Awaiting Master with approved records |
+| GET /items/pis-diffs | Awaiting Master with approved records and no Master measurements |
 | GET /items/final-pis-check | Master and Master 1 items with progress toward the next stage |
 | GET /items/final-masters | Master 2 waiting/ready, Final Master created, finalized |
 | GET /items/master-vs-pd | Final Master and current PD comparison |
@@ -70,7 +70,7 @@ Legacy direct modal master updates via PATCH /items/:id/pis and the inline /fina
 
 Finalization records final_snapshot, finalized_at and finalized_by. Model middleware guards document saves, query updates, replacements and bulk writes, including parent CBM replacements and stale documents. Normalization hooks skip frozen master values, and the master remark maintenance script excludes finalized records. Application scripts must use the guarded Item model; direct database writes are outside application protections and must never be used to modify finalized masters.
 
-No migration or destructive reset is required. Deploy backend and client together. Existing masters remain available, while approved items without a current workflow appear for Master review. In-progress items continue from their saved stage. Item rows allow up to five item-size rows and four box-size rows; Inner + Master mode uses two rows and Individual + Master uses one master carton row. Existing nonnegative numeric and remark validation remains in place.
+No migration or destructive reset is required. Deploy backend and client together. In-progress items continue from their saved stage. Item rows allow up to five item-size rows and four box-size rows; Inner + Master mode uses two rows and Individual + Master uses one master carton row. Existing nonnegative numeric and remark validation remains in place.
 
 Validation: backend/tests/masterWorkflow.test.js covers the full 1 + 3 + 3 + 3 sequence, legacy and unchanged reviews, duplicate/reused POs, approval/date rules, concurrent/stale submissions, PD invalidation, tolerances/missing data, permissions, PIS preservation and locked model writes. Frontend utility tests cover master-only payloads and packaging transitions. Run backend npm test, frontend npm test and npm run build, then exercise the four pages with representative items before production rollout.
 

@@ -735,7 +735,7 @@ const capabilities = [
   capability({
     auditId: "ITM-07", id: "pis_differences", name: "PIS Diffs / Master 1 review", type: "derived_report",
     sourceClass: "DERIVED_HELPER", assistantRecommendation: "EXTRACT_TO_SERVICE_THEN_CAPABILITY",
-    description: "All approved Items awaiting their first Master review, including legacy masters, old checked flags and matching measurements.",
+    description: "Items awaiting their first Master review with approved inspection evidence and no usable Master measurements.",
     businessPurpose: "Review actual approved inspection evidence alongside PIS and existing master values.",
     collections: ["items", "inspections", "qcs"], relationships: ["qc_item_code", "qc_inspection_records"], routes: routes("/items/pis-diffs"),
     canonicalFile: "backend/services/masterWorkflow.service.js", canonicalSymbols: ["getWorkflowRows"], sourceKind: "derived_helper",
