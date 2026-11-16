@@ -1,4 +1,5 @@
 const path = require("path");
+const { parseDateOnly } = require("./dateOnly");
 
 const CLAIM_TEST_THRESHOLD = 3;
 
@@ -75,28 +76,40 @@ const getCurrentRequest = (qc = {}) => {
   };
 };
 
-const buildRequirementStatus = ({ qc, activeTests = [], claimPercentage = 0 }) => {
+const getDropTestWaiver = (passedAt, now = new Date()) => {
+  const passed = parseDateOnly(passedAt);
+  const today = parseDateOnly(now);
+  if (!passed || !today || passed > today) return null;
+  const year = passed.getUTCFullYear();
+  const month = passed.getUTCMonth() + 2;
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const expiry = new Date(Date.UTC(year, month, Math.min(passed.getUTCDate(), lastDay)));
+  if (today >= expiry) return null;
+  return {
+    passed_on: passed.toISOString().slice(0, 10),
+    expires_on: expiry.toISOString().slice(0, 10),
+  };
+};
+
+const buildRequirementStatus = ({ qc, activeTests = [], claimPercentage = 0, waiver = null }) => {
   const request = getCurrentRequest(qc);
   const completedRuns =
     (Array.isArray(qc?.test_runs) ? qc.test_runs : [])
-      .filter((run) => String(run?.request_key || "").trim() === request.key)
-      .map((run) => ({
-        test_id: String(run?.test?._id || run?.test || "").trim(),
-        version: String(run?.test_version || "").trim(),
-      }))
-      .filter((run) => run.test_id);
-  const required = requiresClaimTest(claimPercentage);
+      .filter((run) => String(run?.request_key || "").trim() === request.key);
+  const required = requiresClaimTest(claimPercentage) && !waiver;
   const tests = activeTests.map((test) => ({
     test_id: String(test?._id || test || "").trim(),
     completed: completedRuns.some(
       (run) =>
-        run.test_id === String(test?._id || test || "").trim() &&
-        run.version === String(test?.version || "").trim(),
+        String(run?.test?._id || run?.test || "").trim() === String(test?._id || test || "").trim() &&
+        String(run?.test_version || "").trim() === String(test?.version || "").trim(),
     ),
   }));
   return {
     claim_percentage: Number(claimPercentage) || 0,
     required,
+    waiver,
+    result: completedRuns.at(-1)?.result || (waiver ? "pass" : null),
     request_key: request.key,
     request_history_id: request.id,
     request_date: request.date,
@@ -116,6 +129,7 @@ module.exports = {
   buildRequirementStatus,
   getCurrentRequest,
   getDropHeights,
+  getDropTestWaiver,
   hasAllDropStages,
   isAllowedDropMedia,
   requiresClaimTest,

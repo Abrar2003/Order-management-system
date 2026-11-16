@@ -16,6 +16,9 @@ const {
   isAllowedDropMedia,
 } = require("../helpers/dropTest");
 const { deriveOrderStatus } = require("../helpers/orderStatus");
+const { runTransactionalController } = require("../helpers/transactionalController");
+const { findDropTestWaiver } = require("../services/dropTestRequirement.service");
+const { prepareVideoUpload, signVideoPart, completeVideoUpload } = require("../services/dropTestVideoUpload.service");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   createStorageKey,
@@ -63,6 +66,63 @@ const loadQc = async (qcId, user) => {
   });
   if (!qc?.order || !isQcAssignedToUser(qc, user)) return null;
   return qc;
+};
+
+const loadDropTestTarget = async (req, res) => {
+  const qc = await loadQc(req.params.qcId, req.user);
+  if (!qc) {
+    res.status(404).json({ message: "QC record not found" });
+    return null;
+  }
+  if (normalizeUserRoleKey(req.user?.role) !== "qc" || !isQcAssignedToUser(qc, req.user)) {
+    res.status(403).json({ message: "Only the assigned QC inspector can run this test" });
+    return null;
+  }
+  const testId = req.params.testId;
+  const test = mongoose.isValidObjectId(testId)
+    ? await Test.findOne({ _id: testId, type: "drop", is_active: true })
+    : null;
+  if (!test) {
+    res.status(404).json({ message: "Active Drop Test not found" });
+    return null;
+  }
+  const request = getCurrentRequest(qc);
+  if ((req.body?.request_key !== undefined && req.body.request_key !== request.key) ||
+      (req.body?.test_version !== undefined && req.body.test_version !== test.version)) {
+    res.status(409).json({ message: "The inspection request or test template changed. Reopen the Drop Test." });
+    return null;
+  }
+  return { qc, test, request, scope: {
+    qc: qc._id, test: test._id, test_version: test.version,
+    request_key: request.key, user: req.user._id || req.user.id,
+  } };
+};
+
+const sendVideoUploadError = (res, error) => {
+  if (!error.status) console.error("Drop Test video storage request failed:", error.name, error.$metadata?.httpStatusCode);
+  return res.status(error.status || 502).json({
+    message: error.status ? error.message : "Wasabi could not be reached or rejected the upload. Retry to continue.",
+  });
+};
+
+exports.prepareDropTestVideo = async (req, res) => {
+  try {
+    const target = await loadDropTestTarget(req, res);
+    if (target) return res.json({ data: await prepareVideoUpload(target.scope, req.body) });
+  } catch (error) {
+    return sendVideoUploadError(res, error);
+  }
+};
+
+exports.signDropTestVideoPart = async (req, res) => {
+  try {
+    const target = await loadDropTestTarget(req, res);
+    if (!target) return;
+    const upload_url = await signVideoPart(target.scope, req.params.uploadId, Number(req.params.partNumber));
+    return res.json({ data: { upload_url } });
+  } catch (error) {
+    return sendVideoUploadError(res, error);
+  }
 };
 
 const serializeGuide = async (guide = {}) => {
@@ -193,11 +253,9 @@ const releasePendingInspection = async ({ qc, request, user }) => {
   qc.updated_by = buildActor(user);
   await qc.save();
 
-  const [order, inspections] = await Promise.all([
-    Order.findById(qc.order),
-    Inspection.find({ qc: qc._id }).lean(),
-  ]);
+  const order = await Order.findById(qc.order);
   if (order) {
+    const inspections = await Inspection.find({ qc: qc._id }).lean();
     order.status = deriveOrderStatus({
       orderEntry: order,
       qcRecord: { ...qc.toObject(), inspection_record: inspections },
@@ -315,11 +373,12 @@ exports.getQcTests = async (req, res) => {
   try {
     const qc = await loadQc(req.params.qcId, req.user);
     if (!qc) return res.status(404).json({ message: "QC record not found" });
-    const [activeTests, claimPercentage] = await Promise.all([
+    const [activeTests, claimPercentage, waiver] = await Promise.all([
       Test.find({ is_active: true }).sort({ updatedAt: -1 }).lean(),
       getClaimPercentage(qc, req.user),
+      findDropTestWaiver(qc.item?.item_code),
     ]);
-    const requirement = buildRequirementStatus({ qc, activeTests, claimPercentage });
+    const requirement = buildRequirementStatus({ qc, activeTests, claimPercentage, waiver });
     return res.json({
       data: {
         requirement,
@@ -334,13 +393,13 @@ exports.getQcTests = async (req, res) => {
 
 exports.submitDropTestRun = async (req, res) => {
   try {
-    const qc = await loadQc(req.params.qcId, req.user);
-    if (!qc) return res.status(404).json({ message: "QC record not found" });
-    if (normalizeUserRoleKey(req.user?.role) !== "qc" || !isQcAssignedToUser(qc, req.user)) {
-      return res.status(403).json({ message: "Only the assigned QC inspector can run this test" });
+    const target = await loadDropTestTarget(req, res);
+    if (!target) return;
+    const { qc, test, request, scope } = target;
+    const runId = req.body?.run_id;
+    if (runId !== undefined && (typeof runId !== "string" || !/^[a-f0-9]{24}$/i.test(runId))) {
+      return res.status(400).json({ message: "Invalid Drop Test run ID" });
     }
-    const test = await Test.findOne({ _id: req.params.testId, type: "drop", is_active: true });
-    if (!test) return res.status(404).json({ message: "Active Drop Test not found" });
 
     const weight = Number(req.body?.gross_packed_weight_kg);
     const heights = getDropHeights(weight);
@@ -353,48 +412,74 @@ exports.submitDropTestRun = async (req, res) => {
     }
 
     const images = Array.isArray(req.files?.images) ? req.files.images : [];
-    const videos = Array.isArray(req.files?.videos) ? req.files.videos : [];
     if (!isAllowedDropMedia(images, "image")) {
       return res.status(400).json({ message: "Drop Test accepts up to 10 supported images" });
     }
-    if (!isAllowedDropMedia(videos, "video")) {
-      return res.status(400).json({ message: "Drop Test accepts up to 2 supported videos" });
+    let videoIds;
+    try {
+      videoIds = JSON.parse(req.body?.video_upload_ids ?? "[]");
+    } catch {
+      return res.status(400).json({ message: "Invalid video upload IDs" });
     }
-    const actor = buildActor(req.user);
-    const [uploadedImages, uploadedVideos] = await Promise.all([
-      uploadFiles(images, actor, "image"),
-      uploadFiles(videos, actor, "video"),
-    ]);
-    const request = getCurrentRequest(qc);
-    qc.test_runs.push({
-      test: test._id,
-      test_type: "drop",
-      test_name: test.name,
-      test_version: test.version,
-      request_history_id: request.id || null,
-      request_key: request.key,
-      request_date: request.date,
-      gross_packed_weight_kg: weight,
-      ...heights,
-      confirmed_stages: confirmedStages,
-      result,
-      images: uploadedImages,
-      videos: uploadedVideos,
-      completed_by: actor,
-      completed_at: new Date(),
-    });
-    qc.updated_by = actor;
-    await qc.save();
+    if (!Array.isArray(videoIds) || videoIds.length > 2 || new Set(videoIds).size !== videoIds.length ||
+        !videoIds.every((id) => typeof id === "string" && /^[a-f0-9]{24}$/.test(id))) {
+      return res.status(400).json({ message: "Supply up to 2 distinct video upload IDs" });
+    }
 
-    const [activeTests, claimPercentage] = await Promise.all([
-      Test.find({ is_active: true }).lean(),
-      getClaimPercentage(qc, req.user),
-    ]);
-    const requirement = buildRequirementStatus({ qc, activeTests, claimPercentage });
-    const released = requirement.required && requirement.missing_test_ids.length === 0
-      ? await releasePendingInspection({ qc, request, user: req.user })
-      : false;
-    return res.status(201).json({ data: { requirement, released } });
+    let run;
+    if (!runId || !qc.test_runs.id(runId)) {
+      if (mongoose.connection.$supportsTransactions === false) {
+        return res.status(503).json({ message: "Drop Test submissions require MongoDB transactions." });
+      }
+      const actor = buildActor(req.user);
+      let uploadedVideos;
+      try {
+        uploadedVideos = await Promise.all(videoIds.map((id) => completeVideoUpload(scope, id, actor)));
+      } catch (error) {
+        return sendVideoUploadError(res, error);
+      }
+      const uploadedImages = await uploadFiles(images, actor, "image");
+      run = {
+        _id: runId || new mongoose.Types.ObjectId(),
+        test: test._id,
+        test_type: "drop",
+        test_name: test.name,
+        test_version: test.version,
+        request_history_id: request.id || null,
+        request_key: request.key,
+        request_date: request.date,
+        gross_packed_weight_kg: weight,
+        ...heights,
+        confirmed_stages: confirmedStages,
+        result,
+        images: uploadedImages,
+        videos: uploadedVideos,
+        completed_by: actor,
+        completed_at: new Date(),
+      };
+    }
+
+    return await runTransactionalController({ connection: mongoose.connection, req, res, handler: async (req, res) => {
+      const current = await loadDropTestTarget(req, res);
+      if (!current) return;
+      if (current.request.key !== request.key || current.test.version !== test.version) {
+        return res.status(409).json({ message: "The inspection request or test template changed. Reopen the Drop Test." });
+      }
+      const savedQc = current.qc;
+      if (run && !savedQc.test_runs.id(run._id)) {
+        savedQc.test_runs.push(run);
+        savedQc.updated_by = run.completed_by;
+        await savedQc.save();
+      }
+      const activeTests = await Test.find({ is_active: true }).lean();
+      const claimPercentage = await getClaimPercentage(savedQc, req.user);
+      const waiver = await findDropTestWaiver(savedQc.item?.item_code);
+      const requirement = buildRequirementStatus({ qc: savedQc, activeTests, claimPercentage, waiver });
+      const released = requirement.missing_test_ids.length === 0
+        ? await releasePendingInspection({ qc: savedQc, request: current.request, user: req.user })
+        : false;
+      return res.status(201).json({ data: { requirement, released } });
+    } });
   } catch (error) {
     return res.status(400).json({ message: error.message || "Failed to submit Drop Test" });
   }

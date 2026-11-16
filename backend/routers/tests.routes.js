@@ -9,11 +9,13 @@ const router = express.Router();
 router.get("/", auth, requirePermission("qc", "view"), tests.getTests);
 router.post("/", auth, requirePermission("qc", "edit"), upload.safeSingle("testing_guide"), tests.createTest);
 router.get("/qc/:qcId", auth, requirePermission("qc", "view"), tests.getQcTests);
+router.post("/qc/:qcId/:testId/video-uploads", auth, requirePermission("qc", "edit"), tests.prepareDropTestVideo);
+router.post("/qc/:qcId/:testId/video-uploads/:uploadId/parts/:partNumber", auth, requirePermission("qc", "edit"), tests.signDropTestVideoPart);
 router.post(
   "/qc/:qcId/:testId/runs",
   auth,
   requirePermission("qc", "edit"),
-  upload.testMediaUpload,
+  upload.dropTestImageUpload,
   tests.submitDropTestRun,
 );
 router.patch("/:id", auth, requirePermission("qc", "edit"), upload.safeSingle("testing_guide"), tests.updateTest);

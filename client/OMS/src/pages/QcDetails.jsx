@@ -597,7 +597,14 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
   const [activeTestTemplate, setActiveTestTemplate] = useState(null);
   const [qcTests, setQcTests] = useState(null);
   const [loadingTests, setLoadingTests] = useState(false);
-  const [submittingTest, setSubmittingTest] = useState(false);
+  const testRequirement = qcTests?.requirement;
+  const dropTestResult = testRequirement?.result;
+  const dropTestStatus = loadingTests ? "Loading…" : !testRequirement ? "Unavailable" :
+    dropTestResult === "pass" ? "Pass" : dropTestResult === "fail" ? "Fail" :
+      testRequirement.missing_test_ids?.length ? "Pending" : "Not Required";
+  const dropTestWaiverText = testRequirement?.waiver
+    ? `Item passed on ${formatDateDDMMYYYY(testRequirement.waiver.passed_on)}. Waiver expires on ${formatDateDDMMYYYY(testRequirement.waiver.expires_on)}.`
+    : "";
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
   const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
@@ -1992,18 +1999,10 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
   }, [id]);
 
   const submitDropTest = useCallback(async (body) => {
-    if (!activeTestTemplate) return;
-    try {
-      setSubmittingTest(true);
-      const response = await api.post(`/tests/qc/${id}/${activeTestTemplate._id}/runs`, body);
-      setActiveTestTemplate(null);
-      await Promise.all([fetchQcDetails(), fetchQcTests()]);
-      if (response.data?.data?.released) alert("Drop Test saved and the pending inspection was completed.");
-    } catch (error) {
-      alert(error?.response?.data?.message || "Failed to submit Drop Test.");
-    } finally {
-      setSubmittingTest(false);
-    }
+    const response = await api.post(`/tests/qc/${id}/${activeTestTemplate._id}/runs`, body);
+    setActiveTestTemplate(null);
+    await Promise.all([fetchQcDetails(), fetchQcTests()]);
+    if (response.data?.data?.released) alert("Drop Test saved and the pending inspection was completed.");
   }, [activeTestTemplate, fetchQcDetails, fetchQcTests, id]);
 
   const resolveReminder = useCallback(async (reminderId) => {
@@ -3295,24 +3294,39 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
         )}
 
         <div className="card om-card qc-details-main-card">
-          <button type="button" className="qc-claim-percentage-corner-tag border-0" onClick={() => { setClaimWarningIsAutomatic(false); setClaimWarningSeconds(0); setClaimWarningOpen(true); }} title="View claim tenure details">
-            <span>Claim percentage</span>
-            <strong>{formatClaimPercentage(claimPercentage)}%</strong>
-          </button>
-          <button
-            type="button"
-            className={`qc-shipping-mark-corner-tag border-0${shippingMarkUpdated ? " is-updated" : ""}`}
-            onClick={handleShippingMarkUpdatedToggle}
-            disabled={!isAdmin || updatingShippingMark}
-            title={isAdmin ? "Toggle shipping mark status" : "Shipping mark status"}
-          >
-            <span>Shipping mark</span>
-            <strong>{shippingMarkUpdated ? "Updated" : "Not Updated"}</strong>
-          </button>
           <div className="card-body d-grid gap-4">
             <section>
-              <h3 className="h6 mb-3 qc-details-section-title">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${getOptionText(qc?.order?.vendor || qc?.order_meta?.vendor) || "N/A"} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
-              <h3 className="h6 mb-3 qc-details-section-title">{`Status: ${derivedOrderStatus} | Inspector: ${qc?.inspector?.name}${qc.request_type === "AQL" ? " | AQL" : ""}`}</h3>
+              <div className="qc-order-heading mb-3">
+                <div>
+                  <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${getOptionText(qc?.order?.vendor || qc?.order_meta?.vendor) || "N/A"} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
+                  <h3 className="h6 mb-0">{`Status: ${derivedOrderStatus} | Inspector: ${qc?.inspector?.name}${qc.request_type === "AQL" ? " | AQL" : ""}`}</h3>
+                </div>
+                <div className="qc-order-status-tags">
+                  <button
+                    type="button"
+                    className={`qc-order-status-tag border-0${dropTestResult === "pass" ? " is-updated" : dropTestResult === "fail" ? " is-failed" : ""}`}
+                    onClick={() => setShowTestsModal(true)}
+                    title={dropTestWaiverText || "View Drop Test status and history"}
+                  >
+                    <span>Drop Test</span>
+                    <strong>{dropTestStatus}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className={`qc-order-status-tag border-0${shippingMarkUpdated ? " is-updated" : ""}`}
+                    onClick={handleShippingMarkUpdatedToggle}
+                    disabled={!isAdmin || updatingShippingMark}
+                    title={isAdmin ? "Toggle shipping mark status" : "Shipping mark status"}
+                  >
+                    <span>Shipping mark</span>
+                    <strong>{shippingMarkUpdated ? "Updated" : "Not Updated"}</strong>
+                  </button>
+                  <button type="button" className="qc-claim-percentage-corner-tag border-0" onClick={() => { setClaimWarningIsAutomatic(false); setClaimWarningSeconds(0); setClaimWarningOpen(true); }} title="View claim tenure details">
+                    <span>Claim percentage</span>
+                    <strong>{formatClaimPercentage(claimPercentage)}%</strong>
+                  </button>
+                </div>
+              </div>
               <div className="qc-order-inline-grid">
                 <InfoBox compact label="Item Code" value={qc.item.item_code} />
                 <InfoBox
@@ -4009,11 +4023,13 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
                   View tests
                 </button>
               </div>
-              {loadingTests ? <div className="text-secondary small">Loading test status…</div> : qcTests?.requirement?.required ? (
+              {loadingTests ? <div className="text-secondary small">Loading test status…</div> : dropTestWaiverText ? (
+                <div className="alert alert-success py-2 mb-0">{dropTestWaiverText}</div>
+              ) : qcTests?.requirement?.required ? (
                 <div className={`alert py-2 mb-0 ${qcTests.requirement.missing_test_ids?.length ? "alert-warning" : "alert-success"}`}>
                   Claim percentage is {formatClaimPercentage(qcTests.requirement.claim_percentage)}%. {qcTests.requirement.missing_test_ids?.length ? `${qcTests.requirement.missing_test_ids.length} required test${qcTests.requirement.missing_test_ids.length === 1 ? "" : "s"} pending.` : "All required tests are complete."}
                 </div>
-              ) : <div className="text-secondary small">No test is required for a claim percentage of 3% or lower.</div>}
+              ) : <div className="text-secondary small">{testRequirement ? "No test is required for a claim percentage of 3% or lower." : "Test status is unavailable."}</div>}
             </section>
 
             {!isViewOnly && (
@@ -4112,6 +4128,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
             <div className="modal-content">
               <div className="modal-header"><h5 className="modal-title">Test dashboard</h5><button type="button" className="btn-close" onClick={() => setShowTestsModal(false)} /></div>
               <div className="modal-body">
+                {dropTestWaiverText && <div className="alert alert-success">{dropTestWaiverText}</div>}
                 {qcTests?.requirement?.required && <div className={`alert ${qcTests.requirement.missing_test_ids?.length ? "alert-warning" : "alert-success"}`}>{qcTests.requirement.missing_test_ids?.length ? "Required tests are pending; this inspection remains pending until each active test is submitted." : "Required tests are complete."}</div>}
                 <h6>Active tests</h6>
                 {(qcTests?.templates || []).map((template) => {
@@ -4127,7 +4144,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
         </div>
       )}
 
-      {activeTestTemplate && <DropTestModal template={activeTestTemplate} defaultWeight={Number(itemMasterDetails.weightGross) || 0} saving={submittingTest} onClose={() => setActiveTestTemplate(null)} onSubmit={submitDropTest} />}
+      {activeTestTemplate && testRequirement && <DropTestModal template={activeTestTemplate} defaultWeight={Number(itemMasterDetails.weightGross) || 0} endpoint={`/tests/qc/${id}/${activeTestTemplate._id}`} requestKey={testRequirement.request_key} onClose={() => setActiveTestTemplate(null)} onSubmit={submitDropTest} />}
 
 	      {inspectionRecordToUpdate &&
           !isViewOnly &&

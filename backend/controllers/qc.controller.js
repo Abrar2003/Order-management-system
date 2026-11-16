@@ -92,6 +92,7 @@ const {
   normalizeOrderStatus,
 } = require("../helpers/orderStatus");
 const { buildRequirementStatus } = require("../helpers/dropTest");
+const { findDropTestWaiver } = require("../services/dropTestRequirement.service");
 const {
   QC_IMAGE_UPLOAD_MODES,
   QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD,
@@ -7637,6 +7638,7 @@ const updateQC = async (req, res) => {
         qc,
         activeTests,
         claimPercentage: Number(claimItem?.claim_percentage || 0) || 0,
+        waiver: activeTests.length ? await findDropTestWaiver(qc?.item?.item_code, inspectionDateForRecord) : null,
       });
       const testRequirementPending =
         testRequirement.required && testRequirement.missing_test_ids.length > 0;

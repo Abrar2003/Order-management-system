@@ -4,14 +4,19 @@ const fsp = require("fs/promises");
 const { Upload } = require("@aws-sdk/lib-storage");
 const {
   S3Client,
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CopyObjectCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectVersionsCommand,
+  ListPartsCommand,
   GetBucketCorsCommand,
   PutObjectCommand,
   PutBucketCorsCommand,
+  UploadPartCommand,
 } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { logStorageDeletion } = require("./storageDeletionAudit.service");
@@ -281,6 +286,40 @@ const getPresignedUploadUrl = async (
     );
   }
 };
+
+const createMultipartUpload = async (key, contentType) => {
+  const response = await getClient().send(new CreateMultipartUploadCommand({
+    Bucket: getConfig().bucket, Key: key, ContentType: contentType,
+  }), { abortSignal: AbortSignal.timeout(30_000) });
+  if (!response.UploadId) throw new Error("Wasabi did not return an upload ID");
+  return response.UploadId;
+};
+
+const getPresignedPartUrl = (key, uploadId, partNumber, size) => getSignedUrl(
+  getClient(),
+  new UploadPartCommand({
+    Bucket: getConfig().bucket, Key: key, UploadId: uploadId, PartNumber: partNumber,
+    ContentLength: size,
+  }),
+  { expiresIn: 3600, signableHeaders: new Set(["content-length"]) },
+);
+
+const listMultipartParts = async (key, uploadId) => {
+  const response = await getClient().send(new ListPartsCommand({
+    Bucket: getConfig().bucket, Key: key, UploadId: uploadId,
+  }), { abortSignal: AbortSignal.timeout(30_000) });
+  // Drop Test uploads use at most 172 parts, well below the ListParts page size.
+  return response.Parts || [];
+};
+
+const completeMultipartUpload = (key, uploadId, parts) => getClient().send(new CompleteMultipartUploadCommand({
+  Bucket: getConfig().bucket, Key: key, UploadId: uploadId,
+  MultipartUpload: { Parts: parts },
+}), { abortSignal: AbortSignal.timeout(30_000) });
+
+const abortMultipartUpload = (key, uploadId) => getClient().send(new AbortMultipartUploadCommand({
+  Bucket: getConfig().bucket, Key: key, UploadId: uploadId,
+}), { abortSignal: AbortSignal.timeout(15_000) });
 
 const copyObject = async (sourceKey, key, etag) => {
   const { bucket } = getConfig();
@@ -754,6 +793,11 @@ module.exports = {
   getObjectUrl,
   getSignedObjectUrl,
   getPresignedUploadUrl,
+  createMultipartUpload,
+  getPresignedPartUrl,
+  listMultipartParts,
+  completeMultipartUpload,
+  abortMultipartUpload,
   copyObject,
   getObjectBuffer,
   getObjectMetadata,

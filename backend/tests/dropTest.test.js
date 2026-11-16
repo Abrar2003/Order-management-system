@@ -5,6 +5,7 @@ const {
   DROP_TEST_STAGES,
   buildRequirementStatus,
   getDropHeights,
+  getDropTestWaiver,
   hasAllDropStages,
   isAllowedDropMedia,
   requiresClaimTest,
@@ -62,8 +63,24 @@ test("a failed completed test releases the shared QC completion gate", () => {
     },
   });
   assert.deepEqual(requirement.missing_test_ids, []);
+  assert.equal(requirement.result, "fail");
 
   const order = { quantity: 10, shipment: [] };
   assert.equal(deriveOrderStatus({ orderEntry: order, qcRecord: { quantities: { qc_passed: 10 }, test_requirement_pending: true } }), "Under Inspection");
   assert.equal(deriveOrderStatus({ orderEntry: order, qcRecord: { quantities: { qc_passed: 10 } } }), "Inspection Done");
+});
+
+test("a pass waives the requirement until the two-calendar-month anniversary", () => {
+  const qc = { _id: "another-po", request_date: "2026-02-27" };
+  const activeTests = [{ _id: "drop-test", version: "2" }];
+  const passedOn = "2025-12-31";
+  const waiver = getDropTestWaiver(passedOn, "2026-02-27");
+  assert.deepEqual(waiver, { passed_on: passedOn, expires_on: "2026-02-28" });
+  const covered = buildRequirementStatus({ qc, activeTests, claimPercentage: 6, waiver });
+  assert.equal(covered.required, false);
+  assert.equal(covered.result, "pass");
+  assert.deepEqual(covered.missing_test_ids, []);
+  const expired = getDropTestWaiver(passedOn, "2026-02-28");
+  assert.equal(expired, null);
+  assert.deepEqual(buildRequirementStatus({ qc, activeTests, claimPercentage: 6, waiver: expired }).missing_test_ids, ["drop-test"]);
 });

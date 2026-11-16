@@ -1,5 +1,6 @@
 const path = require("path");
 const multer = require("multer");
+const { isAllowedDropMedia } = require("../helpers/dropTest");
 const {
   QC_IMAGE_MIME_TYPES,
   QC_IMAGE_EXTENSIONS,
@@ -421,12 +422,20 @@ module.exports.handleComplaintUploadErrors = handleComplaintUploadErrors;
 module.exports.handleSampleUploadErrors = handleSampleUploadErrors;
 module.exports.complaintFilesUpload = (fieldName = "files") =>
   applyComplaintMulterMiddleware(complaintUpload.array(fieldName, COMPLAINT_UPLOAD_MAX_FILE_COUNT));
-module.exports.testMediaUpload = applyComplaintMulterMiddleware(
-  complaintUpload.fields([
-    { name: "images", maxCount: 10 },
-    { name: "videos", maxCount: 2 },
-  ]),
-);
+const dropTestImages = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 10, fileSize: COMPLAINT_UPLOAD_MAX_FILE_SIZE, fields: 10, fieldSize: 4096 },
+  fileFilter: (_req, file, cb) => {
+    if (isAllowedDropMedia([file], "image")) return cb(null, true);
+    return cb(new Error("Drop Test images must be JPEG, PNG, or WebP"));
+  },
+}).fields([{ name: "images", maxCount: 10 }]);
+module.exports.dropTestImageUpload = (req, res, next) => dropTestImages(req, res, (error) => {
+  if (!error) return next();
+  return res.status(400).json({
+    message: error.field === "videos" ? "Upload Drop Test videos directly to Wasabi and attach their upload IDs" : error.message,
+  });
+});
 module.exports.sampleFilesUpload = (fieldName = "files") =>
   applySampleMulterMiddleware(sampleUpload.array(fieldName, SAMPLE_UPLOAD_MAX_FILE_COUNT));
 module.exports.QC_IMAGE_TEMP_DIR = QC_IMAGE_TEMP_DIR;

@@ -507,11 +507,26 @@ small,
   position: relative;
 }
 
+.qc-order-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+}
+
+.qc-order-heading > :first-child {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.qc-order-status-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
 .qc-claim-percentage-corner-tag {
-  position: absolute;
-  z-index: 2;
-  top: 1rem;
-  right: 1rem;
   display: grid;
   min-width: 9.5rem;
   padding: 0.65rem 1rem;
@@ -536,11 +551,7 @@ small,
   line-height: 1;
 }
 
-.qc-shipping-mark-corner-tag {
-  position: absolute;
-  z-index: 2;
-  top: 1rem;
-  right: 11.5rem;
+.qc-order-status-tag {
   display: grid;
   min-width: 9.5rem;
   padding: 0.65rem 1rem;
@@ -552,53 +563,36 @@ small,
   text-align: center;
 }
 
-.qc-shipping-mark-corner-tag.is-updated {
+.qc-order-status-tag.is-updated {
   border-color: rgba(22, 163, 74, 0.35);
   background: linear-gradient(145deg, #f0fdf4, #dcfce7);
   color: #15803d;
 }
 
-.qc-shipping-mark-corner-tag span {
+.qc-order-status-tag.is-failed {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.qc-order-status-tag span {
   font-size: 0.65rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.qc-shipping-mark-corner-tag strong {
+.qc-order-status-tag strong {
   margin-top: 0.12rem;
   font-size: 1rem;
   line-height: 1.1;
 }
 
-.qc-shipping-mark-corner-tag:disabled {
+.qc-order-status-tag:disabled {
   cursor: default;
 }
 
 .qc-details-main-card > .card-body {
   padding-top: 1.35rem;
-}
-
-.qc-details-main-card .qc-details-section-title {
-  padding-right: 21rem;
-}
-
-@media (max-width: 767.98px) {
-  .qc-claim-percentage-corner-tag {
-    position: static;
-    width: fit-content;
-    margin: 1rem 1rem 0 auto;
-  }
-
-  .qc-shipping-mark-corner-tag {
-    position: static;
-    width: fit-content;
-    margin: 1rem 1rem 0 auto;
-  }
-
-  .qc-details-main-card .qc-details-section-title {
-    padding-right: 0;
-  }
 }
 
 .qc-claim-warning-modal {

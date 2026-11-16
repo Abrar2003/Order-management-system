@@ -1,5 +1,5 @@
 import axios from "axios";
-import api from "../api/axios";
+import api from "../api/axios.js";
 
 export const MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST = 100;
 export const QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD = 150;
@@ -7,7 +7,7 @@ export const HARDWARE_INSPECTION_IMAGE_LIMIT = 6;
 export const QC_IMAGE_BATCH_SIZE = 10;
 export const QC_IMAGE_DIRECT_UPLOAD_CONCURRENCY = 3;
 export const QC_IMAGE_ENABLE_AVIF_UPLOADS =
-  String(import.meta.env.VITE_QC_IMAGE_ENABLE_AVIF_UPLOADS || "")
+  String(import.meta.env?.VITE_QC_IMAGE_ENABLE_AVIF_UPLOADS || "")
     .trim()
     .toLowerCase() === "true";
 export const SUPPORTED_QC_IMAGE_EXTENSIONS = [
@@ -205,6 +205,7 @@ export const uploadFileToPresignedWasabiUrl = async ({
   headers = {},
   signal,
   onUploadProgress,
+  timeout = 5 * 60 * 1000,
 } = {}) =>
   axios.put(uploadUrl, file, {
     headers: {
@@ -212,7 +213,7 @@ export const uploadFileToPresignedWasabiUrl = async ({
       "Content-Type": normalizeText(headers?.["Content-Type"] || file?.type || "application/octet-stream"),
     },
     signal,
-    timeout: 5 * 60 * 1000,
+    timeout,
     onUploadProgress,
   });
 
