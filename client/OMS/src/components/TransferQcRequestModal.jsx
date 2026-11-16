@@ -91,7 +91,9 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
 
   const requestRows = useMemo(() => {
     const requestHistory = Array.isArray(qc?.request_history) ? qc.request_history : [];
-    const latestRequestId = requestHistory[requestHistory.length - 1]?._id;
+    const latestRequestId =
+      qc?.latest_request_history_id ??
+      requestHistory[requestHistory.length - 1]?._id;
 
     return requestHistory.map((entry) => {
       const requestHistoryId = String(entry?._id || "").trim();
@@ -122,7 +124,7 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
           requestedQuantity > 0,
       };
     });
-  }, [qc?.request_history]);
+  }, [qc?.request_history, qc?.latest_request_history_id]);
 
   const handleToggleRequest = (requestId) => {
     setSelectedRequestIds((previous) =>

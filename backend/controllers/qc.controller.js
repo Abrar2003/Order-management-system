@@ -13651,6 +13651,8 @@ exports.getQCById = async (req, res) => {
             }
           : qcData?.rejected_image || null,
         labels: sortedLabels,
+        latest_request_history_id:
+          resolveLatestRequestEntry(qcData.request_history)?._id || null,
         request_history: sortedRequestHistory,
         inspection_record: signedInspectionRecords.map((record) => ({ ...record, ...getInspectionPassedFields(record, qcData) })),
       },
