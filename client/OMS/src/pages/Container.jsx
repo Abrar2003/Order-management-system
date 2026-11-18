@@ -43,6 +43,19 @@ const getShippedQuantity = (shipmentEntries) =>
 const toErrorMessage = (err, fallback) =>
   err?.response?.data?.message || err?.message || fallback;
 
+const shipmentRequestError = (error) => {
+  const status = error?.response?.status;
+  if (!status || status === 408 || status >= 500) {
+    const reason = status
+      ? "The server could not confirm the shipment."
+      : "No response was received for this shipment.";
+    return `${reason} Check the order or sample shipment history before trying again.`;
+  }
+  const message = error.response.data?.message;
+  if (typeof message === "string" && message.trim()) return message;
+  return "The server rejected this shipment. Review the shipment details and try again.";
+};
+
 const normalizeSearchParam = (value) => String(value || "").trim();
 
 const normalizeFilterParam = (value, fallback = "all") => {
@@ -96,6 +109,7 @@ const Container = () => {
   const [eudrNeeded, setEudrNeeded] = useState(false);
   const [woodDrafts, setWoodDrafts] = useState({});
   const [error, setError] = useState("");
+  const [failedShipments, setFailedShipments] = useState([]);
   const [success, setSuccess] = useState("");
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [sortBy, setSortBy] = useState("orderId");
@@ -435,10 +449,11 @@ const Container = () => {
   }));
   const selectedTimberMilliCft = previewRows.reduce((sum, row) => row.timberCft == null || !Number.isFinite(row.timberCft) ? sum : sum + Math.round(row.timberCft * 1000 * row.quantity), 0);
   const selectedMissingTimberCft = previewRows.filter(row => row.timberCft == null || !Number.isFinite(row.timberCft)).length;
-  const selectedItems = [...new Map(selectedRows.map(row => [row.itemCode, row])).values()];
+  const selectedItems = new Map(selectedRows.map(row => [row.itemCode, row]));
 
   const handleBulkFinalize = async () => {
     setError("");
+    setFailedShipments([]);
     setSuccess("");
 
     if (!canFinalizeShipping) {
@@ -483,30 +498,33 @@ const Container = () => {
       return;
     }
 
-    const invalidRow = selectedRows.find(
-      (row) => row.quantity <= 0 || row.quantity > row.maxQuantity,
-    );
-    if (invalidRow) {
-      setError(
-        `Invalid quantity for ${invalidRow.orderId} / ${invalidRow.itemCode}.`,
-      );
-      return;
-    }
-
+    setSaving(true);
     try {
-      const eudrByItem = new Map(selectedItems.map(row => [row.itemCode,
-        eudrShipmentPayload(eudrNeeded, woodDrafts[row.itemCode] || row.wood || woodForm()),
-      ]));
-      setSaving(true);
-
-      const results = [];
+      const failures = [];
+      let succeededCount = 0;
+      let attemptedRequest = false;
       // Save sequentially because different POs may update the same item's wood metadata.
       for (const row of selectedRows) {
+        if (row.quantity > row.maxQuantity) {
+          failures.push({ row, message: `Quantity ${row.quantity} exceeds the available quantity of ${row.maxQuantity}.` });
+          continue;
+        }
+
+        let eudrPayload;
+        try {
+          const wood = woodDrafts[row.itemCode] || selectedItems.get(row.itemCode).wood || woodForm();
+          eudrPayload = eudrShipmentPayload(eudrNeeded, wood);
+        } catch (error) {
+          failures.push({ row, message: error.message });
+          continue;
+        }
+
+        attemptedRequest = true;
         try {
           await api.patch(row.lineType === "sample"
             ? `/samples/${row.orderDocumentId}/finalize-shipment`
             : `/orders/finalize-order/${row.orderDocumentId}`, {
-            ...eudrByItem.get(row.itemCode),
+            ...eudrPayload,
             stuffing_date: shippingDateIso,
             container,
             invoice_number: invoiceNumberValue,
@@ -514,40 +532,23 @@ const Container = () => {
             quantity: row.quantity,
             remarks: row.lineType === "sample" ? row.itemDescription || "Bulk container shipment" : "Bulk container shipment",
           });
-          results.push({ status: "fulfilled" });
-        } catch (reason) {
-          results.push({ status: "rejected", reason });
+          succeededCount += 1;
+        } catch (error) {
+          failures.push({ row, message: shipmentRequestError(error) });
         }
       }
 
-      const failed = results.filter((entry) => entry.status === "rejected");
-      const succeededCount = results.length - failed.length;
-
+      setFailedShipments(failures);
       if (succeededCount > 0) {
         setSuccess(
           `${succeededCount} shipment${succeededCount > 1 ? "s" : ""} added to container ${container}.`,
         );
       }
 
-      if (failed.length > 0) {
-        const failMessage = failed
-          .slice(0, 3)
-          .map((entry) =>
-            toErrorMessage(
-              entry.reason,
-              "One shipment failed during bulk finalize.",
-            ),
-          )
-          .join(" | ");
-        setError(
-          `${failed.length} shipment${failed.length > 1 ? "s" : ""} failed. ${failMessage}`,
-        );
+      if (attemptedRequest) {
+        setSampleRows([]);
+        await fetchVendorRows(vendor);
       }
-
-      setSampleRows([]);
-      await fetchVendorRows(vendor);
-    } catch (err) {
-      setError(toErrorMessage(err, "Failed to finalize shipments."));
     } finally {
       setSaving(false);
     }
@@ -727,7 +728,7 @@ const Container = () => {
             {!isViewOnly && canFinalizeShipping && <>
               <label className="form-check mb-3"><input type="checkbox" className="form-check-input" checked={eudrNeeded} onChange={e => setEudrNeeded(e.target.checked)} disabled={saving} />EUDR needed</label>
               {eudrNeeded && <p className="small text-secondary">Select items below, then fill CFT per item, wood type and HSN for each selected item. These details will be saved to the items.</p>}
-              {eudrNeeded && selectedItems.map(row => <div className="mb-3" key={row.itemCode}>
+              {eudrNeeded && [...selectedItems.values()].map(row => <div className="mb-3" key={row.itemCode}>
                 <h6>{row.itemCode} — {row.itemDescription}</h6>
                 <ProductWoodFields value={woodDrafts[row.itemCode] || row.wood || woodForm()} onChange={value => setWoodDrafts(prev => ({ ...prev, [row.itemCode]: value }))} disabled={saving} />
               </div>)}
@@ -781,8 +782,18 @@ const Container = () => {
           </div>
         </div>
 
-        {error && <div className="alert alert-danger mb-3">{error}</div>}
-        {success && <div className="alert alert-success mb-3">{success}</div>}
+        {error && <div className="alert alert-danger mb-3" role="alert">{error}</div>}
+        {success && <div className="alert alert-success mb-3" role="status">{success}</div>}
+        {failedShipments.length > 0 && (
+          <div className="alert alert-danger mb-3" role="alert">
+            <strong>{failedShipments.length} shipment{failedShipments.length === 1 ? "" : "s"} could not be finalized.</strong>
+            <ul className="mb-0 mt-1">
+              {failedShipments.map(({ row, message }) => (
+                <li key={row.id}><strong>{row.orderId} / {row.itemCode}</strong> — {message}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="card om-card">
           <div className="card-body p-0">

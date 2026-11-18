@@ -862,9 +862,10 @@ exports.finalizeSampleShipment = async (req, res) => {
       data: serializeSample(sample),
     });
   } catch (error) {
-    return res.status(error.statusCode || (isBadRequestError(error) ? 400 : 500)).json({
+    const status = error.statusCode || (isBadRequestError(error) ? 400 : 500);
+    return res.status(status).json({
       success: false,
-      message: error.statusCode === 400 ? error.message : "Failed to finalize sample shipment",
+      message: status === 400 ? error.message : "Failed to finalize sample shipment",
       error: error.message,
     });
   }

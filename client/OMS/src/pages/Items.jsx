@@ -54,7 +54,15 @@ const normalizeFilterParam = (value, fallback = "all") => {
   return cleaned;
 };
 
-const normalizeSearchParam = (value) => String(value || "").trim();
+const ITEM_SEARCH_FIELDS = [
+  ["code", "Item Code"],
+  ["name", "Name"],
+  ["description", "Description"],
+  ["barcode", "Barcode"],
+];
+const ITEM_SEARCH_KEYS = ["search", ...ITEM_SEARCH_FIELDS.map(([key]) => key)];
+const readItemSearch = (params) =>
+  Object.fromEntries(ITEM_SEARCH_KEYS.map((key) => [key, params.get(key)?.trim() || ""]));
 
 const downloadBlobResponse = (response, fallbackName) => {
   const disposition = String(response?.headers?.["content-disposition"] || "");
@@ -449,12 +457,8 @@ const Items = () => {
   const [updatingShippingMarkItemId, setUpdatingShippingMarkItemId] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [searchInput, setSearchInput] = useState(() =>
-    normalizeSearchParam(searchParams.get("search")),
-  );
-  const [draftSearchInput, setDraftSearchInput] = useState(() =>
-    normalizeSearchParam(searchParams.get("search")),
-  );
+  const [itemSearch, setItemSearch] = useState(() => readItemSearch(searchParams));
+  const [draftItemSearch, setDraftItemSearch] = useState(itemSearch);
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("brand"), "all"),
   );
@@ -502,7 +506,7 @@ const Items = () => {
 
       const res = await api.get("/items", {
         params: {
-          search: searchInput,
+          ...itemSearch,
           brand: brandFilter,
           vendor: vendorFilter,
           country: countryFilter,
@@ -539,7 +543,7 @@ const Items = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, countryFilter, limit, page, searchInput, vendorFilter, workloadStatus, workloadTask]);
+  }, [brandFilter, countryFilter, itemSearch, limit, page, vendorFilter, workloadStatus, workloadTask]);
 
   useEffect(() => {
     fetchItems();
@@ -576,7 +580,7 @@ const Items = () => {
     const currentQuery = searchParams.toString();
     if (syncedQuery === currentQuery) return;
 
-    const nextSearchInput = normalizeSearchParam(searchParams.get("search"));
+    const nextItemSearch = readItemSearch(searchParams);
     const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
     const nextCountryFilter = normalizeFilterParam(
@@ -586,8 +590,10 @@ const Items = () => {
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
     const nextLimit = parseLimit(searchParams.get("limit"));
 
-    setSearchInput((prev) => (prev === nextSearchInput ? prev : nextSearchInput));
-    setDraftSearchInput((prev) => (prev === nextSearchInput ? prev : nextSearchInput));
+    setItemSearch((prev) =>
+      ITEM_SEARCH_KEYS.every((key) => prev[key] === nextItemSearch[key]) ? prev : nextItemSearch,
+    );
+    setDraftItemSearch(nextItemSearch);
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
@@ -604,10 +610,10 @@ const Items = () => {
     if (syncedQuery !== currentQuery) return;
 
     const next = new URLSearchParams();
-    const searchValue = normalizeSearchParam(searchInput);
-
     next.set("country", countryFilter);
-    if (searchValue) next.set("search", searchValue);
+    for (const [key, value] of Object.entries(itemSearch)) {
+      if (value) next.set(key, value);
+    }
     if (brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
     if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
     if (workloadTask) {
@@ -623,9 +629,9 @@ const Items = () => {
   }, [
     brandFilter,
     countryFilter,
+    itemSearch,
     limit,
     page,
-    searchInput,
     searchParams,
     setSearchParams,
     syncedQuery,
@@ -670,7 +676,7 @@ const Items = () => {
       const response = await api.get("/items/export", {
         responseType: "blob",
         params: {
-          search: searchInput,
+          ...itemSearch,
           brand: brandFilter,
           vendor: vendorFilter,
           country: countryFilter,
@@ -691,25 +697,27 @@ const Items = () => {
     } finally {
       setExporting(false);
     }
-  }, [brandFilter, countryFilter, searchInput, vendorFilter]);
+  }, [brandFilter, countryFilter, itemSearch, vendorFilter]);
 
   const handleApplyFilters = useCallback((event) => {
     event?.preventDefault();
     setPage(1);
-    setSearchInput(normalizeSearchParam(draftSearchInput));
+    setItemSearch(Object.fromEntries(
+      ITEM_SEARCH_FIELDS.map(([key]) => [key, draftItemSearch[key]?.trim() || ""]),
+    ));
     setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
     setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
     setCountryFilter(normalizeFilterParam(draftCountryFilter, DEFAULT_COUNTRY_FILTER));
     setSuccess("");
-  }, [draftBrandFilter, draftCountryFilter, draftSearchInput, draftVendorFilter]);
+  }, [draftBrandFilter, draftCountryFilter, draftItemSearch, draftVendorFilter]);
 
   const handleClearFilters = useCallback(() => {
     setPage(1);
-    setDraftSearchInput("");
+    setDraftItemSearch({});
     setDraftBrandFilter("all");
     setDraftVendorFilter("all");
     setDraftCountryFilter(DEFAULT_COUNTRY_FILTER);
-    setSearchInput("");
+    setItemSearch({});
     setBrandFilter("all");
     setVendorFilter("all");
     setCountryFilter(DEFAULT_COUNTRY_FILTER);
@@ -1081,23 +1089,28 @@ const Items = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
-              <div className="col-md-3">
-                <label className="form-label">Search (Code / Name / Description / Barcode)</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={draftSearchInput}
-                  list="item-code-options"
-                  placeholder="Search items"
-                  onChange={(e) => setDraftSearchInput(e.target.value)}
-                />
-                <datalist id="item-code-options">
-                  {itemCodeOptions.map((code) => (
-                    <option key={code} value={code} />
-                  ))}
-                </datalist>
-              </div>
-              <div className="col-md-2">
+              {itemSearch.search && (
+                <div className="col-12 small">General search: {itemSearch.search}</div>
+              )}
+              {ITEM_SEARCH_FIELDS.map(([key, label]) => (
+                <div className="col-sm-6 col-md-3" key={key}>
+                  <label className="form-label" htmlFor={`items-filter-${key}`}>{label}</label>
+                  <input
+                    id={`items-filter-${key}`}
+                    type="text"
+                    className="form-control"
+                    value={draftItemSearch[key] || ""}
+                    list={key === "code" ? "item-code-options" : undefined}
+                    onChange={(e) => setDraftItemSearch({ ...draftItemSearch, [key]: e.target.value })}
+                  />
+                </div>
+              ))}
+              <datalist id="item-code-options">
+                {itemCodeOptions.map((code) => (
+                  <option key={code} value={code} />
+                ))}
+              </datalist>
+              <div className="col-sm-6 col-md-3">
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
@@ -1112,7 +1125,7 @@ const Items = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-2">
+              <div className="col-sm-6 col-md-3">
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
@@ -1127,7 +1140,7 @@ const Items = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-2">
+              <div className="col-sm-6 col-md-3">
                 <label className="form-label">Country of Origin</label>
                 <select
                   className="form-select"
@@ -1142,13 +1155,13 @@ const Items = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-3 d-grid gap-2">
-                <button type="submit" className="btn btn-primary" disabled={loading}>
+              <div className="col-sm-6 col-md-3 d-flex gap-2">
+                <button type="submit" className="btn btn-primary flex-fill" disabled={loading}>
                   Apply
                 </button>
                 <button
                   type="button"
-                  className="btn btn-outline-secondary"
+                  className="btn btn-outline-secondary flex-fill"
                   onClick={handleClearFilters}
                   disabled={loading}
                 >

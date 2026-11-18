@@ -85,6 +85,10 @@ test("sample shipping validates and saves EUDR details on the same sample", asyn
   t.mock.method(Species, "countDocuments", async () => 1);
   const save = t.mock.method(sample, "save", async () => sample);
   let res = response();
+  await finalizeSampleShipment({ params: { id }, user, body: { ...shipping, container: "invalid" } }, res);
+  assert.equal(res.code, 400);
+  assert.match(res.body.message, /container number must be in the format/);
+  res = response();
   await finalizeSampleShipment({ params: { id }, user, body: { ...shipping, eudr_needed: true } }, res);
   assert.equal(res.code, 400);
   assert.equal(save.mock.calls.length, 0);

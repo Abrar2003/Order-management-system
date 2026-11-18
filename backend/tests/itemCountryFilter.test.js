@@ -41,6 +41,29 @@ test("item search matches every current barcode variant", () => {
   });
 });
 
+test("specific item search fields match independently and combine with other filters", () => {
+  const barcodeMatch = buildItemMatch({ barcode: " 001234 " });
+  const legacyMatch = buildItemMatch({ search: "001234" });
+  assert.deepEqual(barcodeMatch.$or, legacyMatch.$or.slice(5));
+
+  assert.deepEqual(buildItemMatch({
+    code: " A.1 ",
+    name: "Chair",
+    description: "Solid oak",
+    barcode: "001234",
+    country: "India",
+  }), {
+    $and: [
+      { code: { $regex: "A\\.1", $options: "i" } },
+      { name: { $regex: "Chair", $options: "i" } },
+      { description: { $regex: "Solid oak", $options: "i" } },
+      barcodeMatch,
+      buildItemMatch({ country: "India" }),
+    ],
+  });
+  assert.deepEqual(buildItemMatch({ code: [".*"], name: " ", barcode: { $ne: "" } }), {});
+});
+
 test("item country filter matches country of origin case-insensitively", () => {
   assert.deepEqual(buildItemMatch({ country: " India " }), {
     country_of_origin: {

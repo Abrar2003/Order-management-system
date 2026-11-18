@@ -302,7 +302,7 @@ const Samples = () => {
                           <span className="badge bg-success-subtle text-success border border-success-subtle d-inline-flex align-items-center">
                             Converted (
                             <a
-                              href={`/items?search=${encodeURIComponent(sample.converted_item.code)}`}
+                              href={`/items?code=${encodeURIComponent(sample.converted_item.code)}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-decoration-none text-success fw-bold ms-1"

@@ -3191,10 +3191,8 @@ exports.approveProductDatabaseItem = async (req, res) => {
 
 exports.getItems = async (req, res) => {
   try {
-    const search = req.query.search;
-    const brand = req.query.brand;
-    const vendor = req.query.vendor;
-    const country = req.query.country;
+    const { search, code, name, description, barcode, brand, vendor, country } = req.query;
+    const textFilters = { search, code, name, description, barcode };
     const fileType = req.query.file_type ?? req.query.fileType;
     const fileStatus = req.query.file_status ?? req.query.fileStatus;
     const workloadTask = req.query.workload_task ?? req.query.workloadTask;
@@ -3209,22 +3207,22 @@ exports.getItems = async (req, res) => {
       return res.status(400).json({ message: "Invalid workload task or status" });
     }
     const match = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, brand, vendor, country }), req.user),
+      applyItemDataAccess(buildItemMatch({ ...textFilters, brand, vendor, country }), req.user),
       fileViewMatch,
       workloadTaskMatch,
     );
     const brandOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, vendor, country }), req.user),
+      applyItemDataAccess(buildItemMatch({ ...textFilters, vendor, country }), req.user),
       fileViewMatch,
       workloadTaskMatch,
     );
     const vendorOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ search, brand, country }), req.user),
+      applyItemDataAccess(buildItemMatch({ ...textFilters, brand, country }), req.user),
       fileViewMatch,
       workloadTaskMatch,
     );
     const codeOptionsMatch = combineMongoMatches(
-      applyItemDataAccess(buildItemMatch({ brand, vendor, country }), req.user),
+      applyItemDataAccess(buildItemMatch({ name, description, barcode, brand, vendor, country }), req.user),
       fileViewMatch,
       workloadTaskMatch,
     );
@@ -3329,9 +3327,9 @@ const buildItemPoStatusSummary = (orders = []) => {
   return { summary, currentRunningPos };
 };
 
-const getItemsExportDataset = async ({ search, brand, vendor, country, user } = {}) => {
+const getItemsExportDataset = async (filters, user) => {
   const items = await Item.find(
-    applyItemDataAccess(buildItemMatch({ search, brand, vendor, country }), user),
+    applyItemDataAccess(buildItemMatch(filters), user),
   )
     .sort({ updatedAt: -1, code: 1 })
     .lean();
@@ -3368,13 +3366,7 @@ const getItemsExportDataset = async ({ search, brand, vendor, country, user } = 
 
 exports.exportItems = async (req, res) => {
   try {
-    const dataset = await getItemsExportDataset({
-      search: req.query.search,
-      brand: req.query.brand,
-      vendor: req.query.vendor,
-      country: req.query.country,
-      user: req.user,
-    });
+    const dataset = await getItemsExportDataset(req.query, req.user);
     // ponytail: Excel cells max at 32,767 characters; add chunked raw-data sheets if an item exceeds it.
     const stringifyForExport = (value) => {
       try {

@@ -489,7 +489,7 @@ const InspectedItemsReport = () => {
                           {row.code ? (
                             <Link
                               className="text-reset om-etd-history-label"
-                              to={`/items?search=${encodeURIComponent(row.code)}&country=${encodeURIComponent(countryFilter)}`}
+                              to={`/items?code=${encodeURIComponent(row.code)}&country=${encodeURIComponent(countryFilter)}`}
                             >
                               {row.code}
                             </Link>

@@ -25,6 +25,13 @@ const server = http.createServer((req, res) => {
   const order = { _id: id, order_id: "PO-EUDR", item: { item_code: "TABLE", description: "Table" }, quantity: 10, order_quantity: 10,
     status: "Inspection Done", shippable_quantity: 10, passed_quantity: 10, shipment: [], vendor: "Test Vendor", line_type: "order" };
   const sample = { _id: id, code: "SAMPLE-EUDR", brand: "Giga", name: "Sample", shipment: [] };
+  const bulkRejections = [
+    { orderId: "PO-DATE", itemCode: "CHAIR", status: 400, message: "Stuffing date cannot be before the inspection passed date (18/11/2026)." },
+    { orderId: "PO-QUANTITY", itemCode: "DESK", status: 400, message: "shipping quantity cannot exceed available qc passed quantity" },
+    { orderId: "PO-CLOSED", itemCode: "BENCH", status: 400, message: "Order is already closed" },
+    { orderId: "PO-NETWORK", itemCode: "STOOL", message: "No response was received for this shipment." },
+  ].map((row, index) => ({ ...row, id: String(index + 1).padStart(24, "0") }));
+  let rejectBulkRows = false;
   let browser;
   try {
     browser = await puppeteer.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
@@ -36,7 +43,7 @@ const server = http.createServer((req, res) => {
     page.on("request", request => {
       const url = new URL(request.url()), route = url.pathname.replace(/^\/api/, "");
       if (url.origin === origin && request.isNavigationRequest()) return request.continue();
-      const respond = body => request.respond({ status: 200, contentType: "application/json", headers: {
+      const respond = (body, status = 200) => request.respond({ status, contentType: "application/json", headers: {
         "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Headers": "content-type", "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
       }, body: JSON.stringify(body) });
@@ -47,6 +54,8 @@ const server = http.createServer((req, res) => {
       if (request.method() === "OPTIONS") return respond({});
       if (request.method() === "PATCH" || request.method() === "POST" && route === "/samples") {
         mutations.push(JSON.parse(request.postData()));
+        const rejection = rejectBulkRows && bulkRejections.find(row => route === `/orders/finalize-order/${row.id}`);
+        if (rejection) return rejection.status ? respond({ message: rejection.message }, rejection.status) : request.abort();
         return respond({ data: sample });
       }
       if (route.startsWith("/auth/")) return respond({ user: { id, role: "super_admin", name: "Admin", brand_scope: "all" } });
@@ -58,6 +67,10 @@ const server = http.createServer((req, res) => {
       if (route === "/qc/list") return respond({ data: [
         { order, item: order.item, quantities: { qc_passed: 10, client_demand: 10 } },
         { order: { ...order, _id: species._id, order_id: "PO-SECOND" }, item: order.item, quantities: { qc_passed: 10, client_demand: 10 } },
+        ...(rejectBulkRows ? bulkRejections.map(row => ({
+          order: { ...order, _id: row.id, order_id: row.orderId },
+          item: { item_code: row.itemCode }, quantities: { qc_passed: 10, client_demand: 10 },
+        })) : []),
       ], pagination: { totalPages: 1 } });
       if (route === "/samples") return respond({ data: [sample], pagination: { totalPages: 1 } });
       if (url.origin !== origin || url.pathname.startsWith("/api/")) return respond({ data: [], unreadCount: 0 });
@@ -133,10 +146,28 @@ const server = http.createServer((req, res) => {
     const before = mutations.length;
     await click("Finalize Bulk");
     await page.waitForFunction(() => document.querySelector(".alert-danger")?.textContent.includes("CFT per item"));
+    assert.deepEqual(await page.$$eval(".alert-danger li strong", nodes => nodes.map(node => node.textContent)), [
+      "PO-EUDR / TABLE", "PO-SECOND / TABLE",
+    ]);
     assert.equal(mutations.length, before);
     await wood();
     await saved("Finalize Bulk", 2);
+
+    rejectBulkRows = true;
+    await page.goto(origin + "/container?vendor=Test%20Vendor", { waitUntil: "networkidle0" });
+    await field("Container Number", "MSCU-123456-7");
+    await field("Stuffed By", "shipped_by_vendor");
+    await page.$$eval('tbody input[type="checkbox"]', nodes => nodes.forEach(node => node.click()));
+    await click("Finalize Bulk");
+    await page.waitForFunction(() => document.querySelector(".alert-success")?.textContent.includes("2 shipments added"));
+    await page.waitForFunction(() => document.querySelectorAll('tbody input[type="checkbox"]').length === 6);
+    const failures = await page.$$eval(".alert-danger li", nodes => nodes.map(node => node.textContent));
+    assert.equal(failures.length, bulkRejections.length);
+    for (const { orderId, itemCode, message } of bulkRejections) {
+      assert.ok(failures.some(line => line.includes(`${orderId} / ${itemCode}`) && line.includes(message)));
+    }
+    assert.match(failures.join(" "), /Check the order or sample shipment history before trying again/);
     assert.deepEqual(errors, []);
-    console.log("EUDR browser checks passed: individual, sample and bulk shipping; required fields; shared item forms; live CFT preview.");
+    console.log("Shipping browser checks passed: EUDR validation, shared item forms, CFT preview and bulk row failures.");
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
