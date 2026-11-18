@@ -127,20 +127,19 @@ const getVendorOrderDifferenceInDays = (orderRow = {}) => {
   return 0;
 };
 
-const getVendorOrderRowClassName = (orderRow = {}) => {
-  const differenceInDays = getVendorOrderDifferenceInDays(orderRow);
+const getVendorOrderRowClassName = (orderRow, differenceInDays) => {
   const isShipped = String(orderRow?.status || "").trim() === "Shipped";
 
   if (isShipped && Number.isFinite(differenceInDays) && differenceInDays < 0) {
     return "om-report-success-row";
   }
 
-  if (Number.isFinite(differenceInDays) && differenceInDays > 0) {
-    return "om-report-danger-row";
+  const delayDays = differenceInDays ?? (isShipped ? 0 : Number(orderRow?.delay_days));
+  if (Number.isFinite(delayDays) && delayDays > 30) {
+    return "om-report-danger-row om-report-severe-delay-row";
   }
 
-  const delayedDays = Number(orderRow?.delay_days);
-  if (!isShipped && Number.isFinite(delayedDays) && delayedDays > 0) {
+  if (Number.isFinite(delayDays) && delayDays > 0) {
     return "om-report-danger-row";
   }
 
@@ -721,7 +720,7 @@ const VendorReports = () => {
                           )}
                           {filteredOrders.map((orderRow) => {
                             const differenceInDays = getVendorOrderDifferenceInDays(orderRow);
-                            const rowClassName = getVendorOrderRowClassName(orderRow);
+                            const rowClassName = getVendorOrderRowClassName(orderRow, differenceInDays);
 
                             return (
                               <tr

@@ -6519,6 +6519,12 @@ button.items-action-btn-success:hover,
   width: 100%;
 }
 
+.vendor-report-table .om-report-severe-delay-row > * {
+  --bs-table-striped-color: #fff;
+  background: #801d2b !important;
+  color: #fff;
+}
+
 .vendor-report-table th,
 .vendor-report-table td {
   width: 10%;
