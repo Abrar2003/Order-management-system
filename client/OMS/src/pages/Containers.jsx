@@ -111,6 +111,7 @@ const Containers = () => {
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [filterOptions, setFilterOptions] = useState({
     brands: [],
+    weeklyReportBrands: [],
     vendors: [],
     containers: [],
   });
@@ -126,6 +127,7 @@ const Containers = () => {
   });
   const [updatingContainer, setUpdatingContainer] = useState(false);
   const [reportDate, setReportDate] = useState(getTodayISODate);
+  const [reportBrands, setReportBrands] = useState([]);
   const [exportingReport, setExportingReport] = useState(false);
 
   const exportWeeklyReport = async (event) => {
@@ -133,8 +135,10 @@ const Containers = () => {
     setExportingReport(true);
     setError("");
     try {
+      const params = new URLSearchParams({ date: reportDate });
+      reportBrands.forEach((brand) => params.append("brand", brand));
       const response = await api.get("/orders/containers/weekly-report", {
-        params: { date: reportDate },
+        params,
         responseType: "blob",
       });
       downloadPdfResponse(response, `container-shipment-report-${reportDate}.pdf`);
@@ -167,6 +171,9 @@ const Containers = () => {
         brands: Array.isArray(response?.data?.filters?.brands)
           ? response.data.filters.brands
           : [],
+        weeklyReportBrands: Array.isArray(response?.data?.filters?.weekly_report_brands)
+          ? response.data.filters.weekly_report_brands
+          : [],
         vendors: Array.isArray(response?.data?.filters?.vendors)
           ? response.data.filters.vendors
           : [],
@@ -180,6 +187,7 @@ const Containers = () => {
       setSummary({ total: 0 });
       setFilterOptions({
         brands: [],
+        weeklyReportBrands: [],
         vendors: [],
         containers: [],
       });
@@ -520,6 +528,46 @@ const Containers = () => {
               </div>
             </form>
             <form className="d-flex flex-wrap align-items-end justify-content-end gap-2 mt-3 pt-3 border-top" onSubmit={exportWeeklyReport}>
+              <div className="dropdown">
+                <label className="form-label" htmlFor="container-report-brands">Brand</label>
+                <button
+                  id="container-report-brands"
+                  type="button"
+                  className="form-select packed-goods-filter-trigger"
+                  data-bs-toggle="dropdown"
+                  data-bs-auto-close="outside"
+                  aria-expanded="false"
+                  title={reportBrands.join(", ") || "All Brands"}
+                >
+                  {reportBrands.length === 0 ? "All Brands" : `${reportBrands.length} selected`}
+                </button>
+                <ul className="dropdown-menu packed-goods-filter-menu shadow" aria-labelledby="container-report-brands">
+                  <li>
+                    <label className="packed-goods-filter-option">
+                      <input type="checkbox" className="form-check-input" checked={reportBrands.length === 0} onChange={() => setReportBrands([])} />
+                      <span className="packed-goods-filter-option-label">All Brands</span>
+                    </label>
+                  </li>
+                  {filterOptions.weeklyReportBrands.map((brand) => (
+                    <li key={brand}>
+                      <label className="packed-goods-filter-option">
+                        <input
+                          type="checkbox"
+                          className="form-check-input"
+                          checked={reportBrands.includes(brand)}
+                          onChange={(event) => {
+                            const { checked } = event.target;
+                            setReportBrands((current) => checked
+                              ? [...current, brand]
+                              : current.filter((selected) => selected !== brand));
+                          }}
+                        />
+                        <span className="packed-goods-filter-option-label">{brand}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
               <div>
                 <label className="form-label" htmlFor="container-report-date">
                   ETA week (Monday to Sunday)

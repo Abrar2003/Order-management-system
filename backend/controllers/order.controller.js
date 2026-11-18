@@ -4321,6 +4321,7 @@ const getShipmentDataset = async ({
 
 const getContainerDataset = async ({
   brand,
+  reportBrands = [],
   vendor,
   container,
   checked_status,
@@ -4401,6 +4402,7 @@ const getContainerDataset = async ({
   }
 
   let rows = Array.from(groupedByContainer.values())
+    .filter((group) => !reportBrands.length || reportBrands.some((brand) => group.brandSet.has(brand)))
     .map((group) => {
       const commonValue = (values) =>
         values.size === 1 ? [...values][0] || null : null;
@@ -10925,6 +10927,11 @@ exports.exportShipmentsDb = async (req, res) => {
 
 exports.getContainersDb = async (req, res) => {
   try {
+    const shipmentMatch = { "shipment.container": /\S/ };
+    const [orderBrands, sampleBrands] = await Promise.all([
+      Order.distinct("brand", applyDataAccessMatch({ ...ACTIVE_ORDER_MATCH, ...shipmentMatch }, req.user)),
+      Sample.distinct("brand", applyDataAccessMatch(shipmentMatch, req.user, { vendorFields: ["vendor"] })),
+    ]);
     const containerData = await getContainerDataset({
       brand: req.query.brand,
       vendor: req.query.vendor,
@@ -10948,7 +10955,7 @@ exports.getContainersDb = async (req, res) => {
       count: containerData.rows.length,
       data: containerData.rows,
       summary: containerData.summary,
-      filters: containerData.filters,
+      filters: { ...containerData.filters, weekly_report_brands: normalizeDistinctValues([...orderBrands, ...sampleBrands]) },
     });
   } catch (error) {
     console.error("Get Containers DB Error:", error);
@@ -10965,8 +10972,11 @@ exports.exportWeeklyContainerReport = async (req, res) => {
   if (!week) return res.status(400).json({ message: "Select a valid date for the ETA week" });
 
   try {
-    const { rows } = await getContainerDataset({ user: req.user });
-    const pdf = await renderPdf(buildWeeklyContainerReport(rows, week));
+    const reportBrands = normalizeDistinctValues(
+      [req.query.brand].flat().filter((brand) => typeof brand === "string").map(normalizeFilterValue),
+    );
+    const { rows } = await getContainerDataset({ reportBrands, user: req.user });
+    const pdf = await renderPdf(buildWeeklyContainerReport(rows, { ...week, brands: reportBrands }));
     return res.attachment(`container-shipment-report-${week.start}.pdf`).send(pdf);
   } catch (error) {
     console.error("Export Weekly Container Report Error:", error);

@@ -27,7 +27,7 @@ const formatDay = (value) => {
   return day ? dayFormat.format(day) : "-";
 };
 
-const buildWeeklyContainerReport = (rows, { start, end }, now = new Date()) => {
+const buildWeeklyContainerReport = (rows, { start, end, brands = [] }, now = new Date()) => {
   const matchingRows = rows.filter(({ shipping_ETA }) => shipping_ETA >= start && shipping_ETA <= end);
   const generatedDate = reportDateFormat.format(parseDateOnly(toDateOnlyIso(now)));
 
@@ -40,7 +40,7 @@ const buildWeeklyContainerReport = (rows, { start, end }, now = new Date()) => {
         <header>
           <div class="register-brand"><span>GREEN HOUSE SOURCING&nbsp; / &nbsp;LOGISTICS</span><span>${generatedDate}</span></div>
           <h1>Container shipment report</h1>
-          <div class="register-range">${formatDay(start)} - ${formatDay(end)}&nbsp; / &nbsp;All containers</div>
+          <div class="register-range">${formatDay(start)} - ${formatDay(end)}&nbsp; / &nbsp;${brands.length ? escapeHtml(brands.join(", ")) : "All containers"}</div>
         </header>
         <section>
           <h2>Shipment register</h2>
