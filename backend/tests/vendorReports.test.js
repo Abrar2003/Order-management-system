@@ -17,17 +17,17 @@ const response = () => ({
   json(body) { this.body = body; return this; },
 });
 
-test("vendor report calculates delays from the final inspection and complete shipment", async (t) => {
-  t.mock.method(Order, "find", () => asQuery([
+test("vendor report filters by original ETD and uses it for packed and shipping delays", async (t) => {
+  const find = t.mock.method(Order, "find", () => asQuery([
     {
       order_id: "PO-1", brand: "Brand", vendor: "Vendor", status: "Shipped",
-      order_date: "2026-01-01", ETD: "2026-01-15", quantity: 5,
+      order_date: "2026-01-01", ETD: "2026-01-15", revised_ETD: "2026-02-15", quantity: 5,
       item: { item_code: "ITEM-1" }, qc_record: { last_inspected_date: "2026-01-08" },
       shipment: [{ stuffing_date: "2026-01-09", quantity: 4 }],
     },
     {
       order_id: "PO-1", brand: "Brand", vendor: "Vendor", status: "Shipped",
-      order_date: "2026-01-01", ETD: "2026-01-15", quantity: 5,
+      order_date: "2026-01-01", ETD: "2026-01-15", revised_ETD: "2026-02-20", quantity: 5,
       item: { item_code: "ITEM-2" }, qc_record: { last_inspected_date: "2026-01-11" },
       shipment: [{ stuffing_date: "2026-01-10", quantity: 6 }],
     },
@@ -40,6 +40,9 @@ test("vendor report calculates delays from the final inspection and complete shi
   }, res);
 
   assert.equal(res.statusCode, 200);
+  const queryJson = JSON.stringify(find.mock.calls[0].arguments[0]);
+  assert.match(queryJson, /"ETD":\{"\$gte":"2025-12-31T18:30:00.000Z","\$lt":"2026-01-31T18:30:00.000Z"\}/);
+  assert.doesNotMatch(queryJson, /revised_ETD/);
   assert.deepEqual(res.body.vendors[0].orders[0], {
     order_id: "PO-1", brand: "Brand", vendor: "Vendor", status: "Shipped",
     order_date: "2026-01-01", etd: "2026-01-15", last_inspection_date: "2026-01-11",

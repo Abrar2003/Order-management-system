@@ -84,6 +84,7 @@ const OrderEtdWithHistory = ({
   className = "",
   fallback = "N/A",
   showOriginalWhenNoRevision = true,
+  showOriginalEtd = false,
 }) => {
   const cacheKey = useMemo(
     () => getCacheKey(orderId, itemCode),
@@ -182,10 +183,9 @@ const OrderEtdWithHistory = ({
     return candidates[0]?.value || null;
   }, [historyState.items]);
 
-  const displayValue =
-    historyDisplayValue ||
-    revisedEtd ||
-    (showOriginalWhenNoRevision ? etd : "");
+  const currentRevisedEtd = historyDisplayValue || revisedEtd;
+  const displayValue = showOriginalEtd ? etd :
+    currentRevisedEtd || (showOriginalWhenNoRevision ? etd : "");
   const formattedEtd = formatDateDDMMYYYY(displayValue, fallback);
 
   const tooltipHistoryItems = useMemo(() => {
@@ -249,6 +249,7 @@ const OrderEtdWithHistory = ({
 
     const originalDateKey = toDateKey(etd);
     const displayDateKey = toDateKey(displayValue);
+    const currentRevisedDateKey = toDateKey(currentRevisedEtd);
     const hasCurrentRevision = Boolean(displayDateKey && displayDateKey !== originalDateKey);
 
     const mergedTooltipHistory = [];
@@ -272,7 +273,8 @@ const OrderEtdWithHistory = ({
       .map((historyEntry) => ({
         revised_etd: historyEntry.revised_etd,
         updated_at: historyEntry.updated_at,
-        meta: "Previous Revised ETD",
+        meta: toDateKey(historyEntry.revised_etd) === currentRevisedDateKey
+          ? "Current Revised ETD" : "Previous Revised ETD",
       }));
 
     mergedTooltipHistory.push(...previousRevisedHistory);
@@ -287,7 +289,7 @@ const OrderEtdWithHistory = ({
           },
         ]
       : [];
-  }, [cacheKey, displayValue, etd, historyState.items, normalizedItemCode, revisedEtd]);
+  }, [cacheKey, currentRevisedEtd, displayValue, etd, historyState.items, normalizedItemCode, revisedEtd]);
 
   const totalTooltipHistoryEntries = useMemo(
     () =>

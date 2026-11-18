@@ -581,13 +581,13 @@ const capabilities = [
   capability({
     auditId: "QC-06", id: "vendor_shipping_performance", name: "Vendor shipping performance", type: "report",
     sourceClass: "DUPLICATED_LOGIC", assistantRecommendation: "EXTRACT_TO_SERVICE_THEN_CAPABILITY",
-    description: "Vendor/PO shipping-time and effective-ETD delay metrics for groups prefiltered as fully shipped by stored order status.",
+    description: "Vendor/PO shipping-time and original-ETD delay metrics for completely packed POs.",
     businessPurpose: "Rank vendor shipment timeliness under current executable semantics.",
     collections: ["orders"], relationships: ["order_vendor", "order_shipment_entries"], routes: routes("/qc/reports/vendors"),
     canonicalFile: "backend/controllers/qc.controller.js", canonicalSymbols: ["getVendorReports"], filters: filters("brand", "vendor", "from_date", "to_date"),
     outputFields: outputs("groups", "counts", "dates", "status"), resultGrain: "vendor_po_group",
     aliases: ["vendor shipping report"], keywords: ["vendor delay", "shipping time"], userIntentExamples: ["Average shipping time by vendor"],
-    dateSemantics: dateSemantics(["order_date", "ETD", "revised_ETD", "stuffing_date"], "latest_stuffing_date", true, "Delay uses effective ETD; date range uses latest stuffing date."),
+    dateSemantics: dateSemantics(["order_date", "ETD", "stuffing_date"], "ETD", true, "Delay and date range use the original ETD."),
     statusSemantics: storedStatusRisk("Stored fully-shipped prefilter makes unshipped timing branches unreachable."), risks: ["Stored order.status can disagree with shipment-derived state."], uncertainties: ["BQ-07", "BQ-15"],
   }),
   capability({

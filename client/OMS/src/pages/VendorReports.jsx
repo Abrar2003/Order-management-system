@@ -445,7 +445,7 @@ const VendorReports = () => {
         <ReportInfoBanner
           description="Measures order completion, lead times, and delay metrics for manufacturing vendors."
           dataShown="Vendor lists, order counts, delayed orders, average delay days, lead times, and detailed order lists with ETD comparison dates."
-          howItWorks="Computes average lead time and delay statistics. Filterable by timeline/date range, brand, vendor, and sortable by order dates or ETD."
+          howItWorks="The date range and delay calculations use the original ETD. Filter by brand or vendor and sort by order date or original ETD."
         />
 
         <div className="card om-card mb-3">
@@ -688,7 +688,7 @@ const VendorReports = () => {
                             </th>
                             <th>
                               <SortHeaderButton
-                                label="ETD"
+                                label="Original ETD"
                                 isActive={activeSortField === "etd"}
                                 direction={activeSortOrder}
                                 onClick={() => handleVendorTableSortToggle(vendorKey, "etd")}
@@ -747,7 +747,7 @@ const VendorReports = () => {
                                   <OrderEtdWithHistory
                                     orderId={orderRow?.order_id}
                                     etd={orderRow?.etd}
-                                    revisedEtd={orderRow?.effective_etd || orderRow?.revised_etd}
+                                    showOriginalEtd
                                   />
                                 </td>
                                 <td>{formatDateDDMMYYYY(orderRow.latest_shipment_date)}</td>

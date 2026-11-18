@@ -82,11 +82,12 @@ const resolveEtdDateRange = ({ fromDate = "", toDate = "" } = {}) => {
     toExclusiveInstant: to ? new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate() + 1) - KOLKATA_OFFSET_MS) : null,
   };
 };
-const buildEffectiveEtdMatch = (range) => {
+const buildEffectiveEtdMatch = (range, { useOriginalEtd = false } = {}) => {
   if (!range?.fromInstant && !range?.toExclusiveInstant) return {};
   const dateMatch = {};
   if (range.fromInstant) dateMatch.$gte = range.fromInstant;
   if (range.toExclusiveInstant) dateMatch.$lt = range.toExclusiveInstant;
+  if (useOriginalEtd) return { ETD: dateMatch };
   return {
     $or: [
       { revised_ETD: dateMatch },
@@ -113,7 +114,7 @@ const getCompleteShipmentDate = (shipments = [], quantity = 0) => {
   return null;
 };
 
-const buildPoSections = (orderRows = []) => {
+const buildPoSections = (orderRows = [], { useOriginalEtd = false } = {}) => {
   const today = toUtcDate(new Date());
   const groups = new Map();
   for (const order of orderRows) {
@@ -143,7 +144,7 @@ const buildPoSections = (orderRows = []) => {
     );
     const packedDate = toUtcDate(order?.qc_record?.last_inspected_date);
     const shippingDate = getCompleteShipmentDate(order?.shipment, quantity);
-    const etd = effectiveEtd(order);
+    const etd = useOriginalEtd ? toUtcDate(order?.ETD) : effectiveEtd(order);
 
     group.total_quantity += quantity;
     group.item_count += 1;

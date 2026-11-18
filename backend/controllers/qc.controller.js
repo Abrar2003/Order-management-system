@@ -3787,12 +3787,6 @@ const toUtcDateOnly = (value) => {
   return toUtcDayStart(parsed);
 };
 
-const resolveEffectiveOrderEtdUtc = (order = {}) => {
-  const revisedEtdUtc = toUtcDateOnly(order?.revised_ETD);
-  if (revisedEtdUtc) return revisedEtdUtc;
-  return toUtcDateOnly(order?.ETD);
-};
-
 const getWeekStartIsoDate = (value) => {
   const dayStart = toUtcDateOnly(value);
   if (!dayStart) return "";
@@ -8668,11 +8662,12 @@ exports.getVendorReports = async (req, res) => {
       fromDate: timelineRange.from_date_iso,
       toDate: timelineRange.to_date_iso,
     });
+    const etdOptions = { useOriginalEtd: true };
     const orderRows = await Order.find(applyDataAccessMatch({
-      $and: [ACTIVE_ORDER_MATCH, buildEffectiveEtdMatch(etdRange)],
+      $and: [ACTIVE_ORDER_MATCH, buildEffectiveEtdMatch(etdRange, etdOptions)],
     }, req.user))
       .select(
-        "order_id brand vendor status order_date ETD revised_ETD quantity item shipment qc_record",
+        "order_id brand vendor status order_date ETD quantity item shipment qc_record",
       )
       .populate("qc_record", "last_inspected_date quantities")
       .lean();
@@ -8694,7 +8689,6 @@ exports.getVendorReports = async (req, res) => {
           item_codes: new Set(),
           quantity_total: 0,
           order_date_utc: null,
-          etd_utc: null,
           last_inspection_utc: null,
           latest_shipment_utc: null,
           shipment_entries: [],
@@ -8721,14 +8715,6 @@ exports.getVendorReports = async (req, res) => {
           orderDateUtc.getTime() < entry.order_date_utc.getTime())
       ) {
         entry.order_date_utc = orderDateUtc;
-      }
-
-      const effectiveEtdUtc = resolveEffectiveOrderEtdUtc(row);
-      if (
-        effectiveEtdUtc &&
-        (!entry.etd_utc || effectiveEtdUtc.getTime() > entry.etd_utc.getTime())
-      ) {
-        entry.etd_utc = effectiveEtdUtc;
       }
 
       const inspectionDateUtc = toUtcDateOnly(row?.qc_record?.last_inspected_date);
@@ -8772,7 +8758,7 @@ exports.getVendorReports = async (req, res) => {
       }
     }
 
-    const timelineOrders = buildPoSections(orderRows).po_delay;
+    const timelineOrders = buildPoSections(orderRows, etdOptions).po_delay;
     const brandOptionsBase = selectedVendor
       ? timelineOrders.filter((entry) => entry.vendor === selectedVendor)
       : timelineOrders;
@@ -8834,7 +8820,7 @@ exports.getVendorReports = async (req, res) => {
       const isDelayed = delayDays > 0;
       const key = `${normalizeText(delayRow.vendor).toLowerCase()}__${String(delayRow.brand || "").trim().toLowerCase()}__${String(delayRow.po || "").trim().toLowerCase()}`;
       const orderEntry = orderGroupMap.get(key);
-      const effectiveEtdUtc = toUtcDateOnly(delayRow.etd);
+      const originalEtdUtc = toUtcDateOnly(delayRow.etd);
 
       ordersWithEtdCount += 1;
       packedDelayOrderCount += 1;
@@ -8865,9 +8851,9 @@ exports.getVendorReports = async (req, res) => {
       vendorEntry.brands.add(delayRow.brand);
       const packedDelayDays = -delayDays;
       const shippingDelayDays =
-        effectiveEtdUtc && orderEntry?.complete_shipping_utc
+        originalEtdUtc && orderEntry?.complete_shipping_utc
           ? Math.floor(
-              (effectiveEtdUtc.getTime() - orderEntry.complete_shipping_utc.getTime()) /
+              (originalEtdUtc.getTime() - orderEntry.complete_shipping_utc.getTime()) /
                 MS_PER_DAY,
             )
           : null;
