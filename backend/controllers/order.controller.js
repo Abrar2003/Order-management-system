@@ -69,6 +69,8 @@ const {
   buildPackedGoodsDataset,
 } = require("../services/packedGoods.service");
 const { buildDailyShipmentReport } = require("../services/dailyShipmentReport.service");
+const { getContainerEtaWeek, buildWeeklyContainerReport } = require("../services/weeklyContainerReport");
+const { renderPdf } = require("../services/pdfRenderer");
 const {
   applyDataAccessMatch,
   assertBrandVendorAssociations,
@@ -3203,6 +3205,7 @@ const buildPoBucketDataset = async ({
   orderDateRange = null,
   etdRange = null,
   user = null,
+  includeItemDetails = false,
 } = {}) => {
   const selectedBucket = normalizePoBucket(poBucket);
   const countryMatch = await buildOrderCountryMatch(country);
@@ -3409,6 +3412,7 @@ const buildPoBucketDataset = async ({
         total_shipping_pending_cbm: 0,
         total_packing_pending_cbm: 0,
         item_codes: new Set(),
+        ...(includeItemDetails ? { item_details: [] } : {}),
       });
     }
 
@@ -3422,6 +3426,12 @@ const buildPoBucketDataset = async ({
     groupedEntry.total_pending_inspection_quantity +=
       lineProgress.pending_inspection_quantity;
     const itemCodeValue = normalizeLooseString(orderEntry?.item?.item_code);
+    groupedEntry.item_details?.push({
+      item_code: itemCodeValue,
+      description: normalizeLooseString(orderEntry?.item?.description),
+      quantity: lineProgress.order_quantity,
+      status: lineProgress.status,
+    });
     const itemDoc = itemMap.get(itemCodeValue.toLowerCase()) || null;
     const storedPoCbm = toPositiveCbmNumber(orderEntry?.total_po_cbm);
     const cbmSummary = resolveOrderRowCbmSummaryWithStoredFallback({
@@ -3501,6 +3511,7 @@ const buildPoBucketDataset = async ({
     return {
       order_id: groupedEntry.order_id,
       items: groupedEntry.items,
+      ...(includeItemDetails ? { item_details: groupedEntry.item_details } : {}),
       brand: groupedEntry.brand,
       vendor: groupedEntry.vendor,
       ETD: groupedEntry.ETD,
@@ -7428,6 +7439,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       sortBy,
       sortOrder,
       user: req.user,
+      includeItemDetails: true,
     });
 
     const orders = dataset.rows.filter((row) => {
@@ -10945,6 +10957,20 @@ exports.getContainersDb = async (req, res) => {
       message: "Failed to fetch containers list",
       error: error.message,
     });
+  }
+};
+
+exports.exportWeeklyContainerReport = async (req, res) => {
+  const week = getContainerEtaWeek(req.query.date);
+  if (!week) return res.status(400).json({ message: "Select a valid date for the ETA week" });
+
+  try {
+    const { rows } = await getContainerDataset({ user: req.user });
+    const pdf = await renderPdf(buildWeeklyContainerReport(rows, week));
+    return res.attachment(`container-shipment-report-${week.start}.pdf`).send(pdf);
+  } catch (error) {
+    console.error("Export Weekly Container Report Error:", error);
+    return res.status(500).json({ message: "Failed to export the weekly container report" });
   }
 };
 

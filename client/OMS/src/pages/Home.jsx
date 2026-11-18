@@ -17,6 +17,8 @@ import "../App.css";
 const DEFAULT_TODAY_ETD_SORT_BY = "ETD";
 const DEFAULT_COUNTRY = "India";
 const HOME_COUNTRY_OPTIONS = [...COUNTRY_OPTIONS, { value: "all", label: "All" }];
+// Keep the selection across route changes until the browser reloads the app.
+let lastSelectedCountry = DEFAULT_COUNTRY;
 
 const parseTodayEtdSortBy = (value) => {
   const normalized = String(value || "")
@@ -57,10 +59,7 @@ const Home = () => {
   const [todayEtdError, setTodayEtdError] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "home");
-  const countryParam = searchParams.get("country")?.trim().toLowerCase();
-  const selectedCountry = HOME_COUNTRY_OPTIONS.find(
-    ({ value }) => value.toLowerCase() === countryParam,
-  )?.value || DEFAULT_COUNTRY;
+  const [selectedCountry, setSelectedCountry] = useState(lastSelectedCountry);
   const initialTodayEtdSortBy = parseTodayEtdSortBy(
     searchParams.get("today_sort_by"),
   );
@@ -257,7 +256,6 @@ const Home = () => {
 
     const next = new URLSearchParams();
     if (selectedBrand) next.set("brand", selectedBrand);
-    if (selectedCountry !== DEFAULT_COUNTRY) next.set("country", selectedCountry);
     if (todayEtdSortBy !== DEFAULT_TODAY_ETD_SORT_BY) {
       next.set("today_sort_by", todayEtdSortBy);
     }
@@ -271,7 +269,6 @@ const Home = () => {
   }, [
     searchParams,
     selectedBrand,
-    selectedCountry,
     setSearchParams,
     todayEtdSortBy,
     todayEtdSortOrder,
@@ -411,10 +408,8 @@ const Home = () => {
                     onClick={() => {
                       if (selectedCountry === value) return;
                       setPage(1);
-                      const next = new URLSearchParams(searchParams);
-                      if (value === DEFAULT_COUNTRY) next.delete("country");
-                      else next.set("country", value);
-                      setSearchParams(next, { replace: true });
+                      lastSelectedCountry = value;
+                      setSelectedCountry(value);
                     }}
                   >
                     {label}

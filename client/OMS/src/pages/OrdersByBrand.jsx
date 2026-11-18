@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
@@ -52,6 +52,7 @@ const OrdersByBrand = () => {
 
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
+  const [expandedOrderId, setExpandedOrderId] = useState(null);
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -180,6 +181,9 @@ const OrdersByBrand = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
+                      <th scope="col" className="px-1" style={{ width: "3rem" }}>
+                        <span className="visually-hidden">Item details</span>
+                      </th>
                       <th>
                         <SortHeaderButton
                           label="Order ID"
@@ -221,44 +225,101 @@ const OrdersByBrand = () => {
                   <tbody>
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan="7" className="text-center py-4">
+                        <td colSpan="9" className="text-center py-4">
                           No orders found
                         </td>
                       </tr>
                     )}
 
-                    {orders.map((order) => (
-                      <tr
-                        key={order._id || order.order_id}
-                        className="table-clickable"
-                        onClick={() => navigate(`/orders?order_id=${order.order_id}`)}
-                      >
-                        <td>{order.order_id}</td>
-                        <td>{order.items}</td>
-                        <td>{order?.totalStatus || "N/A"}</td>
-                        <td>
-                          {formatCbm(
-                            resolvePreferredCbm(
-                              order?.total_cbm,
-                              order?.total_po_cbm,
-                              order?.top_po_cbm,
-                            ),
+                    {orders.map((order) => {
+                      const orderKey = order._id || order.order_id;
+                      const isExpanded = expandedOrderId === orderKey;
+                      const detailsId = `order-items-${encodeURIComponent(orderKey)}`;
+
+                      return (
+                        <Fragment key={orderKey}>
+                          <tr
+                            className="table-clickable"
+                            onClick={() => navigate(`/orders?order_id=${order.order_id}`)}
+                          >
+                            <td className="text-center px-1">
+                              <button
+                                type="button"
+                                className="btn btn-outline-secondary btn-sm px-2 py-1"
+                                aria-label={`Item details for order ${order.order_id}`}
+                                aria-expanded={isExpanded}
+                                aria-controls={isExpanded ? detailsId : undefined}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setExpandedOrderId(isExpanded ? null : orderKey);
+                                }}
+                              >
+                                <span aria-hidden="true">{isExpanded ? "−" : "+"}</span>
+                              </button>
+                            </td>
+                            <td>{order.order_id}</td>
+                            <td>{order.items}</td>
+                            <td>{order?.totalStatus || "N/A"}</td>
+                            <td>
+                              {formatCbm(
+                                resolvePreferredCbm(
+                                  order?.total_cbm,
+                                  order?.total_po_cbm,
+                                  order?.top_po_cbm,
+                                ),
+                              )}
+                            </td>
+                            <td>{formatCbm(order?.total_pending_cbm)}</td>
+                            <td>{formatDateDDMMYYYY(order.order_date)}</td>
+                            <td>{formatDateDDMMYYYY(order?.ETD)}</td>
+                            <td>
+                              <OrderEtdWithHistory
+                                orderId={order?.order_id}
+                                etd={order?.ETD}
+                                revisedEtd={order?.revised_ETD}
+                                fallback="N/A"
+                                showOriginalWhenNoRevision={false}
+                              />
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr id={detailsId}>
+                              <td colSpan="9" className="p-3">
+                                <table
+                                  className="table table-sm mb-0"
+                                  aria-label={`Items for order ${order.order_id}`}
+                                >
+                                  <thead className="table-primary">
+                                    <tr>
+                                      <th scope="col">Item Code</th>
+                                      <th scope="col">Description</th>
+                                      <th scope="col">Quantity</th>
+                                      <th scope="col">Current Status</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {order.item_details?.length ? (
+                                      order.item_details.map((item, index) => (
+                                        <tr key={index}>
+                                          <td>{item.item_code || "N/A"}</td>
+                                          <td>{item.description || "N/A"}</td>
+                                          <td>{item.quantity}</td>
+                                          <td>{item.status}</td>
+                                        </tr>
+                                      ))
+                                    ) : (
+                                      <tr>
+                                        <td colSpan="4" className="text-center">No items found</td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
                           )}
-                        </td>
-                        <td>{formatCbm(order?.total_pending_cbm)}</td>
-                        <td>{formatDateDDMMYYYY(order.order_date)}</td>
-                        <td>{formatDateDDMMYYYY(order?.ETD)}</td>
-                        <td>
-                          <OrderEtdWithHistory
-                            orderId={order?.order_id}
-                            etd={order?.ETD}
-                            revisedEtd={order?.revised_ETD}
-                            fallback="N/A"
-                            showOriginalWhenNoRevision={false}
-                          />
-                        </td>
-                      </tr>
-                    ))}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

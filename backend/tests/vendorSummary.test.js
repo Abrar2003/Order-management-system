@@ -134,7 +134,11 @@ test("packed order filter excludes partially shipped POs", async (t) => {
     qc_record: { quantities: { qc_passed: 10 } },
   };
   const orders = [
-    { ...order, order_id: "PO-INSPECTED", item: { item_code: "ITEM-1" } },
+    {
+      ...order,
+      order_id: "PO-INSPECTED",
+      item: { item_code: "ITEM-1", description: "Dining chair" },
+    },
     {
       ...order,
       order_id: "PO-PARTIAL-SHIPPED",
@@ -165,4 +169,7 @@ test("packed order filter excludes partially shipped POs", async (t) => {
     res.body.data.map((row) => row.order_id),
     ["PO-INSPECTED"],
   );
+  assert.deepEqual(res.body.data[0].item_details, [
+    { item_code: "ITEM-1", description: "Dining chair", quantity: 10, status: "Inspection Done" },
+  ]);
 });

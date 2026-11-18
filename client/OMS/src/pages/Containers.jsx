@@ -7,7 +7,8 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
-import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
+import { formatDateDDMMYYYY, getTodayISODate, toISODateString } from "../utils/date";
+import { downloadPdfResponse } from "../services/pdfExport.service";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { getUserFromToken } from "../auth/auth.service";
@@ -124,6 +125,25 @@ const Containers = () => {
     shipping_ETA: "",
   });
   const [updatingContainer, setUpdatingContainer] = useState(false);
+  const [reportDate, setReportDate] = useState(getTodayISODate);
+  const [exportingReport, setExportingReport] = useState(false);
+
+  const exportWeeklyReport = async (event) => {
+    event.preventDefault();
+    setExportingReport(true);
+    setError("");
+    try {
+      const response = await api.get("/orders/containers/weekly-report", {
+        params: { date: reportDate },
+        responseType: "blob",
+      });
+      downloadPdfResponse(response, `container-shipment-report-${reportDate}.pdf`);
+    } catch {
+      setError("Failed to export the weekly container report. Please try again.");
+    } finally {
+      setExportingReport(false);
+    }
+  };
 
   const fetchContainers = useCallback(async () => {
     try {
@@ -498,6 +518,25 @@ const Containers = () => {
                   Clear
                 </button>
               </div>
+            </form>
+            <form className="d-flex flex-wrap align-items-end justify-content-end gap-2 mt-3 pt-3 border-top" onSubmit={exportWeeklyReport}>
+              <div>
+                <label className="form-label" htmlFor="container-report-date">
+                  ETA week (Monday to Sunday)
+                </label>
+                <input
+                  id="container-report-date"
+                  type="date"
+                  className="form-control"
+                  title="Choose any date in the ETA week to export"
+                  value={reportDate}
+                  onChange={(event) => setReportDate(event.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={exportingReport}>
+                {exportingReport ? "Exporting…" : "Export Weekly Report"}
+              </button>
             </form>
           </div>
         </div>

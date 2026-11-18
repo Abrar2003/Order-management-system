@@ -45,6 +45,7 @@ const {
   getShippingPending,
   exportShippingPending,
   getContainersDb,
+  exportWeeklyContainerReport,
   updateContainer,
   getShipmentsDb,
   getShipmentTimberCft,
@@ -271,6 +272,16 @@ router.get(
   requirePermission("containers", "view"),
   cacheRoute("orders", SHORT_CACHE_TTL),
   getContainersDb,
+);
+
+router.get(
+  "/containers/weekly-report",
+  authenticate,
+  requirePermission("containers", "view"),
+  securityLog("export_pdf", "containers", {
+    metadata: (req) => ({ date: req.query.date }),
+  }),
+  exportWeeklyContainerReport,
 );
 
 router.patch(
