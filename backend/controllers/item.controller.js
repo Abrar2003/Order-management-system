@@ -3191,8 +3191,8 @@ exports.approveProductDatabaseItem = async (req, res) => {
 
 exports.getItems = async (req, res) => {
   try {
-    const { search, code, name, description, barcode, brand, vendor, country } = req.query;
-    const textFilters = { search, code, name, description, barcode };
+    const { search, item_search, code, name, description, barcode, brand, vendor, country } = req.query;
+    const textFilters = { search, item_search, code, name, description, barcode };
     const fileType = req.query.file_type ?? req.query.fileType;
     const fileStatus = req.query.file_status ?? req.query.fileStatus;
     const workloadTask = req.query.workload_task ?? req.query.workloadTask;

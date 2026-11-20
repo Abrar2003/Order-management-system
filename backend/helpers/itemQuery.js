@@ -39,7 +39,7 @@ const buildBarcodeSearchConditions = (escapedSearch) =>
     [field]: { $regex: escapedSearch, $options: "i" },
   }));
 
-const buildItemMatch = ({ search, code, name, description, barcode, brand, vendor, country } = {}) => {
+const buildItemMatch = ({ search, item_search, code, name, description, barcode, brand, vendor, country } = {}) => {
   const conditions = [];
   const normalizedSearch = normalizeFilterValue(search);
   const normalizedBrand = normalizeFilterValue(brand);
@@ -57,6 +57,15 @@ const buildItemMatch = ({ search, code, name, description, barcode, brand, vendo
         { brand_name: { $regex: escaped, $options: "i" } },
         ...buildBarcodeSearchConditions(escaped),
       ],
+    });
+  }
+
+  const escapedItemSearch = typeof item_search === "string" ? escapeRegex(item_search) : "";
+  if (escapedItemSearch) {
+    conditions.push({
+      $or: ["code", "name", "description"].map((field) => ({
+        [field]: { $regex: escapedItemSearch, $options: "i" },
+      })),
     });
   }
 

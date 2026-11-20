@@ -64,6 +64,26 @@ test("specific item search fields match independently and combine with other fil
   assert.deepEqual(buildItemMatch({ code: [".*"], name: " ", barcode: { $ne: "" } }), {});
 });
 
+test("combined item text search stays separate from PIS barcode and logistics EAN search", () => {
+  const textMatch = {
+    $or: ["code", "name", "description"].map((field) => ({
+      [field]: { $regex: "Oak\\.1", $options: "i" },
+    })),
+  };
+  assert.deepEqual(buildItemMatch({ item_search: " Oak.1 " }), textMatch);
+  const barcodeMatch = buildItemMatch({ barcode: "001234" });
+  for (const field of ["pis_barcode", "pis_master_barcode", "pis_inner_barcode", "pis_logistics_ean", "pis_logistics_eans", "inspected_logistics_ean", "inspected_logistics_eans"]) {
+    assert.deepEqual(barcodeMatch.$or.find((condition) => field in condition), {
+      [field]: { $regex: "001234", $options: "i" },
+    });
+  }
+  assert.deepEqual(buildItemMatch({ item_search: "Oak.1", barcode: "001234", country: "India" }), {
+    $and: [textMatch, barcodeMatch, buildItemMatch({ country: "India" })],
+  });
+  assert.deepEqual(buildItemMatch({ item_search: { $ne: "" } }), {});
+  assert.deepEqual(buildItemMatch({ item_search: " " }), {});
+});
+
 test("item country filter matches country of origin case-insensitively", () => {
   assert.deepEqual(buildItemMatch({ country: " India " }), {
     country_of_origin: {

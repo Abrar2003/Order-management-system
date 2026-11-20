@@ -55,12 +55,10 @@ const normalizeFilterParam = (value, fallback = "all") => {
 };
 
 const ITEM_SEARCH_FIELDS = [
-  ["code", "Item Code"],
-  ["name", "Name"],
-  ["description", "Description"],
+  ["item_search", "Item Code, Name or Description"],
   ["barcode", "Barcode"],
 ];
-const ITEM_SEARCH_KEYS = ["search", ...ITEM_SEARCH_FIELDS.map(([key]) => key)];
+const ITEM_SEARCH_KEYS = ["search", "code", "name", "description", ...ITEM_SEARCH_FIELDS.map(([key]) => key)];
 const readItemSearch = (params) =>
   Object.fromEntries(ITEM_SEARCH_KEYS.map((key) => [key, params.get(key)?.trim() || ""]));
 
@@ -1089,18 +1087,19 @@ const Items = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
-              {itemSearch.search && (
-                <div className="col-12 small">General search: {itemSearch.search}</div>
-              )}
+              {ITEM_SEARCH_KEYS.filter((key) => !ITEM_SEARCH_FIELDS.some(([field]) => field === key) && itemSearch[key]).map((key) => (
+                <div className="col-12 small" key={key}>{key}: {itemSearch[key]}</div>
+              ))}
               {ITEM_SEARCH_FIELDS.map(([key, label]) => (
-                <div className="col-sm-6 col-md-3" key={key}>
+                <div className="col-md-6" key={key}>
                   <label className="form-label" htmlFor={`items-filter-${key}`}>{label}</label>
                   <input
                     id={`items-filter-${key}`}
                     type="text"
                     className="form-control"
                     value={draftItemSearch[key] || ""}
-                    list={key === "code" ? "item-code-options" : undefined}
+                    list={key === "item_search" ? "item-code-options" : undefined}
+                    placeholder={key === "barcode" ? "PIS barcode or logistics EAN" : "Search item code, name or description"}
                     onChange={(e) => setDraftItemSearch({ ...draftItemSearch, [key]: e.target.value })}
                   />
                 </div>
