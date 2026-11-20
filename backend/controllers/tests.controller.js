@@ -3,6 +3,7 @@ const path = require("path");
 
 const Test = require("../models/tests.model");
 const QC = require("../models/qc.model");
+const { canViewQc } = require("../services/qcVendorAccess.service");
 const Inspection = require("../models/inspection.model");
 const Item = require("../models/item.model");
 const Order = require("../models/order.model");
@@ -57,14 +58,14 @@ const isQcAssignedToUser = (qc, user) => {
   return Boolean(userId && inspectorId && userId === inspectorId);
 };
 
-const loadQc = async (qcId, user) => {
+const loadQc = async (qcId, user, vendorView = false) => {
   if (!mongoose.Types.ObjectId.isValid(qcId)) return null;
   const qc = await QC.findById(qcId).populate({
     path: "order",
     match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, user),
-    select: "_id quantity shipment status",
+    select: "_id quantity shipment status vendor brand",
   });
-  if (!qc?.order || !isQcAssignedToUser(qc, user)) return null;
+  if (!qc?.order || !(vendorView ? await canViewQc(user, qc) : isQcAssignedToUser(qc, user))) return null;
   return qc;
 };
 
@@ -371,7 +372,7 @@ exports.updateTest = async (req, res) => {
 
 exports.getQcTests = async (req, res) => {
   try {
-    const qc = await loadQc(req.params.qcId, req.user);
+    const qc = await loadQc(req.params.qcId, req.user, true);
     if (!qc) return res.status(404).json({ message: "QC record not found" });
     const [activeTests, claimPercentage, waiver] = await Promise.all([
       Test.find({ is_active: true }).sort({ updatedAt: -1 }).lean(),

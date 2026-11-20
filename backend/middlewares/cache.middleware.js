@@ -7,6 +7,8 @@ const {
 
 const cacheRoute = (prefix, ttlSeconds = SHORT_CACHE_TTL) => async (req, res, next) => {
   if (req.method !== "GET") return next();
+  // QC vendor access must be rechecked after completion or reassignment.
+  if (["items", "qc"].includes(prefix) && String(req.user?.role).trim().toLowerCase() === "qc") return next();
 
   const cacheKey = buildCacheKey(prefix, req);
   const cachedBody = await getCache(cacheKey);

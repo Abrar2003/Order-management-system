@@ -10,7 +10,7 @@ import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { usePermissions } from "../auth/PermissionContext";
-import { isManagerLikeRole } from "../auth/permissions";
+import { isManagerLikeRole, isQcOnlyUserRole } from "../auth/permissions";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { createComplaint } from "../services/complaints.service";
 import {
@@ -427,10 +427,12 @@ const Items = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "items");
   const { canEditPis, hasPermission, role } = usePermissions();
-  const canSyncItems = hasPermission("items", "sync");
-  const canEditItems = hasPermission("items", "edit");
-  const canCreateItems = hasPermission("items", "create") && canEditPis;
-  const canUploadItemFiles = hasPermission("images_documents", "upload");
+  const isQcUser = isQcOnlyUserRole(role);
+  const canExportItems = !isQcUser || hasPermission("items", "export");
+  const canSyncItems = !isQcUser && hasPermission("items", "sync");
+  const canEditItems = !isQcUser && hasPermission("items", "edit");
+  const canCreateItems = !isQcUser && hasPermission("items", "create") && canEditPis;
+  const canUploadItemFiles = !isQcUser && hasPermission("images_documents", "upload");
   const canUpdateShippingMark = isManagerLikeRole(role);
   const canCreateComplaints =
     hasPermission("complaints", "create") && isManagerLikeRole(role);
@@ -481,6 +483,7 @@ const Items = () => {
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [vendorScope, setVendorScope] = useState(null);
   const [filters, setFilters] = useState({
     brands: [],
     vendors: [],
@@ -502,19 +505,25 @@ const Items = () => {
       setLoading(true);
       setError("");
 
-      const res = await api.get("/items", {
-        params: {
-          ...itemSearch,
-          brand: brandFilter,
-          vendor: vendorFilter,
-          country: countryFilter,
-          workload_task: workloadTask,
-          workload_status: workloadStatus,
-          include_product_image_thumbnail: true,
-          page,
-          limit,
-        },
-      });
+      const params = {
+        ...itemSearch, brand: brandFilter, vendor: vendorFilter, country: countryFilter,
+        workload_task: workloadTask, workload_status: workloadStatus,
+        include_product_image_thumbnail: true, page, limit,
+      };
+      let res;
+      try {
+        res = await api.get("/items", { params });
+      } catch (error) {
+        if (error?.response?.data?.code !== "QC_VENDOR_ACCESS_REVOKED") throw error;
+        res = await api.get("/items", { params: { ...params, vendor: "all", page: 1 } });
+        setPage(1);
+      }
+      const scope = res?.data?.vendor_scope || null;
+      setVendorScope(scope);
+      if (scope) {
+        setVendorFilter(scope.selected_vendor_id || "all");
+        setDraftVendorFilter(scope.selected_vendor_id || "all");
+      }
 
       setRows(Array.isArray(res?.data?.data) ? res.data.data : []);
       setTotalPages(Number(res?.data?.pagination?.totalPages || 1));
@@ -713,14 +722,14 @@ const Items = () => {
     setPage(1);
     setDraftItemSearch({});
     setDraftBrandFilter("all");
-    setDraftVendorFilter("all");
+    setDraftVendorFilter(isQcUser ? vendorFilter : "all");
     setDraftCountryFilter(DEFAULT_COUNTRY_FILTER);
     setItemSearch({});
     setBrandFilter("all");
-    setVendorFilter("all");
+    setVendorFilter(isQcUser ? vendorFilter : "all");
     setCountryFilter(DEFAULT_COUNTRY_FILTER);
     setSuccess("");
-  }, []);
+  }, [isQcUser, vendorFilter]);
 
   const itemCodeOptions = useMemo(
     () => (Array.isArray(filters.item_codes) ? filters.item_codes : []),
@@ -793,13 +802,13 @@ const Items = () => {
     (item) => {
       const itemCode = String(item?.code || "").trim();
       if (!itemCode) return;
-      navigate(`/items/${encodeURIComponent(itemCode)}/details`, {
+      navigate(`/items/${encodeURIComponent(itemCode)}/details${isQcUser ? `?vendor=${encodeURIComponent(vendorFilter)}` : ""}`, {
         state: {
           fromItems: `${location.pathname}${location.search}`,
         },
       });
     },
-    [location.pathname, location.search, navigate],
+    [location.pathname, location.search, navigate, isQcUser, vendorFilter],
   );
 
   const navigateToLatestInspectionReport = useCallback(
@@ -1027,7 +1036,7 @@ const Items = () => {
           <h2 className="h4 mb-0">Items</h2>
           {canSyncItems || canCreateItems || totalRecords > 0 ? (
             <div className="d-flex gap-2 flex-wrap justify-content-end oms-responsive-page-actions">
-              <button
+              {canExportItems && <button
                 type="button"
                 className="btn btn-outline-primary btn-sm"
                 onClick={handleExportXls}
@@ -1035,7 +1044,7 @@ const Items = () => {
                 title="Export all items matching the current filters and their current running POs"
               >
                 {exporting ? "Exporting..." : "Export XLS"}
-              </button>
+              </button>}
               {canCreateItems && (
                 <>
                   <button
@@ -1129,10 +1138,13 @@ const Items = () => {
                 <select
                   className="form-select"
                   value={draftVendorFilter}
+                  disabled={isQcUser && (vendorScope?.vendors?.length || 0) <= 1}
                   onChange={(e) => setDraftVendorFilter(e.target.value)}
                 >
-                  <option value="all">All Vendors</option>
-                  {filters.vendors.map((vendor) => (
+                  {!isQcUser && <option value="all">All Vendors</option>}
+                  {isQcUser ? (vendorScope?.vendors || []).map((vendor) => (
+                    <option key={vendor.vendor_id || vendor.name} value={vendor.vendor_id || vendor.name}>{vendor.name}</option>
+                  )) : filters.vendors.map((vendor) => (
                     <option key={vendor} value={vendor}>
                       {vendor}
                     </option>
@@ -1258,7 +1270,7 @@ const Items = () => {
                     {sortedRows.length === 0 && (
                       <tr className="responsive-card-table-empty-row">
                         <td colSpan="8" className="text-center py-4">
-                          No items found
+                          {isQcUser && vendorScope?.vendors?.length === 0 ? "No open inspection requests assigned." : "No items found"}
                         </td>
                       </tr>
                     )}
@@ -1283,8 +1295,10 @@ const Items = () => {
                           <td data-label="Item Code">
                             {item?.code ? (
                               <ItemOrderPresenceTooltip
+                                key={`${item.code}:${vendorFilter}`}
                                 itemCode={item.code}
-                                onClick={() => navigateToItemOrdersHistory(item)}
+                                vendor={isQcUser ? vendorFilter : ""}
+                                onClick={() => isQcUser ? navigateToItemDetails(item) : navigateToItemOrdersHistory(item)}
                                 buttonClassName="p-0"
                               />
                             ) : (

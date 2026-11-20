@@ -1,3 +1,4 @@
+const { canViewQc, ownsQc } = require("../services/qcVendorAccess.service");
 const QC = require("../models/qc.model");
 const Test = require("../models/tests.model");
 const Inspection = require("../models/inspection.model");
@@ -12993,7 +12994,7 @@ exports.downloadQcImageFile = async (req, res) => {
       .populate({
         path: "order",
         match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
-        select: "_id",
+        select: "_id vendor brand",
       });
 
     if (!qc || !qc.order) {
@@ -13005,21 +13006,10 @@ exports.downloadQcImageFile = async (req, res) => {
 
     const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
     if (normalizedRole === "qc") {
-      const currentUserId = String(
-        req.user?.id || req.user?._id || "",
-      ).trim();
-      const alignedInspectorId = String(
-        qc?.inspector?._id || qc?.inspector || "",
-      ).trim();
-
-      if (
-        !currentUserId ||
-        !alignedInspectorId ||
-        alignedInspectorId !== currentUserId
-      ) {
+      if (!await canViewQc(req.user, qc)) {
         return res.status(403).json({
           success: false,
-          message: "QC can only view records aligned to them",
+          message: "You do not have access to this QC record",
         });
       }
     }
@@ -13099,7 +13089,7 @@ exports.downloadQcImages = async (req, res) => {
       .populate({
         path: "order",
         match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
-        select: "_id",
+        select: "_id vendor brand",
       });
 
     if (!qc || !qc.order) {
@@ -13111,21 +13101,10 @@ exports.downloadQcImages = async (req, res) => {
 
     const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
     if (normalizedRole === "qc") {
-      const currentUserId = String(
-        req.user?.id || req.user?._id || "",
-      ).trim();
-      const alignedInspectorId = String(
-        qc?.inspector?._id || qc?.inspector || "",
-      ).trim();
-
-      if (
-        !currentUserId ||
-        !alignedInspectorId ||
-        alignedInspectorId !== currentUserId
-      ) {
+      if (!await canViewQc(req.user, qc)) {
         return res.status(403).json({
           success: false,
-          message: "QC can only view records aligned to them",
+          message: "You do not have access to this QC record",
         });
       }
     }
@@ -13282,17 +13261,9 @@ exports.getQCById = async (req, res) => {
       .toLowerCase();
     const isQcUser = normalizedRole === "qc";
     if (isQcUser) {
-      const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-      const alignedInspectorId = String(
-        qc?.inspector?._id || qc?.inspector || "",
-      ).trim();
-      if (
-        !currentUserId ||
-        !alignedInspectorId ||
-        alignedInspectorId !== currentUserId
-      ) {
+      if (!await canViewQc(req.user, qc)) {
         return res.status(403).json({
-          message: "QC can only view records aligned to them",
+          message: "You do not have access to this QC record",
         });
       }
     }
@@ -13526,7 +13497,7 @@ exports.getQCById = async (req, res) => {
     const previousImageHistory =
       await findPreviousPoImageHistoryForItem({
         qcDoc: qcData,
-        user: req.user,
+        user: isQcUser ? { ...req.user, qc_vendor_scope: [qc.order.vendor] } : req.user,
       });
     const itemReminders = await findItemRemindersForQc({
       qcDoc: qcData,
@@ -13621,6 +13592,7 @@ exports.getQCById = async (req, res) => {
     res.json({
       data: {
         ...qcData,
+        read_only: isQcUser && !ownsQc(req.user, qc),
         shipping_mark_updated: Boolean(itemMaster?.shipping_mark_updated),
         item_master: itemMasterWithSignedUrls,
         qc_images: qcImagesWithSignedUrls,

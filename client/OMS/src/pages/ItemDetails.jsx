@@ -5,9 +5,11 @@ import api from "../api/axios";
 import { usePermissions } from "../auth/PermissionContext";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isManagerLikeRole, normalizeUserRole } from "../auth/permissions";
+import { getItemPoTarget } from "../utils/itemNavigation";
 import { confirmFileDeletion } from "../utils/fileDeletePassword";
 import Navbar from "../components/Navbar";
 import FilePreviewModal from "../components/FilePreviewModal";
+import ItemDiscussions from "../components/ItemDiscussions";
 import QcItemComplaintsSection from "../components/complaints/QcItemComplaintsSection";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { ClaimPercentageModal } from "./Items";
@@ -520,6 +522,8 @@ const ItemDetails = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { hasPermission } = usePermissions();
+  const isQcUser = normalizeUserRole(getUserFromToken()?.role) === "qc";
+  const selectedVendor = new URLSearchParams(location.search).get("vendor") || "";
   const { itemCode } = useParams();
   const resolvedItemCode = useMemo(
     () => decodeURIComponent(String(itemCode || "")).trim(),
@@ -527,9 +531,10 @@ const ItemDetails = () => {
   );
   const backTarget = useMemo(() => {
     const fromItems = String(location.state?.fromItems || location.state?.fromPreviousPage || "").trim();
-    return fromItems.startsWith("/") ? fromItems : "/items";
-  }, [location.state]);
+    return fromItems.startsWith("/") ? fromItems : `/items${isQcUser && selectedVendor ? `?vendor=${encodeURIComponent(selectedVendor)}` : ""}`;
+  }, [location.state, isQcUser, selectedVendor]);
 
+  const [effectiveVendor, setEffectiveVendor] = useState(selectedVendor);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [details, setDetails] = useState(null);
@@ -548,9 +553,9 @@ const ItemDetails = () => {
   const [adminReminderPopupOpen, setAdminReminderPopupOpen] = useState(false);
   const [resolvingReminderId, setResolvingReminderId] = useState("");
   const adminReminderPopupShownRef = useRef("");
-  const canDeleteItemFiles = hasPermission("images_documents", "delete");
-  const canEditItems = hasPermission("items", "edit");
-  const canEditQc = hasPermission("qc", "edit");
+  const canDeleteItemFiles = !isQcUser && hasPermission("images_documents", "delete");
+  const canEditItems = !isQcUser && hasPermission("items", "edit");
+  const canEditQc = !isQcUser && hasPermission("qc", "edit");
 
   const fetchDetails = useCallback(async () => {
     if (!resolvedItemCode) {
@@ -562,15 +567,18 @@ const ItemDetails = () => {
     try {
       setLoading(true);
       setError("");
-      const response = await api.get(`/items/${encodeURIComponent(resolvedItemCode)}/details`);
+      const response = await api.get(`/items/${encodeURIComponent(resolvedItemCode)}/details`, {
+        params: isQcUser ? { vendor: selectedVendor } : {},
+      });
       setDetails(response?.data?.data || null);
+      setEffectiveVendor(response?.data?.vendor_scope?.selected_vendor_id || selectedVendor);
     } catch (fetchError) {
       setDetails(null);
       setError(fetchError?.response?.data?.message || "Failed to load item details.");
     } finally {
       setLoading(false);
     }
-  }, [resolvedItemCode]);
+  }, [resolvedItemCode, isQcUser, selectedVendor]);
 
   useEffect(() => {
     fetchDetails();
@@ -767,15 +775,8 @@ const ItemDetails = () => {
   };
 
   const getPoRowTarget = useCallback((row = {}) => {
-    const inspectionCount = Number(row?.inspection_count || 0);
-    const qcId = normalizeText(row?.qc_id);
-    if (inspectionCount > 0 && qcId) {
-      return `/qc/${encodeURIComponent(qcId)}`;
-    }
-
-    const po = normalizeText(row?.po);
-    return po ? `/orders?order_id=${encodeURIComponent(po)}` : "";
-  }, []);
+    return getItemPoTarget(row, isQcUser);
+  }, [isQcUser]);
 
   const handlePoRowClick = useCallback(
     (row = {}) => {
@@ -1064,7 +1065,7 @@ const ItemDetails = () => {
       setDownloadingFileKey(fileKey || fileType);
       const response = await api.get(
         `/items/${encodeURIComponent(itemId)}/files/${encodeURIComponent(fileType)}/url`,
-        { params: { download: true, file_key: fileKey } },
+        { params: { download: true, file_key: fileKey, ...(isQcUser ? { vendor: effectiveVendor } : {}) } },
       );
       const url = String(response?.data?.data?.url || "").trim();
       if (!url) throw new Error("Download URL is unavailable.");
@@ -1079,7 +1080,7 @@ const ItemDetails = () => {
     } finally {
       setDownloadingFileKey("");
     }
-  }, [downloadingFileKey, item?._id]);
+  }, [downloadingFileKey, item?._id, isQcUser, effectiveVendor]);
 
   return (
     <>
@@ -1377,9 +1378,10 @@ const ItemDetails = () => {
                   )}
                 </section>
 
-                <QcItemComplaintsSection itemCode={item?.code || resolvedItemCode} />
+                <ItemDiscussions key={`${item?._id}:${effectiveVendor}`} itemId={item?._id} vendor={isQcUser ? effectiveVendor : ""} />
+                <QcItemComplaintsSection enabled={!isQcUser} itemCode={item?.code || resolvedItemCode} />
 
-                <section className="border rounded p-3 d-grid gap-3 item-reminder-form">
+                {!isQcUser && <section className="border rounded p-3 d-grid gap-3 item-reminder-form">
                   <div>
                     <h3 className="h6 mb-1">Reminders</h3>
                     <div className="small text-secondary">
@@ -1463,7 +1465,7 @@ const ItemDetails = () => {
                       })}
                     </div>
                   )}
-                </section>
+                </section>}
 
                 <section>
                   <h3 className="h6 mb-3">POs</h3>
@@ -1486,6 +1488,13 @@ const ItemDetails = () => {
                         ) : sortedOrders.map((row) => (
                           <tr
                             key={row.id || row.po}
+                            tabIndex={getPoRowTarget(row) ? 0 : undefined}
+                            onKeyDown={(event) => {
+                              if (getPoRowTarget(row) && ["Enter", " "].includes(event.key)) {
+                                event.preventDefault();
+                                handlePoRowClick(row);
+                              }
+                            }}
                             style={{ cursor: getPoRowTarget(row) ? "pointer" : "default" }}
                             onClick={() => handlePoRowClick(row)}
                           >

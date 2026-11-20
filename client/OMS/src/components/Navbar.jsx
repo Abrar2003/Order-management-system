@@ -267,6 +267,7 @@ const Navbar = () => {
   const itemMenuItems = useMemo(() => {
     if (isQcOnlyRole) {
       return [
+        ...(hasPermission("items", "view") ? [routeMenuItem("items-all", "View Items", "/items")] : []),
         groupMenuItem("qc-file-approvals", "File Approvals", [
           routeMenuItem("qc-cad-approval", "AutoCAD Approval", "/item-files?file_type=cad_file&country=India"),
           routeMenuItem("qc-assembly-approval", "Assembly Approval", "/item-files?file_type=assembly_file&country=India"),

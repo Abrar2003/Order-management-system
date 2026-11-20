@@ -605,7 +605,7 @@ const App = () => {
           <Route
             path="/items"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute permissionModule="items">
                 <Items />
               </ProtectedRoute>
             }
@@ -641,7 +641,7 @@ const App = () => {
           <Route
             path="/items/:itemCode/details"
             element={
-              <ProtectedRoute allowViewer={false}>
+              <ProtectedRoute allowViewer={false} permissionModule="items">
                 <ItemDetails />
               </ProtectedRoute>
             }

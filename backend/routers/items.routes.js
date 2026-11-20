@@ -71,7 +71,22 @@ const {
 } = require("../middlewares/parseAndSyncPisUpload.middleware");
 
 const router = express.Router();
+const qcItemVendorScope = require("../middlewares/qcItemVendorScope.middleware");
+const discussions = require("../controllers/itemDiscussion.controller");
+const { discussionUpload } = require("../middlewares/itemDiscussionUpload.middleware");
 const invalidateItemsOnSuccess = invalidateCacheOnSuccess(invalidateItemCaches);
+
+// Posting in a discussion is intentionally available to every authorized viewer.
+const discussionAccess = [
+  auth,
+  (req, res, next) => requirePermission(req.query.qc_id ? "qc" : "items", "view")(req, res, next),
+  qcItemVendorScope, discussions.loadItem,
+];
+router.get("/:id/discussions", ...discussionAccess, discussions.listTopics);
+router.get("/:id/discussions/:topic/messages", ...discussionAccess, discussions.listMessages);
+router.post("/:id/discussions/:topic/messages", ...discussionAccess, discussionUpload, discussions.postMessage);
+router.delete("/:id/discussions/:topic/messages/:messageId", ...discussionAccess, discussions.deleteMessage);
+router.get("/:id/discussions/:topic/messages/:messageId/files/:fileId", ...discussionAccess, discussions.getAttachment);
 
 router.post(
   "/pdf/render",
@@ -138,6 +153,7 @@ router.get(
   "/",
   auth,
   requirePermission("items", "view"),
+  qcItemVendorScope,
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getItems,
 );
@@ -185,6 +201,8 @@ router.get(
   "/export",
   auth,
   requirePermission("items", "view"),
+  (req, res, next) => String(req.user?.role).trim().toLowerCase() === "qc" ? requirePermission("items", "export")(req, res, next) : next(),
+  qcItemVendorScope,
   securityLog("export_excel", "items", {
     metadata: (req) => ({ filters: req.query || {} }),
   }),
@@ -408,6 +426,7 @@ router.get(
   "/:itemCode/order-presence",
   auth,
   requirePermission("items", "view"),
+  qcItemVendorScope,
   cacheRoute("items", SHORT_CACHE_TTL),
   getItemOrderPresence,
 );
@@ -416,6 +435,7 @@ router.get(
   "/:itemCode/details",
   auth,
   requirePermission("items", "view"),
+  qcItemVendorScope,
   requireNonViewer,
   securityLog("view", "item", {
     resourceId: (req) => req.params.itemCode,
@@ -429,6 +449,7 @@ router.get(
   "/:itemCode/orders-history",
   auth,
   requirePermission("items", "view"),
+  qcItemVendorScope,
   requireNonViewer,
   securityLog("view", "item_orders_history", {
     resourceId: (req) => req.params.itemCode,
@@ -442,6 +463,7 @@ router.get(
   "/:id/files/:fileType/url",
   auth,
   requirePermission("images_documents", "view"),
+  (req, res, next) => !req.query.vendor && !req.query.qc_id && ["cad_file", "assembly_file", "mounting_file"].includes(req.params.fileType) ? next() : qcItemVendorScope(req, res, next),
   securityLog("download_file", "item_file", {
     resourceId: (req) => req.params.id,
     metadata: (req) => ({ file_type: req.params.fileType }),
@@ -453,6 +475,7 @@ router.get(
   "/:itemId/pis-file-url",
   auth,
   requirePermission("pis", "view"),
+  qcItemVendorScope,
   securityLog("download_file", "pis_file", {
     resourceId: (req) => req.params.itemId,
   }),

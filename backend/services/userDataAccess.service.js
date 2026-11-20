@@ -574,6 +574,9 @@ const buildDataAccessMatch = (
   if (allowedVendors) {
     conditions.push(buildVendorAccessCondition(vendorFields, allowedVendors));
   }
+  if (Array.isArray(user.qc_vendor_scope)) {
+    conditions.push(buildVendorAccessCondition(vendorFields, user.qc_vendor_scope));
+  }
 
   return combineMongoMatches(...conditions);
 };

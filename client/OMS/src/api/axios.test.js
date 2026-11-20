@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeApiVendorRefs } from "./axios.js";
 
+test("QC vendor scope preserves IDs used for authorized vendor selection", () => {
+  const vendor_scope = { restricted: true, vendors: [{ vendor_id: "vendor-1", name: "Alpha" }], selected_vendor_id: "vendor-1" };
+  assert.deepEqual(normalizeApiVendorRefs({ vendor_scope }).vendor_scope, vendor_scope);
+});
+
 test("keeps vendor access options with their brand ids", () => {
   const response = normalizeApiVendorRefs({
     vendors: [{ _id: "vendor-1", name: "Boranada", country: "IN", brand_ids: ["brand-1"] }],

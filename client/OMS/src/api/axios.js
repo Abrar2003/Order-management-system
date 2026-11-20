@@ -62,6 +62,8 @@ const normalizeVendorArray = (values = []) => {
 };
 
 export const normalizeApiVendorRefs = (value, key = "") => {
+  // Access metadata needs vendor IDs as well as display names.
+  if (key === "vendor_scope") return value;
   if (Array.isArray(value)) {
     if (VENDOR_ARRAY_KEYS.has(key)) return normalizeVendorArray(value);
     return value.map((entry) => normalizeApiVendorRefs(entry));

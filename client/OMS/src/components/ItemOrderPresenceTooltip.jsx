@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import api from "../api/axios";
 import Tooltip from "./Tooltip";
+import { getUserFromToken } from "../auth/auth.utils";
+import { isQcOnlyUserRole } from "../auth/permissions";
 import "../App.css";
 
 const orderPresenceCache = new Map();
@@ -10,8 +12,12 @@ const normalizeText = (value) => String(value || "").trim();
 
 const normalizeOrderKey = (value) => normalizeText(value).toLowerCase();
 
-const fetchOrderPresence = async (itemCode = "") => {
+const fetchOrderPresence = async (itemCode = "", vendor = "", isQcUser = false) => {
   const normalizedItemCode = normalizeText(itemCode);
+  if (isQcUser) {
+    const response = await api.get(`/items/${encodeURIComponent(normalizedItemCode)}/order-presence`, { params: { vendor } });
+    return Array.isArray(response?.data?.data) ? response.data.data : [];
+  }
   if (!normalizedItemCode) {
     return [];
   }
@@ -74,6 +80,7 @@ const formatPresenceSummary = (row = {}) => {
 
 const ItemOrderPresenceTooltip = ({
   itemCode = "",
+  vendor = "",
   excludeOrderId = "",
   label,
   onClick,
@@ -82,10 +89,11 @@ const ItemOrderPresenceTooltip = ({
   emptyLabel = "N/A",
 }) => {
   const normalizedItemCode = normalizeText(itemCode);
+  const isQcUser = isQcOnlyUserRole(getUserFromToken()?.role);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [rows, setRows] = useState(() =>
-    normalizedItemCode && orderPresenceCache.has(normalizedItemCode)
+    !isQcUser && normalizedItemCode && orderPresenceCache.has(normalizedItemCode)
       ? orderPresenceCache.get(normalizedItemCode)
       : [],
   );
@@ -100,7 +108,7 @@ const ItemOrderPresenceTooltip = ({
 
   const loadTooltipData = useCallback(async () => {
     if (!normalizedItemCode || loading) return;
-    if (orderPresenceCache.has(normalizedItemCode)) {
+    if (!isQcUser && orderPresenceCache.has(normalizedItemCode)) {
       setRows(orderPresenceCache.get(normalizedItemCode) || []);
       return;
     }
@@ -108,9 +116,10 @@ const ItemOrderPresenceTooltip = ({
     try {
       setLoading(true);
       setError("");
-      const nextRows = await fetchOrderPresence(normalizedItemCode);
+      const nextRows = await fetchOrderPresence(normalizedItemCode, vendor, isQcUser);
       setRows(nextRows);
     } catch (fetchError) {
+      setRows([]);
       setError(
         fetchError?.response?.data?.message ||
           fetchError?.message ||
@@ -119,7 +128,7 @@ const ItemOrderPresenceTooltip = ({
     } finally {
       setLoading(false);
     }
-  }, [loading, normalizedItemCode]);
+  }, [loading, normalizedItemCode, vendor, isQcUser]);
 
   if (!normalizedItemCode) {
     return emptyLabel;

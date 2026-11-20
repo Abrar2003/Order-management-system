@@ -2006,7 +2006,7 @@ const notifyAdminsForFinalPisComment = async ({ item = {}, comment = {}, actor =
   );
 };
 
-const buildLatestInspectionReportLookup = async (itemCodes = []) => {
+const buildLatestInspectionReportLookup = async (itemCodes = [], user = {}) => {
   const normalizedCodes = [...new Set(
     (Array.isArray(itemCodes) ? itemCodes : [])
       .map((code) => normalizeTextField(code))
@@ -2017,17 +2017,21 @@ const buildLatestInspectionReportLookup = async (itemCodes = []) => {
     return new Map();
   }
 
-  const qcRows = await QC.find({
+  let query = QC.find(applyDataAccessMatch({
     $or: normalizedCodes.map((code) => ({
       "item.item_code": new RegExp(`^\\s*${escapeRegex(code)}\\s*$`, "i"),
     })),
-  })
-    .select("_id item.item_code last_inspected_date inspection_record updatedAt createdAt")
-    .lean();
+  }, user, { brandFields: ["order_meta.brand"], vendorFields: ["order_meta.vendor"] }))
+    .select("_id order item.item_code last_inspected_date inspection_record updatedAt createdAt");
+  if (Array.isArray(user.qc_vendor_scope)) {
+    query = query.populate({ path: "order", match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, user), select: "_id" });
+  }
+  const qcRows = await query.lean();
 
   const latestByItemCode = new Map();
 
   (Array.isArray(qcRows) ? qcRows : []).forEach((qcDoc) => {
+    if (Array.isArray(user.qc_vendor_scope) && !qcDoc.order) return;
     const itemCodeKey = normalizeLookupKey(qcDoc?.item?.item_code);
     if (!itemCodeKey) return;
 
@@ -3244,6 +3248,7 @@ exports.getItems = async (req, res) => {
 
     const latestInspectionReportLookup = await buildLatestInspectionReportLookup(
       (Array.isArray(items) ? items : []).map((item) => item?.code),
+      req.user,
     );
     const itemsWithLatestInspectionReport = (Array.isArray(items) ? items : []).map((item) => {
       const latestInspectionReport = latestInspectionReportLookup.get(
@@ -3270,6 +3275,7 @@ exports.getItems = async (req, res) => {
     return res.status(200).json({
       success: true,
       data: itemsWithThumbnails,
+      ...(req.vendorScope ? { vendor_scope: req.vendorScope } : {}),
       pagination: {
         page,
         limit,
@@ -3282,7 +3288,7 @@ exports.getItems = async (req, res) => {
           ...(brandsRaw || []),
           ...(brandNamesRaw || []),
         ]),
-        vendors: normalizeVendorDisplayList(vendorsRaw),
+        vendors: req.vendorScope ? req.vendorScope.vendors.map((vendor) => vendor.name) : normalizeVendorDisplayList(vendorsRaw),
         item_codes: normalizeDistinctValues(codesRaw),
       },
     });
@@ -4267,6 +4273,7 @@ exports.getItemDetails = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+      ...(req.vendorScope ? { vendor_scope: req.vendorScope } : {}),
       data: {
         item: {
           ...item,
@@ -5997,6 +6004,7 @@ exports.getItemFileUrl = async (req, res) => {
     ].join(" ");
     const isQcApprovalPreview =
       normalizeUserRoleKey(req.user?.role) === "qc" &&
+      !req.vendorScope &&
       APPROVAL_FILE_TYPES.includes(fileType);
     const item = await Item.findOne(
       isQcApprovalPreview ? { _id: itemId } : applyItemDataAccess({ _id: itemId }, req.user),

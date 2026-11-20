@@ -1,4 +1,5 @@
 import PreviewImage from "../components/PreviewImage";
+import ItemDiscussions from "../components/ItemDiscussions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "../api/axios";
@@ -639,6 +640,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
   const normalizedRole = normalizeUserRole(user?.role);
   const currentUserId = String(user?.id || user?._id || "").trim();
   const isQcUser = normalizedRole === "qc";
+  const isVendorReadOnly = Boolean(qc?.read_only);
   const isAdmin = isManagerLikeRole(normalizedRole);
   const isStrictAdmin = isStrictAdminRole(normalizedRole);
   const isCurrentUserLabelExempt = isLabelExemptUser(currentUserId);
@@ -746,7 +748,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
     () => getQcPendingAlignmentInfo(qc),
     [qc],
   );
-  const canShowTransferRequest = canTransferLatestRequestToday(qc);
+  const canShowTransferRequest = !isVendorReadOnly && canTransferLatestRequestToday(qc);
   const canUpdateQcByRole =
     isAdmin ||
     normalizedRole === "qc";
@@ -800,7 +802,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
   }, []);
   const canUpdateInspectionRecord = useCallback(
     (record = {}) => {
-      if (isTransferredInspectionRecord(record)) return false;
+      if (isVendorReadOnly || isTransferredInspectionRecord(record)) return false;
       if (isAdmin) return true;
       if (!isCurrentUserLabelExempt || !currentUserId) return false;
 
@@ -820,20 +822,22 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
       isLabelExemptAlignedInspectionEditor,
       isQcUser,
       isTransferredInspectionRecord,
+      isVendorReadOnly,
     ],
   );
-  const showInspectionActions = true;
+  const showInspectionActions = !isVendorReadOnly;
   const isQcAlignedRecord = !isQcUser || (
     Boolean(currentUserId) &&
     Boolean(alignedInspectorId) &&
     alignedInspectorId === currentUserId
   );
   const canUpdateQc =
+    !isVendorReadOnly &&
     canUpdateQcByRole &&
     pendingAlignmentInfo.hasRequest &&
     isQcAlignedRecord &&
     (!isQcUser || qcUserRequestAvailability.isAvailable);
-  const canRunQcTests = isQcUser && isQcAlignedRecord;
+  const canRunQcTests = !isVendorReadOnly && isQcUser && isQcAlignedRecord;
   const qcUpdateDisabledReason = !canUpdateQc
     ? !pendingAlignmentInfo.hasRequest
       ? "QC is not requested yet. Align QC request before updating."
@@ -911,7 +915,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
     },
     [availableRelatedFileOptions, relatedFileType, subFileType, qc?.item_master],
   );
-  const canUploadQcImages = isAdmin || isQcUser || isViewOnly;
+  const canUploadQcImages = !isVendorReadOnly && (isAdmin || isQcUser || isViewOnly);
   const canUploadItemMasterFiles = (isAdmin && canUpdateQc) || isViewOnly;
   const isQcImageUploadType = activeRelatedFileConfig?.scope === "qc";
   const activeQcScopedImageUploadTotalLimit =
@@ -1979,6 +1983,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
       setQc(res.data.data);
     } catch (err) {
       console.error(err);
+      if ([403, 404].includes(err?.response?.status)) setQc(null);
       if (!galleryOnly) alert("Failed to load QC details");
     } finally {
       setLoading(false);
@@ -2072,6 +2077,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
       if (!fileUrl) {
         const response = await api.get(
           `/items/${encodeURIComponent(qc.item_master._id)}/files/${encodeURIComponent(fileConfig.value)}/url`,
+          { params: isQcUser ? { qc_id: id } : {} },
         );
         responseFile = response?.data?.data?.file || currentFile;
         fileUrl = String(response?.data?.data?.url || "").trim();
@@ -2104,7 +2110,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
     } finally {
       setOpeningRelatedFileType("");
     }
-  }, [qc?.item_master]);
+  }, [qc?.item_master, isQcUser, id]);
 
   const handleApproveItemMasterFile = useCallback(async (entry) => {
     const itemId = String(qc?.item_master?._id || "").trim();
@@ -2176,6 +2182,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
         {
           params: {
             download: true,
+            ...(isQcUser ? { qc_id: id } : {}),
             file_key: String(currentFile?.key || currentFile?.public_id || "").trim(),
           },
         },
@@ -2193,7 +2200,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
     } finally {
       setDownloadingRelatedFileType("");
     }
-  }, [qc?.item_master]);
+  }, [qc?.item_master, isQcUser, id]);
 
   const handleRelatedFileUploadProgress = useCallback((progressEvent) => {
     const total = Number(progressEvent?.total || 0);
@@ -2847,7 +2854,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
           <h2 className="h4 mb-0">QC Details</h2>
           <div className="d-flex flex-column align-items-end gap-2 qc-details-actions">
             <div className="d-flex align-items-center flex-wrap justify-content-end gap-2 qc-details-toolbar">
-              {(!isViewOnly || isViewOnly) && (
+              {!isVendorReadOnly && (
                 <>
                   <select
                     className="form-select form-select-sm qc-details-toolbar-select"
@@ -3380,7 +3387,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
                 {itemMasterFiles.map((entry) => {
                   const hasFile = hasStoredFile(entry.file);
                   const isOpening = openingRelatedFileType === entry.value;
-                  const isPendingApproval = isQcUser && isPendingQcFileApproval(qc?.item_master, entry);
+                  const isPendingApproval = !isVendorReadOnly && isQcUser && isPendingQcFileApproval(qc?.item_master, entry);
                   const fileType = String(entry.fileType || entry.value || "").trim().toLowerCase();
                   const isApproving = approvingItemFileType === fileType;
                   const isSubmittingComment = submittingItemFileCommentType === fileType;
@@ -3601,8 +3608,9 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
               )}
             </section>
 
+            <ItemDiscussions key={`${qc?.item_master?._id}:${id}`} itemId={qc?.item_master?._id} qcId={id} />
             <QcItemComplaintsSection
-              enabled={!isViewOnly && (isAdmin || isQcUser)}
+              enabled={!isVendorReadOnly && !isViewOnly && (isAdmin || isQcUser)}
               itemCode={qc?.item?.item_code}
             />
 
@@ -4032,7 +4040,7 @@ const QcDetails = ({ galleryQcId, onCloseGallery } = {}) => {
               ) : <div className="text-secondary small">{testRequirement ? "No test is required for a claim percentage of 3% or lower." : "Test status is unavailable."}</div>}
             </section>
 
-            {!isViewOnly && (
+            {!isViewOnly && !isVendorReadOnly && (
               <div className="d-flex justify-content-end flex-wrap gap-2 qc-details-action-row">
                 {canFinalizeShipping &&
                   canFinalizeMoreShipping && (
