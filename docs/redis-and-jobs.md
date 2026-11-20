@@ -50,6 +50,16 @@ redis-cli ping
 
 ## Production Notes
 
+- Item discussions reuse Socket.IO for live message/deletion updates and ephemeral typing status.
+  `REDIS_JOBS_ENABLED=true` enables the discussion Pub/Sub relay between PM2 web workers;
+  without Redis, only readers connected to the same worker receive live events.
+- Apply the `/socket.io/` WebSocket location in `deploy/nginx/order-management-system.conf`
+  to the active API virtual host, run `sudo nginx -t`, and reload nginx when releasing this change.
+  Ordinary application deployments do not update nginx. The shared notification/discussion
+  client uses WebSockets, avoiding HTTP polling affinity issues across PM2 workers.
+- Socket subscriptions and event delivery recheck the HTTP discussion access rules. Reconnection
+  reloads stored messages; typing expires after five seconds and draft text is never transmitted.
+
 - Bind Redis to localhost when Redis runs on the same VPS.
 - Do not expose port `6379` publicly.
 - Use a password and TLS for remote Redis.

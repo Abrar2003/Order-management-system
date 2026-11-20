@@ -48,6 +48,8 @@ const createNotificationSocketServer = ({
   allowCredentials = false,
 } = {}) => {
   const io = new Server(server, {
+    // WebSocket handshakes do not use the browser's CORS enforcement.
+    allowRequest: (req, callback) => callback(null, !req.headers.origin || allowedOrigins.includes(req.headers.origin)),
     cors: {
       origin: Array.isArray(allowedOrigins) ? allowedOrigins : [],
       methods: ["GET", "POST"],
@@ -61,6 +63,7 @@ const createNotificationSocketServer = ({
       socket.data.userId = normalizeText(user?._id);
       next();
     } catch (error) {
+      error.data = { statusCode: ["TokenExpiredError", "JsonWebTokenError", "NotBeforeError"].includes(error.name) || error.message === "Socket user was not found" ? 401 : 500 };
       next(error);
     }
   });

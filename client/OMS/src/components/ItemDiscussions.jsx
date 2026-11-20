@@ -3,8 +3,9 @@ import api from "../api/axios";
 import { usePermissions } from "../auth/PermissionContext";
 import { isStrictAdminRole } from "../auth/permissions";
 import FilePreviewModal from "./FilePreviewModal";
+import useItemDiscussionLive from "../hooks/useItemDiscussionLive";
 import { APP_DATE_TIMEZONE } from "../utils/date";
-import { DISCUSSION_FILE_ACCEPT, DISCUSSION_MAX_TEXT, ITEM_DISCUSSION_TOPICS, getDiscussionFileError, mergeDiscussionReplies } from "../utils/itemDiscussions";
+import { DISCUSSION_FILE_ACCEPT, DISCUSSION_MAX_TEXT, ITEM_DISCUSSION_TOPICS, getDiscussionFileError, mergeDiscussionReplies, loadDiscussionThread } from "../utils/itemDiscussions";
 import "./ItemDiscussions.css";
 
 const time = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: APP_DATE_TIMEZONE });
@@ -37,7 +38,7 @@ function DiscussionMessage({ message, isRoot, openFile, canDelete, removeMessage
   </article>;
 }
 
-function DiscussionThread({ itemId, topic, vendor, qcId, onClose, onPosted }) {
+function DiscussionThread({ itemId, topic, vendor, qcId, onClose, onPosted, live }) {
   const { role } = usePermissions();
   const canDelete = isStrictAdminRole(role);
   const [thread, setThread] = useState({ root: null, replies: [], before: null });
@@ -54,22 +55,29 @@ function DiscussionThread({ itemId, topic, vendor, qcId, onClose, onPosted }) {
   const endRef = useRef(null);
   const uploadRef = useRef(null);
   const requestIdRef = useRef(crypto.randomUUID());
+  const threadRef = useRef(thread);
+  threadRef.current = thread;
+  const loadVersion = useRef(0);
   const draftId = useId();
   const base = `/items/${encodeURIComponent(itemId)}/discussions/${topic.key}/messages`;
   const context = qcId ? { qc_id: qcId } : vendor ? { vendor } : {};
 
-  const load = useCallback(async (before = "") => {
-    setLoading(true); setError("");
+  const load = useCallback(async (before = "", background = false) => {
+    const version = ++loadVersion.current;
+    if (!background) { setLoading(true); setError(""); }
     try {
-      const response = await api.get(base, { params: { ...(qcId ? { qc_id: qcId } : vendor ? { vendor } : {}), ...(before ? { before } : {}) } });
-      const data = response.data.data;
+      const getPage = async (cursor) => (await api.get(base, { params: { ...(qcId ? { qc_id: qcId } : vendor ? { vendor } : {}), ...(cursor ? { before: cursor } : {}) } })).data.data;
+      const earliest = background && threadRef.current.replies[0]?._id;
+      const data = await loadDiscussionThread(getPage, before, earliest, () => version === loadVersion.current);
+      if (version !== loadVersion.current) return;
       setThread((current) => before ? { ...data, replies: mergeDiscussionReplies(data.replies, current.replies) } : data);
     } catch (error) {
+      if (version !== loadVersion.current) return;
       if ([403, 404].includes(error?.response?.status)) setThread({ root: null, replies: [], before: null });
       setError(failureMessage(error, "Could not load this discussion."));
-    } finally { setLoading(false); }
+    } finally { if (version === loadVersion.current) setLoading(false); }
   }, [base, qcId, vendor]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load("", Boolean(live.revision)); }, [live.revision, load]);
   const latestMessageId = thread.replies.at(-1)?._id || thread.root?._id;
   useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [latestMessageId]);
   useEffect(() => {
@@ -115,6 +123,7 @@ function DiscussionThread({ itemId, topic, vendor, qcId, onClose, onPosted }) {
     const fileError = getDiscussionFileError(files);
     if (fileError) { setError(fileError); return; }
     setSaving(true); setError("");
+    live.setTyping(false);
     const form = new FormData();
     form.append("text", draft.trim()); form.append("client_message_id", requestIdRef.current);
     files.forEach((file) => form.append("files", file));
@@ -126,7 +135,7 @@ function DiscussionThread({ itemId, topic, vendor, qcId, onClose, onPosted }) {
         : { root: message, replies: [], before: null });
       setDraft(""); setFiles([]); requestIdRef.current = crypto.randomUUID();
       if (uploadRef.current) uploadRef.current.value = "";
-      await load(); onPosted();
+      await load("", true); onPosted();
     } catch (error) { setError(failureMessage(error, "Message was not confirmed. Retry to send it safely.")); }
     finally { setSaving(false); }
   };
@@ -158,7 +167,7 @@ function DiscussionThread({ itemId, topic, vendor, qcId, onClose, onPosted }) {
   return <div className="item-discussion-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
     <aside className="item-discussion-panel" role="dialog" aria-modal="true" aria-labelledby={`${draftId}-heading`} data-saving={busy} ref={panelRef}>
       <header className="item-discussion-header">
-        <div><div className="small text-secondary">Item discussion</div><h3 id={`${draftId}-heading`}>{topic.label}</h3></div>
+        <div><div className="small text-secondary">Item discussion · <span role="status">{live.status}</span></div><h3 id={`${draftId}-heading`}>{topic.label}</h3></div>
         <div className="d-flex gap-2"><button type="button" className="btn btn-outline-secondary btn-sm" disabled={loading || busy} onClick={() => load()}>Refresh</button>
           <button type="button" className="btn-close" aria-label="Close discussion" disabled={busy} onClick={onClose} /></div>
       </header>
@@ -174,10 +183,13 @@ function DiscussionThread({ itemId, topic, vendor, qcId, onClose, onPosted }) {
         <div ref={endRef} />
       </div>
       <form className="item-discussion-composer" onSubmit={send}>
+        <div className="item-discussion-typing small text-secondary" role="status" aria-live="polite">
+          {live.typers.length > 0 && `${live.typers.length === 1 ? live.typers[0] : live.typers.length === 2 ? live.typers.join(" and ") : `${live.typers.slice(0, 2).join(", ")} and ${live.typers.length - 2} others`} ${live.typers.length === 1 ? "is" : "are"} typing…`}
+        </div>
         {error && <div className="alert alert-danger py-2 small" role="alert">{error}</div>}
         <label htmlFor={draftId} className="visually-hidden">{thread.root ? "Reply to thread" : "Start discussion"}</label>
         <textarea id={draftId} className="form-control" rows={3} maxLength={DISCUSSION_MAX_TEXT} disabled={busy} value={draft}
-          onChange={(event) => { setDraft(event.target.value); requestIdRef.current = crypto.randomUUID(); }} placeholder={thread.root ? "Reply to thread…" : "Write the first message…"} />
+          onChange={(event) => { setDraft(event.target.value); live.setTyping(Boolean(event.target.value.trim())); requestIdRef.current = crypto.randomUUID(); }} onBlur={() => live.setTyping(false)} placeholder={thread.root ? "Reply to thread…" : "Write the first message…"} />
         {files.length > 0 && <ul className="item-discussion-pending-files">{files.map((file, index) => <li key={`${file.name}-${index}`}>
           <span className="text-truncate">{file.name}</span><button type="button" className="btn-close" disabled={busy} aria-label={`Remove ${file.name}`}
             onClick={() => { setFiles(files.filter((_, i) => i !== index)); requestIdRef.current = crypto.randomUUID(); }} />
@@ -197,26 +209,34 @@ function DiscussionThread({ itemId, topic, vendor, qcId, onClose, onPosted }) {
 export default function ItemDiscussions({ itemId, vendor = "", qcId = "" }) {
   const [topics, setTopics] = useState(ITEM_DISCUSSION_TOPICS);
   const [active, setActive] = useState(null);
+  const live = useItemDiscussionLive(itemId, vendor, qcId, active?.key || "");
   const [error, setError] = useState("");
+  const topicsVersion = useRef(0);
   const loadTopics = useCallback(async () => {
     if (!itemId) return;
+    const version = ++topicsVersion.current;
     try {
       const response = await api.get(`/items/${encodeURIComponent(itemId)}/discussions`, { params: qcId ? { qc_id: qcId } : vendor ? { vendor } : {} });
+      if (version !== topicsVersion.current) return;
       setTopics(response.data.data); setError("");
-    } catch (error) { setError(failureMessage(error, "Could not load item discussions.")); }
+    } catch (error) {
+      if (version !== topicsVersion.current) return;
+      if ([403, 404].includes(error?.response?.status)) setTopics(ITEM_DISCUSSION_TOPICS);
+      setError(failureMessage(error, "Could not load item discussions."));
+    }
   }, [itemId, vendor, qcId]);
-  useEffect(() => { loadTopics(); }, [loadTopics]);
+  useEffect(() => { loadTopics(); }, [live.revision, loadTopics]);
   const close = useCallback(() => { setActive(null); }, []);
   if (!itemId) return null;
   return <section className="item-discussions">
     <div className="d-flex justify-content-between align-items-center gap-2 mb-2"><h3 className="h6 mb-0">Discussions</h3>
-      <span className="small text-secondary">One shared thread per topic</span></div>
+      <span className="small text-secondary">{live.status} · One shared thread per topic</span></div>
     {error && <div className="alert alert-danger py-2 small" role="alert">{error} <button className="btn btn-link btn-sm" type="button" onClick={loadTopics}>Retry</button></div>}
     <div className="item-discussion-topics">{topics.map((topic) => <button type="button" className="item-discussion-topic" key={topic.key} onClick={() => setActive(topic)}>
       <span className="item-discussion-topic-heading"><strong>{topic.label}</strong><span className="badge text-bg-light border">{Math.max(0, (topic.message_count || 0) - 1)} {(topic.message_count || 0) === 2 ? "reply" : "replies"}</span></span>
       <span className="item-discussion-topic-preview">{topic.latest?.deleted_at ? "Message deleted by an admin" : topic.latest ? `${topic.latest.author?.name || "Unknown"}: ${topic.latest.text || "Shared an attachment"}` : "Start the discussion"}</span>
       <span className="small text-secondary">Open thread →</span>
     </button>)}</div>
-    {active && <DiscussionThread key={`${itemId}:${active.key}:${vendor}:${qcId}`} itemId={itemId} topic={active} vendor={vendor} qcId={qcId} onClose={close} onPosted={loadTopics} />}
+    {active && <DiscussionThread key={`${itemId}:${active.key}:${vendor}:${qcId}`} itemId={itemId} topic={active} vendor={vendor} qcId={qcId} onClose={close} onPosted={loadTopics} live={live} />}
   </section>;
 }

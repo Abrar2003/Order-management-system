@@ -24,6 +24,7 @@
 .item-discussion-file-meta small{font-size:.7rem}
 .item-discussion-composer{flex-shrink:0;padding:16px 24px 20px;border-top:1px solid var(--bs-border-color);max-height:55%;overflow-y:auto}
 .item-discussion-composer textarea{resize:vertical;min-height:85px}
+.item-discussion-typing{min-height:1.4em;margin-bottom:4px;font-style:italic}
 .item-discussion-pending-files{list-style:none;padding:0;margin:10px 0;display:grid;gap:5px}
 .item-discussion-pending-files li{display:flex;align-items:center;gap:10px;font-size:.8rem}
 .item-discussion-pending-files .btn-close{font-size:.6rem;flex-shrink:0}

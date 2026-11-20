@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ITEM_DISCUSSION_TOPICS, getDiscussionFileError, mergeDiscussionReplies } from "./itemDiscussions.js";
+import { ITEM_DISCUSSION_TOPICS, getDiscussionFileError, mergeDiscussionReplies, loadDiscussionThread } from "./itemDiscussions.js";
 import { isStrictAdminRole } from "../auth/permissions.js";
 
 test("discussion deletion controls are limited to admins and super admins", () => {
@@ -23,4 +23,23 @@ test("loading earlier replies merges overlaps without duplicating messages", () 
   assert.deepEqual(mergeDiscussionReplies([{ _id: "01", text: "first" }, { _id: "02", text: "old" }], [{ _id: "02", text: "fresh" }, { _id: "03", text: "last" }]), [
     { _id: "01", text: "first" }, { _id: "02", text: "fresh" }, { _id: "03", text: "last" },
   ]);
+});
+
+test("live reconciliation preserves loaded history and refreshes old deletions across missed pages", async () => {
+  const pages = [
+    { root: { _id: "01" }, replies: [{ _id: "06" }, { _id: "07" }], before: "06" },
+    { root: { _id: "01" }, replies: [{ _id: "04" }, { _id: "05" }], before: "04" },
+    { root: { _id: "01", deleted_at: "now" }, replies: [{ _id: "02", deleted_at: "now" }, { _id: "03" }], before: null },
+  ];
+  const cursors = [];
+  const result = await loadDiscussionThread(async (cursor) => { cursors.push(cursor); return pages.shift(); }, "", "02", () => true);
+  assert.deepEqual(cursors, ["", "06", "04"]);
+  assert.deepEqual(result.replies.map((message) => message._id), ["02", "03", "04", "05", "06", "07"]);
+  assert.equal(result.root.deleted_at, "now"); assert.equal(result.replies[0].deleted_at, "now");
+});
+
+test("superseded live requests stop fetching older pages", async () => {
+  let count = 0;
+  await loadDiscussionThread(async () => { count++; return { replies: [{ _id: "06" }], before: "06" }; }, "", "02", () => false);
+  assert.equal(count, 1);
 });

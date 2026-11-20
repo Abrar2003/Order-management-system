@@ -19,3 +19,13 @@ export const mergeDiscussionReplies = (older, newer) => {
   const byId = new Map([...older, ...newer].map((message) => [message._id, message]));
   return [...byId.values()].sort((a, b) => a._id.localeCompare(b._id));
 };
+
+export const loadDiscussionThread = async (getPage, before, earliest, isCurrent) => {
+  let data = await getPage(before);
+  // Include the loaded history so reconnects reconcile deletions and any missed messages.
+  while (earliest && data.before && data.replies[0]?._id > earliest && isCurrent()) {
+    const older = await getPage(data.before);
+    data = { ...older, replies: mergeDiscussionReplies(older.replies, data.replies) };
+  }
+  return data;
+};

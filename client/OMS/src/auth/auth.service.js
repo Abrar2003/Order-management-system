@@ -1,5 +1,6 @@
 import api from "../api/axios";
 import { TASK_POPUP_LOGIN_KEY } from "../utils/loginTaskPopup";
+import { disconnectNotificationSocket, reconnectNotificationSocket } from "../realtime/notificationSocket";
 
 let currentUser = null;
 
@@ -18,6 +19,7 @@ export const signin = async (credentials) => {
     skipAuthRefresh: true,
   });
   currentUser = normalizeUser(res.data?.user || null);
+  reconnectNotificationSocket();
   try {
     if (currentUser?.id) sessionStorage.setItem(TASK_POPUP_LOGIN_KEY, currentUser.id);
   } catch {
@@ -31,6 +33,7 @@ export const updateBrandScope = async (brandScope) => {
     brand_scope: brandScope,
   });
   currentUser = normalizeUser(res.data?.user || null);
+  reconnectNotificationSocket();
   return currentUser;
 };
 
@@ -61,6 +64,7 @@ export const getUserFromToken = () => currentUser;
 
 export const logout = async () => {
   currentUser = null;
+  disconnectNotificationSocket();
   try {
     sessionStorage.removeItem(TASK_POPUP_LOGIN_KEY);
   } catch {

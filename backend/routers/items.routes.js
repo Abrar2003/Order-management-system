@@ -76,12 +76,7 @@ const discussions = require("../controllers/itemDiscussion.controller");
 const { discussionUpload } = require("../middlewares/itemDiscussionUpload.middleware");
 const invalidateItemsOnSuccess = invalidateCacheOnSuccess(invalidateItemCaches);
 
-// Posting in a discussion is intentionally available to every authorized viewer.
-const discussionAccess = [
-  auth,
-  (req, res, next) => requirePermission(req.query.qc_id ? "qc" : "items", "view")(req, res, next),
-  qcItemVendorScope, discussions.loadItem,
-];
+const discussionAccess = require("../middlewares/itemDiscussionAccess.middleware");
 router.get("/:id/discussions", ...discussionAccess, discussions.listTopics);
 router.get("/:id/discussions/:topic/messages", ...discussionAccess, discussions.listMessages);
 router.post("/:id/discussions/:topic/messages", ...discussionAccess, discussionUpload, discussions.postMessage);

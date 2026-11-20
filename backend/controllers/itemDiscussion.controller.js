@@ -8,6 +8,7 @@ const { buildAuditActor } = require("../helpers/permissions");
 const { normalizeUserRoleKey } = require("../helpers/userRole");
 const { DISCUSSION_TOPICS, discussionError, validateDiscussionFile, validateDiscussionMessage } = require("../helpers/itemDiscussions");
 const { cleanupDiscussionFiles } = require("../middlewares/itemDiscussionUpload.middleware");
+const discussionRelay = require("../services/itemDiscussionRelay.service");
 
 const sendError = (res, error) => {
   if (!error.statusCode) console.error("Item discussion error:", error);
@@ -113,6 +114,7 @@ exports.postMessage = async (req, res) => {
       return res.json({ data: await serializeMessage(duplicate) });
     }
     saved = true;
+    void discussionRelay.publishItemDiscussionEvent({ type: "changed", itemId: String(req.discussionItem._id), topic: req.params.topic });
     return res.status(201).json({ data: await serializeMessage(message.toObject()) });
   } catch (error) { return sendError(res, error); }
   finally {
@@ -142,6 +144,7 @@ exports.deleteMessage = async (req, res) => {
       $set: { text: "", attachments: [], deleted_at: new Date(), deleted_by: buildAuditActor(req.user) },
     }, { new: false }).lean();
     if (!message) throw discussionError(404, "Message not found or already deleted.");
+    void discussionRelay.publishItemDiscussionEvent({ type: "changed", itemId: String(req.discussionItem._id), topic: req.params.topic });
     await Promise.all((message.attachments || []).map((file) => storage.deleteObject(file.key).catch((error) => console.error("Deleted discussion attachment cleanup failed", error))));
     return res.json({ success: true });
   } catch (error) { return sendError(res, error); }

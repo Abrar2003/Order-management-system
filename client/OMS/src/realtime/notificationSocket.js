@@ -14,7 +14,7 @@ const resolveSocketBaseUrl = () => {
 
   if (typeof window !== "undefined") {
     const { protocol, hostname, origin, port } = window.location;
-    if (apiBaseUrl.startsWith("/") && ["localhost", "127.0.0.1"].includes(hostname) && port === "5173") {
+    if (apiBaseUrl.startsWith("/") && ["localhost", "127.0.0.1"].includes(hostname) && ["5173", "5174"].includes(port)) {
       return `${protocol}//${hostname}:8008`;
     }
     return origin;
@@ -25,12 +25,16 @@ const resolveSocketBaseUrl = () => {
 
 let notificationSocket = null;
 
+export const reconnectNotificationSocket = () => notificationSocket?.disconnect().connect();
+export const disconnectNotificationSocket = () => notificationSocket?.disconnect();
+
 export const connectNotificationSocket = () => {
   if (!notificationSocket) {
     notificationSocket = io(resolveSocketBaseUrl(), {
       autoConnect: false,
       withCredentials: true,
-      transports: ["websocket", "polling"],
+      // A single WebSocket works across PM2 workers without polling session affinity.
+      transports: ["websocket"],
       reconnection: true,
       timeout: 10000,
     });

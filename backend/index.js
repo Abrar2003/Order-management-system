@@ -43,6 +43,8 @@ const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
 const { createNotificationSocketServer } = require("./realtime/notificationSocket");
 const { closeNotificationRelay, startNotificationRelay } = require("./services/notificationRelay.service");
+const { registerItemDiscussionSocket } = require("./realtime/itemDiscussionSocket");
+const { startItemDiscussionRelay, closeItemDiscussionRelay } = require("./services/itemDiscussionRelay.service");
 const { cleanupExpiredUploads } = require("./services/orderReferenceDocuments.service");
 const {
   startSecurityBaselineCron,
@@ -228,6 +230,7 @@ const startServer = async () => {
       allowCredentials: corsOptions.credentials,
     });
     app.set("io", io);
+    startItemDiscussionRelay(registerItemDiscussionSocket(io)).catch((error) => console.warn("Discussion relay unavailable:", error.message));
     startNotificationRelay(io).catch((error) => console.warn("Notification relay unavailable:", error.message));
     startSecurityBaselineCron();
     const documentCleanup = setInterval(() => {
@@ -254,6 +257,7 @@ const startServer = async () => {
           clearInterval(documentCleanup);
           await io.close();
           await closeNotificationRelay();
+          await closeItemDiscussionRelay();
           await closePdfRenderer();
           await closeQueues();
           await closeRedisClients();

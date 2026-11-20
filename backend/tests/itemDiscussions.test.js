@@ -9,6 +9,7 @@ const Item = require("../models/item.model");
 const Message = require("../models/itemDiscussionMessage.model");
 const storage = require("../services/wasabiStorage.service");
 const controller = require("../controllers/itemDiscussion.controller");
+const discussionRelay = require("../services/itemDiscussionRelay.service");
 const { DISCUSSION_TOPICS, validateDiscussionFile, validateDiscussionMessage } = require("../helpers/itemDiscussions");
 
 const itemId = new mongoose.Types.ObjectId();
@@ -85,6 +86,8 @@ test("each item exposes the same three topic threads regardless of vendor contex
 });
 
 test("posting works for item viewers and stores trusted authorship, not client-supplied identity", async (t) => {
+  const events = [];
+  t.mock.method(discussionRelay, "publishItemDiscussionEvent", async (event) => events.push(event));
   t.mock.method(Message, "findOne", () => chain(null));
   let saved;
   t.mock.method(Message, "create", async (payload) => { saved = payload; return new Message({ ...payload, created_at: new Date() }); });
@@ -93,6 +96,7 @@ test("posting works for item viewers and stores trusted authorship, not client-s
   assert.equal(response.statusCode, 201);
   assert.deepEqual(saved.author, { user: userId, name: "QC Inspector" });
   assert.equal(saved.item, itemId); assert.equal(saved.topic, "autocad");
+  assert.deepEqual(events, [{ type: "changed", itemId: String(itemId), topic: "autocad" }]);
 });
 
 test("attachment-only posts keep private metadata and clean temporary files", async (t) => {
@@ -119,6 +123,7 @@ test("invalid file contents are rejected before upload", async (t) => {
 });
 
 test("upload or persistence failure rolls back storage and removes temporary files", async (t) => {
+  t.mock.method(discussionRelay, "publishItemDiscussionEvent", () => assert.fail("uncommitted message was broadcast"));
   const state = stubStorage(t);
   t.mock.method(console, "error", () => {});
   t.mock.method(Message, "findOne", () => chain(null));
@@ -130,6 +135,7 @@ test("upload or persistence failure rolls back storage and removes temporary fil
 });
 
 test("retrying a confirmed message returns it without posting or uploading again", async (t) => {
+  t.mock.method(discussionRelay, "publishItemDiscussionEvent", () => assert.fail("idempotent retry was broadcast again"));
   const state = stubStorage(t);
   const original = new Message({ ...req().body, item: itemId, topic: "autocad", author: { user: userId, name: "QC Inspector" }, created_at: new Date() }).toObject();
   t.mock.method(Message, "findOne", () => chain(original));
@@ -274,10 +280,13 @@ test("retries cannot restore a message deleted by an admin", async (t) => {
 });
 
 test("storage cleanup errors do not restore deleted messages", async (t) => {
+  const events = [];
+  t.mock.method(discussionRelay, "publishItemDiscussionEvent", async (event) => events.push(event));
   t.mock.method(console, "error", () => {});
   t.mock.method(Message, "findOneAndUpdate", () => chain({ attachments: [{ key: "old.pdf" }] }));
   t.mock.method(storage, "deleteObject", async () => { throw new Error("Storage unavailable"); });
   const request = req(); request.user.role = "admin"; request.params.messageId = String(new mongoose.Types.ObjectId());
   const response = res(); await controller.deleteMessage(request, response);
   assert.equal(response.statusCode, 200);
+  assert.deepEqual(events, [{ type: "changed", itemId: String(itemId), topic: "autocad" }]);
 });
