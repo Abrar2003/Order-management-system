@@ -1435,6 +1435,7 @@ const PRODUCT_DATABASE_TABLE_V1_COMPLETION_FALLBACK_FIELDS = Object.freeze([
 ]);
 const ITEM_DETAILS_SELECT = [
   "code",
+  "shipping_mark_updated",
   "timber_cft",
   "hs_code", "species_composition", "timber_cft_history", "timber_volume_input",
   "name",

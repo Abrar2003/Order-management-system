@@ -15,6 +15,7 @@ import SortHeaderButton from "../components/SortHeaderButton";
 import { ClaimPercentageModal } from "./Items";
 import {
   getFilePreviewSource,
+  getShippingMarkStatus,
   getItemFileValues,
   getStoredItemFileUrl,
   hasStoredItemFile,
@@ -543,6 +544,7 @@ const ItemDetails = () => {
   const [deletingFileKey, setDeletingFileKey] = useState("");
   const [downloadingFileKey, setDownloadingFileKey] = useState("");
   const [claimPercentageItem, setClaimPercentageItem] = useState(null);
+  const [updatingShippingMark, setUpdatingShippingMark] = useState(false);
   const [poSortBy, setPoSortBy] = useState("po");
   const [poSortOrder, setPoSortOrder] = useState("asc");
   const [reminderComment, setReminderComment] = useState("");
@@ -591,6 +593,21 @@ const ItemDetails = () => {
   const reminderAnchor = details?.reminder_anchor || null;
   const currentRole = normalizeUserRole(getUserFromToken()?.role);
   const isManager = isManagerLikeRole(currentRole);
+  const shippingMarkStatus = getShippingMarkStatus(item);
+  const canUpdateShippingMark = isManager && hasPermission("qc", "edit");
+  const handleShippingMarkUpdatedToggle = useCallback(async () => {
+    if (!canUpdateShippingMark || !item._id || updatingShippingMark || shippingMarkStatus === "Not Uploaded") return;
+    const nextValue = !Boolean(item.shipping_mark_updated);
+    if (!window.confirm(`Mark shipping mark as ${nextValue ? "approved" : "not approved"} for ${item.code || "this item"}?`)) return;
+    try {
+      setUpdatingShippingMark(true);
+      setError("");
+      const response = await api.patch(`/items/${encodeURIComponent(item._id)}/shipping-mark-updated`, { shipping_mark_updated: nextValue });
+      setDetails((current) => current ? { ...current, item: { ...current.item, shipping_mark_updated: response.data.shipping_mark_updated } } : current);
+    } catch (error) {
+      setError(error?.response?.data?.message || "Failed to update shipping mark status.");
+    } finally { setUpdatingShippingMark(false); }
+  }, [canUpdateShippingMark, item._id, item.code, item.shipping_mark_updated, shippingMarkStatus, updatingShippingMark]);
   const canCreateReminder = canEditQc && (isManager || Boolean(reminderAnchor?.can_qc_create));
   const pendingAdminReminders = itemReminders.filter(
     (reminder) => reminder?.type === "admin" && reminder?.status === "pending",
@@ -1099,24 +1116,23 @@ const ItemDetails = () => {
         {error && <div className="alert alert-danger">{error}</div>}
 
         <div className="card om-card inspection-report-card item-details-main-card">
-          <button
-            type="button"
-            className="qc-claim-percentage-corner-tag"
-            onClick={() => setClaimPercentageItem(item)}
-            disabled={!canEditItems}
-            title={canEditItems ? "Edit claim details" : "You do not have permission to edit claim details"}
-          >
-            <span>Claim percentage</span>
-            <strong>{formatClaimPercentage(claimPercentage)}%</strong>
-          </button>
           <div className="card-body d-grid gap-4">
             {loading ? (
               <div className="text-center py-5">Loading item details...</div>
             ) : (
               <>
                 <section>
-                  <div className="d-flex justify-center align-center text-center mb-4">
-                    <h3 className="h3 m-auto">Item Details</h3>
+                  <div className="qc-order-heading mb-4">
+                    <h3 className="h3 mb-0">Item Details</h3>
+                    <div className="qc-order-status-tags">
+                      <div className={`qc-order-status-tag${shippingMarkStatus === "Approved" ? " is-updated" : ""}`} role="status" aria-label="Shipping mark status">
+                        <span>Shipping mark</span><strong>{updatingShippingMark ? "Saving…" : shippingMarkStatus}</strong>
+                      </div>
+                      <button type="button" className="qc-claim-percentage-corner-tag" onClick={() => setClaimPercentageItem(item)}
+                        disabled={!canEditItems} title={canEditItems ? "Edit claim details" : "You do not have permission to edit claim details"}>
+                        <span>Claim percentage</span><strong>{formatClaimPercentage(claimPercentage)}%</strong>
+                      </button>
+                    </div>
                   </div>
                   <div className="inspection-report-summary-line mb-3">
                     <span><strong>Item Code:</strong> {toDisplay(item?.code, resolvedItemCode)}</span>
@@ -1313,6 +1329,13 @@ const ItemDetails = () => {
                                       ).trim()
                                         ? "Deleting..."
                                         : "Delete File"}
+                                    </button>
+                                  )}
+                                  {canUpdateShippingMark && (
+                                    <button type="button" className={`btn btn-sm rounded-pill ${shippingMarkStatus === "Approved" ? "btn-outline-success" : "btn-outline-primary"}`}
+                                      onClick={handleShippingMarkUpdatedToggle} disabled={updatingShippingMark || shippingMarkStatus === "Not Uploaded"}
+                                      title="Toggle shipping mark approval">
+                                      {updatingShippingMark ? "Saving…" : shippingMarkStatus === "Approved" ? "Shipping Mark Approved" : "Approve Shipping Mark"}
                                     </button>
                                   )}
                                 </div>
