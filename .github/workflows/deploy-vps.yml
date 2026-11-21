@@ -45,6 +45,11 @@ jobs:
       - name: Validate backend production env
         run: NODE_ENV=production npm run check:env
 
+      - name: Verify safe dependency replacement
+        run: |
+          bash -n ../deploy/scripts/deploy_vps.sh
+          python3 ../deploy/tests/dependency_swap_test.py ../deploy/scripts/deploy_vps.sh
+
   verify-frontend:
     name: Verify Frontend
     runs-on: ubuntu-latest

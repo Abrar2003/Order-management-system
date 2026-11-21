@@ -210,6 +210,11 @@ How the workflows behave:
 - `Deploy Hostinger OMS` runs on push to `main` and on manual dispatch.
 - The workflow can reach only the Hostinger forced deploy command, which deploys `main`.
 - nginx configuration changes are handled separately; ordinary application deploys do not reload nginx.
+- Backend dependencies are installed and checked in a temporary directory first. The frontend
+  build also finishes before OMS is paused. Only the OMS API and workers are stopped while
+  dependencies are replaced and the remaining deployment checks run; expect a short maintenance
+  window. Installation/build failures leave serving dependencies untouched. Later failures restore
+  the previous dependencies and restart OMS. This recovery does not roll back code or database changes.
 
 ## 9. Health Checks
 

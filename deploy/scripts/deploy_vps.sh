@@ -145,7 +145,50 @@ PUPPETEER_CACHE_DIR="${PUPPETEER_CACHE_DIR:-$(get_env_value PUPPETEER_CACHE_DIR)
 PUPPETEER_CACHE_DIR="${PUPPETEER_CACHE_DIR:-$BACKEND_DIR/.cache/puppeteer}"
 export PUPPETEER_CACHE_DIR
 mkdir -p "$PUPPETEER_CACHE_DIR"
-npm ci --omit=dev
+# npm ci removes node_modules; never run it against a serving backend.
+DEPENDENCY_STAGE="$(mktemp -d "$BACKEND_DIR/.deploy-deps.XXXXXX")"
+PREVIOUS_DEPENDENCIES="$DEPENDENCY_STAGE/previous-node_modules"
+DEPENDENCIES_SWITCHED=false
+OMS_PAUSED=false
+restore_dependencies_on_exit() {
+  local status=$?
+  trap - EXIT
+  if [[ "$status" -ne 0 && "$DEPENDENCIES_SWITCHED" == true && -d "$PREVIOUS_DEPENDENCIES" ]]; then
+    mv "$BACKEND_DIR/node_modules" "$DEPENDENCY_STAGE/failed-node_modules"
+    mv "$PREVIOUS_DEPENDENCIES" "$BACKEND_DIR/node_modules"
+  fi
+  if [[ "$status" -ne 0 && "$OMS_PAUSED" == true ]]; then
+    for app in oms-backend oms-worker oms-qc-image-worker; do
+      if pm2 describe "$app" >/dev/null 2>&1; then pm2 restart "$app" || true; fi
+    done
+  fi
+  rm -rf -- "$DEPENDENCY_STAGE"
+  exit "$status"
+}
+trap restore_dependencies_on_exit EXIT
+cp package.json package-lock.json "$DEPENDENCY_STAGE/"
+if [[ -f .npmrc ]]; then cp .npmrc "$DEPENDENCY_STAGE/"; fi
+npm ci --omit=dev --prefix "$DEPENDENCY_STAGE"
+node -e 'for (const name of ["mongoose", "express"]) require(require.resolve(name, { paths: [process.argv[1]] }));' "$DEPENDENCY_STAGE"
+
+log "Installing frontend dependencies"
+cd "$FRONTEND_DIR"
+npm ci
+log "Building frontend"
+npm run build
+cd "$BACKEND_DIR"
+
+log "Pausing OMS before replacing backend dependencies"
+OMS_PAUSED=true
+for app in oms-backend oms-worker oms-qc-image-worker; do
+  if pm2 describe "$app" >/dev/null 2>&1; then pm2 stop "$app"; fi
+done
+if [[ -d "$BACKEND_DIR/node_modules" ]]; then mv "$BACKEND_DIR/node_modules" "$PREVIOUS_DEPENDENCIES"; fi
+if ! mv "$DEPENDENCY_STAGE/node_modules" "$BACKEND_DIR/node_modules"; then
+  if [[ -d "$PREVIOUS_DEPENDENCIES" ]]; then mv "$PREVIOUS_DEPENDENCIES" "$BACKEND_DIR/node_modules"; fi
+  exit 1
+fi
+DEPENDENCIES_SWITCHED=true
 log "Installing Chromium for PDF exports"
 npx puppeteer browsers install chrome
 NODE_ENV=production npm run check:env
@@ -154,13 +197,6 @@ NODE_ENV=production npm run seed:table-sub-product-type
 NODE_ENV=production npm run update:pims-template-fields
 NODE_ENV=production npm run update:table-product-spec-groups
 NODE_ENV=production node scripts/backfillQcMismatchReviews.js
-
-log "Installing frontend dependencies"
-cd "$FRONTEND_DIR"
-npm ci
-
-log "Building frontend"
-npm run build
 
 log "Publishing frontend build"
 sync_frontend_build
@@ -301,6 +337,7 @@ if command -v curl >/dev/null 2>&1; then
   fi
 fi
 
+OMS_PAUSED=false
 log "Deploy completed successfully"
 echo "Backend:  $BACKEND_DIR"
 echo "Frontend: $FRONTEND_DEPLOY_DIR"
