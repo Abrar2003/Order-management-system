@@ -38,7 +38,7 @@ const buildWeeklyContainerReport = (rows, { start, end, brands = [] }, now = new
     html: `
       <article class="container-register">
         <header>
-          <div class="register-brand"><span>GREEN HOUSE SOURCING&nbsp; / &nbsp;LOGISTICS</span><span>${generatedDate}</span></div>
+          <div class="register-brand"><span>${generatedDate}</span></div>
           <h1>Container shipment report</h1>
           <div class="register-range">${formatDay(start)} - ${formatDay(end)}&nbsp; / &nbsp;${brands.length ? escapeHtml(brands.join(", ")) : "All containers"}</div>
         </header>
@@ -74,7 +74,7 @@ const buildWeeklyContainerReport = (rows, { start, end, brands = [] }, now = new
       @page :first { margin-top: 0; }
       .container-register { color: #263430; font: 8.8pt/11.3pt Lato, Arial, sans-serif; }
       .container-register header { height: 111pt; padding: 22pt 32pt 0; background: #f2efe9; }
-      .register-brand { display: flex; justify-content: space-between; color: #68665e; font-size: 8.4pt; font-weight: bold; }
+      .register-brand { display: flex; justify-content: flex-end; color: #68665e; font-size: 8.4pt; font-weight: bold; }
       .pdf-report .container-register h1, .pdf-report .container-register h2 {
         color: #30392f; font-family: "DejaVu Serif", Georgia, serif; font-weight: normal;
       }
