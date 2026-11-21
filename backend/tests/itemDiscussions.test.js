@@ -52,7 +52,8 @@ test("three fixed item topics accept text or supported attachments and reject in
   for (const file of [{ originalname: "x.exe", size: 1 }, { originalname: "../a.pdf", size: 1 }, { originalname: "a.pdf", size: 0 }, { originalname: "a.pdf", size: 51 * 1024 * 1024 }]) {
     assert.throws(() => validateDiscussionFile(file), { statusCode: 400 });
   }
-  assert.throws(() => validateDiscussionMessage(body, Array(11).fill({ size: 1 })), { statusCode: 400 });
+  assert.equal(validateDiscussionMessage(body, Array(20).fill({ size: 1 })).text, body.text);
+  assert.throws(() => validateDiscussionMessage(body, Array(21).fill({ size: 1 })), { statusCode: 400 });
   assert.throws(() => validateDiscussionMessage(body, Array(3).fill({ size: 50 * 1024 * 1024 })), { statusCode: 400 });
   const indexes = Message.schema.indexes();
   assert.ok(indexes.some(([fields, options]) => fields.item && fields.topic && fields["author.user"] && fields.client_message_id && options.unique));

@@ -1,7 +1,7 @@
 const path = require("node:path");
 
 const DISCUSSION_TOPICS = Object.freeze({ autocad: "AutoCAD", shipping_marks: "Shipping Marks", finish: "Finish" });
-const MAX_DISCUSSION_FILES = 10;
+const MAX_DISCUSSION_FILES = 20;
 const MAX_DISCUSSION_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_DISCUSSION_TEXT = 5000;
 const DISCUSSION_FILE_TYPES = Object.freeze({
@@ -27,7 +27,7 @@ const validateDiscussionMessage = ({ text, client_message_id }, files = []) => {
   if (text !== undefined && typeof text !== "string") throw discussionError(400, "Invalid message text.");
   const cleaned = (text || "").trim();
   if (cleaned.length > MAX_DISCUSSION_TEXT) throw discussionError(400, "Messages must be 5,000 characters or fewer.");
-  if (!Array.isArray(files) || files.length > MAX_DISCUSSION_FILES) throw discussionError(400, "Attach up to 10 files per message.");
+  if (!Array.isArray(files) || files.length > MAX_DISCUSSION_FILES) throw discussionError(400, "Attach up to 20 files per message.");
   if (files.reduce((size, file) => size + file.size, 0) > 100 * 1024 * 1024) throw discussionError(400, "Keep attachments under 100 MB total per message.");
   if (!cleaned && !files.length) throw discussionError(400, "Write a message or attach a file.");
   if (typeof client_message_id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(client_message_id)) {

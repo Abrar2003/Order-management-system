@@ -199,7 +199,7 @@ function DiscussionThread({ itemId, topic, vendor, qcId, onClose, onPosted, live
             <button type="button" className="btn btn-outline-secondary btn-sm" disabled={busy} onClick={() => uploadRef.current?.click()}>Attach files</button></div>
           <button type="submit" className="btn btn-primary btn-sm" disabled={busy || loading || (!draft.trim() && !files.length)}>{saving ? "Sending…" : thread.root ? "Send reply" : "Send message"}</button>
         </div>
-        <div className="small text-secondary mt-2">PDF, photos, videos and Excel · Up to 10 files, 50 MB each, 100 MB total</div>
+        <div className="small text-secondary mt-2">PDF, photos, videos and Excel · Up to 20 files, 50 MB each, 100 MB total</div>
       </form>
     </aside>
     {preview && <FilePreviewModal {...preview} title="Discussion attachment" onClose={() => setPreview(null)} />}

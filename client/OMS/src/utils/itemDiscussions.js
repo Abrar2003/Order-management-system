@@ -6,7 +6,7 @@ export const ITEM_DISCUSSION_TOPICS = [
 export const DISCUSSION_FILE_ACCEPT = ".pdf,.jpg,.jpeg,.png,.webp,.mp4,.mov,.mkv,.xls,.xlsx";
 export const DISCUSSION_MAX_TEXT = 5000;
 export const getDiscussionFileError = (files) => {
-  if (files.length > 10) return "Attach up to 10 files per message.";
+  if (files.length > 20) return "Attach up to 20 files per message.";
   if (files.reduce((size, file) => size + file.size, 0) > 100 * 1024 * 1024) return "Keep attachments under 100 MB total per message.";
   for (const file of files) {
     const extension = `.${file.name.split(".").pop().toLowerCase()}`;

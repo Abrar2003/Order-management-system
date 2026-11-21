@@ -14,8 +14,11 @@ test("exactly three item topics and supported attachment types", () => {
     assert.equal(getDiscussionFileError([{ name: `file.${extension}`, size: 20 }]), "");
   }
 });
+test("twenty attachments are accepted per message", () => {
+  assert.equal(getDiscussionFileError(Array(20).fill({ name: "a.pdf", size: 1 })), "");
+});
 test("attachment limits reject bad formats, empty files, oversized files and batches", () => {
-  for (const files of [[{ name: "a.exe", size: 5 }], [{ name: "a.pdf", size: 0 }], [{ name: "a.mp4", size: 51 * 1024 * 1024 }], Array(11).fill({ name: "a.pdf", size: 1 }), Array(3).fill({ name: "a.pdf", size: 50 * 1024 * 1024 })]) {
+  for (const files of [[{ name: "a.exe", size: 5 }], [{ name: "a.pdf", size: 0 }], [{ name: "a.mp4", size: 51 * 1024 * 1024 }], Array(21).fill({ name: "a.pdf", size: 1 }), Array(3).fill({ name: "a.pdf", size: 50 * 1024 * 1024 })]) {
     assert.ok(getDiscussionFileError(files));
   }
 });
