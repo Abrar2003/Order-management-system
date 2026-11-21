@@ -2739,7 +2739,7 @@ const ProductDatabase = () => {
     setLimit(DEFAULT_LIMIT);
   };
 
-  const handleExportXls = useCallback(async () => {
+  const handleExportXls = useCallback(async (format) => {
     try {
       setExporting(true);
       const params = {};
@@ -2753,6 +2753,8 @@ const ProductDatabase = () => {
       if (statusFilter !== DEFAULT_FILTER) params.status = statusFilter;
       if (detailsFilter !== DEFAULT_FILTER) params.details = detailsFilter;
 
+      if (format === "pims") params.format = "pims";
+
       const response = await api.get("/items/product-database/export", {
         params,
         responseType: "blob",
@@ -2760,7 +2762,7 @@ const ProductDatabase = () => {
       downloadProductDatabaseExport(response);
     } catch (exportError) {
       console.error(exportError);
-      let message = "Failed to export Product Database as XLS.";
+      let message = format === "pims" ? "Failed to export PIMS data." : "Failed to export Product Database as XLS.";
       const responseData = exportError?.response?.data;
       if (responseData instanceof Blob) {
         try {
@@ -2844,14 +2846,25 @@ const ProductDatabase = () => {
             <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
               <span className="small text-secondary">PD size data approval workflow</span>
               {hasPermission("product_database", "export") && (
+                <>
                 <button
                   type="button"
                   className="btn btn-outline-primary btn-sm"
-                  onClick={handleExportXls}
+                  onClick={() => handleExportXls()}
                   disabled={loading || exporting || Number(pagination.total || 0) === 0}
                 >
                   {exporting ? "Exporting..." : "Export XLS"}
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={() => handleExportXls("pims")}
+                  disabled={loading || exporting || Number(pagination.total || 0) === 0}
+                  title="Export tables in PIMS format using the current filters"
+                >
+                  {exporting ? "Exporting..." : "Export PIMS"}
+                </button>
+                </>
               )}
             </div>
           </div>

@@ -17,6 +17,7 @@ const crypto = require("crypto");
 const fs = require("fs/promises");
 const path = require("path");
 const XLSX = require("xlsx");
+const { buildPimsWorkbook } = require("../helpers/pimsExport");
 const { syncAllItemsFromOrdersAndQc } = require("../services/itemSync");
 const { syncTotalPoCbmForItem } = require("../services/orderCbm.service");
 const {
@@ -2234,6 +2235,13 @@ exports.exportProductDatabaseItems = async (req, res) => {
       kd: item?.kd === true,
       mounting_file_needed: item?.mounting_file_needed === true,
     }));
+
+    if (req.query.format === "pims") {
+      const fileBuffer = buildPimsWorkbook(rows);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="pims-tables-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+      return res.status(200).send(fileBuffer);
+    }
 
     const formatActorForExport = (actor = null, dateKey = "") => {
       if (!actor) return "";

@@ -10,6 +10,7 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "seed:product-types": "node scripts/seedProductTypeTemplates.js",
+    "update:pims-template-fields": "node scripts/addPimsTemplateFields.js",
     "update:table-template-fields": "node scripts/moveTableTemplateFields.js",
     "update:table-product-spec-groups": "node scripts/syncTableProductSpecGroups.js",
     "update:product-type-common-fields": "node scripts/addCommonProductTypeTemplateFields.js",

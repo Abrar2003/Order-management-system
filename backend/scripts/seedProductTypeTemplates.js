@@ -4,6 +4,7 @@ const { loadEnvFiles } = require("../config/loadEnv");
 const connectDB = require("../config/connectDB");
 const ProductTypeTemplate = require("../models/productTypeTemplate.model");
 const { prepareTemplatePayload } = require("../helpers/productTypeTemplates");
+const { addPimsTemplateFields } = require("../helpers/pimsTemplateFields");
 const { applyCommonProductDatabaseFields } = require("../helpers/productTypeTemplateCommonFields");
 
 const buildField = ({
@@ -588,7 +589,7 @@ const buildTableTemplate = () => {
       },
     ],
   };
-  return prepareTemplatePayload(applyCommonProductDatabaseFields(template));
+  return prepareTemplatePayload(addPimsTemplateFields(applyCommonProductDatabaseFields(template)));
 };
 
 const seedTemplate = async (payload = {}) => {
