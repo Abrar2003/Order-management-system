@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { exportOrders } from "../services/orders.service";
+import { getCountryOptions } from "../constants/countries";
 import "../App.css";
 
 const normalizeFilterChoice = (value) => {
@@ -9,6 +10,7 @@ const normalizeFilterChoice = (value) => {
 };
 
 const buildInitialForm = (defaultFilters = {}) => ({
+  country: normalizeFilterChoice(defaultFilters?.country),
   brand: normalizeFilterChoice(defaultFilters?.brand),
   vendor: normalizeFilterChoice(defaultFilters?.vendor),
   status: normalizeFilterChoice(defaultFilters?.status),
@@ -84,6 +86,7 @@ const OrderExportModal = ({
       const response = await exportOrders(
         {
           ...extraParams,
+          country: form.country,
           brand: form.brand,
           vendor: form.vendor,
           status: form.status,
@@ -149,7 +152,30 @@ const OrderExportModal = ({
 
           <div className="modal-body d-grid gap-3">
             <div className="row g-3">
-              <div className="col-md-4">
+              <div className="col-md-3">
+                <label className="form-label">Country</label>
+                <select
+                  className="form-select"
+                  value={form.country}
+                  disabled={isExporting}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      country: e.target.value,
+                      vendor: "all",
+                    }))
+                  }
+                >
+                  <option value="all">All Countries</option>
+                  {getCountryOptions(form.country).map((country) => (
+                    <option key={country.value} value={country.value}>
+                      {country.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="col-md-3">
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
@@ -166,7 +192,7 @@ const OrderExportModal = ({
                 </select>
               </div>
 
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
@@ -183,7 +209,7 @@ const OrderExportModal = ({
                 </select>
               </div>
 
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">Status</label>
                 <select
                   className="form-select"
