@@ -7523,6 +7523,7 @@ exports.getOrdersByFiltersDb = async (req, res) => {
   try {
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const country = req.query.country;
     const status = req.query.status;
     const order = req.query.order ?? req.query.order_id;
     const itemCode = req.query.item_code ?? req.query.itemCode;
@@ -7584,6 +7585,7 @@ exports.getOrdersByFiltersDb = async (req, res) => {
     const dataset = await buildPoBucketDataset({
       brand,
       vendor,
+      country,
       status,
       order,
       itemCode,
@@ -7624,6 +7626,7 @@ exports.exportOrdersDb = async (req, res) => {
   try {
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const country = req.query.country;
     const status = req.query.status;
     const order = req.query.order ?? req.query.order_id;
     const itemCode = req.query.item_code ?? req.query.itemCode;
@@ -7720,6 +7723,7 @@ exports.exportOrdersDb = async (req, res) => {
       const dataset = await buildPoBucketDataset({
         brand,
         vendor,
+        country,
         status,
         order,
         itemCode,

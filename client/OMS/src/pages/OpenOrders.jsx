@@ -7,6 +7,7 @@ import SortHeaderButton from "../components/SortHeaderButton";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
+import { getCountryOptions } from "../constants/countries";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import {
@@ -17,6 +18,7 @@ import {
 import "../App.css";
 
 const defaultFilters = {
+  country: "India",
   vendor: "all",
   brand: "all",
   status: "all",
@@ -128,6 +130,7 @@ const OpenOrders = ({ bucket = "open" }) => {
   const [sortBy, setSortBy] = useState(initialSortBy);
   const [sortOrder, setSortOrder] = useState(initialSortOrder);
   const [filters, setFilters] = useState(() => ({
+    country: normalizeFilterParam(searchParams.get("country"), "India"),
     vendor: normalizeFilterParam(searchParams.get("vendor"), "all"),
     brand: normalizeFilterParam(searchParams.get("brand"), "all"),
     status: normalizeFilterParam(searchParams.get("status"), "all"),
@@ -135,6 +138,7 @@ const OpenOrders = ({ bucket = "open" }) => {
     item_code: String(searchParams.get("item_code") || "").trim(),
   }));
   const [draftFilters, setDraftFilters] = useState(() => ({
+    country: normalizeFilterParam(searchParams.get("country"), "India"),
     vendor: normalizeFilterParam(searchParams.get("vendor"), "all"),
     brand: normalizeFilterParam(searchParams.get("brand"), "all"),
     status: normalizeFilterParam(searchParams.get("status"), "all"),
@@ -178,6 +182,7 @@ const OpenOrders = ({ bucket = "open" }) => {
       const res = await axios.get("/orders/filters", {
         params: {
           po_bucket: poBucket,
+          country: filters.country,
           vendor: filters.vendor,
           brand: filters.brand,
           status: filters.status,
@@ -225,6 +230,7 @@ const OpenOrders = ({ bucket = "open" }) => {
     }
   }, [
     filters.brand,
+    filters.country,
     filters.order,
     filters.item_code,
     filters.status,
@@ -243,6 +249,7 @@ const OpenOrders = ({ bucket = "open" }) => {
   useEffect(() => {
     const currentQuery = searchParams.toString();
     const nextFilters = {
+      country: normalizeFilterParam(searchParams.get("country"), "India"),
       vendor: normalizeFilterParam(searchParams.get("vendor"), "all"),
       brand: normalizeFilterParam(searchParams.get("brand"), "all"),
       status: normalizeFilterParam(searchParams.get("status"), "all"),
@@ -258,7 +265,8 @@ const OpenOrders = ({ bucket = "open" }) => {
     );
 
     setFilters((prev) =>
-      prev.vendor === nextFilters.vendor
+      prev.country === nextFilters.country
+      && prev.vendor === nextFilters.vendor
       && prev.brand === nextFilters.brand
       && prev.status === nextFilters.status
       && prev.order === nextFilters.order
@@ -267,11 +275,13 @@ const OpenOrders = ({ bucket = "open" }) => {
         : nextFilters,
     );
     setDraftFilters((prev) =>
-      prev.vendor === nextFilters.vendor
+      prev.country === nextFilters.country
+      && prev.vendor === nextFilters.vendor
       && prev.brand === nextFilters.brand
       && prev.status === nextFilters.status
         ? prev
         : {
+            country: nextFilters.country,
             vendor: nextFilters.vendor,
             brand: nextFilters.brand,
             status: nextFilters.status,
@@ -289,6 +299,7 @@ const OpenOrders = ({ bucket = "open" }) => {
     if (syncedQuery !== currentQuery) return;
 
     const next = new URLSearchParams();
+    next.set("country", filters.country || "India");
     if (filters.vendor && filters.vendor !== "all") next.set("vendor", filters.vendor);
     if (filters.brand && filters.brand !== "all") next.set("brand", filters.brand);
     if (filters.status && filters.status !== "all") next.set("status", filters.status);
@@ -306,6 +317,7 @@ const OpenOrders = ({ bucket = "open" }) => {
     }
   }, [
     filters.brand,
+    filters.country,
     filters.order,
     filters.item_code,
     filters.status,
@@ -347,6 +359,7 @@ const OpenOrders = ({ bucket = "open" }) => {
     setOrderSearchInput("");
     setItemCodeSearchInput("");
     setDraftFilters({
+      country: defaultFilters.country,
       vendor: defaultFilters.vendor,
       brand: defaultFilters.brand,
       status: defaultFilters.status,
@@ -359,6 +372,7 @@ const OpenOrders = ({ bucket = "open" }) => {
     setPage(1);
     setFilters((prev) => ({
       ...prev,
+      country: draftFilters.country,
       vendor: draftFilters.vendor,
       brand: draftFilters.brand,
       status: draftFilters.status,
@@ -389,6 +403,7 @@ const OpenOrders = ({ bucket = "open" }) => {
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
             <span className="om-summary-chip">View: {pageMeta.title}</span>
+            <span className="om-summary-chip">Country: {filters.country || "all"}</span>
             <span className="om-summary-chip">Brand: {filters.brand || "all"}</span>
             <span className="om-summary-chip">Vendor: {filters.vendor || "all"}</span>
             <span className="om-summary-chip">Status: {filters.status || "all"}</span>
@@ -400,6 +415,28 @@ const OpenOrders = ({ bucket = "open" }) => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <form onSubmit={handleSearch} className="row g-2 align-items-end open-orders-filter-row">
+              <div className="col-xl-2 col-lg-2 col-md-4">
+                <label className="form-label">Country</label>
+                <select
+                  className="form-select"
+                  value={draftFilters.country}
+                  onChange={(e) =>
+                    setDraftFilters((prev) => ({
+                      ...prev,
+                      country: e.target.value,
+                      vendor: "all",
+                    }))
+                  }
+                >
+                  <option value="all">All Countries</option>
+                  {getCountryOptions(draftFilters.country).map((country) => (
+                    <option key={country.value} value={country.value}>
+                      {country.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="col-xl-2 col-lg-2 col-md-4">
                 <label className="form-label">Vendor</label>
                 <select
@@ -655,7 +692,7 @@ const OpenOrders = ({ bucket = "open" }) => {
           filterOptions={filterOptions}
           statusOptions={statusOptions}
           defaultFilters={filters}
-          extraParams={{ po_bucket: poBucket }}
+          extraParams={{ po_bucket: poBucket, country: filters.country }}
         />
       )}
     </>

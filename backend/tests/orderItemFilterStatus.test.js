@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const Order = require("../models/order.model");
 const Item = require("../models/item.model");
+const Vendor = require("../models/vendor.model");
 const { getOrdersByFiltersDb } = require("../controllers/order.controller");
 
 const asQuery = (value) => ({
@@ -57,4 +58,34 @@ test("item-code filters retain the matched PO's combined status", async (t) => {
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.data[0].items, 2);
   assert.equal(res.body.data[0].totalStatus, "Pending");
+});
+
+test("country filters limit the order list and vendor options", async (t) => {
+  let match;
+  let vendorMatch;
+  t.mock.method(Vendor, "find", (query) => {
+    vendorMatch = query;
+    return {
+      select() { return this; },
+      lean: async () => [],
+    };
+  });
+  t.mock.method(Order, "find", (query) => {
+    match = query;
+    return asQuery([]);
+  });
+
+  const res = response();
+  await getOrdersByFiltersDb({
+    query: { po_bucket: "all", country: "India" },
+    user: { role: "admin", allowed_brands: [], allowed_vendors: ["all"] },
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(vendorMatch.country.source, "^\\s*India\\s*$");
+  const countryMatch = (match.$and || [match]).find(
+    (entry) => entry["vendor.country"],
+  );
+  assert.equal(countryMatch["vendor.country"].source, "^\\s*India\\s*$");
+  assert.deepEqual(res.body.filters.vendors, []);
 });
