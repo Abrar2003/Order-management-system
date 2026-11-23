@@ -7866,7 +7866,7 @@ exports.exportOrdersDb = async (req, res) => {
       return {
         order_id: normalizeText(orderEntry?.order_id),
         brand: normalizeText(orderEntry?.brand),
-        vendor: normalizeText(orderEntry?.vendor),
+        vendor: getVendorName(orderEntry?.vendor),
         status: normalizeText(progress.status),
         item_code: normalizeText(orderEntry?.item?.item_code),
         item_description: normalizeText(orderEntry?.item?.description),

@@ -4,7 +4,10 @@ const test = require("node:test");
 const Order = require("../models/order.model");
 const Item = require("../models/item.model");
 const Vendor = require("../models/vendor.model");
-const { getOrdersByFiltersDb } = require("../controllers/order.controller");
+const {
+  exportOrdersDb,
+  getOrdersByFiltersDb,
+} = require("../controllers/order.controller");
 
 const asQuery = (value) => ({
   select() { return this; },
@@ -21,6 +24,11 @@ const response = () => ({
     return this;
   },
   json(body) {
+    this.body = body;
+    return this;
+  },
+  setHeader() {},
+  send(body) {
     this.body = body;
     return this;
   },
@@ -88,4 +96,26 @@ test("country filters limit the order list and vendor options", async (t) => {
   );
   assert.equal(countryMatch["vendor.country"].source, "^\\s*India\\s*$");
   assert.deepEqual(res.body.filters.vendors, []);
+});
+
+test("orders export writes the vendor name from a vendor snapshot", async (t) => {
+  t.mock.method(Order, "find", () => asQuery([{
+    order_id: "PO-1",
+    brand: "Giga",
+    vendor: { name: "Vendor A", country: "India" },
+    quantity: 10,
+    status: "Pending",
+    item: { item_code: "ITEM-1", description: "Item" },
+    shipment: [],
+  }]));
+
+  const res = response();
+  await exportOrdersDb({
+    query: { format: "csv" },
+    user: { role: "admin", allowed_brands: [], allowed_vendors: ["all"] },
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.match(res.body, /Vendor A/);
+  assert.doesNotMatch(res.body, /\[object Object\]/);
 });
