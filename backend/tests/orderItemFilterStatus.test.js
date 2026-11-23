@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const Order = require("../models/order.model");
 const Item = require("../models/item.model");
+const QC = require("../models/qc.model");
 const Vendor = require("../models/vendor.model");
 const {
   exportOrdersDb,
@@ -118,4 +119,37 @@ test("orders export writes the vendor name from a vendor snapshot", async (t) =>
   assert.equal(res.statusCode, 200);
   assert.match(res.body, /Vendor A/);
   assert.doesNotMatch(res.body, /\[object Object\]/);
+});
+
+test("all-orders export applies its country filter", async (t) => {
+  const sourceOrder = {
+    _id: "507f1f77bcf86cd799439011",
+    order_id: "PO-1",
+    brand: "Giga",
+    vendor: { name: "Vendor A", country: "China" },
+    quantity: 10,
+    status: "Pending",
+    item: { item_code: "ITEM-1", description: "Item" },
+    shipment: [],
+  };
+  const findResults = [[sourceOrder], [sourceOrder]];
+  let vendorMatch;
+
+  t.mock.method(Vendor, "find", (query) => {
+    vendorMatch = query;
+    return { select() { return this; }, lean: async () => [] };
+  });
+  t.mock.method(Order, "find", () => asQuery(findResults.shift() || []));
+  t.mock.method(Item, "find", () => asQuery([]));
+  t.mock.method(QC, "find", () => asQuery([]));
+
+  const res = response();
+  await exportOrdersDb({
+    query: { format: "csv", po_bucket: "all", country: "China" },
+    user: { role: "admin", allowed_brands: [], allowed_vendors: ["all"] },
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(vendorMatch.country.source, "^\\s*China\\s*$");
+  assert.match(res.body, /Vendor A/);
 });

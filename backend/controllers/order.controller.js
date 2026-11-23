@@ -7718,8 +7718,10 @@ exports.exportOrdersDb = async (req, res) => {
     }
 
     let orders = [];
+    const hasPoBucket = Boolean(normalizeFilterValue(poBucket))
+      || String(poBucket || "").trim().toLowerCase() === "all";
 
-    if (normalizeFilterValue(poBucket)) {
+    if (hasPoBucket) {
       const dataset = await buildPoBucketDataset({
         brand,
         vendor,
