@@ -1,7 +1,6 @@
-import FullCalendar from "@fullcalendar/react";
-import dayGridPlugin from "@fullcalendar/daygrid";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import HomeCalendar from "./HomeCalendar";
 import { getEtdCalendarOrders } from "../services/orders.service";
 import { formatDateDDMMYYYY } from "../utils/date";
 
@@ -40,7 +39,7 @@ const POEtdCalendar = ({ brand = "", country }) => {
         if (active) {
           setOrders(Array.isArray(response?.data) ? response.data : []);
         }
-      } catch (requestError) {
+      } catch {
         if (active) {
           setOrders([]);
           setError("Failed to load PO ETDs.");
@@ -73,7 +72,34 @@ const POEtdCalendar = ({ brand = "", country }) => {
   );
 
   return (
-    <div className="home-po-etd-calendar">
+    <HomeCalendar
+      events={events}
+      eventClick={({ event }) => {
+        const orderId = String(event.extendedProps?.order_id || "").trim();
+        if (orderId) navigate(`/orders?order_id=${encodeURIComponent(orderId)}`);
+      }}
+      eventDidMount={({ event, el }) => {
+        const details = event.extendedProps;
+        el.title = [
+          `PO: ${details?.order_id || "N/A"}`,
+          `Vendor: ${details?.vendor || "N/A"}`,
+          `ETD: ${formatDateDDMMYYYY(details?.etd, "N/A")}`,
+          `Status: ${details?.status || "N/A"}`,
+          details?.brand ? `Brand: ${details.brand}` : "",
+          details?.country ? `Country: ${details.country}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }}
+      datesSet={({ startStr, endStr }) =>
+        setRange((previous) => {
+          const next = { start: toDateOnly(startStr), end: toDateOnly(endStr) };
+          return previous?.start === next.start && previous?.end === next.end
+            ? previous
+            : next;
+        })
+      }
+    >
       <div className="home-po-etd-calendar-legend" aria-label="PO status colors">
         {Object.entries(STATUS_COLORS).map(([status, colors]) => (
           <span key={status} className="home-po-etd-calendar-legend-item">
@@ -87,42 +113,7 @@ const POEtdCalendar = ({ brand = "", country }) => {
       </div>
       {error && <div className="alert alert-warning py-2 small mb-3">{error}</div>}
       {loading && <div className="small text-muted mb-2">Loading PO ETDs...</div>}
-      <FullCalendar
-        plugins={[dayGridPlugin]}
-        initialView="dayGridMonth"
-        headerToolbar={{ left: "prev,next today", center: "title", right: "" }}
-        buttonText={{ today: "Today" }}
-        events={events}
-        height="auto"
-        fixedWeekCount={false}
-        dayMaxEventRows={3}
-        eventClick={({ event }) => {
-          const orderId = String(event.extendedProps?.order_id || "").trim();
-          if (orderId) navigate(`/orders?order_id=${encodeURIComponent(orderId)}`);
-        }}
-        eventDidMount={({ event, el }) => {
-          const details = event.extendedProps;
-          el.title = [
-            `PO: ${details?.order_id || "N/A"}`,
-            `Vendor: ${details?.vendor || "N/A"}`,
-            `ETD: ${formatDateDDMMYYYY(details?.etd, "N/A")}`,
-            `Status: ${details?.status || "N/A"}`,
-            details?.brand ? `Brand: ${details.brand}` : "",
-            details?.country ? `Country: ${details.country}` : "",
-          ]
-            .filter(Boolean)
-            .join("\n");
-        }}
-        datesSet={({ startStr, endStr }) =>
-          setRange((previous) => {
-            const next = { start: toDateOnly(startStr), end: toDateOnly(endStr) };
-            return previous?.start === next.start && previous?.end === next.end
-              ? previous
-              : next;
-          })
-        }
-      />
-    </div>
+    </HomeCalendar>
   );
 };
 

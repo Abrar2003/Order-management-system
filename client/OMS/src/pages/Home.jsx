@@ -2,10 +2,12 @@ import PreviewImage from "../components/PreviewImage";
 import { useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
+import HomeContainerArrivals from "../components/HomeContainerArrivals";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import POEtdCalendar from "../components/POEtdCalendar";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { usePermissions } from "../auth/PermissionContext";
 import { COUNTRY_OPTIONS } from "../constants/countries";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -51,6 +53,7 @@ const toNumber = (value) => {
 };
 
 const Home = () => {
+  const { hasPermission } = usePermissions();
   const [brands, setBrands] = useState([]);
   const [vendorSummary, setVendorSummary] = useState([]);
   const [vendorScope, setVendorScope] = useState("active");
@@ -731,6 +734,8 @@ const Home = () => {
             <POEtdCalendar brand={selectedBrand} country={selectedCountry} />
           </div>
         </div>
+
+        {hasPermission("containers", "view") && <HomeContainerArrivals />}
       </div>
     </>
   );
