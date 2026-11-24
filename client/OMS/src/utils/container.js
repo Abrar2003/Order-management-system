@@ -8,6 +8,16 @@ export const isValidContainerNumber = (value) => {
   return CONTAINER_NUMBER_REGEX.test(normalized);
 };
 
+export const getContainerEtaRowsForBrand = (containers, brand) => {
+  const selectedBrand = brand?.trim().toLowerCase();
+  if (!selectedBrand) return [];
+
+  return containers.filter((row) => {
+    const brands = row.brands ?? [row.brand, ...(row.brand?.split(", ") ?? [])];
+    return row.shipping_ETA && brands.some((name) => name?.trim().toLowerCase() === selectedBrand);
+  });
+};
+
 export const getWeeklyContainerArrivals = (containers, today) => {
   const day = new Date(`${today}T00:00:00Z`);
   day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));

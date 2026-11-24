@@ -4408,6 +4408,7 @@ const getContainerDataset = async ({
         values.size === 1 ? [...values][0] || null : null;
       const shipmentCount = Number(group.shipment_count || 0);
       const checkedCount = Number(group.checked_count || 0);
+      const brands = normalizeDistinctValues(Array.from(group.brandSet));
       const checkedStatus =
         shipmentCount > 0 && checkedCount >= shipmentCount
           ? "Checked"
@@ -4417,9 +4418,8 @@ const getContainerDataset = async ({
 
       return {
         container: group.container,
-        brand:
-          normalizeDistinctValues(Array.from(group.brandSet)).join(", ") ||
-          "N/A",
+        brand: brands.join(", ") || "N/A",
+        brands,
         vendor:
           normalizeDistinctValues(Array.from(group.vendorSet)).join(", ") ||
           "N/A",

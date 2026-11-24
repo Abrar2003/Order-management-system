@@ -735,7 +735,9 @@ const Home = () => {
           </div>
         </div>
 
-        {hasPermission("containers", "view") && <HomeContainerArrivals />}
+        {hasPermission("containers", "view") && (
+          <HomeContainerArrivals brand={selectedBrand} />
+        )}
       </div>
     </>
   );

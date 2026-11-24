@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { formatCbm } from "../utils/cbm";
-import { getWeeklyContainerArrivals } from "../utils/container";
+import { getContainerEtaRowsForBrand, getWeeklyContainerArrivals } from "../utils/container";
 import { formatDateDDMMYYYY, getTodayISODate } from "../utils/date";
 import HomeCalendar from "./HomeCalendar";
 
 const containerPath = (container) => `/containers?container=${encodeURIComponent(container)}`;
 
-const HomeContainerArrivals = () => {
+const HomeContainerArrivals = ({ brand }) => {
   const navigate = useNavigate();
   const [containers, setContainers] = useState(null);
   const [error, setError] = useState("");
@@ -33,8 +33,7 @@ const HomeContainerArrivals = () => {
   }, []);
 
   const events = useMemo(
-    () => (containers || [])
-      .filter(({ shipping_ETA }) => shipping_ETA)
+    () => getContainerEtaRowsForBrand(containers || [], brand)
       .map((row) => ({
         id: row.container,
         title: row.container,
@@ -43,7 +42,7 @@ const HomeContainerArrivals = () => {
         url: containerPath(row.container),
         extendedProps: row,
       })),
-    [containers],
+    [brand, containers],
   );
 
   return (
