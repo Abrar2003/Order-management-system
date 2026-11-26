@@ -258,6 +258,7 @@ class LiveLabelProjectionService {
             filter: {
               number,
               owner_inspector: { $in: [null, inspectorId] },
+              rejected_by_inspector: { $in: [null, inspectorId] },
               'usage.inspection_record': null,
               'usage.inspector': null,
               'usage.inspectors.0': { $exists: false },

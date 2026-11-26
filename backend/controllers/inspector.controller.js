@@ -952,21 +952,18 @@ const rejectLabels = async (req, res) => {
     }
 
     const inspector = await Inspector.findById(req.params.id)
-      .populate("user", "name email role");
+      .select("alloted_labels rejected_labels")
+      .lean();
 
     if (!inspector) {
       return res.status(404).json({ message: "Inspector not found" });
     }
 
-    await syncInspectorUsedLabelsFromInspectionRecords(inspector);
-
     const {
       allocated: allocatedLabels,
-      used: usedLabels,
       rejected: rejectedLabels,
     } = getInspectorLabelState(inspector);
     const allocatedSet = new Set(allocatedLabels);
-    const usedSet = new Set(usedLabels);
     const rejectedSet = new Set(rejectedLabels);
 
     const alreadyRejected = normalizedLabels.filter((label) =>
@@ -989,42 +986,40 @@ const rejectLabels = async (req, res) => {
       });
     }
 
-    const usedInInspector = normalizedLabels.filter((label) =>
+    const usageRecords = await Inspection.find({ labels_added: { $in: normalizedLabels } })
+      .select("labels_added")
+      .lean();
+    const usedSet = new Set(usageRecords.flatMap((record) => record.labels_added));
+    const usedLabels = normalizedLabels.filter((label) =>
       usedSet.has(label),
     );
-    if (usedInInspector.length > 0) {
+    if (usedLabels.length > 0) {
       return res.status(400).json({
-        message: `Used labels cannot be rejected: ${formatLabelPreview(usedInInspector)}`,
-        used_labels: usedInInspector,
+        message: `Used labels cannot be rejected: ${formatLabelPreview(usedLabels)}`,
+        used_labels: usedLabels,
       });
     }
 
     const rejectSet = new Set(normalizedLabels);
-    inspector.alloted_labels = allocatedLabels.filter(
-      (label) => !rejectSet.has(label),
-    );
-    inspector.rejected_labels = normalizeInspectorLabels([
-      ...rejectedLabels,
-      ...normalizedLabels,
-    ]);
-    inspector.labels_allotted_by =
-      req.user?._id || inspector.labels_allotted_by;
-    appendLabelAllocationHistory(inspector, {
+    const storedLabels = inspector.alloted_labels.filter((label) => rejectSet.has(Number(label)));
+    // Recording the range is enough for the audit trail and avoids duplicating the whole allocation.
+    const history = buildLabelAllocationHistory({
       action: "reject",
       labels: normalizedLabels,
-      previousLabels: allocatedLabels,
-      nextLabels: inspector.alloted_labels,
       actor: req.user,
     });
 
-    await inspector.save();
-    await mirrorLatestLegacyLabelChange(inspector);
-    await attachUsedLabelHistoryToInspectorRows([inspector], req.user);
+    await liveLabelProjection.mirrorInspectorChange({ inspectorId: inspector._id, history });
+    await Inspector.updateOne({ _id: inspector._id }, {
+      $pull: { alloted_labels: { $in: storedLabels } },
+      $addToSet: { rejected_labels: { $each: normalizedLabels } },
+      $push: { label_allocation_history: history },
+      ...(req.user?._id ? { $set: { labels_allotted_by: req.user._id } } : {}),
+    });
 
     return res.json({
       message: `${normalizedLabels.length} label(s) rejected successfully`,
       rejected_labels: normalizedLabels,
-      data: inspector,
     });
   } catch (err) {
     if (err?.name === "VersionError" || err?.hasErrorLabel?.("TransientTransactionError") || Number(err?.code) === 112 || Number(err?.code) === 11000) throw err;

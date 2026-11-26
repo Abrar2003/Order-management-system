@@ -5,6 +5,7 @@ const replicaSet = require('./helpers/labelReplicaSet');
 const Inspector = require('../models/inspector.model');
 const Inspection = require('../models/inspection.model');
 const Label = require('../models/label.model');
+const LabelTransaction = require('../models/labelTransaction.model');
 const QC = require('../models/qc.model');
 const projector = require('../services/labels/liveLabelProjection.service');
 const controller = require('../controllers/inspector.controller');
@@ -40,14 +41,16 @@ test('serial labels have one owner and one inspection under concurrent writes', 
     return doc;
   };
   const save = (doc) => mongoose.connection.transaction(() => doc.save());
+  const changeLabels = async (action, inspector, labels) => {
+    const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+    await controller[action]({
+      params: { id: String(inspector) }, body: { labels }, user: { _id: actor, name: 'Admin' },
+    }, res);
+    return res;
+  };
 
   await t.test('two simultaneous allocations produce exactly one owner', async () => {
-    const allocate = async (owner) => {
-      const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
-      await controller.allocateLabels({ params: { id: String(owner) }, body: { labels: [900] }, user: { _id: actor, name: 'Admin' } }, res);
-      return res;
-    };
-    const results = await Promise.all([allocate(ownerA), allocate(ownerB)]);
+    const results = await Promise.all([changeLabels('allocateLabels', ownerA, [900]), changeLabels('allocateLabels', ownerB, [900])]);
     assert.equal(results.filter((r) => r.statusCode === 200).length, 1);
     assert.equal(await Inspector.countDocuments({ alloted_labels: 900 }), 1);
     assert.equal(await Label.countDocuments({ number: 900 }), 1);
@@ -79,6 +82,75 @@ test('serial labels have one owner and one inspection under concurrent writes', 
     await assert.rejects(save(doc), /allocated exclusively/);
     assert.equal(await Inspection.countDocuments({ _id: doc._id }), 0);
     assert.equal((await Label.findOne({ number: 104 })).usage.inspection_record, null);
+  });
+
+  await t.test('an unused single label can be rejected despite unrelated legacy vendor history', async () => {
+    const number = 82486;
+    const qcId = oid();
+    await QC.collection.insertOne({ _id: qcId, order_meta: { vendor: 'Retired label test vendor' } });
+    await Inspection.collection.insertOne({ ...visit(201, userB).toObject(), qc: qcId });
+    await Inspector.updateOne({ _id: ownerB }, { $addToSet: { alloted_labels: String(number) } });
+
+    const res = await changeLabels('rejectLabels', ownerB, [number]);
+
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+    assert.deepEqual(res.body.rejected_labels, [number]);
+    const inspector = await Inspector.findById(ownerB).lean();
+    assert.deepEqual(inspector.alloted_labels, [201]);
+    assert.deepEqual(inspector.rejected_labels, [number]);
+    assert.deepEqual(inspector.label_allocation_history.at(-1).labels, [number]);
+    const label = await Label.findOne({ number }).lean();
+    assert.equal(label.owner_inspector, null);
+    assert.equal(String(label.rejected_by_inspector), String(ownerB));
+    assert.ok(await LabelTransaction.exists({ inspector: ownerB, action: 'reject', labels: number }));
+
+    const retry = await changeLabels('rejectLabels', ownerB, [number]);
+    assert.equal(retry.statusCode, 400);
+    assert.match(retry.body.message, /already rejected/);
+    const allocate = await changeLabels('allocateLabels', ownerA, [number]);
+    assert.equal(allocate.statusCode, 400);
+    assert.match(allocate.body.message, /cannot be allocated again/);
+  });
+
+  await t.test('a single rejection fits on an inspector with a nearly full label history', async () => {
+    const inspectorId = oid();
+    const allocated = Array.from({ length: 17068 }, (_, index) => 80000 + index);
+    const previouslyRejected = Array.from({ length: 46 }, (_, index) => 70000 + index);
+    const number = 82487;
+    await Inspector.collection.insertOne({
+      _id: inspectorId,
+      user: oid(),
+      alloted_labels: allocated,
+      used_labels: allocated.filter((serial) => serial !== number).slice(-16784),
+      rejected_labels: previouslyRejected,
+      label_allocation_history: previouslyRejected.map((serial) => ({
+        _id: oid(), action: 'reject', labels: [serial],
+        previous_labels: [serial, ...allocated], next_labels: allocated,
+      })),
+    });
+    const res = await changeLabels('rejectLabels', inspectorId, [number]);
+
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+    assert.deepEqual(res.body.rejected_labels, [number]);
+    const inspector = await Inspector.findById(inspectorId).lean();
+    assert.equal(inspector.alloted_labels.length, allocated.length - 1);
+    assert.equal(inspector.alloted_labels.includes(number), false);
+    assert.deepEqual(inspector.rejected_labels, [...previouslyRejected, number]);
+    assert.equal(inspector.label_allocation_history.length, previouslyRejected.length + 1);
+    assert.deepEqual(inspector.label_allocation_history.at(-1).labels, [number]);
+  });
+
+  await t.test('a range containing a label used by another QC leaves every label unchanged', async () => {
+    const labels = [82490, 82491];
+    await Inspector.updateOne({ _id: ownerB }, { $addToSet: { alloted_labels: { $each: labels } } });
+    await Inspection.collection.insertOne(visit(labels[1], userA).toObject());
+
+    const res = await changeLabels('rejectLabels', ownerB, labels);
+
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.body.used_labels, [labels[1]]);
+    assert.ok(await Inspector.exists({ _id: ownerB, alloted_labels: { $all: labels }, rejected_labels: { $nin: labels } }));
+    assert.equal(await Label.countDocuments({ number: { $in: labels } }), 0);
   });
 
   await t.test('unused transfer and a concurrent use cannot both succeed', async () => {
