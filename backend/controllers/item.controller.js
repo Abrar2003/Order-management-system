@@ -5751,13 +5751,12 @@ exports.updateItemPis = async (req, res) => {
       });
     }
     const payload = req.body && typeof req.body === "object" ? req.body : {};
-    const roleKey = normalizeUserRoleKey(req.user?.role);
-    const isStrictAdmin = ["admin", "super_admin"].includes(roleKey);
-    const adminOverrideRequiredFields = payload?.admin_override_required_fields === true;
-    if (adminOverrideRequiredFields && !isStrictAdmin) {
+    const canManageBarcodeRequirements = isManagerLikeRole(req.user?.role);
+    const overrideRequiredBarcodes = payload?.admin_override_required_fields === true;
+    if (overrideRequiredBarcodes && !canManageBarcodeRequirements) {
       return res.status(403).json({
         success: false,
-        message: "Only Admin or Super Admin can override required fields."
+        message: "Only managers and admins can override required PIS barcodes."
       });
     }
     const pisUpdateSource = normalizeTextField(payload?.pis_update_source).toLowerCase();
@@ -5802,7 +5801,7 @@ exports.updateItemPis = async (req, res) => {
         pisFieldsTouched = true;
       }
     }
-    if (!adminOverrideRequiredFields && (hasOwn(payload, "pis_barcode") && !normalizeTextField(payload.pis_barcode) || hasOwn(payload, "pis_master_barcode") && !normalizeTextField(payload.pis_master_barcode) || hasOwn(payload, "pis_inner_barcode") && !normalizeTextField(payload.pis_inner_barcode) || hasOwn(payload, "pis_logistics_ean") && !normalizeTextField(payload.pis_logistics_ean))) {
+    if (!overrideRequiredBarcodes && (hasOwn(payload, "pis_barcode") && !normalizeTextField(payload.pis_barcode) || hasOwn(payload, "pis_master_barcode") && !normalizeTextField(payload.pis_master_barcode) || hasOwn(payload, "pis_inner_barcode") && !normalizeTextField(payload.pis_inner_barcode) || hasOwn(payload, "pis_logistics_ean") && !normalizeTextField(payload.pis_logistics_ean))) {
       return res.status(400).json({
         success: false,
         message: "PIS barcode fields cannot be blank."
@@ -5860,10 +5859,10 @@ exports.updateItemPis = async (req, res) => {
       setPisPath("mounting_file_needed", toBooleanValue(payload.mounting_file_needed, "mounting_file_needed"));
     }
     if (hasOwn(payload, "barcode_exempted")) {
-      if (!isStrictAdmin) {
+      if (!canManageBarcodeRequirements) {
         return res.status(403).json({
           success: false,
-          message: "Only Admin or Super Admin can enable or disable barcode exempt items."
+          message: "Only managers and admins can change a PIS barcode exemption."
         });
       }
       setPisPath("barcode_exempted", toBooleanValue(payload.barcode_exempted, "barcode_exempted"));
@@ -5900,13 +5899,13 @@ exports.updateItemPis = async (req, res) => {
     const effectivePisBoxMode = detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes);
     const effectivePisMasterBarcode = normalizeTextField(item?.pis_master_barcode || item?.pis_barcode);
     const pisBarcodesRequired = requiresPisBarcodes(item);
-    if (!adminOverrideRequiredFields && pisBarcodesRequired && !effectivePisMasterBarcode) {
+    if (!overrideRequiredBarcodes && pisBarcodesRequired && !effectivePisMasterBarcode) {
       return res.status(400).json({
         success: false,
         message: requiresMasterBarcode(effectivePisBoxMode) ? "PIS master barcode is required for this box mode." : "PIS barcode is required."
       });
     }
-    if (!adminOverrideRequiredFields && pisBarcodesRequired && requiresInnerBarcode(effectivePisBoxMode) && !normalizeTextField(item?.pis_inner_barcode)) {
+    if (!overrideRequiredBarcodes && pisBarcodesRequired && requiresInnerBarcode(effectivePisBoxMode) && !normalizeTextField(item?.pis_inner_barcode)) {
       return res.status(400).json({
         success: false,
         message: "PIS inner barcode is required for this box mode."
@@ -5941,7 +5940,7 @@ exports.updateItemPis = async (req, res) => {
         pis_update_source: pisUpdateSource,
         sync_master_data: Boolean(payload?.sync_master_data),
         pis_checked_flag_requested: Boolean(payload?.pis_checked_flag),
-        admin_override_required_fields: adminOverrideRequiredFields
+        admin_override_required_fields: overrideRequiredBarcodes
       }
     });
     await item.save();
@@ -5954,12 +5953,12 @@ exports.updateItemPis = async (req, res) => {
       pageName: "PIS Update Modal",
       source: "pis_update_modal",
       dataScopes: [AUDIT_SCOPES.PIS],
-      extraRemarks: adminOverrideRequiredFields ? ["Admin override saved required PIS barcode fields as entered."] : [],
+      extraRemarks: overrideRequiredBarcodes ? ["Saved PIS with a required barcode override."] : [],
       metadata: {
         pis_update_source: pisUpdateSource,
         sync_master_data: Boolean(payload?.sync_master_data),
         pis_checked_flag_requested: Boolean(payload?.pis_checked_flag),
-        admin_override_required_fields: adminOverrideRequiredFields
+        admin_override_required_fields: overrideRequiredBarcodes
       }
     });
     return res.status(200).json({

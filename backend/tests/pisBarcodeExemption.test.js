@@ -2,8 +2,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  updateItemPis,
   __test__: { requiresPisBarcodes },
 } = require("../controllers/item.controller");
+const Item = require("../models/item.model");
+const PisUpdateLog = require("../models/pisUpdateLog.model");
 const {
   __test__: {
     getQcBarcodeValidationRequirements,
@@ -11,6 +14,65 @@ const {
     requiresLogisticsEanScanValidation,
   },
 } = require("../controllers/qc.controller");
+
+test("PIS updates let managers and admins override missing barcodes and change exemptions", async (t) => {
+  const itemId = "507f1f77bcf86cd799439011";
+  const initialItem = { _id: itemId, code: "TEST-PIS", pis_box_mode: "carton" };
+  let savedItem = initialItem;
+  t.mock.method(Item, "findOne", async () => Item.hydrate(savedItem));
+  const saveItem = t.mock.method(Item.prototype, "save", async function () {
+    savedItem = this.toObject();
+    return this;
+  });
+  t.mock.method(PisUpdateLog, "create", async () => {});
+
+  const update = async (role, body) => {
+    const res = {
+      status(code) { this.code = code; return this; },
+      json(data) { this.body = data; return this; },
+    };
+    await updateItemPis({ params: { id: itemId }, user: { role }, body }, res);
+    return res;
+  };
+
+  const override = { admin_override_required_fields: true };
+  for (const role of ["QC", "dev", "user", "viewer"]) {
+    assert.equal((await update(role, override)).code, 403, role);
+    assert.equal((await update(role, { barcode_exempted: true })).code, 403, role);
+  }
+  assert.equal(saveItem.mock.callCount(), 0);
+
+  for (const role of ["manager", "product manager", "inspection manager", "admin", "super admin"]) {
+    savedItem = initialItem;
+    assert.equal((await update(role, { country_of_origin: "India" })).code, 400, role);
+    assert.equal((await update(role, { barcode_exempted: true })).code, 200, role);
+    assert.equal(savedItem.barcode_exempted, true);
+    assert.equal((await update(role, { barcode_exempted: false })).code, 400, role);
+    assert.equal(savedItem.barcode_exempted, true);
+
+    const enableRequirements = await update(role, {
+      barcode_exempted: false,
+      pis_master_barcode: "123456",
+      pis_inner_barcode: "654321",
+    });
+    assert.equal(enableRequirements.code, 200, role);
+    assert.equal(savedItem.barcode_exempted, false);
+
+    const clearBarcodes = await update(role, {
+      ...override,
+      pis_master_barcode: "",
+      pis_inner_barcode: "",
+    });
+    assert.equal(clearBarcodes.code, 200, role);
+    assert.equal(savedItem.pis_master_barcode, "");
+    assert.equal(savedItem.pis_inner_barcode, "");
+    assert.equal(savedItem.barcode_exempted, false);
+  }
+
+  const invalidEan = await update("manager", { ...override, pis_logistics_ean: "12345" });
+  assert.equal(invalidEan.code, 400);
+  assert.match(invalidEan.body.message, /valid 13-digit EAN/);
+});
 
 test("QC barcode validation is required without a Logistics EAN", () => {
   assert.equal(requiresPisBarcodes({ barcode_exempted: false }), true);

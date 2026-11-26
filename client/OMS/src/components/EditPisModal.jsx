@@ -27,7 +27,7 @@ import {
 } from "../utils/measuredSizeForm";
 import { formatEan13BarcodeDisplay, toEan13BarcodeValue } from "../utils/barcode";
 import { getUserFromToken } from "../auth/auth.utils";
-import { isStrictAdminRole, normalizeUserRole } from "../auth/permissions";
+import { isManagerLikeRole } from "../auth/permissions";
 import "../App.css";
 
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
@@ -382,9 +382,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const [latestInspectionContextLoading, setLatestInspectionContextLoading] = useState(false);
   const [latestInspectionContextLoaded, setLatestInspectionContextLoaded] = useState(false);
   const user = getUserFromToken();
-  const canToggleBarcodeExemption = isStrictAdminRole(
-    normalizeUserRole(user?.role),
-  );
+  const canManageBarcodeRequirements = isManagerLikeRole(user?.role);
   const editScopeLabel = isPisDiffUpdate ? "Master" : "PIS";
   const restoreDraftForm = (payload = {}) => {
     const defaults = buildInitialForm(item, { preferMaster: isMasterUpdate });
@@ -743,7 +741,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     );
 
     if (missingRequiredFields.length > 0 && !allowMissingRequiredFields) {
-      if (canToggleBarcodeExemption) {
+      if (canManageBarcodeRequirements) {
         setShowRequiredFieldsWarning(true);
       } else {
         setError(missingRequiredFields[0].message);
@@ -807,7 +805,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         payload.pis_barcode = barcode;
         payload.pis_master_barcode = barcode;
       }
-      if (requiresPisInnerBarcode) {
+      if (requiresPisInnerBarcode && (innerBarcode || allowMissingRequiredFields)) {
         payload.pis_inner_barcode = innerBarcode;
       }
       if (hasLogisticsEan) {
@@ -818,7 +816,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       }
       payload.kd = Boolean(form.kd);
       payload.mounting_file_needed = Boolean(form.mounting_file_needed);
-      if (canToggleBarcodeExemption) {
+      if (canManageBarcodeRequirements) {
         payload.barcode_exempted = Boolean(form.barcode_exempted);
       }
       if (updateSource) {
@@ -846,7 +844,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             pis_box_sizes: payload.pis_box_sizes,
             kd: payload.kd,
             mounting_file_needed: payload.mounting_file_needed,
-            barcode_exempted: canToggleBarcodeExemption
+            barcode_exempted: canManageBarcodeRequirements
               ? payload.barcode_exempted
               : item?.barcode_exempted,
             master_country_of_origin: payload.country_of_origin,
@@ -985,7 +983,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                   </button>
                 </div>
               </div>
-              {canToggleBarcodeExemption && (
+              {canManageBarcodeRequirements && (
                 <div className="col-md-4">
                   <label className="form-label">Barcode Exempted Item</label>
                   <div className="btn-group w-100" role="group" aria-label="Barcode Exempted Item">
